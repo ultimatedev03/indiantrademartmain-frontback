@@ -862,9 +862,11 @@ export const vendorApi = {
 
     add: async (bankData) => {
       const vendorId = await getVendorId();
+      // Remove temporary ID before sending to database
+      const { id, ...cleanData } = bankData;
       const { data, error } = await supabase
         .from('vendor_bank_details')
-        .insert([{ ...bankData, vendor_id: vendorId }])
+        .insert([{ ...cleanData, vendor_id: vendorId }])
         .select()
         .single();
       if (error) throw error;
