@@ -3,21 +3,21 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import otpRoutes from './routes/otp.js';
 import quotationRoutes from './routes/quotation.js';
+import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 
 dotenv.config({ path: '.env.local' });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://127.0.0.1:5173'
-  ],
-  credentials: true
-}));
+// Subdomain Detection Middleware (BEFORE cors)
+app.use(subdomainMiddleware);
+
+// CORS with subdomain support
+app.use(cors(getSubdomainAwareCORS()));
+
+// Subdomain Redirect Middleware (optional - redirects wrong subdomain access)
+app.use(subdomainRedirectMiddleware);
 
 app.use(express.json());
 

@@ -14,6 +14,9 @@ import Pricing from '@/modules/directory/pages/Pricing';
 import Login from '@/modules/directory/pages/Login';
 import VendorListing from '@/modules/directory/pages/VendorListing';
 import VendorProfilePublic from '@/modules/directory/pages/VendorProfile';
+import Press from '@/modules/directory/pages/Press';
+import Investor from '@/modules/directory/pages/Investor';
+import { JoinSales, SuccessStories, Help, CustomerCare, Complaints, Jobs, ContactPage, BuyLeads, LearningCentre, ProductsPage } from '@/modules/directory/pages/FooterPages';
 
 export const DirectoryRoutes = () => {
   return (
@@ -38,6 +41,26 @@ export const DirectoryRoutes = () => {
         <Route path="become-a-vendor" element={<BecomeVendor />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="auth/login" element={<Login />} />
+        
+        {/* Footer Information Links */}
+        <Route path="press" element={<Press />} />
+        <Route path="investor" element={<Investor />} />
+        <Route path="join-sales" element={<JoinSales />} />
+        <Route path="success-stories" element={<SuccessStories />} />
+        
+        {/* Footer Support Links */}
+        <Route path="help" element={<Help />} />
+        <Route path="customer-care" element={<CustomerCare />} />
+        <Route path="complaints" element={<Complaints />} />
+        <Route path="jobs" element={<Jobs />} />
+        <Route path="contact" element={<ContactPage />} />
+        
+        {/* Footer Suppliers Tool Kit */}
+        <Route path="buyleads" element={<BuyLeads />} />
+        <Route path="learning-centre" element={<LearningCentre />} />
+        
+        {/* Footer Buyers Tool Kit */}
+        <Route path="products" element={<ProductsPage />} />
         
         <Route path="directory/vendor" element={<VendorListing />} />
         <Route path="directory/vendor/:vendorId" element={<VendorProfilePublic />} />

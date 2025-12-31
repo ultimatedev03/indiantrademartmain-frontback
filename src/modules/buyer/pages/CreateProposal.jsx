@@ -44,24 +44,27 @@ const CreateProposal = () => {
     setLoading(true);
 
     try {
-      // Correct API Call using buyerApi
       await buyerApi.createProposal({
         buyer_id: buyerId,
-        ...formData
+        category: formData.category,
+        quantity: formData.quantity,
+        budget: formData.budget,
+        location: formData.location,
+        description: formData.description
       });
 
       toast({ 
-        title: "Proposal Created!", 
+        title: "Success", 
         description: "Your requirement has been posted successfully.", 
         className: "bg-green-50 border-green-200 text-green-900" 
       });
       
-      navigate('/buyer/proposals');
+      setTimeout(() => navigate('/buyer/proposals'), 300);
 
     } catch (error) {
       console.error("Submission failed:", error);
       toast({ 
-        title: "Submission Failed", 
+        title: "Error", 
         description: error.message || "Failed to create proposal. Please try again.", 
         variant: "destructive" 
       });

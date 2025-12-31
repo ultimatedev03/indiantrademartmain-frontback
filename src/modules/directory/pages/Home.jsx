@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import HeroSection from '@/modules/directory/components/HeroSection';
@@ -14,6 +14,10 @@ const Home = () => {
   const [topLevelCategories, setTopLevelCategories] = useState([]);
   const [featuredVendors, setFeaturedVendors] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  // ✅ show only first 8 categories initially
+  const [showAllCategories, setShowAllCategories] = useState(false);
+  const INITIAL_LIMIT = 8;
 
   useEffect(() => {
     const loadData = async () => {
@@ -36,6 +40,13 @@ const Home = () => {
     };
     loadData();
   }, []);
+
+  const visibleCategories = useMemo(() => {
+    if (showAllCategories) return topLevelCategories;
+    return topLevelCategories.slice(0, INITIAL_LIMIT);
+  }, [topLevelCategories, showAllCategories]);
+
+  const hasMoreCategories = topLevelCategories.length > INITIAL_LIMIT;
 
   const getIconForCategory = (name) => {
       if (name.includes("Construction")) return "🏗️";
@@ -64,47 +75,67 @@ const Home = () => {
                     <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {topLevelCategories.map((cat) => (
-                        <motion.div 
-                            key={cat.id}
-                            initial={{ opacity: 0, y: 10 }}
-                            whileInView={{ opacity: 1, y: 0 }}
-                            viewport={{ once: true }}
-                            className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer group"
-                            onClick={() => navigate(`/categories/${cat.slug}`)}
+                <>
+                    {/* ✅ Top view more/less */}
+                    {hasMoreCategories && (
+                      <div className="flex justify-end mb-4">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllCategories(v => !v)}
+                          className="text-sm font-semibold text-blue-700 hover:text-blue-800 underline underline-offset-4"
                         >
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-4">
-                                    <span className="text-3xl bg-slate-50 w-14 h-14 flex items-center justify-center rounded-lg group-hover:bg-blue-50 transition-colors">
-                                        {getIconForCategory(cat.name)}
-                                    </span>
-                                    <div>
-                                        <h3 className="font-bold text-lg text-slate-900 group-hover:text-blue-700 transition-colors">{cat.name}</h3>
-                                        <p className="text-xs text-blue-600 font-medium bg-blue-50 inline-block px-2 py-0.5 rounded-full mt-1">High Demand</p>
+                          {showAllCategories ? 'View less' : 'View more'}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {visibleCategories.map((cat) => (
+                            <motion.div 
+                                key={cat.id}
+                                initial={{ opacity: 0, y: 10 }}
+                                whileInView={{ opacity: 1, y: 0 }}
+                                viewport={{ once: true }}
+                                className="bg-white rounded-xl border border-slate-200 p-6 hover:shadow-lg hover:border-blue-300 transition-all cursor-pointer group"
+                                onClick={() => navigate(`/categories/${cat.slug}`)}
+                            >
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center gap-4">
+                                        <span className="text-3xl bg-slate-50 w-14 h-14 flex items-center justify-center rounded-lg group-hover:bg-blue-50 transition-colors">
+                                            {getIconForCategory(cat.name)}
+                                        </span>
+                                        <div>
+                                            <h3 className="font-bold text-lg text-slate-900 group-hover:text-blue-700 transition-colors">{cat.name}</h3>
+                                            <p className="text-xs text-blue-600 font-medium bg-blue-50 inline-block px-2 py-0.5 rounded-full mt-1">High Demand</p>
+                                        </div>
+                                    </div>
+                                    <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
+                                        <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white" />
                                     </div>
                                 </div>
-                                <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-all">
-                                    <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-white" />
+                                <div className="pl-[4.5rem]">
+                                    <p className="text-sm text-slate-500 mb-2">Industrial machinery, raw materials, tools...</p>
                                 </div>
-                            </div>
-                            <div className="pl-[4.5rem]">
-                                <p className="text-sm text-slate-500 mb-2">Industrial machinery, raw materials, tools...</p>
-                            </div>
-                        </motion.div>
-                    ))}
-                </div>
+                            </motion.div>
+                        ))}
+                    </div>
+
+                    {/* ✅ Bottom view more/less */}
+                    {hasMoreCategories && (
+                      <div className="flex justify-center mt-10">
+                        <button
+                          type="button"
+                          onClick={() => setShowAllCategories(v => !v)}
+                          className="px-6 py-3 rounded-lg bg-white border border-slate-200 hover:border-blue-500 hover:shadow-md transition-all font-semibold text-slate-800"
+                        >
+                          {showAllCategories
+                            ? 'View less'
+                            : `View more (${topLevelCategories.length - INITIAL_LIMIT})`}
+                        </button>
+                      </div>
+                    )}
+                </>
             )}
-            
-            <div className="text-center mt-12">
-                <Button 
-                    variant="outline" 
-                    className="border-slate-300 text-slate-700 hover:bg-slate-50 px-8 h-11"
-                    onClick={() => navigate('/categories')}
-                >
-                    View All Categories
-                </Button>
-            </div>
          </div>
       </section>
 

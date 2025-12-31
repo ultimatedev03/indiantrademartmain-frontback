@@ -3,7 +3,7 @@ import { Loader2, ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { directoryApi } from '../api/directoryApi';
 
-const BrowseByIndustry = () => {
+const BrowseByIndustry = ({ limit = 9 }) => {
   const navigate = useNavigate();
   const [headCategories, setHeadCategories] = useState([]);
   const [expandedHeadId, setExpandedHeadId] = useState(null);
@@ -11,6 +11,8 @@ const BrowseByIndustry = () => {
   const [microCategoriesMap, setMicroCategoriesMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [loadingSubFor, setLoadingSubFor] = useState(null);
+  const displayedCategories = headCategories.slice(0, limit);
+  const hasMoreCategories = headCategories.length > limit;
 
   // Fetch head categories on mount
   useEffect(() => {
@@ -105,7 +107,7 @@ const BrowseByIndustry = () => {
 
         {/* Head Categories Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          {headCategories.slice(0, 9).map((headCategory) => (
+          {displayedCategories.map((headCategory) => (
             <div
               key={headCategory.id}
               className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
@@ -225,7 +227,7 @@ const BrowseByIndustry = () => {
         </div>
 
         {/* View All Categories Button */}
-        {headCategories.length > 9 && (
+        {hasMoreCategories && (
           <div className="text-center mt-12">
             <button
               onClick={() => navigate('/categories')}

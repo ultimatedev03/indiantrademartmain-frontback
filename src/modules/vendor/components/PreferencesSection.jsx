@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, X, Save } from 'lucide-react';
+import { supabase } from '@/lib/customSupabaseClient';
 
 const PreferencesSection = () => {
   const [loading, setLoading] = useState(true);
@@ -22,11 +23,14 @@ const PreferencesSection = () => {
 
   const [allStates, setAllStates] = useState([]);
   const [allCities, setAllCities] = useState([]);
-  const [allCategories, setAllCategories] = useState([]);
+  const [allHeadCategories, setAllHeadCategories] = useState([]);
 
   const [selectedStateId, setSelectedStateId] = useState('');
   const [selectedCategoryId, setSelectedCategoryId] = useState('');
   const [selectedCityId, setSelectedCityId] = useState('');
+  const MAX_STATES = 6;
+  const MAX_CITIES = 6;
+  const MAX_CATEGORIES = 5;
 
   useEffect(() => {
     loadData();
@@ -35,26 +39,80 @@ const PreferencesSection = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [prefs, states, categories] = await Promise.all([
-        vendorApi.preferences.get(),
-        vendorApi.getStates(),
-        vendorApi.categories.getAllMicroCategories()
-      ]);
+      // Load states from database
+      const { data: states, error: statesError } = await supabase
+        .from('states')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('name');
 
-      setPreferences(prefs);
+      if (statesError) throw statesError;
       setAllStates(states || []);
-      setAllCategories(categories || []);
+      console.log('States loaded:', states);
 
-      // Load cities for first selected state
-      if (prefs.preferred_states?.length > 0) {
-        const cities = await vendorApi.getCities(prefs.preferred_states[0]);
-        setAllCities(cities || []);
+      // Load head categories from database
+      try {
+        const { data: headCategories, error: categoriesError } = await supabase
+          .from('head_categories')
+          .select('id, name')
+          .eq('is_active', true)
+          .order('name');
+
+        if (categoriesError) {
+          console.error('Error loading head categories:', categoriesError);
+          setAllHeadCategories([]);
+        } else {
+          setAllHeadCategories(headCategories || []);
+          console.log('Head categories loaded:', headCategories);
+        }
+      } catch (catError) {
+        console.error('Error loading head categories:', catError);
+        setAllHeadCategories([]);
+      }
+
+      // Load user preferences
+      try {
+        const prefs = await vendorApi.preferences.get();
+        console.log('Preferences loaded:', prefs);
+        setPreferences(prefs);
+
+        // Load cities for first selected state
+        if (prefs.preferred_states?.length > 0) {
+          try {
+            const cities = await vendorApi.getCities(prefs.preferred_states[0]);
+            setAllCities(cities || []);
+            console.log('Cities loaded for state:', prefs.preferred_states[0]);
+          } catch (e) {
+            console.error('Error loading cities:', e);
+          }
+        } else if (states && states.length > 0) {
+          // Auto-load cities for first state if no preferences exist
+          try {
+            const cities = await vendorApi.getCities(states[0].id);
+            setAllCities(cities || []);
+            setSelectedStateId(states[0].id);
+            console.log('Auto-loaded cities for first state');
+          } catch (e) {
+            console.error('Error auto-loading cities:', e);
+          }
+        }
+      } catch (prefsError) {
+        console.error('Error loading preferences:', prefsError);
+        // Set default preferences
+        setPreferences({
+          preferred_micro_categories: [],
+          preferred_states: [],
+          preferred_cities: [],
+          min_budget: 0,
+          max_budget: 999999,
+          auto_lead_filter: true
+        });
       }
     } catch (e) {
-      console.error(e);
+      console.error('Error loading preferences data:', e);
       toast({
         title: 'Error loading preferences',
-        description: e?.message,
+        description: e?.message || 'Something went wrong',
         variant: 'destructive'
       });
     } finally {
@@ -68,10 +126,18 @@ const PreferencesSection = () => {
       toast({ title: 'Already added', variant: 'destructive' });
       return;
     }
+    if (preferences.preferred_states.length >= MAX_STATES) {
+      toast({ title: `Maximum ${MAX_STATES} states allowed`, variant: 'destructive' });
+      return;
+    }
 
     // Load cities for this state
-    const cities = await vendorApi.getCities(selectedStateId);
-    setAllCities(cities || []);
+    try {
+      const cities = await vendorApi.getCities(selectedStateId);
+      setAllCities(cities || []);
+    } catch (e) {
+      console.error('Error loading cities:', e);
+    }
 
     setPreferences(prev => ({
       ...prev,
@@ -86,6 +152,10 @@ const PreferencesSection = () => {
       toast({ title: 'Already added', variant: 'destructive' });
       return;
     }
+    if (preferences.preferred_cities.length >= MAX_CITIES) {
+      toast({ title: `Maximum ${MAX_CITIES} cities allowed`, variant: 'destructive' });
+      return;
+    }
 
     setPreferences(prev => ({
       ...prev,
@@ -98,6 +168,10 @@ const PreferencesSection = () => {
     if (!selectedCategoryId) return;
     if (preferences.preferred_micro_categories.includes(selectedCategoryId)) {
       toast({ title: 'Already added', variant: 'destructive' });
+      return;
+    }
+    if (preferences.preferred_micro_categories.length >= MAX_CATEGORIES) {
+      toast({ title: `Maximum ${MAX_CATEGORIES} categories allowed`, variant: 'destructive' });
       return;
     }
 
@@ -157,9 +231,7 @@ const PreferencesSection = () => {
     );
   }
 
-  const getStateName = (id) => allStates.find(s => s.id === id)?.name || id;
-  const getCityName = (id) => allCities.find(c => c.id === id)?.name || id;
-  const getCategoryName = (id) => allCategories.find(c => c.id === id)?.name || id;
+  // Removed getCategoryName - now using inline rendering for all lists
 
   return (
     <div className="space-y-6">
@@ -167,31 +239,47 @@ const PreferencesSection = () => {
       <Card className="p-6">
         <div className="space-y-4">
           <div>
-            <h3 className="font-semibold text-gray-900 mb-2">Preferred States</h3>
-            <p className="text-sm text-gray-500 mb-4">Select states where you operate or want to receive leads from</p>
+            <h3 className="font-semibold text-gray-900 mb-2">Preferred States (Max {MAX_STATES})</h3>
+            <p className="text-sm text-gray-500 mb-4">Select up to {MAX_STATES} states where you operate or want to receive leads from</p>
           </div>
 
           <div className="flex gap-2">
             <select
               value={selectedStateId}
-              onChange={(e) => setSelectedStateId(e.target.value)}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+              onChange={(e) => {
+                setSelectedStateId(e.target.value);
+                // Auto load cities when state is selected
+                if (e.target.value) {
+                  vendorApi.getCities(e.target.value).then(cities => {
+                    setAllCities(cities || []);
+                  }).catch(err => console.error('Error loading cities:', err));
+                }
+              }}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+              disabled={preferences.preferred_states.length >= MAX_STATES}
             >
               <option value="">Select a state</option>
-              {allStates.map(state => (
-                <option key={state.id} value={state.id}>{state.name}</option>
-              ))}
+              {allStates && allStates.length > 0 ? (
+                allStates.map(state => (
+                  <option key={state.id} value={state.id}>{state.name}</option>
+                ))
+              ) : (
+                <option disabled>No states available</option>
+              )}
             </select>
-            <Button onClick={handleAddState} variant="outline">Add</Button>
+            <Button onClick={handleAddState} variant="outline" disabled={!selectedStateId || preferences.preferred_states.length >= MAX_STATES}>Add</Button>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {preferences.preferred_states.map(stateId => (
-              <Badge key={stateId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
-                {getStateName(stateId)}
-                <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveState(stateId)} />
-              </Badge>
-            ))}
+            {preferences.preferred_states.map(stateId => {
+              const stateName = allStates.find(s => s.id === stateId)?.name || stateId;
+              return (
+                <Badge key={stateId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
+                  {stateName}
+                  <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveState(stateId)} />
+                </Badge>
+              );
+            })}
           </div>
         </div>
       </Card>
@@ -200,31 +288,39 @@ const PreferencesSection = () => {
       <Card className="p-6">
         <div className="space-y-4">
           <div>
-            <h3 className="font-semibold text-gray-900 mb-2">Preferred Cities</h3>
-            <p className="text-sm text-gray-500 mb-4">Select specific cities for more targeted leads</p>
+            <h3 className="font-semibold text-gray-900 mb-2">Preferred Cities (Max {MAX_CITIES})</h3>
+            <p className="text-sm text-gray-500 mb-4">Select up to {MAX_CITIES} cities for more targeted leads</p>
           </div>
 
           <div className="flex gap-2">
             <select
               value={selectedCityId}
               onChange={(e) => setSelectedCityId(e.target.value)}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+              disabled={preferences.preferred_cities.length >= MAX_CITIES || allCities.length === 0}
             >
               <option value="">Select a city</option>
-              {allCities.map(city => (
-                <option key={city.id} value={city.id}>{city.name}</option>
-              ))}
+              {allCities && allCities.length > 0 ? (
+                allCities.map(city => (
+                  <option key={city.id} value={city.id}>{city.name}</option>
+                ))
+              ) : (
+                <option disabled>No cities available - select a state first</option>
+              )}
             </select>
-            <Button onClick={handleAddCity} variant="outline">Add</Button>
+            <Button onClick={handleAddCity} variant="outline" disabled={!selectedCityId || preferences.preferred_cities.length >= MAX_CITIES}>Add</Button>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {preferences.preferred_cities.map(cityId => (
-              <Badge key={cityId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
-                {getCityName(cityId)}
-                <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveCity(cityId)} />
-              </Badge>
-            ))}
+            {preferences.preferred_cities.map(cityId => {
+              const cityName = allCities.find(c => c.id === cityId)?.name || cityId;
+              return (
+                <Badge key={cityId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
+                  {cityName}
+                  <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveCity(cityId)} />
+                </Badge>
+              );
+            })}
           </div>
         </div>
       </Card>
@@ -233,31 +329,39 @@ const PreferencesSection = () => {
       <Card className="p-6">
         <div className="space-y-4">
           <div>
-            <h3 className="font-semibold text-gray-900 mb-2">Product Categories</h3>
-            <p className="text-sm text-gray-500 mb-4">Select categories your business deals in</p>
+            <h3 className="font-semibold text-gray-900 mb-2">Product Categories (Max {MAX_CATEGORIES})</h3>
+            <p className="text-sm text-gray-500 mb-4">Select up to {MAX_CATEGORIES} main categories your business deals in</p>
           </div>
 
           <div className="flex gap-2">
             <select
               value={selectedCategoryId}
               onChange={(e) => setSelectedCategoryId(e.target.value)}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+              disabled={preferences.preferred_micro_categories.length >= MAX_CATEGORIES}
             >
               <option value="">Select a category</option>
-              {allCategories.map(cat => (
-                <option key={cat.id} value={cat.id}>{cat.name}</option>
-              ))}
+              {allHeadCategories && allHeadCategories.length > 0 ? (
+                allHeadCategories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.name}</option>
+                ))
+              ) : (
+                <option disabled>No categories available</option>
+              )}
             </select>
-            <Button onClick={handleAddCategory} variant="outline">Add</Button>
+            <Button onClick={handleAddCategory} variant="outline" disabled={!selectedCategoryId || preferences.preferred_micro_categories.length >= MAX_CATEGORIES}>Add</Button>
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {preferences.preferred_micro_categories.map(catId => (
-              <Badge key={catId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
-                {getCategoryName(catId)}
-                <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveCategory(catId)} />
-              </Badge>
-            ))}
+            {preferences.preferred_micro_categories.map(catId => {
+              const catName = allHeadCategories.find(c => c.id === catId)?.name || catId;
+              return (
+                <Badge key={catId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
+                  {catName}
+                  <X className="w-3 h-3 cursor-pointer" onClick={() => handleRemoveCategory(catId)} />
+                </Badge>
+              );
+            })}
           </div>
         </div>
       </Card>

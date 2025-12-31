@@ -25,7 +25,7 @@ const Suggestions = () => {
   const fetchSuggestions = async () => {
     setLoading(true);
     try {
-      const data = await buyerApi.getSuggestions(buyerId);
+      const data = await buyerApi.getSuggestions();
       setSuggestions(data);
     } catch (error) {
       toast({ title: "Error", description: "Failed to load suggestions", variant: "destructive" });

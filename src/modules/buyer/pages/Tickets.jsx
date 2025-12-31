@@ -41,7 +41,7 @@ const Tickets = () => {
   const fetchTickets = async () => {
     setLoading(true);
     try {
-      const data = await buyerApi.getTickets(buyerId);
+      const data = await buyerApi.getTickets();
       setTickets(data);
     } catch (error) {
       console.error("Fetch error:", error);
@@ -79,10 +79,8 @@ const Tickets = () => {
     setSubmitLoading(true);
 
     try {
-      // 1. Map status strictly before API call
       const validStatus = mapStatusToValid(formData.status);
       
-      // 2. Call API with mapped data
       await buyerApi.raiseTicket({
         buyerId,
         subject: formData.subject,
@@ -91,18 +89,17 @@ const Tickets = () => {
         status: validStatus
       });
 
-      // 3. Success handling
       toast({ 
         title: "Success", 
         description: "Support ticket raised successfully!", 
         className: "bg-green-50 border-green-200 text-green-900" 
       });
       
-      setOpen(false);
-      setFormData({ subject: '', description: '', priority: 'MEDIUM', status: 'OPEN' });
-      
-      // 4. Refresh list
-      fetchTickets();
+      setTimeout(() => {
+        setOpen(false);
+        setFormData({ subject: '', description: '', priority: 'MEDIUM', status: 'OPEN' });
+        fetchTickets();
+      }, 300);
 
     } catch (error) {
       console.error('Ticket error:', error);
