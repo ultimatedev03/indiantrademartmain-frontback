@@ -621,7 +621,9 @@ const SectionHeaderWithActions = ({ title, onAdd }) => (
 );
 
 const BankingSection = ({ banks, onRefresh }) => {
-  const [newBanks, setNewBanks] = useState(banks.length > 0 ? banks : [{ id: 'temp-1' }]);
+  // Generate a temporary client-side ID (will be replaced with UUID on save)
+  const generateTempId = () => `temp-${Math.random().toString(36).substr(2, 9)}`;
+  const [newBanks, setNewBanks] = useState(banks.length > 0 ? banks : [{ id: generateTempId() }]);
   const [adding, setAdding] = useState(false);
 
   const handleUpdateBank = (index, field, value) => {
@@ -631,7 +633,8 @@ const BankingSection = ({ banks, onRefresh }) => {
   };
 
   const handleAddBank = () => {
-    setNewBanks([...newBanks, { id: `temp-${Date.now()}` }]);
+    const tempId = `temp-${Math.random().toString(36).substr(2, 9)}`;
+    setNewBanks([...newBanks, { id: tempId }]);
   };
 
   const handleRemoveBank = async (index) => {
@@ -648,7 +651,8 @@ const BankingSection = ({ banks, onRefresh }) => {
       }
     }
     const updated = newBanks.filter((_, i) => i !== index);
-    setNewBanks(updated.length > 0 ? updated : [{ id: 'temp-1' }]);
+    const tempId = `temp-${Math.random().toString(36).substr(2, 9)}`;
+    setNewBanks(updated.length > 0 ? updated : [{ id: tempId }]);
   };
 
   const handleSaveAllBanks = async () => {

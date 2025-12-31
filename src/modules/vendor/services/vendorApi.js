@@ -797,9 +797,9 @@ export const vendorApi = {
       }
 
       const [products, leads, messages] = await Promise.all([
-        supabase.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
-        supabase.from('leads').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'AVAILABLE'),
-        supabase.from('vendor_messages').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id)
+        supabase.from('products').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).limit(1),
+        supabase.from('leads').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).eq('status', 'AVAILABLE').limit(1),
+        supabase.from('vendor_messages').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).limit(1)
       ]);
 
       return {

@@ -107,12 +107,11 @@ export const quotationApi = {
   }
 };
 
-// Send quotation via backend API (uses Nodemailer SMTP)
+// Send quotation via Netlify serverless function
 async function sendQuotationViaBackend(quotationData) {
   try {
-    // Get backend URL from environment or use default
-    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-    const apiUrl = `${backendUrl}/api/quotation/send`;
+    // Use Netlify serverless function
+    const apiUrl = '/.netlify/functions/quotation/send';
     
     console.log('Sending quotation to:', apiUrl);
     
@@ -136,7 +135,7 @@ async function sendQuotationViaBackend(quotationData) {
 
     return await response.json();
   } catch (error) {
-    console.error('Backend quotation error:', error);
+    console.error('Netlify quotation function error:', error);
     throw error;
   }
 }
