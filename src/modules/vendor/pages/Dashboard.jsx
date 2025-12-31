@@ -1,0 +1,345 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import Card from '@/shared/components/Card';
+import { Button } from '@/components/ui/button';
+import {
+  ShoppingCart,
+  Users,
+  AlertTriangle,
+  Plus,
+  Package,
+  MessageSquare,
+  CheckCircle,
+  HelpCircle,
+  ArrowRight,
+} from 'lucide-react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '@/modules/vendor/context/AuthContext';
+
+// ✅ Clickable + Hover premium stats card (FIXED overflow)
+const StatsCardWithDetail = ({ label, value, icon: Icon, detail, hint, to }) => {
+  const Wrapper = ({ children }) =>
+    to ? (
+      <Link to={to} className="block focus:outline-none">
+        {children}
+      </Link>
+    ) : (
+      <div>{children}</div>
+    );
+
+  return (
+    <Wrapper>
+      <div
+        className={[
+          "group bg-white border border-slate-200 rounded-xl p-5 shadow-sm overflow-hidden", // ✅ FIX
+          "transition-all duration-200 ease-out",
+          "hover:-translate-y-0.5 hover:shadow-md hover:border-[#003D82]/30",
+          "focus-visible:ring-2 focus-visible:ring-[#003D82]/30 focus-visible:ring-offset-2",
+          to ? "cursor-pointer" : "cursor-default"
+        ].join(" ")}
+      >
+        <div className="flex items-start justify-between gap-3">
+          {/* ✅ left content */}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-slate-700">{label}</p>
+            <p className="text-3xl font-bold text-slate-900 mt-2">{value}</p>
+
+            <p className="text-xs text-slate-500 mt-1 leading-snug break-words">
+              {detail}
+            </p>
+
+            {/* ✅ FIXED: hint wraps and never overflows */}
+            {hint ? (
+              <div className="mt-2 flex items-start gap-1 text-[11px] text-slate-500 min-w-0">
+                <HelpCircle className="w-3.5 h-3.5 shrink-0 mt-[1px]" />
+                <p className="leading-snug break-words min-w-0">
+                  {hint}
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          {/* ✅ right side icon + view */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <div className="w-10 h-10 rounded-lg bg-slate-50 flex items-center justify-center border border-slate-200 transition-colors group-hover:bg-[#003D82]/5 group-hover:border-[#003D82]/30">
+              <Icon className="w-5 h-5 text-slate-500 transition-colors group-hover:text-[#003D82]" />
+            </div>
+
+            {to ? (
+              <div className="text-[11px] text-slate-400 inline-flex items-center gap-1 group-hover:text-[#003D82] transition-colors">
+                <span>View</span>
+                <ArrowRight className="w-3 h-3" />
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </Wrapper>
+  );
+};
+
+const Dashboard = () => {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const { vendorId: paramVendorId } = useParams();
+
+  const [stats, setStats] = useState({
+    totalProducts: 0,
+    totalLeads: 0,
+    totalMessages: 0,
+    profileCompletion: 0,
+    kycStatus: 'PENDING',
+    trustScore: 0,
+    rating: 0,
+    vendorId: null,
+  });
+
+  const [vendorId, setVendorId] = useState(null);
+  const [recentProducts, setRecentProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadDashboard = async () => {
+      try {
+        const [data, products] = await Promise.all([
+          vendorApi.dashboard.getStats(),
+          vendorApi.products.list()
+        ]);
+
+        const normalized = {
+          totalProducts: data?.totalProducts ?? 0,
+          totalLeads: data?.totalLeads ?? 0,
+          totalMessages: data?.totalMessages ?? 0,
+          profileCompletion: data?.profileCompletion ?? 0,
+          kycStatus: data?.kycStatus ?? 'PENDING',
+          trustScore: data?.trustScore ?? 0,
+          rating: data?.rating ?? 0,
+          vendorId: data?.vendorId ?? null,
+        };
+
+        setStats(normalized);
+
+        const vendId = normalized?.vendorId;
+        setVendorId(vendId);
+
+        setRecentProducts(products?.slice(0, 3) || []);
+
+        if (vendId && !paramVendorId) {
+          navigate(`/vendor/${vendId}/dashboard`, { replace: true });
+        }
+      } catch (error) {
+        console.error("Failed to load dashboard", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadDashboard();
+  }, [paramVendorId, navigate]);
+
+  const ownerName = useMemo(() => {
+    return (
+      user?.ownerName ||
+      user?.owner_name ||
+      user?.name ||
+      (user?.email ? user.email.split('@')[0] : '') ||
+      'Vendor'
+    );
+  }, [user]);
+
+  // ✅ Profile completion explanation (40% ka meaning)
+  const profileHint = useMemo(() => {
+    const p = Number(stats.profileCompletion || 0);
+    if (p >= 90) return 'Great! Your profile is almost complete.';
+    if (p >= 60) return 'Add bank + KYC docs to unlock full features.';
+    return 'Fill profile + upload KYC documents to unlock full features.';
+  }, [stats.profileCompletion]);
+
+  return (
+    <div className="space-y-6">
+      {/* Welcome & KYC Status */}
+      <div className="flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-neutral-800">Hello, {ownerName}! 👋</h2>
+          <p className="text-neutral-500">Here's what's happening with your store today.</p>
+        </div>
+
+        {stats.kycStatus !== 'VERIFIED' ? (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow">
+            <AlertTriangle className="h-5 w-5" />
+            <div>
+              <p className="font-semibold text-sm">KYC {stats.kycStatus}</p>
+              <p className="text-xs">Complete verification to unlock all features.</p>
+            </div>
+            <Link to="/vendor/profile?tab=kyc">
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2 border-yellow-600 text-yellow-800 hover:bg-yellow-100"
+              >
+                Verify Now
+              </Button>
+            </Link>
+          </div>
+        ) : (
+          <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:shadow-sm transition-shadow">
+            <CheckCircle className="w-4 h-4" />
+            <span className="text-sm font-medium">Account Verified</span>
+          </div>
+        )}
+      </div>
+
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatsCardWithDetail
+          label="Total Products"
+          value={stats.totalProducts}
+          icon={Package}
+          detail="Listed products in your catalog."
+          hint="Add more products to increase visibility."
+          to="/vendor/products"
+        />
+
+        <StatsCardWithDetail
+          label="Active Leads"
+          value={stats.totalLeads}
+          icon={Users}
+          detail="New buyer inquiries received."
+          hint="Reply fast to win more orders."
+          to="/vendor/leads"
+        />
+
+        <StatsCardWithDetail
+          label="Messages"
+          value={stats.totalMessages}
+          icon={MessageSquare}
+          detail="Support / buyer messages pending."
+          hint="Open messages and respond."
+          to="/vendor/support"
+        />
+
+        <StatsCardWithDetail
+          label="Profile Completion"
+          value={`${stats.profileCompletion}%`}
+          icon={ShoppingCart}
+          detail="How much of your business profile is filled."
+          hint={profileHint}
+          to="/vendor/profile?tab=primary"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Vendor ID Card */}
+        <Card className="transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+          <Card.Header>
+            <Card.Title>Your Vendor ID</Card.Title>
+          </Card.Header>
+          <Card.Content className="space-y-2">
+            <p className="text-sm text-neutral-600">Use this ID for all support requests and transactions</p>
+
+            <div className="bg-neutral-50 p-3 rounded font-mono text-center text-lg font-bold text-[#003D82] break-all min-h-[3rem] flex items-center justify-center border border-slate-200">
+              {loading ? (
+                <span className="text-blue-500 animate-pulse">Loading...</span>
+              ) : vendorId ? (
+                vendorId
+              ) : (
+                <span className="text-neutral-400">No vendor ID assigned</span>
+              )}
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full hover:border-[#003D82] hover:text-[#003D82]"
+              onClick={() => {
+                if (vendorId) {
+                  navigator.clipboard.writeText(vendorId);
+                  alert('Vendor ID copied!');
+                }
+              }}
+              disabled={!vendorId}
+            >
+              Copy ID
+            </Button>
+          </Card.Content>
+        </Card>
+
+        {/* Quick Actions */}
+        <div className="lg:col-span-2 space-y-3">
+          <Card className="h-full transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+            <Card.Header>
+              <Card.Title>Quick Actions</Card.Title>
+            </Card.Header>
+            <Card.Content className="space-y-3">
+              <Link to="/vendor/products/add">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
+                >
+                  <Plus className="mr-2 h-5 w-5" />
+                  Add New Product
+                </Button>
+              </Link>
+
+              <Link to="/vendor/leads">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
+                >
+                  <Users className="mr-2 h-5 w-5" />
+                  View New Leads
+                </Button>
+              </Link>
+
+              <Link to="/vendor/support">
+                <Button
+                  variant="outline"
+                  className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
+                >
+                  <MessageSquare className="mr-2 h-5 w-5" />
+                  Contact Support
+                </Button>
+              </Link>
+            </Card.Content>
+          </Card>
+        </div>
+
+        {/* Recent Products */}
+        <div className="lg:col-span-2">
+          <Card className="h-full transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
+            <Card.Header>
+              <Card.Title>Recent Products</Card.Title>
+            </Card.Header>
+            <Card.Content>
+              {recentProducts.length > 0 ? (
+                <div className="space-y-3">
+                  {recentProducts.map(product => (
+                    <div
+                      key={product.id}
+                      className="flex justify-between items-start p-3 bg-neutral-50 rounded border border-slate-200 hover:border-[#003D82]/30 hover:bg-white transition-colors"
+                    >
+                      <div className="flex-1">
+                        <p className="font-semibold text-sm text-neutral-800">{product.name}</p>
+                        <p className="text-xs text-neutral-500">Status: {product.status}</p>
+                      </div>
+                      <span className="text-sm font-bold text-[#00A699]">₹{product.price}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  No products yet.{' '}
+                  <Link to="/vendor/products/add" className="text-[#003D82] font-semibold hover:underline">
+                    Add one now
+                  </Link>
+                </div>
+              )}
+            </Card.Content>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;
