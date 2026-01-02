@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import { Facebook, Instagram, Linkedin, Mail, Twitter } from 'lucide-react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Mail, Phone, MapPin, Facebook, Twitter, Linkedin, Instagram } from 'lucide-react';
 import PostRequirementModal from './modals/PostRequirementModal';
 import SupportModal from './modals/SupportModal';
 
@@ -29,16 +29,16 @@ const Footer = () => {
                 Connecting businesses with trusted technology providers across India.
               </p>
               <div className="flex gap-4 pt-2">
-                <a href="#" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-600 hover:text-white transition-all duration-300">
+                <a href="https://www.facebook.com/IndianTradeMart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-600 hover:text-white transition-all duration-300">
                   <Facebook className="w-5 h-5" />
                 </a>
-                <a href="#" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-300">
+                <a href="https://x.com/IndianTradeMart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-300">
                   <Twitter className="w-5 h-5" />
                 </a>
-                <a href="#" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-700 hover:text-white transition-all duration-300">
+                <a href="	https://www.linkedin.com/company/indian-trade-mart-itm/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-700 hover:text-white transition-all duration-300">
                   <Linkedin className="w-5 h-5" />
                 </a>
-                <a href="#" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300">
+                <a href="https://www.instagram.com/indiantrademart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300">
                   <Instagram className="w-5 h-5" />
                 </a>
               </div>

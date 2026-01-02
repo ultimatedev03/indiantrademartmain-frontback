@@ -8,6 +8,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { ChevronRight, ChevronDown, Plus, Edit2, Trash2, Tag, Search, X } from 'lucide-react';
+import AddEditCategoryDialog from '@/modules/employee/components/AddEditCategoryDialog';
+import DeleteCategoryDialog from '@/modules/employee/components/DeleteCategoryDialog';
+import { headCategoryApi, subCategoryApi, microCategoryApi } from '@/modules/employee/services/categoryApi';
 
 const Categories = () => {
   // State for head categories
@@ -36,6 +39,15 @@ const Categories = () => {
   const [searchResults, setSearchResults] = useState({ heads: [], subs: [], micros: [] });
   
   const [loading, setLoading] = useState(false);
+  
+  // State for CRUD dialogs
+  const [showAddEditDialog, setShowAddEditDialog] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [dialogLevel, setDialogLevel] = useState(null); // 'head', 'sub', 'micro'
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [parentCategory, setParentCategory] = useState(null); // for sub/micro
+  const [childCount, setChildCount] = useState(0);
+  const [savingCategory, setSavingCategory] = useState(false);
 
   useEffect(() => {
     fetchHeadCategories();
@@ -251,6 +263,109 @@ const Categories = () => {
     }
   };
 
+  // CRUD Handlers
+  const openAddDialog = (level, parentId = null, parentName = null) => {
+    setDialogLevel(level);
+    setSelectedCategory(null);
+    setParentCategory(parentId ? { id: parentId, name: parentName } : null);
+    setShowAddEditDialog(true);
+  };
+  
+  const openEditDialog = async (level, category, parentId = null) => {
+    setDialogLevel(level);
+    setSelectedCategory(category);
+    setParentCategory(parentId ? { id: parentId } : null);
+    setShowAddEditDialog(true);
+  };
+  
+  const openDeleteDialog = async (level, category, parentId = null) => {
+    setDialogLevel(level);
+    setSelectedCategory(category);
+    setParentCategory(parentId ? { id: parentId } : null);
+    
+    // Get child count
+    try {
+      let count = 0;
+      if (level === 'head') {
+        count = await headCategoryApi.getChildCount(category.id);
+      } else if (level === 'sub') {
+        count = await subCategoryApi.getChildCount(category.id);
+      }
+      setChildCount(count);
+    } catch (error) {
+      console.error('Error getting child count:', error);
+      setChildCount(0);
+    }
+    
+    setShowDeleteDialog(true);
+  };
+  
+  const handleSaveCategory = async (formData) => {
+    setSavingCategory(true);
+    try {
+      let result;
+      
+      if (dialogLevel === 'head') {
+        if (formData.id) {
+          result = await headCategoryApi.update(formData.id, formData);
+          toast({ title: 'Success', description: 'Head category updated' });
+        } else {
+          result = await headCategoryApi.create(formData);
+          toast({ title: 'Success', description: 'Head category created' });
+        }
+        // Refresh head categories
+        await fetchHeadCategories();
+      } else if (dialogLevel === 'sub') {
+        if (formData.id) {
+          result = await subCategoryApi.update(formData.id, formData);
+          toast({ title: 'Success', description: 'Sub category updated' });
+        } else {
+          result = await subCategoryApi.create(formData, formData.parentId);
+          toast({ title: 'Success', description: 'Sub category created' });
+        }
+        // Refresh sub categories
+        await fetchSubCategories(formData.parentId);
+      } else if (dialogLevel === 'micro') {
+        if (formData.id) {
+          result = await microCategoryApi.update(formData.id, formData);
+          toast({ title: 'Success', description: 'Micro category updated' });
+        } else {
+          result = await microCategoryApi.create(formData, formData.parentId);
+          toast({ title: 'Success', description: 'Micro category created' });
+        }
+        // Refresh micro categories
+        await fetchMicroCategories(formData.parentId);
+      }
+      
+      setShowAddEditDialog(false);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setSavingCategory(false);
+    }
+  };
+  
+  const handleDeleteCategory = async (categoryId) => {
+    try {
+      if (dialogLevel === 'head') {
+        await headCategoryApi.delete(categoryId);
+        toast({ title: 'Success', description: 'Head category deleted' });
+        await fetchHeadCategories();
+      } else if (dialogLevel === 'sub') {
+        await subCategoryApi.delete(categoryId);
+        toast({ title: 'Success', description: 'Sub category deleted' });
+        await fetchSubCategories(parentCategory.id);
+      } else if (dialogLevel === 'micro') {
+        await microCategoryApi.delete(categoryId);
+        toast({ title: 'Success', description: 'Micro category deleted' });
+        await fetchMicroCategories(parentCategory.id);
+      }
+      setShowDeleteDialog(false);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  };
+  
   if (loading) {
     return <div className="p-6 text-center">Loading categories...</div>;
   }
@@ -259,6 +374,13 @@ const Categories = () => {
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold">Category Management</h2>
+        <Button 
+          onClick={() => openAddDialog('head')}
+          className="gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          Add Head Category
+        </Button>
       </div>
 
       {/* Search Section */}
@@ -384,16 +506,39 @@ const Categories = () => {
             <div key={headCategory.id} className="border-b" id={`head-${headCategory.id}`}>
               {/* HEAD CATEGORY */}
               <div 
-                className="p-4 hover:bg-gray-50 cursor-pointer flex items-center gap-3"
-                onClick={() => toggleHeadExpansion(headCategory.id)}
+                className="p-4 hover:bg-gray-50 flex items-center gap-3 justify-between group"
               >
-                {expandedHeads[headCategory.id] ? 
-                  <ChevronDown className="w-5 h-5" /> : 
-                  <ChevronRight className="w-5 h-5" />
-                }
-                <div className="flex-1">
-                  <div className="font-semibold text-lg">{headCategory.name}</div>
-                  <div className="text-xs text-gray-500">{headCategory.slug}</div>
+                <div 
+                  className="flex-1 cursor-pointer flex items-center gap-3"
+                  onClick={() => toggleHeadExpansion(headCategory.id)}
+                >
+                  {expandedHeads[headCategory.id] ? 
+                    <ChevronDown className="w-5 h-5" /> : 
+                    <ChevronRight className="w-5 h-5" />
+                  }
+                  <div>
+                    <div className="font-semibold text-lg">{headCategory.name}</div>
+                    <div className="text-xs text-gray-500">{headCategory.slug}</div>
+                  </div>
+                </div>
+                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openEditDialog('head', headCategory)}
+                    className="gap-1"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={() => openDeleteDialog('head', headCategory)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
 
@@ -403,24 +548,69 @@ const Categories = () => {
                   {subCategories[headCategory.id]?.map(subCategory => (
                     <div key={subCategory.id} className="border-b">
                       <div 
-                        className="p-4 ml-8 hover:bg-white cursor-pointer flex items-center gap-3"
-                        onClick={() => toggleSubExpansion(subCategory.id)}
+                        className="p-4 ml-8 hover:bg-white flex items-center gap-3 justify-between group"
                       >
-                        {expandedSubs[subCategory.id] ? 
-                          <ChevronDown className="w-4 h-4" /> : 
-                          <ChevronRight className="w-4 h-4" />
-                        }
-                        <div className="flex-1">
-                          <div className="font-medium">{subCategory.name}</div>
-                          <div className="text-xs text-gray-500">{subCategory.slug}</div>
+                        <div 
+                          className="flex-1 cursor-pointer flex items-center gap-3"
+                          onClick={() => toggleSubExpansion(subCategory.id)}
+                        >
+                          {expandedSubs[subCategory.id] ? 
+                            <ChevronDown className="w-4 h-4" /> : 
+                            <ChevronRight className="w-4 h-4" />
+                          }
+                          <div>
+                            <div className="font-medium">{subCategory.name}</div>
+                            <div className="text-xs text-gray-500">{subCategory.slug}</div>
+                          </div>
                         </div>
+                        <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditDialog('sub', subCategory, headCategory.id)}
+                            className="gap-1"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                            Edit
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 hover:text-red-700"
+                            onClick={() => openDeleteDialog('sub', subCategory, headCategory.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 ml-8 px-4 py-2 bg-gray-50 border-b">
+                        <Button
+                          size="sm"
+                          onClick={() => openAddDialog('sub', headCategory.id, headCategory.name)}
+                          className="gap-1 ml-auto"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add Sub Category
+                        </Button>
+                      </div>
+
+                      {/* ADD MICRO BUTTON */}
+                      <div className="flex gap-2 ml-16 px-4 py-2 bg-gray-50 border-b">
+                        <Button
+                          size="sm"
+                          onClick={() => openAddDialog('micro', subCategory.id, subCategory.name)}
+                          className="gap-1 ml-auto"
+                        >
+                          <Plus className="w-3 h-3" />
+                          Add Micro Category
+                        </Button>
                       </div>
 
                       {/* MICRO CATEGORIES */}
                       {expandedSubs[subCategory.id] && (
                         <div className="bg-white border-t">
                           {microCategories[subCategory.id]?.map(microCategory => (
-                            <div key={microCategory.id} className="p-4 ml-16 border-b hover:bg-blue-50 flex items-center justify-between gap-3">
+                            <div key={microCategory.id} className="p-4 ml-16 border-b hover:bg-blue-50 flex items-center justify-between gap-3 group">
                               <div className="flex-1">
                                 <div className="font-medium text-sm">{microCategory.name}</div>
                                 <div className="text-xs text-gray-500">{microCategory.slug}</div>
@@ -429,18 +619,19 @@ const Categories = () => {
                                 )}
                               </div>
                               
-                              <Dialog open={showMetaDialog && selectedMicroCategory?.id === microCategory.id} onOpenChange={setShowMetaDialog}>
-                                <DialogTrigger asChild>
-                                  <Button 
-                                    size="sm" 
-                                    variant="outline"
-                                    onClick={() => openMetaDialog(microCategory)}
-                                    className="gap-1"
-                                  >
-                                    <Tag className="w-4 h-4" />
-                                    Meta
-                                  </Button>
-                                </DialogTrigger>
+                              <div className="flex gap-2">
+                                <Dialog open={showMetaDialog && selectedMicroCategory?.id === microCategory.id} onOpenChange={setShowMetaDialog}>
+                                  <DialogTrigger asChild>
+                                    <Button 
+                                      size="sm" 
+                                      variant="outline"
+                                      onClick={() => openMetaDialog(microCategory)}
+                                      className="gap-1"
+                                    >
+                                      <Tag className="w-4 h-4" />
+                                      Meta
+                                    </Button>
+                                  </DialogTrigger>
                                 
                                 <DialogContent className="max-w-2xl">
                                   <DialogHeader>
@@ -483,7 +674,26 @@ const Categories = () => {
                                     </Button>
                                   </div>
                                 </DialogContent>
-                              </Dialog>
+                                </Dialog>
+                                
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openEditDialog('micro', microCategory, subCategory.id)}
+                                  className="gap-1"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-red-600 hover:text-red-700"
+                                  onClick={() => openDeleteDialog('micro', microCategory, subCategory.id)}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </div>
                           )) || (
                             <div className="p-4 ml-16 text-sm text-gray-500">
@@ -510,6 +720,26 @@ const Categories = () => {
           </div>
         )}
       </div>
+      
+      {/* ADD/EDIT DIALOG */}
+      <AddEditCategoryDialog
+        isOpen={showAddEditDialog}
+        onClose={() => setShowAddEditDialog(false)}
+        category={selectedCategory}
+        level={dialogLevel}
+        parentId={parentCategory?.id}
+        onSave={handleSaveCategory}
+      />
+      
+      {/* DELETE DIALOG */}
+      <DeleteCategoryDialog
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        category={selectedCategory}
+        level={dialogLevel}
+        childCount={childCount}
+        onConfirm={handleDeleteCategory}
+      />
     </div>
   );
 };
