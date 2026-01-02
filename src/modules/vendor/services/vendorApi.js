@@ -307,6 +307,11 @@ export const vendorApi = {
       if (error) throw error;
     },
 
+    updatePassword: async (newPassword) => {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+    },
+
     // ✅ FIXED: auth fields will NEVER go into vendors update
     updateProfile: async (updates) => {
       const vendorId = await getVendorId();

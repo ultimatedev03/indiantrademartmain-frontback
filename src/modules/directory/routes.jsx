@@ -16,6 +16,7 @@ import VendorListing from '@/modules/directory/pages/VendorListing';
 import VendorProfilePublic from '@/modules/directory/pages/VendorProfile';
 import Press from '@/modules/directory/pages/Press';
 import Investor from '@/modules/directory/pages/Investor';
+import ForgotPassword from '@/shared/pages/ForgotPassword';
 import { JoinSales, SuccessStories, Help, CustomerCare, Complaints, Jobs, ContactPage, BuyLeads, LearningCentre, ProductsPage } from '@/modules/directory/pages/FooterPages';
 
 export const DirectoryRoutes = () => {
@@ -41,6 +42,7 @@ export const DirectoryRoutes = () => {
         <Route path="become-a-vendor" element={<BecomeVendor />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="auth/login" element={<Login />} />
+        <Route path="auth/forgot-password" element={<ForgotPassword />} />
         
         {/* Footer Information Links */}
         <Route path="press" element={<Press />} />

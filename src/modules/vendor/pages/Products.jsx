@@ -112,8 +112,8 @@ const Products = () => {
                         ) : (
                             <div className="flex items-center justify-center h-full text-slate-400"><Eye className="w-8 h-8"/></div>
                         )}
-                        <div className="absolute top-3 left-3">
-                           <Badge variant={p.status === 'ACTIVE' ? 'default' : 'secondary'} className={p.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : ''}>{p.status || 'DRAFT'}</Badge>
+                        <div className="absolute bottom-3 right-3">
+                           <Badge variant={p.status === 'ACTIVE' ? 'default' : 'secondary'} className={`text-xs py-0.5 px-2 ${p.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : ''}`}>{p.status || 'DRAFT'}</Badge>
                         </div>
                     </div>
 
@@ -136,6 +136,15 @@ const Products = () => {
                                   </span>
                                ) : (p.category_other || 'Uncategorized')}
                             </div>
+                            {p.extra_micro_categories && p.extra_micro_categories.length > 0 && (
+                              <div className="flex flex-wrap gap-2 mb-3">
+                                {p.extra_micro_categories.map((cat, idx) => (
+                                  <Badge key={idx} variant="secondary" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                                    {cat.name || cat}
+                                  </Badge>
+                                ))}
+                              </div>
+                            )}
                             {p.description && (
                                <p className="text-sm text-gray-600 line-clamp-2 mb-3">{p.description.replace(/<[^>]*>/g, '')}</p>
                             )}

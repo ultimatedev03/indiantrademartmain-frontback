@@ -12,6 +12,7 @@ import BuyerFavorites from '@/modules/buyer/pages/Favorites';
 import BuyerSuggestions from '@/modules/buyer/pages/Suggestions';
 import BuyerRegister from '@/modules/buyer/pages/auth/Register';
 import BuyerLogin from '@/modules/buyer/pages/auth/Login';
+import ForgotPassword from '@/shared/pages/ForgotPassword';
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import { BuyerAuthProvider } from '@/modules/buyer/context/AuthContext';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
@@ -22,6 +23,7 @@ export const BuyerRoutes = () => {
       <Routes>
         <Route path="login" element={<BuyerLogin />} />
         <Route path="register" element={<PageStatusWrapper pageRoute="/buyer/register"><BuyerRegister /></PageStatusWrapper>} />
+        <Route path="forgot-password" element={<ForgotPassword />} />
 
         <Route element={<ProtectedRoute allowedRoles={['BUYER']} />}>
           <Route element={<PageStatusWrapper pageRoute="/buyer"><BuyerLayout /></PageStatusWrapper>}>

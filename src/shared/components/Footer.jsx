@@ -64,11 +64,7 @@ const Footer = () => {
                 <li><Link to="/customer-care" className="text-gray-300 hover:text-blue-400 transition-colors">Customer Care</Link></li>
                 <li><Link to="/complaints" className="text-gray-300 hover:text-blue-400 transition-colors">Complaints</Link></li>
                 <li><Link to="/jobs" className="text-gray-300 hover:text-blue-400 transition-colors">Jobs & Careers</Link></li>
-                <li>
-                  <button onClick={() => setShowSupport(true)} className="text-gray-300 hover:text-blue-400 transition-colors text-left">
-                    Contact Us
-                  </button>
-                </li>
+                <li><Link to="/contact" className="text-gray-300 hover:text-blue-400 transition-colors">Contact Us</Link></li>
               </ul>
             </div>
 

@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import otpRoutes from './routes/otp.js';
 import quotationRoutes from './routes/quotation.js';
+import passwordResetRoutes from './routes/passwordReset.js';
+import migrationRoutes from './routes/migration.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 
 dotenv.config({ path: '.env.local' });
@@ -24,6 +26,8 @@ app.use(express.json());
 // Routes
 app.use('/api/otp', otpRoutes);
 app.use('/api/quotation', quotationRoutes);
+app.use('/api/password-reset', passwordResetRoutes);
+app.use('/api/migration', migrationRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

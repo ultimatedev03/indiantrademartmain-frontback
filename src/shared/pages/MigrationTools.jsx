@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Loader2, CheckCircle, AlertCircle, ArrowRight } from 'lucide-react';
 import { migrateProductSlugsBatch } from '@/shared/utils/migrateProductSlugs';
+import MigrationVendorIds from './MigrationVendorIds';
 
 const MigrationTools = () => {
+  const [activeTab, setActiveTab] = useState('slugs'); // 'slugs' or 'vendorIds'
   const [migrating, setMigrating] = useState(false);
   const [result, setResult] = useState(null);
   const [showResults, setShowResults] = useState(false);
@@ -42,8 +45,27 @@ const MigrationTools = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 p-8">
+      {activeTab === 'vendorIds' && <MigrationVendorIds />}
+      
+      {activeTab === 'slugs' && (
       <div className="max-w-2xl mx-auto space-y-6">
         <h1 className="text-3xl font-bold text-gray-900">Migration Tools</h1>
+        
+        {/* Tab Navigation */}
+        <div className="flex gap-2 border-b border-gray-200">
+          <button
+            onClick={() => setActiveTab('slugs')}
+            className="px-4 py-2 font-semibold text-[#003D82] border-b-2 border-[#003D82]"
+          >
+            Product Slugs
+          </button>
+          <button
+            onClick={() => setActiveTab('vendorIds')}
+            className="px-4 py-2 font-semibold text-gray-600 hover:text-gray-900"
+          >
+            Vendor IDs
+          </button>
+        </div>
         
         <Card>
           <CardHeader>
@@ -105,6 +127,7 @@ const MigrationTools = () => {
           <p>Visit this page at: <code className="bg-white px-2 py-1 rounded">/migration-tools</code></p>
         </div>
       </div>
+      )}
     </div>
   );
 };

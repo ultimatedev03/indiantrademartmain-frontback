@@ -16,6 +16,7 @@ import PhotosDocs from '@/modules/vendor/pages/PhotosDocs';
 import VendorRegister from '@/modules/vendor/pages/auth/Register';
 import VendorLogin from '@/modules/vendor/pages/auth/Login';
 import VendorVerify from '@/modules/vendor/pages/auth/Verify';
+import ForgotPassword from '@/shared/pages/ForgotPassword';
 import VendorAnalytics from '@/modules/vendor/pages/Analytics';
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
@@ -27,6 +28,7 @@ export const VendorRoutes = () => {
       <Route path="login" element={<VendorLogin />} />
       <Route path="register" element={<PageStatusWrapper pageRoute="/vendor/register"><VendorRegister /></PageStatusWrapper>} />
       <Route path="verify" element={<VendorVerify />} />
+      <Route path="forgot-password" element={<ForgotPassword />} />
 
       {/* Protected Portal Routes */}
       <Route element={<ProtectedRoute allowedRoles={['VENDOR']} redirectTo="/vendor/login" />}>

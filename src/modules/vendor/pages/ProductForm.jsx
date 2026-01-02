@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { vendorApi as vendorDataApi } from '@/modules/vendor/services/vendorApi';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -56,6 +57,8 @@ const ProductForm = () => {
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [extraCatInput, setExtraCatInput] = useState(null);
+  const [showAddCityDialog, setShowAddCityDialog] = useState(false);
+  const [customCityInput, setCustomCityInput] = useState('');
 
   const [formData, setFormData] = useState({
     // ✅ BASIC (Sequence)
@@ -73,7 +76,7 @@ const ProductForm = () => {
     // optional pricing (still supported)
     price: '',
 
-    status: 'DRAFT',
+    status: 'ACTIVE',
 
     // Media
     images: [],
@@ -253,6 +256,41 @@ const ProductForm = () => {
       ...p,
       target_locations: { ...p.target_locations, [type]: (p.target_locations[type] || []).filter(x => x.id !== id) }
     }));
+  };
+
+  const handleAddCustomCity = async () => {
+    if (!customCityInput.trim()) {
+      toast({ title: "Please enter a city name", variant: "destructive" });
+      return;
+    }
+    if (!selectedStateId) {
+      toast({ title: "Please select a state first", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const cityName = customCityInput.trim();
+      const slug = cityName.toLowerCase().replace(/\s+/g, '-');
+      
+      const { data, error } = await supabase
+        .from('cities')
+        .insert([{ name: cityName, slug: slug, state_id: selectedStateId }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        addLocation('cities', data);
+        setCities(p => [...p, data]);
+        setCustomCityInput('');
+        setShowAddCityDialog(false);
+        toast({ title: "City added successfully!" });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Failed to add city", variant: "destructive" });
+    }
   };
 
   if (loading && !formData) {
@@ -543,51 +581,6 @@ const ProductForm = () => {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader><CardTitle className="text-base">Product Status</CardTitle></CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-4">
-                    <div className="flex-1">
-                      <Label className="text-sm">Current Status</Label>
-                      <div className="mt-1">
-                        <Badge variant={formData.status === 'ACTIVE' ? 'success' : 'secondary'}>
-                          {formData.status}
-                        </Badge>
-                      </div>
-                    </div>
-
-                    {formData.status === 'DRAFT' && (
-                      <div className="flex items-end">
-                        <Button
-                          type="button"
-                          className="bg-emerald-600 hover:bg-emerald-700"
-                          onClick={() => setFormData(p => ({ ...p, status: 'ACTIVE' }))}
-                        >
-                          Publish to Live
-                        </Button>
-                      </div>
-                    )}
-
-                    {formData.status === 'ACTIVE' && (
-                      <div className="flex items-end">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setFormData(p => ({ ...p, status: 'DRAFT' }))}
-                        >
-                          Unpublish
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-slate-500 mt-2">
-                    {formData.status === 'DRAFT'
-                      ? 'Draft products are visible only to you. Publish to make them visible to buyers.'
-                      : 'This product is visible to all buyers. Unpublish to hide it.'}
-                  </p>
-                </CardContent>
-              </Card>
 
               <Card>
                 <CardHeader><CardTitle className="text-base">Specifications</CardTitle></CardHeader>
@@ -673,15 +666,57 @@ const ProductForm = () => {
 
                     <div>
                       <Label>Select multiple cities of that state</Label>
-                      <Select disabled={!selectedStateId} onValueChange={(v) => {
-                        const c = cities.find(x => x.id === v);
-                        addLocation('cities', c);
-                      }}>
-                        <SelectTrigger><SelectValue placeholder="Add City" /></SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {cities.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
+                      <div className="space-y-2">
+                        <Select disabled={!selectedStateId} onValueChange={(v) => {
+                          if (v === 'OTHER') {
+                            setShowAddCityDialog(true);
+                          } else {
+                            const c = cities.find(x => x.id === v);
+                            addLocation('cities', c);
+                          }
+                        }}>
+                          <SelectTrigger><SelectValue placeholder="Add City" /></SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {cities.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            <SelectItem value="OTHER">+ Add Other City</SelectItem>
+                          </SelectContent>
+                        </Select>
+
+                        {showAddCityDialog && (
+                          <div className="border rounded-md p-3 bg-blue-50">
+                            <div className="space-y-2">
+                              <Label className="text-sm">Enter city name</Label>
+                              <Input
+                                placeholder="e.g. Bengaluru, Pune"
+                                value={customCityInput}
+                                onChange={(e) => setCustomCityInput(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAddCustomCity()}
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  className="bg-emerald-600 hover:bg-emerald-700"
+                                  onClick={handleAddCustomCity}
+                                >
+                                  Add City
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setShowAddCityDialog(false);
+                                    setCustomCityInput('');
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
 
                       <div className="flex flex-wrap gap-2 mt-2">
                         {(formData.target_locations.cities || []).map(c => (

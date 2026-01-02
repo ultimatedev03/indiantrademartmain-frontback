@@ -483,7 +483,7 @@ const Profile = () => {
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs text-slate-500">CIN Number</Label>
+                    <Label className="text-xs text-slate-500">CIN/LLPIN Number</Label>
                     <Input
                       disabled={editingSection !== 'additional'}
                       placeholder="CIN (if company)"
@@ -494,12 +494,12 @@ const Profile = () => {
                   </div>
 
                   <div className="space-y-1">
-                    <Label className="text-xs text-slate-500">LLPIN Number</Label>
+                    <Label className="text-xs text-slate-500">TAN Number</Label>
                     <Input
                       disabled={editingSection !== 'additional'}
-                      placeholder="LLPIN (if LLP)"
-                      value={draft.llpinNumber || draft.llpin_number || ''}
-                      onChange={e => setDraft({ ...draft, llpinNumber: e.target.value, llpin_number: e.target.value })}
+                      placeholder="TAN Number"
+                      value={draft.tanNumber || draft.tan_number || ''}
+                      onChange={e => setDraft({ ...draft, tanNumber: e.target.value, tan_number: e.target.value })}
                       className="h-9"
                     />
                   </div>
@@ -803,7 +803,7 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
     { id: 'GST', label: 'GST Certificate' },
     { id: 'PAN', label: 'PAN Card' },
     { id: 'AADHAR', label: 'Aadhar Card' },
-    { id: 'BANK', label: 'Bank Statement' },
+    { id: 'BANK', label: 'Bank Passbook/Cheque Copy' },
   ];
 
   return (
