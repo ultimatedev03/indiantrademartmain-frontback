@@ -106,50 +106,71 @@ export const handler = async (event) => {
       }
 
       try {
-        // Find user by email
-        const { data: userData, error: userError } = await supabase
-          .from("auth_users")
-          .select("id")
+        let userId = null;
+        let userRole = null;
+
+        // Step 1: Find user_id from buyers table
+        const { data: buyer, error: buyerError } = await supabase
+          .from("buyers")
+          .select("user_id, email")
           .eq("email", emailLower)
           .maybeSingle();
 
-        if (userError && userError.code !== "PGRST116") {
-          return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "User lookup failed" })
-          };
+        if (buyer && buyer.user_id) {
+          userId = buyer.user_id;
+          userRole = "BUYER";
         }
 
-        if (!userData) {
+        // Step 2: If not found in buyers, check vendors table
+        if (!userId) {
+          const { data: vendor, error: vendorError } = await supabase
+            .from("vendors")
+            .select("user_id, email")
+            .eq("email", emailLower)
+            .maybeSingle();
+
+          if (vendor && vendor.user_id) {
+            userId = vendor.user_id;
+            userRole = "VENDOR";
+          }
+        }
+
+        if (!userId) {
           return {
             statusCode: 404,
-            body: JSON.stringify({ error: "User not found" })
+            body: JSON.stringify({ error: "Email not found in our records" })
           };
         }
 
-        // Update password using Supabase Admin API
-        const { error: updateError } = await supabase.auth.admin.updateUserById(
-          userData.id,
+        // Step 3: Update password using Supabase Admin API
+        const { data: updatedUser, error: updateError } = await supabase.auth.admin.updateUserById(
+          userId,
           { password: new_password }
         );
 
         if (updateError) {
+          console.error("[password-reset] Password update error:", updateError);
           return {
             statusCode: 500,
             body: JSON.stringify({
-              error: updateError.message || "Failed to reset password"
+              error: "Failed to reset password: " + updateError.message
             })
           };
         }
+
+        console.log(`[password-reset] Password reset successfully for ${userRole} user: ${emailLower}`);
 
         return {
           statusCode: 200,
           body: JSON.stringify({
             success: true,
-            message: "Password has been reset successfully"
+            message: "Password has been reset successfully",
+            email: emailLower,
+            role: userRole
           })
         };
       } catch (error) {
+        console.error("[password-reset] Password reset error:", error);
         return {
           statusCode: 500,
           body: JSON.stringify({

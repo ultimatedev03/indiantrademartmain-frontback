@@ -129,11 +129,10 @@ export const passwordResetApi = {
         throw new Error('Password must be at least 6 characters long');
       }
 
+      // Both local and Netlify use the same endpoint
       // Local: Express -> /api/password-reset
-      // Netlify: Function -> /.netlify/functions/password-reset-update
-      const url = isLocal
-        ? `${API_BASE}/password-reset`
-        : `${API_BASE}/password-reset-update`;
+      // Netlify: Function -> /.netlify/functions/password-reset
+      const url = `${API_BASE}/password-reset`;
 
       const response = await fetch(url, {
         method: 'POST',
