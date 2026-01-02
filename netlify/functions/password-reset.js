@@ -32,43 +32,61 @@ export const handler = async (event) => {
 
     const emailLower = email.toLowerCase().trim();
 
-    // ✅ CHECK EMAIL BY ROLE
+    // ✅ CHECK EMAIL BY ROLE (BUYER / VENDOR)
     if (!new_password && role) {
       try {
-        // Query the auth_users table to check if email exists with this role
+        const normalizedRole = String(role).toUpperCase();
+
+        if (normalizedRole !== "BUYER" && normalizedRole !== "VENDOR") {
+          return {
+            statusCode: 400,
+            body: JSON.stringify({ error: "Invalid role" })
+          };
+        }
+
+        const table = normalizedRole === "BUYER" ? "buyers" : "vendors";
+
         const { data, error } = await supabase
-          .from("auth_users")
-          .select("id, email, role")
+          .from(table)
+          .select("id, email, user_id")
           .eq("email", emailLower)
-          .eq("role", role)
           .maybeSingle();
 
         if (error && error.code !== "PGRST116") {
+          console.error("[password-reset] Error checking", table, "for email", emailLower, error);
           return {
             statusCode: 500,
-            body: JSON.stringify({ error: "Database query failed" })
+            body: JSON.stringify({ error: "Failed to verify email" })
           };
         }
 
         if (!data) {
+          const notFoundMsg = normalizedRole === "BUYER"
+            ? "This email is not registered as a buyer"
+            : "This email is not registered as a vendor";
+
           return {
             statusCode: 404,
-            body: JSON.stringify({
-              error: "Email not registered with this role"
-            })
+            body: JSON.stringify({ error: notFoundMsg })
           };
         }
+
+        const successMsg = normalizedRole === "BUYER"
+          ? "Buyer account found"
+          : "Vendor account found";
 
         return {
           statusCode: 200,
           body: JSON.stringify({
+            success: true,
             found: true,
-            email: data.email,
-            role: data.role,
-            message: "Email found"
+            role: normalizedRole,
+            email: emailLower,
+            message: successMsg
           })
         };
       } catch (error) {
+        console.error("[password-reset] Email verification error:", error);
         return {
           statusCode: 500,
           body: JSON.stringify({ error: error.message || "Check email failed" })
