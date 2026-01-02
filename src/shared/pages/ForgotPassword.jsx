@@ -48,29 +48,14 @@ const ForgotPassword = () => {
     setLoading(true);
     try {
       // Check if email exists with the specified role
-      const response = await fetch('/.netlify/functions/password-reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.toLowerCase().trim(), role })
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        toast({
-          title: 'Email Not Found',
-          description: data.error || `This email is not registered as a ${role.toLowerCase()}`,
-          variant: 'destructive'
-        });
-        return;
-      }
+      const data = await passwordResetApi.checkEmailByRole(email, role);
 
       // Request OTP
       await passwordResetApi.requestOTP(email);
       
       toast({
         title: 'OTP Sent',
-        description: 'Check your email for the OTP code'
+        description: data.message || 'Check your email for the OTP code'
       });
 
       setOtpExpiry(120); // 2 minutes

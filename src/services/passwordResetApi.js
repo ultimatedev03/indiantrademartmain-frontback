@@ -1,6 +1,12 @@
 // ❌ Frontend me supabase use NAHI karna
 // ✅ Sirf Netlify Functions call karni hai
 
+// Helper to decide whether we're on localhost dev or Netlify
+const isLocal = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const API_BASE = isLocal ? '/api' : '/.netlify/functions';
+
 export const passwordResetApi = {
   // ===============================
   // STEP 1: Check email by role
@@ -11,7 +17,13 @@ export const passwordResetApi = {
         throw new Error('Email and role are required');
       }
 
-      const response = await fetch('/.netlify/functions/password-reset', {
+      // Local: Express route -> /api/password-reset/verify-email
+      // Netlify: Function      -> /.netlify/functions/password-reset
+      const url = isLocal
+        ? `${API_BASE}/password-reset/verify-email`
+        : `${API_BASE}/password-reset`;
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -44,7 +56,9 @@ export const passwordResetApi = {
         throw new Error('Email is required');
       }
 
-      const response = await fetch('/.netlify/functions/otp/request', {
+      const url = `${API_BASE}/otp/request`;
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -76,7 +90,9 @@ export const passwordResetApi = {
         throw new Error('Email and OTP are required');
       }
 
-      const response = await fetch('/.netlify/functions/otp/verify', {
+      const url = `${API_BASE}/otp/verify`;
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -101,7 +117,7 @@ export const passwordResetApi = {
   },
 
   // ===============================
-  // STEP 4: RESET PASSWORD (🔥 FIXED)
+  // STEP 4: RESET PASSWORD
   // ===============================
   resetPassword: async (email, newPassword) => {
     try {
@@ -113,8 +129,13 @@ export const passwordResetApi = {
         throw new Error('Password must be at least 6 characters long');
       }
 
-      // ✅ ONLY backend call — NO supabase here
-      const response = await fetch('/.netlify/functions/password-reset-update', {
+      // Local: Express -> /api/password-reset
+      // Netlify: Function -> /.netlify/functions/password-reset-update
+      const url = isLocal
+        ? `${API_BASE}/password-reset`
+        : `${API_BASE}/password-reset-update`;
+
+      const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
