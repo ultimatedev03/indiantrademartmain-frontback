@@ -1,5 +1,5 @@
 // ✅ File: src/modules/vendor/pages/ProductForm.jsx
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { vendorApi as vendorDataApi } from '@/modules/vendor/services/vendorApi';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
@@ -20,22 +20,14 @@ const MAX_IMAGES = 7;
 
 // ✅ IndiaMART-style common UOMs (practical + familiar)
 const UNIT_OPTIONS = [
-  // Count
   'Piece', 'Nos', 'Unit', 'Set', 'Pair', 'Dozen',
   'Pack', 'Packet', 'Box', 'Carton', 'Bundle', 'Bag',
-  // Containers
   'Bottle', 'Can', 'Jar',
-  // Weight
   'Kg', 'Gram', 'Ton', 'Quintal',
-  // Volume
   'Litre', 'ML',
-  // Length / Size
   'Meter', 'CM', 'MM', 'Inch', 'Foot',
-  // Area / Volume
   'Sq Ft', 'Sq M', 'Cubic Ft', 'Cubic M',
-  // Misc
   'Roll', 'Sheet', 'Tray',
-  // Service
   'Hour', 'Day', 'Month', 'Job/Service',
 ];
 
@@ -47,6 +39,8 @@ const SimpleRichText = ({ value, onChange, placeholder }) => (
     placeholder={placeholder}
   />
 );
+
+const cx = (...arr) => arr.filter(Boolean).join(' ');
 
 const ProductForm = () => {
   const { id } = useParams();
@@ -69,29 +63,28 @@ const ProductForm = () => {
   const [showAddCityDialog, setShowAddCityDialog] = useState(false);
   const [customCityInput, setCustomCityInput] = useState('');
 
+  // ✅ UI clean: Pan India details show/hide
+  const [showPanIndiaDetails, setShowPanIndiaDetails] = useState(false);
+
   const [formData, setFormData] = useState({
-    // ✅ BASIC (Sequence)
     name: '',
     category_path: '',
     micro_category_id: null,
     sub_category_id: null,
     head_category_id: null,
     category_other: '',
-    extra_micro_categories: [], // Add Keywords (max 2)
+    extra_micro_categories: [],
     min_order_qty: '',
-    price_unit: '', // ✅ Unit dropdown (qty_unit removed)
+    price_unit: '',
     description: '',
 
-    // optional pricing
     price: '',
     status: 'ACTIVE',
 
-    // Media
     images: [],
     video_url: '',
     pdf_url: '',
 
-    // Specs & Locs
     specifications: [{ key: '', value: '' }],
     target_locations: {
       pan_india: false,
@@ -99,6 +92,111 @@ const ProductForm = () => {
       cities: [],
     },
   });
+
+  const isPanIndia = !!formData.target_locations?.pan_india;
+
+  // ✅ Pan India auto-fill guard (avoid re-fetch loop)
+  const panIndiaAutoFilledRef = useRef(false);
+
+  // ✅ Small concurrency pool to avoid too many API calls at once
+  const asyncPool = async (poolLimit, array, iteratorFn) => {
+    const ret = [];
+    const executing = [];
+    for (const item of array) {
+      const p = Promise.resolve().then(() => iteratorFn(item));
+      ret.push(p);
+
+      if (poolLimit <= array.length) {
+        const e = p.then(() => executing.splice(executing.indexOf(e), 1));
+        executing.push(e);
+        if (executing.length >= poolLimit) {
+          await Promise.race(executing);
+        }
+      }
+    }
+    return Promise.all(ret);
+  };
+
+  const loadAllStatesAndCities = async () => {
+    setBulkCityLoading(true);
+    try {
+      // 1) Ensure states list
+      let stList = states;
+      if (!stList || stList.length === 0) {
+        stList = (await vendorApi.getStates()) || [];
+        setStates(stList);
+      }
+
+      const allStatesSlim = (stList || [])
+        .filter((s) => s?.id)
+        .map((s) => ({ id: s.id, name: s.name }));
+
+      // 2) Load all cities for all states (concurrency limited)
+      const cityBuckets = [];
+      await asyncPool(6, stList || [], async (st) => {
+        if (!st?.id) return;
+        const list = await vendorApi.getCities(st.id);
+        (list || []).forEach((c) => cityBuckets.push(c));
+      });
+
+      const cityMap = new Map();
+      for (const c of cityBuckets) {
+        if (c?.id) cityMap.set(String(c.id), c);
+      }
+
+      const allCitiesSlim = Array.from(cityMap.values()).map((c) => ({
+        id: c.id,
+        name: c.name,
+      }));
+
+      setFormData((p) => ({
+        ...p,
+        target_locations: {
+          pan_india: true,
+          states: allStatesSlim,
+          cities: allCitiesSlim,
+        },
+      }));
+
+      // ✅ UI reset for state/city dropdown (now everything selected)
+      setSelectedStateId('');
+      setCities([]);
+      setShowAddCityDialog(false);
+      setCustomCityInput('');
+
+      // ✅ UI clean: by default hide huge lists
+      setShowPanIndiaDetails(false);
+
+      toast({
+        title: 'Pan India enabled',
+        description: `All states (${allStatesSlim.length}) & all cities (${allCitiesSlim.length}) selected.`,
+      });
+
+      panIndiaAutoFilledRef.current = true;
+    } catch (e) {
+      console.error(e);
+      toast({
+        title: 'Pan India failed',
+        description: 'All states/cities load nahi ho paya. Please try again.',
+        variant: 'destructive',
+      });
+
+      setFormData((p) => ({
+        ...p,
+        target_locations: {
+          ...p.target_locations,
+          pan_india: false,
+        },
+      }));
+
+      panIndiaAutoFilledRef.current = false;
+    } finally {
+      setBulkCityLoading(false);
+    }
+  };
+
+  const statesCount = (formData.target_locations?.states || []).length;
+  const citiesCount = (formData.target_locations?.cities || []).length;
 
   // Score
   const score = useMemo(() => {
@@ -110,13 +208,11 @@ const ProductForm = () => {
     else if (formData.images?.length > 0) s += 10;
     if (formData.category_path || formData.category_other) s += 10;
 
-    // ✅ Location scoring
     if (formData.target_locations?.pan_india) s += 10;
     else if (
       (formData.target_locations?.states?.length || 0) > 0 ||
       (formData.target_locations?.cities?.length || 0) > 0
-    )
-      s += 10;
+    ) s += 10;
 
     if (formData.pdf_url) s += 5;
     if (formData.video_url) s += 5;
@@ -166,12 +262,14 @@ const ProductForm = () => {
           },
         }));
 
-        // if editing and states exist, pre-load last selected state cities for convenience
         const lastState = data?.target_locations?.states?.slice(-1)?.[0];
         if (lastState?.id) {
           setSelectedStateId(lastState.id);
           loadCities(lastState.id);
         }
+
+        panIndiaAutoFilledRef.current = !!data?.target_locations?.pan_india;
+        setShowPanIndiaDetails(false);
       }
     } catch (e) {
       console.error(e);
@@ -198,12 +296,13 @@ const ProductForm = () => {
         ...p,
         target_locations: {
           ...p.target_locations,
-          // If user starts selecting locations, Pan India should switch off automatically
           pan_india: false,
           [type]: [...list, ...toAdd],
         },
       };
     });
+
+    panIndiaAutoFilledRef.current = false;
   };
 
   const addLocation = (type, item) => addLocations(type, item ? [item] : []);
@@ -218,29 +317,50 @@ const ProductForm = () => {
         ),
       },
     }));
+    panIndiaAutoFilledRef.current = false;
   };
 
-  const togglePanIndia = (checked) => {
-    setFormData((p) => ({
-      ...p,
-      target_locations: {
-        pan_india: checked,
-        states: checked ? [] : p.target_locations.states || [],
-        cities: checked ? [] : p.target_locations.cities || [],
-      },
-    }));
+  // ✅ Pan India ON -> auto select ALL states + ALL cities
+  // ✅ Pan India OFF -> clear selections
+  const togglePanIndia = async (checked) => {
+    if (!checked) {
+      panIndiaAutoFilledRef.current = false;
+      setShowPanIndiaDetails(false);
 
-    if (checked) {
+      setFormData((p) => ({
+        ...p,
+        target_locations: {
+          pan_india: false,
+          states: [],
+          cities: [],
+        },
+      }));
+
       setSelectedStateId('');
       setCities([]);
       setShowAddCityDialog(false);
       setCustomCityInput('');
+
       toast({
-        title: 'Pan India enabled',
-        description:
-          'Ab delivery/service location pure India ke liye set ho gayi.',
+        title: 'Pan India disabled',
+        description: 'Ab aap manually states/cities select kar sakte ho.',
       });
+      return;
     }
+
+    if (panIndiaAutoFilledRef.current && formData.target_locations?.pan_india) {
+      return;
+    }
+
+    setFormData((p) => ({
+      ...p,
+      target_locations: {
+        ...p.target_locations,
+        pan_india: true,
+      },
+    }));
+
+    await loadAllStatesAndCities();
   };
 
   // ✅ ONLY ONE “Select All Cities” (Selected States)
@@ -259,7 +379,6 @@ const ProductForm = () => {
         (list || []).forEach((c) => all.push(c));
       }
 
-      // unique by id
       const map = new Map();
       for (const c of all) {
         if (c?.id) map.set(String(c.id), c);
@@ -284,8 +403,7 @@ const ProductForm = () => {
       formData.category_path ||
       formData.category_other ||
       (formData.name || '').length < 3
-    )
-      return;
+    ) return;
 
     setMatchingCategory(true);
     try {
@@ -302,15 +420,9 @@ const ProductForm = () => {
 
         const confidence = match.matchScore || match.confidence || 0;
         if (confidence > 80) {
-          toast({
-            title: '✓ Category Auto-detected!',
-            description: `${match.path} (${confidence}% match)`,
-          });
+          toast({ title: '✓ Category Auto-detected!', description: `${match.path} (${confidence}% match)` });
         } else if (confidence > 50) {
-          toast({
-            title: 'Category Auto-detected',
-            description: `${match.path} (${confidence}% match - Please verify)`,
-          });
+          toast({ title: 'Category Auto-detected', description: `${match.path} (${confidence}% match - Please verify)` });
         }
       } else {
         toast({
@@ -361,8 +473,6 @@ const ProductForm = () => {
     setLoading(true);
     try {
       const payload = { ...formData };
-
-      // ✅ Ensure qty_unit never goes
       delete payload.qty_unit;
 
       if (!payload.slug || payload.slug.trim() === '') {
@@ -404,11 +514,7 @@ const ProductForm = () => {
       const cityName = customCityInput.trim();
       const citySlug = cityName.toLowerCase().replace(/\s+/g, '-');
       const st = states.find((x) => String(x.id) === String(selectedStateId));
-      const stateSlug = (st?.slug || st?.name || '')
-        .toLowerCase()
-        .replace(/\s+/g, '-');
-
-      // ✅ city-state slug to reduce duplicates (SEO safe)
+      const stateSlug = (st?.slug || st?.name || '').toLowerCase().replace(/\s+/g, '-');
       const slug = stateSlug ? `${citySlug}-${stateSlug}` : citySlug;
 
       const { data, error } = await supabase
@@ -482,9 +588,10 @@ const ProductForm = () => {
                 {formData.images.map((img, i) => (
                   <div
                     key={i}
-                    className={`aspect-square border rounded cursor-pointer overflow-hidden ${
+                    className={cx(
+                      'aspect-square border rounded cursor-pointer overflow-hidden',
                       activeImageIndex === i ? 'ring-2 ring-blue-500' : ''
-                    }`}
+                    )}
                     onClick={() => setActiveImageIndex(i)}
                   >
                     <img src={img} className="w-full h-full object-cover" alt="" />
@@ -587,7 +694,6 @@ const ProductForm = () => {
             <TabsContent value="basic" className="space-y-4 mt-4">
               <Card>
                 <CardContent className="p-6 space-y-5">
-                  {/* 1) Product/Title Name */}
                   <div className="space-y-2">
                     <Label>Product/Title Name *</Label>
                     <div className="relative">
@@ -605,7 +711,6 @@ const ProductForm = () => {
                     </div>
                   </div>
 
-                  {/* 2) Category */}
                   <div className="space-y-2">
                     <Label>Category</Label>
                     {formData.category_path ? (
@@ -662,7 +767,6 @@ const ProductForm = () => {
                     )}
                   </div>
 
-                  {/* 3) Add Keywords */}
                   <div className="space-y-2">
                     <Label>Add Keywords (Max 2)</Label>
                     <div className="flex gap-2">
@@ -710,7 +814,6 @@ const ProductForm = () => {
                     </div>
                   </div>
 
-                  {/* 4) Quantity + 5) Unit */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Quantity</Label>
@@ -755,7 +858,6 @@ const ProductForm = () => {
                     </div>
                   </div>
 
-                  {/* 6) Description */}
                   <div className="space-y-2">
                     <Label>Description</Label>
                     <SimpleRichText
@@ -776,7 +878,6 @@ const ProductForm = () => {
 
             {/* SPECS TAB */}
             <TabsContent value="specs" className="space-y-4 mt-4">
-              {/* Pricing (Optional) */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Pricing (Optional)</CardTitle>
@@ -868,194 +969,254 @@ const ProductForm = () => {
                 </CardContent>
               </Card>
 
-              {/* ✅ Location (Pan India + SINGLE Select All Cities) */}
+              {/* ✅ Location */}
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
                     Where you can deliver / provide service
                   </CardTitle>
                 </CardHeader>
+
                 <CardContent className="space-y-4">
-                  {/* ✅ Pan India toggle */}
+                  {/* ✅ Pan India toggle (clean) */}
                   <div className="flex items-center justify-between rounded-md border p-3 bg-slate-50">
                     <div>
-                      <div className="text-sm font-medium">Pan India</div>
+                      <div className="text-sm font-medium flex items-center gap-2">
+                        Pan India
+                        {bulkCityLoading ? (
+                          <span className="inline-flex items-center gap-2 text-xs text-slate-500">
+                            <Loader2 className="w-3 h-3 animate-spin" /> Loading...
+                          </span>
+                        ) : null}
+                      </div>
                       <div className="text-xs text-slate-500">
-                        Enable karo to pure India me delivery/service available maana
-                        jayega.
+                        Enable karo to pure India me delivery/service available maana jayega.
                       </div>
                     </div>
+
                     <Switch
-                      checked={!!formData.target_locations?.pan_india}
+                      checked={isPanIndia}
                       onCheckedChange={togglePanIndia}
+                      disabled={bulkCityLoading}
                     />
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {/* States */}
-                    <div>
-                      <Label>Select multiple states</Label>
-                      <Select
-                        disabled={!!formData.target_locations?.pan_india}
-                        onValueChange={(v) => {
-                          const s = states.find((x) => String(x.id) === String(v));
-                          addLocation('states', s);
-                          setSelectedStateId(v);
-                          loadCities(v);
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue
-                            placeholder={
-                              formData.target_locations?.pan_india
-                                ? 'Pan India enabled'
-                                : 'Add State'
-                            }
-                          />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {states.map((s) => (
-                            <SelectItem key={s.id} value={String(s.id)}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {(formData.target_locations.states || []).map((s) => (
-                          <span
-                            key={s.id}
-                            className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs flex items-center gap-1"
-                          >
-                            {s.name}
-                            <X
-                              className="w-3 h-3 cursor-pointer"
-                              onClick={() => removeLocation('states', s.id)}
-                            />
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Cities */}
-                    <div>
-                      <Label>Select multiple cities of that state</Label>
-                      <div className="space-y-2">
-                        <Select
-                          disabled={!!formData.target_locations?.pan_india || !selectedStateId}
-                          onValueChange={(v) => {
-                            if (v === 'OTHER') {
-                              setShowAddCityDialog(true);
-                              return;
-                            }
-                            const c = cities.find((x) => String(x.id) === String(v));
-                            addLocation('cities', c);
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue
-                              placeholder={
-                                formData.target_locations?.pan_india
-                                  ? 'Pan India enabled'
-                                  : selectedStateId
-                                  ? 'Add City'
-                                  : 'Select state first'
-                              }
-                            />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60">
-                            {cities.map((c) => (
-                              <SelectItem key={c.id} value={String(c.id)}>
-                                {c.name}
-                              </SelectItem>
-                            ))}
-                            <SelectItem value="OTHER">+ Add Other City</SelectItem>
-                          </SelectContent>
-                        </Select>
-
-                        {showAddCityDialog && (
-                          <div className="border rounded-md p-3 bg-blue-50">
-                            <div className="space-y-2">
-                              <Label className="text-sm">Enter city name</Label>
-                              <Input
-                                placeholder="e.g. Bengaluru, Pune"
-                                value={customCityInput}
-                                onChange={(e) => setCustomCityInput(e.target.value)}
-                                onKeyDown={(e) =>
-                                  e.key === 'Enter' && handleAddCustomCity()
-                                }
-                              />
-                              <div className="flex gap-2">
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  className="bg-emerald-600 hover:bg-emerald-700"
-                                  onClick={handleAddCustomCity}
-                                >
-                                  Add City
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setShowAddCityDialog(false);
-                                    setCustomCityInput('');
-                                  }}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
+                  {/* ✅ CLEAN UI when Pan India is ON */}
+                  {isPanIndia ? (
+                    <div className="rounded-md border bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-900">
+                            ✅ Pan India Enabled
                           </div>
-                        )}
+                          <div className="text-xs text-slate-500 mt-1">
+                            Aapka product/service <b>All India</b> ke liye available hai.
+                          </div>
+                          <div className="text-xs text-slate-500 mt-2">
+                            Selected: <b>{statesCount}</b> States, <b>{citiesCount}</b> Cities
+                          </div>
+                        </div>
 
-                        {/* ✅ ONLY ONE BUTTON NOW */}
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={
-                            !!formData.target_locations?.pan_india ||
-                            bulkCityLoading ||
-                            !(formData.target_locations.states || []).length
-                          }
-                          onClick={selectAllCities}
-                          className="w-full"
+                          onClick={() => setShowPanIndiaDetails((p) => !p)}
                         >
-                          {bulkCityLoading ? (
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          ) : null}
-                          Select All Cities (Selected States)
+                          {showPanIndiaDetails ? 'Hide details' : 'View details'}
                         </Button>
                       </div>
 
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {(formData.target_locations.cities || []).map((c) => (
-                          <span
-                            key={c.id}
-                            className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs flex items-center gap-1"
+                      {showPanIndiaDetails && (
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="rounded-md border p-3 bg-slate-50">
+                            <div className="text-xs font-semibold text-slate-700 mb-2">
+                              States (scroll)
+                            </div>
+                            <div className="max-h-40 overflow-auto flex flex-wrap gap-2">
+                              {(formData.target_locations.states || []).map((s) => (
+                                <span
+                                  key={s.id}
+                                  className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs"
+                                >
+                                  {s.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div className="rounded-md border p-3 bg-slate-50">
+                            <div className="text-xs font-semibold text-slate-700 mb-2">
+                              Cities (scroll)
+                            </div>
+                            <div className="max-h-40 overflow-auto flex flex-wrap gap-2">
+                              {(formData.target_locations.cities || []).map((c) => (
+                                <span
+                                  key={c.id}
+                                  className="bg-green-100 text-green-800 px-2 py-1 rounded text-xs"
+                                >
+                                  {c.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    // ✅ Normal (Pan India OFF) UI
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* States */}
+                      <div>
+                        <Label>Select multiple states</Label>
+                        <Select
+                          onValueChange={(v) => {
+                            const s = states.find((x) => String(x.id) === String(v));
+                            addLocation('states', s);
+                            setSelectedStateId(v);
+                            loadCities(v);
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Add State" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-60">
+                            {states.map((s) => (
+                              <SelectItem key={s.id} value={String(s.id)}>
+                                {s.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+
+                        {/* ✅ scrollable chips (clean) */}
+                        <div className="mt-2 rounded-md border bg-slate-50 p-2 max-h-32 overflow-auto">
+                          <div className="flex flex-wrap gap-2">
+                            {(formData.target_locations.states || []).map((s) => (
+                              <span
+                                key={s.id}
+                                className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs flex items-center gap-1"
+                              >
+                                {s.name}
+                                <X
+                                  className="w-3 h-3 cursor-pointer"
+                                  onClick={() => removeLocation('states', s.id)}
+                                />
+                              </span>
+                            ))}
+                            {!(formData.target_locations.states || []).length && (
+                              <span className="text-xs text-slate-400">No states selected</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Cities */}
+                      <div>
+                        <Label>Select multiple cities of that state</Label>
+                        <div className="space-y-2">
+                          <Select
+                            disabled={!selectedStateId}
+                            onValueChange={(v) => {
+                              if (v === 'OTHER') {
+                                setShowAddCityDialog(true);
+                                return;
+                              }
+                              const c = cities.find((x) => String(x.id) === String(v));
+                              addLocation('cities', c);
+                            }}
                           >
-                            {c.name}
-                            <X
-                              className="w-3 h-3 cursor-pointer"
-                              onClick={() => removeLocation('cities', c.id)}
-                            />
-                          </span>
-                        ))}
+                            <SelectTrigger>
+                              <SelectValue
+                                placeholder={selectedStateId ? 'Add City' : 'Select state first'}
+                              />
+                            </SelectTrigger>
+                            <SelectContent className="max-h-60">
+                              {cities.map((c) => (
+                                <SelectItem key={c.id} value={String(c.id)}>
+                                  {c.name}
+                                </SelectItem>
+                              ))}
+                              <SelectItem value="OTHER">+ Add Other City</SelectItem>
+                            </SelectContent>
+                          </Select>
+
+                          {showAddCityDialog && (
+                            <div className="border rounded-md p-3 bg-blue-50">
+                              <div className="space-y-2">
+                                <Label className="text-sm">Enter city name</Label>
+                                <Input
+                                  placeholder="e.g. Bengaluru, Pune"
+                                  value={customCityInput}
+                                  onChange={(e) => setCustomCityInput(e.target.value)}
+                                  onKeyDown={(e) => e.key === 'Enter' && handleAddCustomCity()}
+                                />
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    className="bg-emerald-600 hover:bg-emerald-700"
+                                    onClick={handleAddCustomCity}
+                                  >
+                                    Add City
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      setShowAddCityDialog(false);
+                                      setCustomCityInput('');
+                                    }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={bulkCityLoading || !(formData.target_locations.states || []).length}
+                            onClick={selectAllCities}
+                            className="w-full"
+                          >
+                            {bulkCityLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                            Select All Cities (Selected States)
+                          </Button>
+                        </div>
+
+                        {/* ✅ scrollable chips (clean) */}
+                        <div className="mt-2 rounded-md border bg-slate-50 p-2 max-h-32 overflow-auto">
+                          <div className="flex flex-wrap gap-2">
+                            {(formData.target_locations.cities || []).map((c) => (
+                              <span
+                                key={c.id}
+                                className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs flex items-center gap-1"
+                              >
+                                {c.name}
+                                <X
+                                  className="w-3 h-3 cursor-pointer"
+                                  onClick={() => removeLocation('cities', c.id)}
+                                />
+                              </span>
+                            ))}
+                            {!(formData.target_locations.cities || []).length && (
+                              <span className="text-xs text-slate-400">No cities selected</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
 
               <div className="flex justify-between pt-4">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setParams({ step: 'basic' })}
-                >
+                <Button type="button" variant="outline" onClick={() => setParams({ step: 'basic' })}>
                   Back
                 </Button>
                 <Button type="submit" className="bg-[#003D82]">
@@ -1073,9 +1234,7 @@ const ProductForm = () => {
               <CardTitle className="text-sm">Product Score</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-emerald-600 mb-2">
-                {score}%
-              </div>
+              <div className="text-3xl font-bold text-emerald-600 mb-2">{score}%</div>
               <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-4">
                 <div
                   className="bg-emerald-500 h-full transition-all duration-500"
@@ -1086,19 +1245,11 @@ const ProductForm = () => {
                 <div className={formData.name.length > 5 ? 'text-emerald-600' : ''}>
                   • Name Length ({formData.name.length}/5 chars)
                 </div>
-                <div className={formData.price ? 'text-emerald-600' : ''}>
-                  • Price Set (optional)
-                </div>
-                <div
-                  className={
-                    formData.images.length >= 3 ? 'text-emerald-600' : ''
-                  }
-                >
+                <div className={formData.price ? 'text-emerald-600' : ''}>• Price Set (optional)</div>
+                <div className={formData.images.length >= 3 ? 'text-emerald-600' : ''}>
                   • 3+ Images ({formData.images.length})
                 </div>
-                <div className={formData.category_path ? 'text-emerald-600' : ''}>
-                  • Category Selected
-                </div>
+                <div className={formData.category_path ? 'text-emerald-600' : ''}>• Category Selected</div>
                 <div
                   className={
                     formData.target_locations?.pan_india ||
