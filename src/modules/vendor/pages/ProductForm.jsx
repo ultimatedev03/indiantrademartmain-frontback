@@ -1,3 +1,4 @@
+// ✅ File: src/modules/vendor/pages/ProductForm.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { vendorApi as vendorDataApi } from '@/modules/vendor/services/vendorApi';
@@ -9,33 +10,40 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
 import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
 import { generateUniqueSlug } from '@/shared/utils/slugUtils';
-import {
-  ArrowLeft,
-  Loader2,
-  Upload,
-  X,
-  Plus,
-} from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { ArrowLeft, Loader2, Upload, X, Plus } from 'lucide-react';
 
 const MAX_IMAGES = 7;
 
+// ✅ IndiaMART-style common UOMs (practical + familiar)
 const UNIT_OPTIONS = [
-  'Piece', 'Kg', 'Gram', 'Liter', 'ML',
-  'Meter', 'CM', 'MM',
-  'Box', 'Pack', 'Set', 'Pair', 'Dozen',
-  'Ton', 'Sq Ft', 'Sq M',
-  'Hour', 'Day', 'Month',
+  // Count
+  'Piece', 'Nos', 'Unit', 'Set', 'Pair', 'Dozen',
+  'Pack', 'Packet', 'Box', 'Carton', 'Bundle', 'Bag',
+  // Containers
+  'Bottle', 'Can', 'Jar',
+  // Weight
+  'Kg', 'Gram', 'Ton', 'Quintal',
+  // Volume
+  'Litre', 'ML',
+  // Length / Size
+  'Meter', 'CM', 'MM', 'Inch', 'Foot',
+  // Area / Volume
+  'Sq Ft', 'Sq M', 'Cubic Ft', 'Cubic M',
+  // Misc
+  'Roll', 'Sheet', 'Tray',
+  // Service
+  'Hour', 'Day', 'Month', 'Job/Service',
 ];
 
 const SimpleRichText = ({ value, onChange, placeholder }) => (
   <textarea
     className="w-full min-h-[150px] p-3 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
     value={value || ''}
-    onChange={e => onChange(e.target.value)}
+    onChange={(e) => onChange(e.target.value)}
     placeholder={placeholder}
   />
 );
@@ -54,6 +62,7 @@ const ProductForm = () => {
   const [states, setStates] = useState([]);
   const [cities, setCities] = useState([]);
   const [selectedStateId, setSelectedStateId] = useState('');
+  const [bulkCityLoading, setBulkCityLoading] = useState(false);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [extraCatInput, setExtraCatInput] = useState(null);
@@ -73,9 +82,8 @@ const ProductForm = () => {
     price_unit: '', // ✅ Unit dropdown (qty_unit removed)
     description: '',
 
-    // optional pricing (still supported)
+    // optional pricing
     price: '',
-
     status: 'ACTIVE',
 
     // Media
@@ -85,18 +93,31 @@ const ProductForm = () => {
 
     // Specs & Locs
     specifications: [{ key: '', value: '' }],
-    target_locations: { states: [], cities: [] }
+    target_locations: {
+      pan_india: false,
+      states: [],
+      cities: [],
+    },
   });
 
   // Score
   const score = useMemo(() => {
     let s = 0;
     if (formData.name?.length > 5) s += 15;
-    if (formData.price) s += 15; // optional but gives score
+    if (formData.price) s += 15;
     if (formData.description?.length > 50) s += 20;
-    if (formData.images?.length >= 3) s += 20; else if (formData.images?.length > 0) s += 10;
+    if (formData.images?.length >= 3) s += 20;
+    else if (formData.images?.length > 0) s += 10;
     if (formData.category_path || formData.category_other) s += 10;
-    if (formData.target_locations?.states?.length > 0) s += 10;
+
+    // ✅ Location scoring
+    if (formData.target_locations?.pan_india) s += 10;
+    else if (
+      (formData.target_locations?.states?.length || 0) > 0 ||
+      (formData.target_locations?.cities?.length || 0) > 0
+    )
+      s += 10;
+
     if (formData.pdf_url) s += 5;
     if (formData.video_url) s += 5;
     return Math.min(s, 100);
@@ -112,7 +133,9 @@ const ProductForm = () => {
     try {
       const data = await vendorApi.getStates();
       setStates(data || []);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const loadCities = async (sid) => {
@@ -120,7 +143,9 @@ const ProductForm = () => {
     try {
       const data = await vendorApi.getCities(sid);
       setCities(data || []);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const loadProduct = async () => {
@@ -128,15 +153,25 @@ const ProductForm = () => {
     try {
       const data = await vendorApi.products.get(id);
       if (data) {
-        setFormData(p => ({
+        setFormData((p) => ({
           ...p,
           ...data,
           price_unit: data.price_unit || '',
           min_order_qty: data.min_order_qty || '',
-          target_locations: data.target_locations || { states: [], cities: [] },
-          extra_micro_categories: data.extra_micro_categories || []
-          // ✅ qty_unit removed intentionally
+          extra_micro_categories: data.extra_micro_categories || [],
+          target_locations: {
+            pan_india: data?.target_locations?.pan_india || false,
+            states: data?.target_locations?.states || [],
+            cities: data?.target_locations?.cities || [],
+          },
         }));
+
+        // if editing and states exist, pre-load last selected state cities for convenience
+        const lastState = data?.target_locations?.states?.slice(-1)?.[0];
+        if (lastState?.id) {
+          setSelectedStateId(lastState.id);
+          loadCities(lastState.id);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -145,33 +180,143 @@ const ProductForm = () => {
     }
   };
 
+  // --- helpers ---
+  const addLocations = (type, items) => {
+    const safeItems = (items || []).filter(Boolean);
+    if (!safeItems.length) return;
+
+    setFormData((p) => {
+      const list = p.target_locations[type] || [];
+      const existingIds = new Set(list.map((x) => String(x.id)));
+      const toAdd = safeItems
+        .filter((it) => it?.id && !existingIds.has(String(it.id)))
+        .map((it) => ({ id: it.id, name: it.name }));
+
+      if (!toAdd.length) return p;
+
+      return {
+        ...p,
+        target_locations: {
+          ...p.target_locations,
+          // If user starts selecting locations, Pan India should switch off automatically
+          pan_india: false,
+          [type]: [...list, ...toAdd],
+        },
+      };
+    });
+  };
+
+  const addLocation = (type, item) => addLocations(type, item ? [item] : []);
+
+  const removeLocation = (type, rid) => {
+    setFormData((p) => ({
+      ...p,
+      target_locations: {
+        ...p.target_locations,
+        [type]: (p.target_locations[type] || []).filter(
+          (x) => String(x.id) !== String(rid)
+        ),
+      },
+    }));
+  };
+
+  const togglePanIndia = (checked) => {
+    setFormData((p) => ({
+      ...p,
+      target_locations: {
+        pan_india: checked,
+        states: checked ? [] : p.target_locations.states || [],
+        cities: checked ? [] : p.target_locations.cities || [],
+      },
+    }));
+
+    if (checked) {
+      setSelectedStateId('');
+      setCities([]);
+      setShowAddCityDialog(false);
+      setCustomCityInput('');
+      toast({
+        title: 'Pan India enabled',
+        description:
+          'Ab delivery/service location pure India ke liye set ho gayi.',
+      });
+    }
+  };
+
+  // ✅ ONLY ONE “Select All Cities” (Selected States)
+  const selectAllCities = async () => {
+    const selectedStates = formData.target_locations?.states || [];
+    if (!selectedStates.length) {
+      toast({ title: 'Select at least 1 state', variant: 'destructive' });
+      return;
+    }
+
+    setBulkCityLoading(true);
+    try {
+      const all = [];
+      for (const st of selectedStates) {
+        const list = await vendorApi.getCities(st.id);
+        (list || []).forEach((c) => all.push(c));
+      }
+
+      // unique by id
+      const map = new Map();
+      for (const c of all) {
+        if (c?.id) map.set(String(c.id), c);
+      }
+
+      addLocations('cities', Array.from(map.values()));
+      toast({
+        title: 'All cities added',
+        description: 'Selected states ki saari cities select ho gayi.',
+      });
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'Failed to load cities', variant: 'destructive' });
+    } finally {
+      setBulkCityLoading(false);
+    }
+  };
+
   // --- Handlers ---
   const handleNameBlur = async () => {
-    if (formData.category_path || formData.category_other || (formData.name || '').length < 3) return;
+    if (
+      formData.category_path ||
+      formData.category_other ||
+      (formData.name || '').length < 3
+    )
+      return;
+
     setMatchingCategory(true);
     try {
       const match = await vendorDataApi.products.matchCategory(formData.name);
       if (match) {
-        setFormData(p => ({
+        setFormData((p) => ({
           ...p,
           micro_category_id: match.micro_category_id,
           sub_category_id: match.sub_category_id,
           head_category_id: match.head_category_id,
           category_path: match.path,
-          category_other: ''
+          category_other: '',
         }));
 
         const confidence = match.matchScore || match.confidence || 0;
         if (confidence > 80) {
-          toast({ title: "✓ Category Auto-detected!", description: `${match.path} (${confidence}% match)` });
+          toast({
+            title: '✓ Category Auto-detected!',
+            description: `${match.path} (${confidence}% match)`,
+          });
         } else if (confidence > 50) {
-          toast({ title: "Category Auto-detected", description: `${match.path} (${confidence}% match - Please verify)` });
+          toast({
+            title: 'Category Auto-detected',
+            description: `${match.path} (${confidence}% match - Please verify)`,
+          });
         }
       } else {
         toast({
-          title: "⚠️ No Category Match Found",
-          description: "Please manually select a category from the dropdown",
-          variant: "destructive"
+          title: '⚠️ No Category Match Found',
+          description: 'Please manually select a category from the dropdown',
+          variant: 'destructive',
         });
       }
     } catch (e) {
@@ -186,7 +331,7 @@ const ProductForm = () => {
     if (!files.length) return;
 
     if (formData.images.length + files.length > MAX_IMAGES) {
-      toast({ title: `Max ${MAX_IMAGES} images allowed`, variant: "destructive" });
+      toast({ title: `Max ${MAX_IMAGES} images allowed`, variant: 'destructive' });
       return;
     }
 
@@ -197,9 +342,9 @@ const ProductForm = () => {
         const url = await vendorApi.auth.uploadImage(file, 'product-images');
         newUrls.push(url);
       }
-      setFormData(p => ({ ...p, images: [...p.images, ...newUrls] }));
+      setFormData((p) => ({ ...p, images: [...p.images, ...newUrls] }));
     } catch (e) {
-      toast({ title: "Upload Failed", variant: "destructive" });
+      toast({ title: 'Upload Failed', variant: 'destructive' });
     } finally {
       setUploading(false);
     }
@@ -208,9 +353,8 @@ const ProductForm = () => {
   const handleSave = async (e) => {
     e.preventDefault();
 
-    // ✅ Price NOT mandatory now (B2B style)
     if (!formData.name || formData.name.trim().length < 2) {
-      toast({ title: "Product/Title Name is required", variant: "destructive" });
+      toast({ title: 'Product/Title Name is required', variant: 'destructive' });
       return;
     }
 
@@ -227,51 +371,46 @@ const ProductForm = () => {
 
       if (id) {
         await vendorApi.products.update(id, payload);
-        toast({ title: "Updated successfully" });
+        toast({ title: 'Updated successfully' });
         navigate('/vendor/products');
       } else {
         await vendorApi.products.create(payload);
-        toast({ title: "Product created successfully!" });
+        toast({ title: 'Product created successfully!' });
         setTimeout(() => navigate('/vendor/products'), 800);
       }
     } catch (e) {
       console.error('Save error:', e);
-      toast({ title: "Error saving product", description: e.message, variant: "destructive" });
+      toast({
+        title: 'Error saving product',
+        description: e.message,
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const addLocation = (type, item) => {
-    if (!item) return;
-    setFormData(p => {
-      const list = p.target_locations[type] || [];
-      if (list.some(x => x.id === item.id)) return p;
-      return { ...p, target_locations: { ...p.target_locations, [type]: [...list, { id: item.id, name: item.name }] } };
-    });
-  };
-
-  const removeLocation = (type, id) => {
-    setFormData(p => ({
-      ...p,
-      target_locations: { ...p.target_locations, [type]: (p.target_locations[type] || []).filter(x => x.id !== id) }
-    }));
-  };
-
   const handleAddCustomCity = async () => {
     if (!customCityInput.trim()) {
-      toast({ title: "Please enter a city name", variant: "destructive" });
+      toast({ title: 'Please enter a city name', variant: 'destructive' });
       return;
     }
     if (!selectedStateId) {
-      toast({ title: "Please select a state first", variant: "destructive" });
+      toast({ title: 'Please select a state first', variant: 'destructive' });
       return;
     }
 
     try {
       const cityName = customCityInput.trim();
-      const slug = cityName.toLowerCase().replace(/\s+/g, '-');
-      
+      const citySlug = cityName.toLowerCase().replace(/\s+/g, '-');
+      const st = states.find((x) => String(x.id) === String(selectedStateId));
+      const stateSlug = (st?.slug || st?.name || '')
+        .toLowerCase()
+        .replace(/\s+/g, '-');
+
+      // ✅ city-state slug to reduce duplicates (SEO safe)
+      const slug = stateSlug ? `${citySlug}-${stateSlug}` : citySlug;
+
       const { data, error } = await supabase
         .from('cities')
         .insert([{ name: cityName, slug: slug, state_id: selectedStateId }])
@@ -282,27 +421,35 @@ const ProductForm = () => {
 
       if (data) {
         addLocation('cities', data);
-        setCities(p => [...p, data]);
+        setCities((p) => [...p, data]);
         setCustomCityInput('');
         setShowAddCityDialog(false);
-        toast({ title: "City added successfully!" });
+        toast({ title: 'City added successfully!' });
       }
     } catch (e) {
       console.error(e);
-      toast({ title: "Failed to add city", variant: "destructive" });
+      toast({ title: 'Failed to add city', variant: 'destructive' });
     }
   };
 
   if (loading && !formData) {
-    return <div className="h-screen flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin" /></div>;
+    return (
+      <div className="h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    );
   }
 
   return (
     <div className="max-w-[1400px] mx-auto p-4 space-y-4 pb-24">
       <div className="flex items-center justify-between bg-white border rounded-md px-4 py-3 shadow-sm">
         <div>
-          <div className="text-sm text-slate-500">{id ? 'Edit Product' : 'Add New Product'}</div>
-          <div className="text-xl font-bold text-slate-900">{formData.name || 'New Product'}</div>
+          <div className="text-sm text-slate-500">
+            {id ? 'Edit Product' : 'Add New Product'}
+          </div>
+          <div className="text-xl font-bold text-slate-900">
+            {formData.name || 'New Product'}
+          </div>
         </div>
         <Button variant="ghost" onClick={() => navigate('/vendor/products')}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Cancel
@@ -313,11 +460,19 @@ const ProductForm = () => {
         {/* LEFT: Media */}
         <div className="space-y-4">
           <Card>
-            <CardHeader><CardTitle className="text-base">Images ({formData.images.length}/{MAX_IMAGES})</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Images ({formData.images.length}/{MAX_IMAGES})
+              </CardTitle>
+            </CardHeader>
             <CardContent className="space-y-4">
               <div className="aspect-square bg-slate-100 rounded-lg border overflow-hidden relative flex items-center justify-center">
                 {formData.images[activeImageIndex] ? (
-                  <img src={formData.images[activeImageIndex]} className="w-full h-full object-contain" alt="Product" />
+                  <img
+                    src={formData.images[activeImageIndex]}
+                    className="w-full h-full object-contain"
+                    alt="Product"
+                  />
                 ) : (
                   <div className="text-slate-400">No Image</div>
                 )}
@@ -327,7 +482,9 @@ const ProductForm = () => {
                 {formData.images.map((img, i) => (
                   <div
                     key={i}
-                    className={`aspect-square border rounded cursor-pointer overflow-hidden ${activeImageIndex === i ? 'ring-2 ring-blue-500' : ''}`}
+                    className={`aspect-square border rounded cursor-pointer overflow-hidden ${
+                      activeImageIndex === i ? 'ring-2 ring-blue-500' : ''
+                    }`}
                     onClick={() => setActiveImageIndex(i)}
                   >
                     <img src={img} className="w-full h-full object-cover" alt="" />
@@ -336,30 +493,52 @@ const ProductForm = () => {
 
                 {formData.images.length < MAX_IMAGES && (
                   <label className="aspect-square border-2 border-dashed rounded flex items-center justify-center cursor-pointer hover:bg-slate-50">
-                    {uploading ? <Loader2 className="animate-spin" /> : <Upload className="text-slate-400" />}
-                    <input type="file" multiple className="hidden" accept="image/*" onChange={handleImageUpload} />
+                    {uploading ? (
+                      <Loader2 className="animate-spin" />
+                    ) : (
+                      <Upload className="text-slate-400" />
+                    )}
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                    />
                   </label>
                 )}
               </div>
 
               {formData.images.length > 0 && (
                 <div className="flex gap-2">
-                  <Button size="sm" variant="outline" className="flex-1" type="button" onClick={() => {
-                    const imgs = [...formData.images];
-                    const item = imgs.splice(activeImageIndex, 1)[0];
-                    imgs.unshift(item);
-                    setFormData(p => ({ ...p, images: imgs }));
-                    setActiveImageIndex(0);
-                  }}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="flex-1"
+                    type="button"
+                    onClick={() => {
+                      const imgs = [...formData.images];
+                      const item = imgs.splice(activeImageIndex, 1)[0];
+                      imgs.unshift(item);
+                      setFormData((p) => ({ ...p, images: imgs }));
+                      setActiveImageIndex(0);
+                    }}
+                  >
                     Set Primary
                   </Button>
 
-                  <Button size="sm" variant="destructive" className="flex-1" type="button" onClick={() => {
-                    const imgs = [...formData.images];
-                    imgs.splice(activeImageIndex, 1);
-                    setFormData(p => ({ ...p, images: imgs }));
-                    setActiveImageIndex(0);
-                  }}>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    className="flex-1"
+                    type="button"
+                    onClick={() => {
+                      const imgs = [...formData.images];
+                      imgs.splice(activeImageIndex, 1);
+                      setFormData((p) => ({ ...p, images: imgs }));
+                      setActiveImageIndex(0);
+                    }}
+                  >
                     Remove
                   </Button>
                 </div>
@@ -368,15 +547,29 @@ const ProductForm = () => {
           </Card>
 
           <Card>
-            <CardHeader><CardTitle className="text-sm">Additional Media</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-sm">Additional Media</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-1">
                 <Label className="text-xs">Video URL (YouTube)</Label>
-                <Input value={formData.video_url} onChange={e => setFormData(p => ({ ...p, video_url: e.target.value }))} placeholder="https://..." />
+                <Input
+                  value={formData.video_url}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, video_url: e.target.value }))
+                  }
+                  placeholder="https://..."
+                />
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Brochure (PDF URL)</Label>
-                <Input value={formData.pdf_url} onChange={e => setFormData(p => ({ ...p, pdf_url: e.target.value }))} placeholder="https://..." />
+                <Input
+                  value={formData.pdf_url}
+                  onChange={(e) =>
+                    setFormData((p) => ({ ...p, pdf_url: e.target.value }))
+                  }
+                  placeholder="https://..."
+                />
               </div>
             </CardContent>
           </Card>
@@ -390,22 +583,25 @@ const ProductForm = () => {
               <TabsTrigger value="specs">Specifications & Location</TabsTrigger>
             </TabsList>
 
-            {/* ✅ BASIC TAB (Sequence fixed) */}
+            {/* BASIC TAB */}
             <TabsContent value="basic" className="space-y-4 mt-4">
               <Card>
                 <CardContent className="p-6 space-y-5">
-
                   {/* 1) Product/Title Name */}
                   <div className="space-y-2">
                     <Label>Product/Title Name *</Label>
                     <div className="relative">
                       <Input
                         value={formData.name}
-                        onChange={e => setFormData(p => ({ ...p, name: e.target.value }))}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, name: e.target.value }))
+                        }
                         onBlur={handleNameBlur}
                         required
                       />
-                      {matchingCategory && <Loader2 className="absolute right-3 top-2.5 w-4 h-4 animate-spin text-blue-500" />}
+                      {matchingCategory && (
+                        <Loader2 className="absolute right-3 top-2.5 w-4 h-4 animate-spin text-blue-500" />
+                      )}
                     </div>
                   </div>
 
@@ -419,13 +615,15 @@ const ProductForm = () => {
                           size="sm"
                           variant="ghost"
                           type="button"
-                          onClick={() => setFormData(p => ({
-                            ...p,
-                            category_path: '',
-                            micro_category_id: null,
-                            sub_category_id: null,
-                            head_category_id: null
-                          }))}
+                          onClick={() =>
+                            setFormData((p) => ({
+                              ...p,
+                              category_path: '',
+                              micro_category_id: null,
+                              sub_category_id: null,
+                              head_category_id: null,
+                            }))
+                          }
                         >
                           Change
                         </Button>
@@ -435,13 +633,13 @@ const ProductForm = () => {
                         <CategoryTypeahead
                           onSelect={(item) => {
                             if (item) {
-                              setFormData(p => ({
+                              setFormData((p) => ({
                                 ...p,
                                 category_path: item.path,
                                 micro_category_id: item.id,
                                 sub_category_id: item.sub_id,
                                 head_category_id: item.head_id,
-                                category_other: ''
+                                category_other: '',
                               }));
                             }
                           }}
@@ -452,14 +650,19 @@ const ProductForm = () => {
                             placeholder="Type custom category if not found"
                             className="h-8 text-sm"
                             value={formData.category_other}
-                            onChange={e => setFormData(p => ({ ...p, category_other: e.target.value }))}
+                            onChange={(e) =>
+                              setFormData((p) => ({
+                                ...p,
+                                category_other: e.target.value,
+                              }))
+                            }
                           />
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* 3) Add Keywords (Extra Categories renamed) */}
+                  {/* 3) Add Keywords */}
                   <div className="space-y-2">
                     <Label>Add Keywords (Max 2)</Label>
                     <div className="flex gap-2">
@@ -472,9 +675,12 @@ const ProductForm = () => {
                         type="button"
                         onClick={() => {
                           if (extraCatInput && formData.extra_micro_categories.length < 2) {
-                            setFormData(p => ({
+                            setFormData((p) => ({
                               ...p,
-                              extra_micro_categories: [...p.extra_micro_categories, extraCatInput]
+                              extra_micro_categories: [
+                                ...p.extra_micro_categories,
+                                extraCatInput,
+                              ],
                             }));
                             setExtraCatInput(null);
                           }
@@ -486,47 +692,66 @@ const ProductForm = () => {
 
                     <div className="flex flex-wrap gap-2">
                       {formData.extra_micro_categories.map((c, i) => (
-                        <div key={i} className="bg-slate-100 px-3 py-1 rounded-full text-xs flex items-center gap-2">
+                        <div
+                          key={i}
+                          className="bg-slate-100 px-3 py-1 rounded-full text-xs flex items-center gap-2"
+                        >
                           {c.name}
-                          <X className="w-3 h-3 cursor-pointer" onClick={() => {
-                            const n = [...formData.extra_micro_categories];
-                            n.splice(i, 1);
-                            setFormData(p => ({ ...p, extra_micro_categories: n }));
-                          }} />
+                          <X
+                            className="w-3 h-3 cursor-pointer"
+                            onClick={() => {
+                              const n = [...formData.extra_micro_categories];
+                              n.splice(i, 1);
+                              setFormData((p) => ({ ...p, extra_micro_categories: n }));
+                            }}
+                          />
                         </div>
                       ))}
                     </div>
                   </div>
 
-                  {/* 4) Quantity  + 5) Unit dropdown (qty_unit removed) */}
+                  {/* 4) Quantity + 5) Unit */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>Quantity</Label>
                       <Input
                         type="number"
                         value={formData.min_order_qty}
-                        onChange={e => setFormData(p => ({ ...p, min_order_qty: e.target.value }))}
+                        onChange={(e) =>
+                          setFormData((p) => ({
+                            ...p,
+                            min_order_qty: e.target.value,
+                          }))
+                        }
                         placeholder="e.g. 10"
                       />
-                      <p className="text-[11px] text-slate-500">Minimum order quantity (optional)</p>
+                      <p className="text-[11px] text-slate-500">
+                        Minimum order quantity (optional)
+                      </p>
                     </div>
 
                     <div className="space-y-2">
                       <Label>Unit</Label>
                       <Select
                         value={formData.price_unit || ''}
-                        onValueChange={(v) => setFormData(p => ({ ...p, price_unit: v }))}
+                        onValueChange={(v) =>
+                          setFormData((p) => ({ ...p, price_unit: v }))
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select unit" />
                         </SelectTrigger>
                         <SelectContent className="max-h-60">
-                          {UNIT_OPTIONS.map(u => (
-                            <SelectItem key={u} value={u}>{u}</SelectItem>
+                          {UNIT_OPTIONS.map((u) => (
+                            <SelectItem key={u} value={u}>
+                              {u}
+                            </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                      <p className="text-[11px] text-slate-500">Choose unit like Piece, Kg, Liter etc.</p>
+                      <p className="text-[11px] text-slate-500">
+                        IndiaMART style: Piece / Nos / Kg / Litre / Meter etc.
+                      </p>
                     </div>
                   </div>
 
@@ -535,7 +760,7 @@ const ProductForm = () => {
                     <Label>Description</Label>
                     <SimpleRichText
                       value={formData.description}
-                      onChange={v => setFormData(p => ({ ...p, description: v }))}
+                      onChange={(v) => setFormData((p) => ({ ...p, description: v }))}
                       placeholder="Write product/service details in simple words..."
                     />
                   </div>
@@ -545,17 +770,17 @@ const ProductForm = () => {
                       Next: Specifications →
                     </Button>
                   </div>
-
                 </CardContent>
               </Card>
             </TabsContent>
 
             {/* SPECS TAB */}
             <TabsContent value="specs" className="space-y-4 mt-4">
-
-              {/* Optional Pricing (kept, not mandatory) */}
+              {/* Pricing (Optional) */}
               <Card>
-                <CardHeader><CardTitle className="text-base">Pricing (Optional)</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle className="text-base">Pricing (Optional)</CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -563,7 +788,9 @@ const ProductForm = () => {
                       <Input
                         type="number"
                         value={formData.price}
-                        onChange={e => setFormData(p => ({ ...p, price: e.target.value }))}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, price: e.target.value }))
+                        }
                         placeholder="e.g. 500"
                       />
                     </div>
@@ -577,32 +804,35 @@ const ProductForm = () => {
                       />
                     </div>
                   </div>
-                  <p className="text-xs text-slate-500">Agar exact price nahi hai, blank chhod sakte ho.</p>
+                  <p className="text-xs text-slate-500">
+                    Agar exact price nahi hai, blank chhod sakte ho.
+                  </p>
                 </CardContent>
               </Card>
 
-
               <Card>
-                <CardHeader><CardTitle className="text-base">Specifications</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle className="text-base">Specifications</CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-4">
                   {formData.specifications.map((spec, i) => (
                     <div key={i} className="flex gap-2">
                       <Input
                         placeholder="Attribute (e.g. Color)"
                         value={spec.key}
-                        onChange={e => {
+                        onChange={(e) => {
                           const n = [...formData.specifications];
                           n[i].key = e.target.value;
-                          setFormData(p => ({ ...p, specifications: n }));
+                          setFormData((p) => ({ ...p, specifications: n }));
                         }}
                       />
                       <Input
                         placeholder="Value (e.g. Red)"
                         value={spec.value}
-                        onChange={e => {
+                        onChange={(e) => {
                           const n = [...formData.specifications];
                           n[i].value = e.target.value;
-                          setFormData(p => ({ ...p, specifications: n }));
+                          setFormData((p) => ({ ...p, specifications: n }));
                         }}
                       />
                       {i > 0 && (
@@ -613,7 +843,7 @@ const ProductForm = () => {
                           onClick={() => {
                             const n = [...formData.specifications];
                             n.splice(i, 1);
-                            setFormData(p => ({ ...p, specifications: n }));
+                            setFormData((p) => ({ ...p, specifications: n }));
                           }}
                         >
                           <X className="w-4 h-4" />
@@ -626,58 +856,120 @@ const ProductForm = () => {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => setFormData(p => ({ ...p, specifications: [...p.specifications, { key: '', value: '' }] }))}
+                    onClick={() =>
+                      setFormData((p) => ({
+                        ...p,
+                        specifications: [...p.specifications, { key: '', value: '' }],
+                      }))
+                    }
                   >
                     <Plus className="w-4 h-4 mr-2" /> Add Row
                   </Button>
                 </CardContent>
               </Card>
 
-              {/* ✅ Renamed + simplified */}
+              {/* ✅ Location (Pan India + SINGLE Select All Cities) */}
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Where you can deliver / provide service</CardTitle>
+                  <CardTitle className="text-base">
+                    Where you can deliver / provide service
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* ✅ Pan India toggle */}
+                  <div className="flex items-center justify-between rounded-md border p-3 bg-slate-50">
+                    <div>
+                      <div className="text-sm font-medium">Pan India</div>
+                      <div className="text-xs text-slate-500">
+                        Enable karo to pure India me delivery/service available maana
+                        jayega.
+                      </div>
+                    </div>
+                    <Switch
+                      checked={!!formData.target_locations?.pan_india}
+                      onCheckedChange={togglePanIndia}
+                    />
+                  </div>
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* States */}
                     <div>
                       <Label>Select multiple states</Label>
-                      <Select onValueChange={(v) => {
-                        const s = states.find(x => x.id === v);
-                        addLocation('states', s);
-                        setSelectedStateId(v);
-                        loadCities(v);
-                      }}>
-                        <SelectTrigger><SelectValue placeholder="Add State" /></SelectTrigger>
+                      <Select
+                        disabled={!!formData.target_locations?.pan_india}
+                        onValueChange={(v) => {
+                          const s = states.find((x) => String(x.id) === String(v));
+                          addLocation('states', s);
+                          setSelectedStateId(v);
+                          loadCities(v);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue
+                            placeholder={
+                              formData.target_locations?.pan_india
+                                ? 'Pan India enabled'
+                                : 'Add State'
+                            }
+                          />
+                        </SelectTrigger>
                         <SelectContent className="max-h-60">
-                          {states.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                          {states.map((s) => (
+                            <SelectItem key={s.id} value={String(s.id)}>
+                              {s.name}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
 
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {(formData.target_locations.states || []).map(s => (
-                          <span key={s.id} className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs flex items-center gap-1">
+                        {(formData.target_locations.states || []).map((s) => (
+                          <span
+                            key={s.id}
+                            className="bg-blue-50 text-blue-700 px-2 py-1 rounded text-xs flex items-center gap-1"
+                          >
                             {s.name}
-                            <X className="w-3 h-3 cursor-pointer" onClick={() => removeLocation('states', s.id)} />
+                            <X
+                              className="w-3 h-3 cursor-pointer"
+                              onClick={() => removeLocation('states', s.id)}
+                            />
                           </span>
                         ))}
                       </div>
                     </div>
 
+                    {/* Cities */}
                     <div>
                       <Label>Select multiple cities of that state</Label>
                       <div className="space-y-2">
-                        <Select disabled={!selectedStateId} onValueChange={(v) => {
-                          if (v === 'OTHER') {
-                            setShowAddCityDialog(true);
-                          } else {
-                            const c = cities.find(x => x.id === v);
+                        <Select
+                          disabled={!!formData.target_locations?.pan_india || !selectedStateId}
+                          onValueChange={(v) => {
+                            if (v === 'OTHER') {
+                              setShowAddCityDialog(true);
+                              return;
+                            }
+                            const c = cities.find((x) => String(x.id) === String(v));
                             addLocation('cities', c);
-                          }
-                        }}>
-                          <SelectTrigger><SelectValue placeholder="Add City" /></SelectTrigger>
+                          }}
+                        >
+                          <SelectTrigger>
+                            <SelectValue
+                              placeholder={
+                                formData.target_locations?.pan_india
+                                  ? 'Pan India enabled'
+                                  : selectedStateId
+                                  ? 'Add City'
+                                  : 'Select state first'
+                              }
+                            />
+                          </SelectTrigger>
                           <SelectContent className="max-h-60">
-                            {cities.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            {cities.map((c) => (
+                              <SelectItem key={c.id} value={String(c.id)}>
+                                {c.name}
+                              </SelectItem>
+                            ))}
                             <SelectItem value="OTHER">+ Add Other City</SelectItem>
                           </SelectContent>
                         </Select>
@@ -690,7 +982,9 @@ const ProductForm = () => {
                                 placeholder="e.g. Bengaluru, Pune"
                                 value={customCityInput}
                                 onChange={(e) => setCustomCityInput(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddCustomCity()}
+                                onKeyDown={(e) =>
+                                  e.key === 'Enter' && handleAddCustomCity()
+                                }
                               />
                               <div className="flex gap-2">
                                 <Button
@@ -716,13 +1010,38 @@ const ProductForm = () => {
                             </div>
                           </div>
                         )}
+
+                        {/* ✅ ONLY ONE BUTTON NOW */}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={
+                            !!formData.target_locations?.pan_india ||
+                            bulkCityLoading ||
+                            !(formData.target_locations.states || []).length
+                          }
+                          onClick={selectAllCities}
+                          className="w-full"
+                        >
+                          {bulkCityLoading ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          ) : null}
+                          Select All Cities (Selected States)
+                        </Button>
                       </div>
 
                       <div className="flex flex-wrap gap-2 mt-2">
-                        {(formData.target_locations.cities || []).map(c => (
-                          <span key={c.id} className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs flex items-center gap-1">
+                        {(formData.target_locations.cities || []).map((c) => (
+                          <span
+                            key={c.id}
+                            className="bg-green-50 text-green-700 px-2 py-1 rounded text-xs flex items-center gap-1"
+                          >
                             {c.name}
-                            <X className="w-3 h-3 cursor-pointer" onClick={() => removeLocation('cities', c.id)} />
+                            <X
+                              className="w-3 h-3 cursor-pointer"
+                              onClick={() => removeLocation('cities', c.id)}
+                            />
                           </span>
                         ))}
                       </div>
@@ -732,7 +1051,13 @@ const ProductForm = () => {
               </Card>
 
               <div className="flex justify-between pt-4">
-                <Button type="button" variant="outline" onClick={() => setParams({ step: 'basic' })}>Back</Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setParams({ step: 'basic' })}
+                >
+                  Back
+                </Button>
                 <Button type="submit" className="bg-[#003D82]">
                   {loading ? 'Saving...' : 'Save Product'}
                 </Button>
@@ -744,22 +1069,51 @@ const ProductForm = () => {
         {/* RIGHT: Score */}
         <div className="space-y-4">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Product Score</CardTitle></CardHeader>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Product Score</CardTitle>
+            </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-emerald-600 mb-2">{score}%</div>
+              <div className="text-3xl font-bold text-emerald-600 mb-2">
+                {score}%
+              </div>
               <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden mb-4">
-                <div className="bg-emerald-500 h-full transition-all duration-500" style={{ width: `${score}%` }} />
+                <div
+                  className="bg-emerald-500 h-full transition-all duration-500"
+                  style={{ width: `${score}%` }}
+                />
               </div>
               <div className="text-xs text-slate-500 space-y-1">
-                <div className={formData.name.length > 5 ? "text-emerald-600" : ""}>• Name Length ({formData.name.length}/5 chars)</div>
-                <div className={formData.price ? "text-emerald-600" : ""}>• Price Set (optional)</div>
-                <div className={formData.images.length >= 3 ? "text-emerald-600" : ""}>• 3+ Images ({formData.images.length})</div>
-                <div className={formData.category_path ? "text-emerald-600" : ""}>• Category Selected</div>
+                <div className={formData.name.length > 5 ? 'text-emerald-600' : ''}>
+                  • Name Length ({formData.name.length}/5 chars)
+                </div>
+                <div className={formData.price ? 'text-emerald-600' : ''}>
+                  • Price Set (optional)
+                </div>
+                <div
+                  className={
+                    formData.images.length >= 3 ? 'text-emerald-600' : ''
+                  }
+                >
+                  • 3+ Images ({formData.images.length})
+                </div>
+                <div className={formData.category_path ? 'text-emerald-600' : ''}>
+                  • Category Selected
+                </div>
+                <div
+                  className={
+                    formData.target_locations?.pan_india ||
+                    (formData.target_locations?.states || []).length ||
+                    (formData.target_locations?.cities || []).length
+                      ? 'text-emerald-600'
+                      : ''
+                  }
+                >
+                  • Location Selected
+                </div>
               </div>
             </CardContent>
           </Card>
         </div>
-
       </div>
     </div>
   );

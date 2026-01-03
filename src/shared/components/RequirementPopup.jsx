@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,171 +7,405 @@ import { Textarea } from '@/components/ui/textarea';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2 } from 'lucide-react';
-import { useAuth } from '@/shared/hooks/useAuth';
+import { Loader2, X } from 'lucide-react';
 
-const RequirementPopup = () => {
-  const [open, setOpen] = useState(false);
+const safe = (v) => (v == null ? '' : String(v).trim());
+
+const PostRequirementModal = ({ isOpen, onOpenChange }) => {
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth();
-  const [dontShowAgain, setDontShowAgain] = useState(false);
+
+  // ✅ Category suggestion
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [catLoading, setCatLoading] = useState(false);
+  const [catSuggestions, setCatSuggestions] = useState([]);
+  const [showCatDropdown, setShowCatDropdown] = useState(false);
+  const catBoxRef = useRef(null);
 
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
+    buyer_name: '',
+    buyer_email: '',
+    buyer_phone: '',
     company_name: '',
+
+    // ✅ lead fields
     requirement_description: '',
     budget: '',
     timeline: '',
+    quantity: '',
+
+    // ✅ location selectors (optional)
     state_id: '',
-    city_id: ''
+    city_id: '',
+
+    // ✅ category resolved
+    category_path: '',   // "Head > Sub > Micro"
+    category_text: '',   // typed category fallback
+    category_slug: '',   // micro slug
   });
 
+  // ✅ close dropdown on outside click
   useEffect(() => {
-    // Logic to show popup
-    // 1. Check if user is logged in -> Don't show
-    if (user) return;
+    const onDocClick = (e) => {
+      if (!catBoxRef.current) return;
+      if (!catBoxRef.current.contains(e.target)) setShowCatDropdown(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
 
-    // 2. Check if already submitted or dismissed in session/local
-    const hasSeen = sessionStorage.getItem('req_popup_seen');
-    const dismissed = localStorage.getItem('req_popup_dismissed');
-
-    if (!hasSeen && !dismissed) {
-      const timer = setTimeout(() => {
-        setOpen(true);
-        sessionStorage.setItem('req_popup_seen', 'true');
-      }, 5000); // Show after 5 seconds on page
-      return () => clearTimeout(timer);
+  // ✅ debounced category suggestions (micro -> sub -> head)
+  useEffect(() => {
+    const q = safe(categoryQuery);
+    if (q.length < 2) {
+      setCatSuggestions([]);
+      setShowCatDropdown(false);
+      setCatLoading(false);
+      return;
     }
-  }, [user]);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    setCatLoading(true);
+    const t = setTimeout(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('micro_categories')
+          .select(`
+            id, name, slug,
+            sub:sub_categories (
+              id, name,
+              head:head_categories ( id, name )
+            )
+          `)
+          .ilike('name', `%${q}%`)
+          .limit(10);
+
+        if (error) throw error;
+
+        const list = (data || []).map((m) => {
+          const head = m?.sub?.head;
+          const sub = m?.sub;
+          return {
+            micro_id: m.id,
+            micro_name: m.name,
+            micro_slug: m.slug,
+            path: `${head?.name || '—'} > ${sub?.name || '—'} > ${m?.name || '—'}`,
+          };
+        });
+
+        setCatSuggestions(list);
+        setShowCatDropdown(true);
+      } catch (e) {
+        console.error('Category suggest error:', e);
+        setCatSuggestions([]);
+      } finally {
+        setCatLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(t);
+  }, [categoryQuery]);
+
+  const selectCategory = (it) => {
+    setFormData((p) => ({
+      ...p,
+      category_path: it.path,
+      category_text: it.micro_name,
+      category_slug: it.micro_slug || '',
+    }));
+    setCategoryQuery(it.micro_name);
+    setShowCatDropdown(false);
+  };
+
+  const clearCategory = () => {
+    setFormData((p) => ({
+      ...p,
+      category_path: '',
+      category_text: '',
+      category_slug: '',
+    }));
+    setCategoryQuery('');
+    setCatSuggestions([]);
+    setShowCatDropdown(false);
+  };
+
+  const resolveLocationText = async () => {
+    const stateId = safe(formData.state_id);
+    const cityId = safe(formData.city_id);
+
+    let stateName = '';
+    let cityName = '';
+
+    if (stateId) {
+      const { data } = await supabase.from('states').select('name').eq('id', stateId).maybeSingle();
+      stateName = data?.name || '';
+    }
+    if (cityId) {
+      const { data } = await supabase.from('cities').select('name').eq('id', cityId).maybeSingle();
+      cityName = data?.name || '';
+    }
+
+    if (cityName && stateName) return `${cityName}, ${stateName}`;
+    if (stateName) return stateName;
+    if (cityName) return cityName;
+    return '';
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
+
+    // basic validation
+    const cat = safe(formData.category_path || formData.category_text);
+    if (!cat) {
+      toast({ title: 'Category is required', variant: 'destructive' });
+      return;
+    }
+    if (!safe(formData.buyer_name) || !safe(formData.buyer_phone) || !safe(formData.buyer_email)) {
+      toast({ title: 'Name, Phone, Email required', variant: 'destructive' });
+      return;
+    }
+    if (!safe(formData.requirement_description)) {
+      toast({ title: 'Requirement description required', variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const { error } = await supabase.from('requirements').insert([
-        {
-          ...formData,
-          status: 'Pending'
-        }
-      ]);
+      const locationText = await resolveLocationText();
 
+      // ✅ EXACT mapping to your leads table columns
+      const payload = {
+        buyer_name: safe(formData.buyer_name),
+        buyer_phone: safe(formData.buyer_phone),
+        buyer_email: safe(formData.buyer_email),
+        company_name: safe(formData.company_name),
+
+        title: `Requirement: ${cat}`,               // ✅ required
+        product_name: safe(formData.category_text) || cat,
+        category: cat,
+        category_slug: safe(formData.category_slug) || null,
+        quantity: safe(formData.quantity) || null,
+        budget: safe(formData.budget) || null,
+        location: safe(locationText) || null,
+
+        product_interest: safe(formData.category_text) || cat,
+
+        // ✅ IMPORTANT: leads me description nahi, message hai
+        message: [
+          safe(formData.requirement_description),
+          safe(formData.timeline) ? `Timeline: ${safe(formData.timeline)}` : '',
+        ].filter(Boolean).join('\n'),
+
+        status: 'AVAILABLE',
+        price: 0,
+      };
+
+      const { error } = await supabase.from('leads').insert([payload]);
       if (error) throw error;
 
-      toast({ title: "Requirement Submitted!", description: "We will contact you shortly." });
-      setOpen(false);
-      
-      if (dontShowAgain) {
-         localStorage.setItem('req_popup_dismissed', 'true');
-      }
+      toast({ title: 'Requirement Submitted!', description: 'We will contact you shortly.' });
+      onOpenChange?.(false);
 
-    } catch (error) {
-      console.error("Submission failed", error);
-      toast({ title: "Error", description: "Failed to submit requirement.", variant: "destructive" });
+      // reset
+      setFormData({
+        buyer_name: '',
+        buyer_email: '',
+        buyer_phone: '',
+        company_name: '',
+        requirement_description: '',
+        budget: '',
+        timeline: '',
+        quantity: '',
+        state_id: '',
+        city_id: '',
+        category_path: '',
+        category_text: '',
+        category_slug: '',
+      });
+      setCategoryQuery('');
+      setCatSuggestions([]);
+      setShowCatDropdown(false);
+
+    } catch (err) {
+      console.error('Lead submit error:', err);
+      toast({
+        title: 'Error',
+        description: err?.message || 'Failed to submit requirement.',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClose = (isOpen) => {
-     setOpen(isOpen);
-     if (!isOpen && dontShowAgain) {
-        localStorage.setItem('req_popup_dismissed', 'true');
-     }
-  };
-
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+    <Dialog open={!!isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Tell Us What You Need</DialogTitle>
-          <DialogDescription>
-            Submit your requirement and get quotes from verified vendors.
-          </DialogDescription>
+          <DialogDescription>Submit your requirement and get quotes from verified vendors.</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
-           <div className="grid grid-cols-2 gap-4">
-              <div>
-                 <Label>Full Name *</Label>
-                 <Input name="name" required value={formData.name} onChange={handleChange} placeholder="Your Name" />
-              </div>
-              <div>
-                 <Label>Phone *</Label>
-                 <Input name="phone" required value={formData.phone} onChange={handleChange} placeholder="Mobile No." />
-              </div>
-           </div>
-
-           <div>
-              <Label>Email *</Label>
-              <Input name="email" type="email" required value={formData.email} onChange={handleChange} placeholder="you@company.com" />
-           </div>
-
-           <div>
-              <Label>Company (Optional)</Label>
-              <Input name="company_name" value={formData.company_name} onChange={handleChange} placeholder="Company Name" />
-           </div>
-
-           <div>
-              <Label>Requirement Description *</Label>
-              <Textarea 
-                name="requirement_description" 
-                required 
-                value={formData.requirement_description} 
-                onChange={handleChange} 
-                placeholder="Product name, specifications, quantity..." 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Full Name *</Label>
+              <Input
+                value={formData.buyer_name}
+                onChange={(e) => setFormData((p) => ({ ...p, buyer_name: e.target.value }))}
+                placeholder="Your Name"
+                required
               />
-           </div>
-
-           <div className="grid grid-cols-2 gap-4">
-              <div>
-                 <Label>Budget (Optional)</Label>
-                 <Input name="budget" value={formData.budget} onChange={handleChange} placeholder="₹ 10k - 50k" />
-              </div>
-              <div>
-                 <Label>Timeline (Optional)</Label>
-                 <Input name="timeline" value={formData.timeline} onChange={handleChange} placeholder="Immediate" />
-              </div>
-           </div>
-
-           <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                 <Label>State</Label>
-                 <StateDropdown value={formData.state_id} onChange={(id) => setFormData(prev => ({ ...prev, state_id: id, city_id: '' }))} />
-              </div>
-              <div className="space-y-1">
-                 <Label>City</Label>
-                 <CityDropdown stateId={formData.state_id} value={formData.city_id} onChange={(id) => setFormData(prev => ({ ...prev, city_id: id }))} />
-              </div>
-           </div>
-
-           <div className="flex items-center space-x-2 pt-2">
-              <input 
-                 type="checkbox" 
-                 id="dontShow" 
-                 className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                 checked={dontShowAgain}
-                 onChange={(e) => setDontShowAgain(e.target.checked)}
+            </div>
+            <div>
+              <Label>Phone *</Label>
+              <Input
+                value={formData.buyer_phone}
+                onChange={(e) => setFormData((p) => ({ ...p, buyer_phone: e.target.value }))}
+                placeholder="Mobile No."
+                required
               />
-              <label htmlFor="dontShow" className="text-sm text-gray-500 cursor-pointer">
-                 Don't show this again
-              </label>
-           </div>
+            </div>
+          </div>
 
-           <Button type="submit" className="w-full bg-[#003D82]" disabled={loading}>
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-              Submit Requirement
-           </Button>
+          <div>
+            <Label>Email *</Label>
+            <Input
+              type="email"
+              value={formData.buyer_email}
+              onChange={(e) => setFormData((p) => ({ ...p, buyer_email: e.target.value }))}
+              placeholder="you@company.com"
+              required
+            />
+          </div>
+
+          <div>
+            <Label>Company (Optional)</Label>
+            <Input
+              value={formData.company_name}
+              onChange={(e) => setFormData((p) => ({ ...p, company_name: e.target.value }))}
+              placeholder="Company Name"
+            />
+          </div>
+
+          {/* ✅ Category with Suggestions */}
+          <div ref={catBoxRef} className="relative">
+            <Label>Category *</Label>
+
+            {formData.category_path ? (
+              <div className="mt-1 flex items-center justify-between gap-2 rounded-md border bg-slate-50 px-3 py-2">
+                <div className="text-sm text-slate-700">{formData.category_path}</div>
+                <button type="button" className="p-1 rounded hover:bg-slate-200" onClick={clearCategory}>
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="mt-1 relative">
+                  <Input
+                    value={categoryQuery}
+                    onChange={(e) => {
+                      setCategoryQuery(e.target.value);
+                      setFormData((p) => ({ ...p, category_text: e.target.value }));
+                    }}
+                    onFocus={() => {
+                      if (catSuggestions.length) setShowCatDropdown(true);
+                    }}
+                    placeholder="Type category (e.g. LED Light, Steel Pipe...)"
+                    required
+                  />
+                  {catLoading && <Loader2 className="w-4 h-4 animate-spin absolute right-3 top-2.5 text-slate-500" />}
+                </div>
+
+                {showCatDropdown && catSuggestions.length > 0 && (
+                  <div className="absolute z-50 mt-2 w-full rounded-md border bg-white shadow-lg max-h-64 overflow-auto">
+                    {catSuggestions.map((it) => (
+                      <button
+                        type="button"
+                        key={it.micro_id}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-50"
+                        onClick={() => selectCategory(it)}
+                      >
+                        <div className="text-sm font-medium text-slate-900">{it.micro_name}</div>
+                        <div className="text-xs text-slate-500">{it.path}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {showCatDropdown && !catLoading && categoryQuery.trim().length >= 2 && catSuggestions.length === 0 && (
+                  <div className="absolute z-50 mt-2 w-full rounded-md border bg-white shadow-lg p-3 text-sm text-slate-600">
+                    No match found. You can still submit with typed category.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div>
+            <Label>Requirement Description *</Label>
+            <Textarea
+              value={formData.requirement_description}
+              onChange={(e) => setFormData((p) => ({ ...p, requirement_description: e.target.value }))}
+              placeholder="Product name, specifications, quantity..."
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label>Quantity (Optional)</Label>
+              <Input
+                value={formData.quantity}
+                onChange={(e) => setFormData((p) => ({ ...p, quantity: e.target.value }))}
+                placeholder="e.g. 10 pcs / 2 ton"
+              />
+            </div>
+            <div>
+              <Label>Budget (Optional)</Label>
+              <Input
+                value={formData.budget}
+                onChange={(e) => setFormData((p) => ({ ...p, budget: e.target.value }))}
+                placeholder="₹ 10k - 50k"
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label>Timeline (Optional)</Label>
+            <Input
+              value={formData.timeline}
+              onChange={(e) => setFormData((p) => ({ ...p, timeline: e.target.value }))}
+              placeholder="Immediate / 7 days / 1 month"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label>State</Label>
+              <StateDropdown
+                value={formData.state_id}
+                onChange={(id) => setFormData((p) => ({ ...p, state_id: id, city_id: '' }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>City</Label>
+              <CityDropdown
+                stateId={formData.state_id}
+                value={formData.city_id}
+                onChange={(id) => setFormData((p) => ({ ...p, city_id: id }))}
+              />
+            </div>
+          </div>
+
+          <Button type="submit" className="w-full bg-[#003D82]" disabled={loading}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Submit Requirement
+          </Button>
         </form>
       </DialogContent>
     </Dialog>
   );
 };
 
-export default RequirementPopup;
+export default PostRequirementModal;
