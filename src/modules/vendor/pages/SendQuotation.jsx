@@ -52,27 +52,32 @@ const SendQuotation = () => {
       const productsData = await vendorApi.products.list();
       setProducts(Array.isArray(productsData) ? productsData : []);
 
-      // Load buyers from purchased leads (actual contacts)
+      // Load all leads (both purchased and direct)
       try {
         const result = await vendorApi.leads.getMyLeads();
         const leadsData = Array.isArray(result) ? result : (result?.data || []);
         
-        // Extract unique buyers from purchased leads
-        const buyerMap = new Map();
-        leadsData.forEach(lead => {
-          if (lead.buyer_email && !buyerMap.has(lead.buyer_email)) {
-            buyerMap.set(lead.buyer_email, {
-              id: lead.id,
-              email: lead.buyer_email,
-              buyer_name: lead.buyer_name,
-              company_name: lead.company_name,
-              phone: lead.buyer_phone
-            });
-          }
+        // Create a list of all leads including direct leads without buyer email
+        const allLeads = leadsData.map((lead, index) => {
+          const email = lead.buyer_email || lead.email;
+          return {
+            id: lead.id,
+            email: email || `lead-${index}-${lead.id}`, // Use unique ID if no email
+            buyer_name: lead.buyer_name || lead.buyerName || lead.title || 'Unknown Buyer',
+            company_name: lead.company_name || lead.companyName || '',
+            phone: lead.buyer_phone || lead.phone || '',
+            source: lead.source || 'Lead',
+            title: lead.title,
+            description: lead.description,
+            location: lead.location,
+            hasEmail: !!email // Flag to track if email exists
+          };
         });
-        setBuyers(Array.from(buyerMap.values()));
+        
+        console.log('📊 Loaded leads:', allLeads);
+        setBuyers(allLeads);
       } catch (e) {
-        console.warn('Could not load buyers:', e);
+        console.warn('Could not load leads:', e);
         setBuyers([]);
       }
     } catch (error) {
@@ -182,15 +187,21 @@ const SendQuotation = () => {
                   {buyers.length > 0 ? (
                     buyers.map(b => (
                       <SelectItem key={b.id} value={b.id}>
-                        {b.buyer_name || 'Unknown'} - {b.email}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{b.buyer_name || b.title || 'Unknown'}</span>
+                          {b.hasEmail && <span className="text-xs text-slate-500">- {b.email}</span>}
+                          {!b.hasEmail && <span className="text-xs text-orange-500 font-medium">📧 (Email required)</span>}
+                          {b.source === 'Direct' && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">Direct</span>}
+                          {b.source === 'Purchased' && <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Purchased</span>}
+                        </div>
                       </SelectItem>
                     ))
                   ) : (
-                    <SelectItem disabled value="no-buyers">No previous leads found</SelectItem>
+                    <SelectItem disabled value="no-buyers">No leads found</SelectItem>
                   )}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-slate-500">Buyers from your purchased leads appear here</p>
+              <p className="text-xs text-slate-500">Select from purchased and direct leads. Direct leads without email will need you to enter email below.</p>
             </div>
 
             {/* Buyer Email - Manual Entry */}

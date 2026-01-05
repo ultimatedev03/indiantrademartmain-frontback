@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
 import SubCategoryPage from '@/modules/directory/pages/SubCategoryPage';
 import MicroCategoryPage from '@/modules/directory/pages/MicroCategoryPage';
+import DynamicCategory from '@/modules/directory/pages/DynamicCategory';
 import Directory from '@/modules/directory/pages/Directory';
 import ProductListing from '@/modules/directory/pages/ProductListing';
 import ProductDetail from '@/modules/directory/pages/ProductDetail';
@@ -27,12 +28,19 @@ export const DirectoryRoutes = () => {
         
         {/* Directory Structure */}
         <Route path="directory" element={<Directory />} />
-        <Route path="directory/:headSlug" element={<SubCategoryPage />} />
-        <Route path="directory/:headSlug/:subSlug" element={<MicroCategoryPage />} />
+        <Route path="directory/search" element={<ProductListing />} />
+        <Route path="directory/vendor" element={<VendorListing />} />
+        <Route path="directory/vendor/:vendorId" element={<VendorProfilePublic />} />
+        
+        {/* Most specific routes first */}
         <Route path="directory/:headSlug/:subSlug/:microSlug" element={<ProductListing />} />
+        <Route path="directory/:headSlug/:subSlug" element={<MicroCategoryPage />} />
+        <Route path="directory/:headSlug" element={<SubCategoryPage />} />
+        
+        {/* Dynamic Service Pages with Location - catch-all for /directory/:slug */}
+        <Route path="directory/:fullSlug" element={<DynamicCategory />} />
         
         {/* Search Alias */}
-        <Route path="directory/search" element={<ProductListing />} />
         <Route path="search" element={<Navigate to="/directory" replace />} />
 
         {/* Product Detail */}
@@ -64,9 +72,6 @@ export const DirectoryRoutes = () => {
         
         {/* Footer Buyers Tool Kit */}
         <Route path="products" element={<ProductsPage />} />
-        
-        <Route path="directory/vendor" element={<VendorListing />} />
-        <Route path="directory/vendor/:vendorId" element={<VendorProfilePublic />} />
       </Route>
     </Routes>
   );

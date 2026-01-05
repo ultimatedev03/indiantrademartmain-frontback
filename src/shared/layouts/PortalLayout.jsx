@@ -120,6 +120,9 @@ const PortalLayout = ({ role }) => {
       case 'ADMIN':
         return [
           { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
+          { icon: Package, label: 'Vendors', path: '/admin/vendors' },
+          { icon: Ticket, label: 'Support Tickets', path: '/admin/tickets' },
+          { icon: UserCheck, label: 'KYC Approvals', path: '/admin/kyc' },
           { icon: Users, label: 'Staff', path: '/admin/staff' },
           { icon: FileText, label: 'Audit Logs', path: '/admin/audit-logs' },
           { icon: Settings, label: 'Settings', path: '/admin/settings' },

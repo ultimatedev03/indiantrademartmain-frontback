@@ -271,6 +271,67 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
       }
     }
     
+    // Fetch meta tags and descriptions for extra_micro_categories from micro_category_meta table
+    if (product && product.extra_micro_categories) {
+      try {
+        let extraCategories = product.extra_micro_categories;
+        
+        // Parse JSON string if necessary
+        if (typeof extraCategories === 'string') {
+          extraCategories = JSON.parse(extraCategories);
+        }
+        
+        if (Array.isArray(extraCategories) && extraCategories.length > 0) {
+          const extraIds = extraCategories.map(c => c?.id).filter(Boolean);
+          
+          if (extraIds.length > 0) {
+            // Fetch meta tags and descriptions from micro_category_meta table
+            const { data: metaData } = await supabase
+              .from('micro_category_meta')
+              .select('micro_categories, meta_tags, description')
+              .in('micro_categories', extraIds);
+            
+            if (metaData && metaData.length > 0) {
+              // Merge meta tags and descriptions with extra_micro_categories
+              product.extra_micro_categories = extraCategories.map(cat => {
+                const withMeta = metaData.find(m => m.micro_categories === cat?.id);
+                return withMeta 
+                  ? { ...cat, meta_tags: withMeta.meta_tags, description: withMeta.description } 
+                  : cat;
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Error processing extra_micro_categories:', err);
+        // Keep original data if parsing fails
+      }
+    }
+    
+    // Also fetch meta tags and description for the primary micro_category
+    if (product && product.micro_category_id) {
+      try {
+        const { data: primaryMeta, error: metaError } = await supabase
+          .from('micro_category_meta')
+          .select('meta_tags, description')
+          .eq('micro_categories', product.micro_category_id)
+          .maybeSingle(); // Use maybeSingle to handle no rows gracefully
+        
+        if (primaryMeta) {
+          product.primary_meta_tags = primaryMeta.meta_tags;
+          product.primary_meta_description = primaryMeta.description;
+        } else {
+          console.info('No meta data found for micro_category_id:', product.micro_category_id);
+          // Use category name and product name as fallback
+          if (product.micro_categories?.name) {
+            product.primary_meta_tags = `${product.name} | ${product.micro_categories.name}`;
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching primary micro category meta:', err);
+      }
+    }
+    
     return product;
   },
   
@@ -283,5 +344,87 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
     if (!stateId) return [];
     const { data } = await supabase.from('cities').select('id, name, slug').eq('state_id', stateId).order('name');
     return data || [];
+  },
+
+  // Get micro-category by slug with metadata
+  getMicroCategoryBySlug: async (microSlug) => {
+    try {
+      const { data: micro, error } = await supabase
+        .from('micro_categories')
+        .select(`
+          id, name, slug,
+          sub_categories (
+            id, name, slug,
+            head_categories (id, name, slug)
+          )
+        `)
+        .eq('slug', microSlug)
+        .single();
+      
+      if (error || !micro) return null;
+      
+      // Fetch meta tags and description from micro_category_meta
+      const { data: metaData } = await supabase
+        .from('micro_category_meta')
+        .select('meta_tags, description')
+        .eq('micro_categories', micro.id)
+        .maybeSingle();
+      
+      return {
+        ...micro,
+        meta_tags: metaData?.meta_tags,
+        meta_description: metaData?.description
+      };
+    } catch (err) {
+      console.warn('Error fetching micro category by slug:', err);
+      return null;
+    }
+  },
+
+  // Get products by micro-category and location
+  getProductsByMicroAndLocation: async ({ microSlug, stateId, cityId, page = 1, limit = 20 }) => {
+    try {
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
+      // First get micro-category by slug
+      const { data: micro, error: microError } = await supabase
+        .from('micro_categories')
+        .select('id')
+        .eq('slug', microSlug)
+        .single();
+      
+      if (microError || !micro) return { data: [], count: 0 };
+
+      // Build query for products
+      let query = supabase
+        .from('products')
+        .select(`
+          *,
+          vendors!inner (
+            id, company_name, city, state, state_id, city_id,
+            seller_rating, kyc_status, verification_badge, trust_score
+          )
+        `, { count: 'exact' })
+        .eq('micro_category_id', micro.id)
+        .eq('status', 'ACTIVE');
+      
+      // Filter by state if provided
+      if (stateId) query = query.eq('vendors.state_id', stateId);
+      
+      // Filter by city if provided
+      if (cityId) query = query.eq('vendors.city_id', cityId);
+      
+      // Apply sorting and pagination
+      query = query.order('created_at', { ascending: false }).range(from, to);
+      
+      const { data, count, error } = await query;
+      if (error) throw error;
+      
+      return { data: data || [], count };
+    } catch (err) {
+      console.warn('Error fetching products by micro and location:', err);
+      return { data: [], count: 0 };
+    }
   }
 };

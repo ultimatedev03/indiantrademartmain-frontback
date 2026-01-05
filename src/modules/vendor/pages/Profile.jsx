@@ -1,6 +1,7 @@
 // ✅ File: src/modules/vendor/pages/Profile.jsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,7 +13,7 @@ import PreferencesSection from '@/modules/vendor/components/PreferencesSection';
 import SubscriptionBadge from '@/modules/vendor/components/SubscriptionBadge';
 import {
   Loader2, Save, Camera, Pencil, MapPin, Phone, Mail,
-  Plus, Trash2, Check, ExternalLink, FileText
+  Plus, Trash2, Check, ExternalLink, FileText, CheckCircle
 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
@@ -34,6 +35,7 @@ const Profile = () => {
   const [documents, setDocuments] = useState([]);
   const [subscription, setSubscription] = useState(null);
   const [subscriptionLoading, setSubscriptionLoading] = useState(true);
+  const [kycStatus, setKycStatus] = useState('PENDING');
 
   // ✅ keep tab in sync with URL ?tab=
   useEffect(() => {
@@ -76,9 +78,33 @@ const Profile = () => {
       
       setProfile(normalizedProfile);
       setDraft(normalizedProfile);
+      setKycStatus(normalizedProfile.kyc_status || 'PENDING');
       setBanks(bankList || []);
       setDocuments(docList || []);
       setSubscription(sub || null);
+      
+      // Subscribe to real-time KYC status updates
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        supabase
+          .channel('profile_kyc_updates')
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'vendors',
+              filter: `user_id=eq.${user.id}`
+            },
+            (payload) => {
+              console.log('🔄 KYC status updated:', payload);
+              if (payload.new?.kyc_status) {
+                setKycStatus(payload.new.kyc_status);
+              }
+            }
+          )
+          .subscribe();
+      }
     } catch (e) {
       console.error(e);
       toast({
@@ -260,6 +286,29 @@ const Profile = () => {
                 <p className="text-sm font-bold text-blue-900">
                   {profile.vendorId || profile.vendor_id || 'Generating...'}
                 </p>
+              </div>
+              
+              {/* KYC Status Badge */}
+              <div className="mt-4">
+                {['VERIFIED', 'APPROVED'].includes(kycStatus) ? (
+                  <div className="p-3 bg-green-50 rounded-lg border border-green-200 flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <div>
+                      <p className="text-xs text-green-600 font-semibold">KYC Approved</p>
+                      <p className="text-xs text-green-700 mt-0.5">Your account is verified</p>
+                    </div>
+                  </div>
+                ) : kycStatus === 'REJECTED' ? (
+                  <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                    <p className="text-xs text-red-600 font-semibold mb-1">KYC Rejected</p>
+                    <p className="text-xs text-red-700">Please resubmit your documents</p>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                    <p className="text-xs text-yellow-600 font-semibold mb-1">KYC Pending</p>
+                    <p className="text-xs text-yellow-700">Upload documents for verification</p>
+                  </div>
+                )}
               </div>
             </div>
           </Card>

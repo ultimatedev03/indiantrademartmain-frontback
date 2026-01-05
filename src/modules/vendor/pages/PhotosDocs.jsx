@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from '@/components/ui/use-toast';
-import { Upload, FileText, Trash2, Loader2, Eye, Download } from 'lucide-react';
+import { Upload, FileText, Trash2, Loader2, Eye, Download, CheckCircle, AlertCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 
 // Helper to get vendor ID
 const getVendorId = async () => {
@@ -77,10 +78,62 @@ const PhotosDocs = () => {
   const [documents, setDocuments] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [kycStatus, setKycStatus] = useState('PENDING');
 
   useEffect(() => {
-    loadDocs();
+    const setupSubscription = async () => {
+      loadDocs();
+      loadKycStatus();
+      
+      // Subscribe to real-time KYC status updates
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const subscription = supabase
+          .channel('kyc_status_updates')
+          .on(
+            'postgres_changes',
+            {
+              event: 'UPDATE',
+              schema: 'public',
+              table: 'vendors',
+              filter: `user_id=eq.${user.id}`
+            },
+            (payload) => {
+              console.log('🔄 KYC status updated:', payload);
+              if (payload.new?.kyc_status) {
+                setKycStatus(payload.new.kyc_status);
+              }
+            }
+          )
+          .subscribe();
+        
+        return () => {
+          subscription?.unsubscribe();
+        };
+      }
+    };
+    
+    setupSubscription();
   }, []);
+  
+  const loadKycStatus = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      
+      const { data: vendor, error } = await supabase
+        .from('vendors')
+        .select('kyc_status')
+        .eq('user_id', user.id)
+        .single();
+      
+      if (!error && vendor) {
+        setKycStatus(vendor.kyc_status);
+      }
+    } catch (error) {
+      console.error('Error loading KYC status:', error);
+    }
+  };
 
   const loadDocs = async () => {
     try {
@@ -131,6 +184,24 @@ const PhotosDocs = () => {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Documents & KYC</h1>
+      
+      {['VERIFIED', 'APPROVED'].includes(kycStatus) && (
+        <Alert className="bg-green-50 border-green-200">
+          <CheckCircle className="h-4 w-4 text-green-600" />
+          <AlertDescription className="text-green-800 ml-2">
+            <strong>KYC Approved!</strong> Your account has been verified. You now have full access to all features.
+          </AlertDescription>
+        </Alert>
+      )}
+      
+      {kycStatus === 'REJECTED' && (
+        <Alert className="bg-red-50 border-red-200">
+          <AlertCircle className="h-4 w-4 text-red-600" />
+          <AlertDescription className="text-red-800 ml-2">
+            <strong>KYC Rejected</strong> - Please review the feedback and resubmit your documents.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Tabs defaultValue="kyc" className="space-y-6">
         <TabsList>

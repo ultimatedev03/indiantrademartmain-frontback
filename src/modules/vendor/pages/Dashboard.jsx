@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import Card from '@/shared/components/Card';
 import { Button } from '@/components/ui/button';
 import {
@@ -141,7 +142,34 @@ const Dashboard = () => {
     };
 
     loadDashboard();
-  }, [paramVendorId, navigate]);
+
+    // Subscribe to real-time vendor updates for KYC status changes
+    const subscription = supabase
+      .channel('vendor_updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'vendors',
+          filter: `user_id=eq.${user?.id}`
+        },
+        (payload) => {
+          console.log('🔄 Vendor updated:', payload);
+          if (payload.new?.kyc_status) {
+            setStats(prev => ({
+              ...prev,
+              kycStatus: payload.new.kyc_status
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [paramVendorId, navigate, user?.id]);
 
   const ownerName = useMemo(() => {
     return (
@@ -233,7 +261,12 @@ const Dashboard = () => {
             return null;
           })()}
 
-          {stats.kycStatus !== 'VERIFIED' ? (
+          {['VERIFIED', 'APPROVED'].includes(stats.kycStatus) ? (
+            <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:shadow-sm transition-shadow">
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-sm font-medium">KYC Approved ✓</span>
+            </div>
+          ) : (
             <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow">
               <AlertTriangle className="h-5 w-5" />
               <div>
@@ -249,11 +282,6 @@ const Dashboard = () => {
                   Verify Now
                 </Button>
               </Link>
-            </div>
-          ) : (
-            <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:shadow-sm transition-shadow">
-              <CheckCircle className="w-4 h-4" />
-              <span className="text-sm font-medium">Account Verified</span>
             </div>
           )}
         </div>

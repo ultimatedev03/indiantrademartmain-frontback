@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
@@ -14,6 +13,9 @@ import KYCApproval from '@/modules/admin/pages/KYCApproval';
 import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
 import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
+
+// Reuse Employee Support pages for Admin
+import SupportTickets from '@/modules/employee/pages/support/Tickets';
 
 // HR Pages
 import HrDashboard from '@/modules/hr/pages/Dashboard';
@@ -33,7 +35,6 @@ import DataEntryVendorOnboarding from '@/modules/employee/pages/dataentry/Vendor
 import DataEntryRecords from '@/modules/employee/pages/dataentry/DataEntryRecords';
 import KycApprovals from '@/modules/employee/pages/support/KycApprovals';
 import SupportDashboard from '@/modules/employee/pages/support/Dashboard';
-import SupportTickets from '@/modules/employee/pages/support/Tickets';
 import SalesDashboard from '@/modules/employee/pages/sales/Dashboard';
 import SalesLeads from '@/modules/employee/pages/sales/Leads';
 import PricingRules from '@/modules/employee/pages/sales/PricingRules';
@@ -59,10 +60,12 @@ export const AdminRoutes = () => {
         <Route element={<PortalLayout role="ADMIN" />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
+            <Route path="vendors" element={<KYCApproval />} />
+            <Route path="tickets" element={<SupportTickets />} />
+            <Route path="kyc" element={<KYCApproval />} />
             <Route path="staff" element={<Staff />} />
             <Route path="audit-logs" element={<AuditLogs />} />
             <Route path="settings" element={<AdminSettings />} />
-            <Route path="kyc" element={<KYCApproval />} />
         </Route>
       </Route>
 

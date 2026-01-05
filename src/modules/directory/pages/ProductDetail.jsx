@@ -152,17 +152,71 @@ const ProductDetail = () => {
   const { vendors: vendor, micro_categories: cat } = data;
   const images = data.images || [];
 
+  // Build SEO meta tags
+  let seoMetaTags = null;
+  try {
+    let extraCategories = [];
+    if (data.extra_micro_categories) {
+      if (typeof data.extra_micro_categories === 'string') {
+        extraCategories = JSON.parse(data.extra_micro_categories);
+      } else if (Array.isArray(data.extra_micro_categories)) {
+        extraCategories = data.extra_micro_categories;
+      }
+    }
+    
+    const extraCatNames = extraCategories?.map(c => c?.name).filter(Boolean).join(', ') || '';
+    const extraMetaTags = extraCategories?.map(c => c?.meta_tags).filter(Boolean) || [];
+    const extraDescriptions = extraCategories?.map(c => c?.description).filter(Boolean) || [];
+    const categoryPath = [cat?.name, cat?.sub_categories?.name].filter(Boolean).join(' - ');
+    
+    // Priority: primary micro category meta_tags > custom meta_tags > generated title
+    const seoTitle = data.primary_meta_tags || `${data.name} | ${categoryPath}${extraCatNames ? ' | ' + extraCatNames : ''} | IndianTradeMart`;
+    
+    // Priority: primary micro category description > extra category descriptions > product description
+    let seoDescription = data.primary_meta_description;
+    if (!seoDescription && extraDescriptions.length > 0) {
+      seoDescription = extraDescriptions[0]?.replace(/<[^>]*>/g, '').substring(0, 160);
+    }
+    if (!seoDescription) {
+      seoDescription = data.description?.replace(/<[^>]*>/g, '').substring(0, 160) || data.name;
+    }
+    
+    // Build comprehensive keywords: primary meta + extra meta tags + category names
+    const allKeywords = [
+      data.primary_meta_tags,
+      data.name,
+      cat?.name,
+      cat?.sub_categories?.name,
+      vendor?.company_name,
+      ...extraCatNames.split(',').map(n => n.trim()),
+      ...extraMetaTags
+    ].filter(Boolean).join(', ');
+    
+    seoMetaTags = (
+      <Helmet>
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDescription} />
+        <meta name="keywords" content={allKeywords} />
+        <meta property="og:title" content={seoTitle} />
+        <meta property="og:description" content={seoDescription} />
+        {images[0] && <meta property="og:image" content={images[0]} />}
+        <meta property="og:url" content={shareUtils.getCurrentUrl()} />
+      </Helmet>
+    );
+  } catch (error) {
+    console.warn('Error building SEO tags:', error);
+    seoMetaTags = (
+      <Helmet>
+        <title>{`${data.name} | IndianTradeMart`}</title>
+        <meta name="description" content={data.description?.replace(/<[^>]*>/g, '').substring(0, 160) || data.name} />
+        <meta property="og:url" content={shareUtils.getCurrentUrl()} />
+      </Helmet>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
-       <Helmet>
-         <title>{data.meta_tags || `${data.name} | ${cat?.name || 'Product'} | IndianTradeMart`}</title>
-         <meta name="description" content={data.meta_description || data.description?.replace(/<[^>]*>/g, '').substring(0, 160) || data.name} />
-         <meta name="keywords" content={`${data.name}, ${cat?.name || ''}, ${cat?.sub_categories?.name || ''}, ${vendor?.company_name || ''}`} />
-         <meta property="og:title" content={data.name} />
-         <meta property="og:description" content={data.meta_description || data.description?.replace(/<[^>]*>/g, '').substring(0, 160) || data.name} />
-         {images[0] && <meta property="og:image" content={images[0]} />}
-         <meta property="og:url" content={shareUtils.getCurrentUrl()} />
-       </Helmet>
+       {seoMetaTags}
        {isDraft && (
          <div className="bg-yellow-50 border-b border-yellow-200 py-3 px-4 mb-0 shadow-sm">
            <div className="container mx-auto text-sm text-yellow-800 flex items-center gap-2">

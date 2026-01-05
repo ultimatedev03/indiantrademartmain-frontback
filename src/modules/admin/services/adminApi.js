@@ -169,5 +169,114 @@ export const adminApi = {
       const { error } = await supabase.from('cities').delete().eq('id', id);
       if (error) throw error;
     }
+  },
+
+  // Support Tickets API
+  tickets: {
+    list: async (filters = {}) => {
+      let query = supabase
+        .from('support_tickets')
+        .select('*, vendors(company_name), buyers(full_name)')
+        .order('created_at', { ascending: false });
+      
+      if (filters.status && filters.status !== 'ALL') {
+        query = query.eq('status', filters.status);
+      }
+      if (filters.priority && filters.priority !== 'ALL') {
+        query = query.eq('priority', filters.priority);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    
+    getById: async (ticketId) => {
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .select('*, vendors(company_name), buyers(full_name)')
+        .eq('id', ticketId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    
+    updateStatus: async (ticketId, status) => {
+      const updates = { status, updated_at: new Date().toISOString() };
+      if (status === 'CLOSED') {
+        updates.resolved_at = new Date().toISOString();
+      }
+      const { error } = await supabase
+        .from('support_tickets')
+        .update(updates)
+        .eq('id', ticketId);
+      if (error) throw error;
+    },
+    
+    getMessages: async (ticketId) => {
+      const { data, error } = await supabase
+        .from('ticket_messages')
+        .select('*')
+        .eq('ticket_id', ticketId)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data || [];
+    },
+    
+    sendMessage: async (ticketId, message, senderType = 'SUPPORT') => {
+      const { data, error } = await supabase
+        .from('ticket_messages')
+        .insert([{
+          ticket_id: ticketId,
+          message: message,
+          sender_type: senderType,
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+      if (error) throw error;
+      return data;
+    }
+  },
+
+  // Vendors API
+  vendors: {
+    list: async (filters = {}) => {
+      let query = supabase.from('vendors').select('*, products(count)').order('created_at', { ascending: false });
+      
+      if (filters.kycStatus && filters.kycStatus !== 'ALL') {
+        query = query.eq('kyc_status', filters.kycStatus);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    },
+    
+    getById: async (vendorId) => {
+      const { data, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .eq('id', vendorId)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    
+    approveKyc: async (vendorId) => {
+      const { error } = await supabase
+        .from('vendors')
+        .update({ kyc_status: 'APPROVED', is_verified: true, verified_at: new Date().toISOString() })
+        .eq('id', vendorId);
+      if (error) throw error;
+    },
+    
+    rejectKyc: async (vendorId, reason) => {
+      const { error } = await supabase
+        .from('vendors')
+        .update({ kyc_status: 'REJECTED', is_verified: false, rejection_reason: reason })
+        .eq('id', vendorId);
+      if (error) throw error;
+    }
   }
 };

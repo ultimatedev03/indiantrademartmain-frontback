@@ -383,24 +383,72 @@ export const dataEntryApi = {
     }
   },
   approveVendorKyc: async (vendorId) => {
-      const { error } = await supabase.from('vendors').update({ kyc_status: 'VERIFIED', verification_badge: true, verified_at: new Date().toISOString() }).eq('id', vendorId);
-      if (error) throw error;
+      try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({})
+          });
+          if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+          const data = await response.json();
+          console.log('✅ KYC approved via API:', data);
+          return data;
+      } catch (error) {
+          console.error('❌ Error approving KYC:', error);
+          throw error;
+      }
   },
   approveVendor: async (vendorId) => {
-      const { error } = await supabase.from('vendors').update({ kyc_status: 'VERIFIED', verification_badge: true, verified_at: new Date().toISOString() }).eq('id', vendorId);
-      if (error) throw error;
+      try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({})
+          });
+          if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+          const data = await response.json();
+          console.log('✅ Vendor approved via API:', data);
+          return data;
+      } catch (error) {
+          console.error('❌ Error approving vendor:', error);
+          throw error;
+      }
   },
   rejectVendorKyc: async (vendorId, remarks) => {
-      const emp = await getEmployeeContext();
-      const { error } = await supabase.from('vendors').update({ kyc_status: 'REJECTED' }).eq('id', vendorId);
-      if (error) throw error;
-      await supabase.from('kyc_remarks').insert([{ vendor_id: vendorId, remarks, created_by: emp.user_id }]);
+      try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ remarks })
+          });
+          if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+          const data = await response.json();
+          console.log('✅ KYC rejected via API:', data);
+          return data;
+      } catch (error) {
+          console.error('❌ Error rejecting KYC:', error);
+          throw error;
+      }
   },
   rejectVendor: async (vendorId, remarks) => {
-      const emp = await getEmployeeContext();
-      const { error } = await supabase.from('vendors').update({ kyc_status: 'REJECTED' }).eq('id', vendorId);
-      if (error) throw error;
-      await supabase.from('kyc_remarks').insert([{ vendor_id: vendorId, remarks, created_by: emp.user_id }]);
+      try {
+          const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ remarks })
+          });
+          if (!response.ok) throw new Error(`API error: ${response.statusText}`);
+          const data = await response.json();
+          console.log('✅ Vendor rejected via API:', data);
+          return data;
+      } catch (error) {
+          console.error('❌ Error rejecting vendor:', error);
+          throw error;
+      }
   },
 
   // --- KYC DOCUMENTS GROUPING ---
