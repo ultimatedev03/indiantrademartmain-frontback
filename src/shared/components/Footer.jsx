@@ -1,4 +1,3 @@
-
 import { Facebook, Instagram, Linkedin, Mail, Twitter } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -12,8 +11,18 @@ const Footer = () => {
   return (
     <>
       {/* Modals Outside Footer */}
-      {showPostRequirement && <PostRequirementModal isOpen={showPostRequirement} onClose={() => setShowPostRequirement(false)} />}
-      {showSupport && <SupportModal isOpen={showSupport} onClose={() => setShowSupport(false)} />}
+      {showPostRequirement && (
+        <PostRequirementModal
+          isOpen={showPostRequirement}
+          onClose={() => setShowPostRequirement(false)}
+        />
+      )}
+      {showSupport && (
+        <SupportModal
+          isOpen={showSupport}
+          onClose={() => setShowSupport(false)}
+        />
+      )}
 
       <footer className="bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
         <div className="container mx-auto px-4">
@@ -28,17 +37,45 @@ const Footer = () => {
               <p className="text-sm text-gray-300 leading-relaxed">
                 Connecting businesses with trusted technology providers across India.
               </p>
+
               <div className="flex gap-4 pt-2">
-                <a href="https://www.facebook.com/IndianTradeMart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-600 hover:text-white transition-all duration-300">
+                <a
+                  href="https://www.facebook.com/IndianTradeMart/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Facebook"
+                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-600 hover:text-white transition-all duration-300"
+                >
                   <Facebook className="w-5 h-5" />
                 </a>
-                <a href="https://x.com/IndianTradeMart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-300">
+
+                <a
+                  href="https://x.com/IndianTradeMart/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Twitter / X"
+                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-300"
+                >
                   <Twitter className="w-5 h-5" />
                 </a>
-                <a href="	https://www.linkedin.com/company/indian-trade-mart-itm/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-700 hover:text-white transition-all duration-300">
+
+                <a
+                  href="https://www.linkedin.com/company/indian-trade-mart-itm/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="LinkedIn"
+                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-700 hover:text-white transition-all duration-300"
+                >
                   <Linkedin className="w-5 h-5" />
                 </a>
-                <a href="https://www.instagram.com/indiantrademart/" className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300">
+
+                <a
+                  href="https://www.instagram.com/indiantrademart/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Instagram"
+                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300"
+                >
                   <Instagram className="w-5 h-5" />
                 </a>
               </div>
@@ -84,10 +121,13 @@ const Footer = () => {
               <h4 className="text-lg font-bold mb-6 text-white">Buyers Tool Kit</h4>
               <ul className="space-y-3 text-sm">
                 <li>
-                  <button onClick={() => {
-                    console.log('Post Requirement clicked');
-                    setShowPostRequirement(true);
-                  }} className="text-gray-300 hover:text-blue-400 transition-colors text-left">
+                  <button
+                    onClick={() => {
+                      console.log('Post Requirement clicked');
+                      setShowPostRequirement(true);
+                    }}
+                    className="text-gray-300 hover:text-blue-400 transition-colors text-left"
+                  >
                     Post Requirement
                   </button>
                 </li>
@@ -104,25 +144,36 @@ const Footer = () => {
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-xs text-gray-400 font-semibold">Customer Care</p>
-                  <a href="mailto:customercare@indiantrademart.com" className="text-gray-300 hover:text-blue-400 transition-colors text-sm">
+                  <a
+                    href="mailto:customercare@indiantrademart.com"
+                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                  >
                     customercare@indiantrademart.com
                   </a>
                 </div>
               </div>
+
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-xs text-gray-400 font-semibold">Support</p>
-                  <a href="mailto:support@indiantrademart.com" className="text-gray-300 hover:text-blue-400 transition-colors text-sm">
+                  <a
+                    href="mailto:support@indiantrademart.com"
+                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                  >
                     support@indiantrademart.com
                   </a>
                 </div>
               </div>
+
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-xs text-gray-400 font-semibold">Business</p>
-                  <a href="mailto:business@indiantrademart.com" className="text-gray-300 hover:text-blue-400 transition-colors text-sm">
+                  <a
+                    href="mailto:business@indiantrademart.com"
+                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                  >
                     business@indiantrademart.com
                   </a>
                 </div>
