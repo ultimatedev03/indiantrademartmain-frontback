@@ -39,13 +39,13 @@ const SearchResults = () => {
     let state = '';
     let city = '';
 
-    // ✅ NEW: /directory/search/:service/:state?/:city?
+    // ✅ /directory/search/:service/:state?/:city?
     if (params.service) {
       service = params.service;
       state = params.state || '';
       city = params.city || '';
     }
-    // ✅ OLD: /directory/:slug (seo format)
+    // ✅ /directory/:slug (seo format)
     else if (params.slug) {
       const parsed = urlParser.parseSeoSlug(params.slug);
       service = parsed?.serviceSlug || '';
@@ -60,7 +60,7 @@ const SearchResults = () => {
     });
   }, [params, location.pathname]);
 
-  // 2) Fetch Products directly (FIX ✅)
+  // 2) Fetch Products
   useEffect(() => {
     const fetchResults = async () => {
       if (!parsedParams.serviceSlug) {
@@ -71,11 +71,10 @@ const SearchResults = () => {
 
       setLoading(true);
       try {
-        // service slug -> readable search text
         const serviceText = (parsedParams.serviceSlug || '').replace(/-/g, ' ').trim();
         const extraQ = (searchParams.get('q') || '').trim();
 
-        // Resolve state/city IDs from slugs (needed for vendors.state_id / city_id filter)
+        // Resolve state/city IDs from slugs
         const { state, city } = await locationService.getLocationBySlug(
           parsedParams.stateSlug,
           parsedParams.citySlug
@@ -84,7 +83,7 @@ const SearchResults = () => {
         const stateId = state?.id || null;
         const cityId = city?.id || null;
 
-        // ✅ Search in products table and INNER JOIN vendors (so we can filter by vendor location)
+        // products + vendors join
         let query = supabase
           .from('products')
           .select(
@@ -99,43 +98,37 @@ const SearchResults = () => {
           )
           .eq('status', 'ACTIVE');
 
-        // ✅ location filters
+        // location filters
         if (stateId) query = query.eq('vendors.state_id', stateId);
         if (cityId) query = query.eq('vendors.city_id', cityId);
 
-        // ✅ MAIN SEARCH: match product name + category fields + description
-        const q1 = serviceText;
-        const q2 = extraQ;
-
+        // search (service + optional q)
         const orParts = [];
-        if (q1) {
+        if (serviceText) {
           orParts.push(
-            `name.ilike.%${q1}%`,
-            `category.ilike.%${q1}%`,
-            `category_path.ilike.%${q1}%`,
-            `category_other.ilike.%${q1}%`,
-            `description.ilike.%${q1}%`
+            `name.ilike.%${serviceText}%`,
+            `category.ilike.%${serviceText}%`,
+            `category_path.ilike.%${serviceText}%`,
+            `category_other.ilike.%${serviceText}%`,
+            `description.ilike.%${serviceText}%`
           );
         }
-        if (q2) {
+        if (extraQ) {
           orParts.push(
-            `name.ilike.%${q2}%`,
-            `category.ilike.%${q2}%`,
-            `category_path.ilike.%${q2}%`,
-            `category_other.ilike.%${q2}%`,
-            `description.ilike.%${q2}%`
+            `name.ilike.%${extraQ}%`,
+            `category.ilike.%${extraQ}%`,
+            `category_path.ilike.%${extraQ}%`,
+            `category_other.ilike.%${extraQ}%`,
+            `description.ilike.%${extraQ}%`
           );
         }
-
         if (orParts.length) query = query.or(orParts.join(','));
 
-        // ✅ order & limit
         query = query.order('created_at', { ascending: false }).limit(120);
 
         const { data, error } = await query;
         if (error) throw error;
 
-        // Convert response to the format your UI expects
         const mapped = (data || []).map((p) => ({
           ...p,
           vendorName: p.vendors?.company_name,
@@ -158,14 +151,14 @@ const SearchResults = () => {
     fetchResults();
   }, [parsedParams.serviceSlug, parsedParams.stateSlug, parsedParams.citySlug, searchParams]);
 
-  // Client-side filtering
+  // Client-side filtering (basic)
   const filteredResults = results.filter((item) => {
     if (filters.verified && !item.vendorVerified) return false;
     if (filters.inStock && !item.inStock) return false;
     return true;
   });
 
-  // SEO text
+  // SEO text helpers
   const formatName = (s) => (s ? s.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) : '');
   const serviceName = formatName(parsedParams.serviceSlug);
   const cityName = formatName(parsedParams.citySlug);
@@ -198,55 +191,64 @@ const SearchResults = () => {
         <link rel="canonical" href={canonicalUrl} />
       </Helmet>
 
-      <div className="min-h-screen bg-neutral-50 pb-20">
-        {/* Sticky Header */}
-        <div className="bg-white border-b sticky top-16 z-10 shadow-sm pt-4 pb-4">
-          <div className="container mx-auto px-4">
-            <PillBreadcrumbs className="mb-4" overrideParams={parsedParams} />
+      <div className="min-h-screen bg-neutral-50 pb-16">
+        {/* ✅ Compact Sticky Header (Nearby always visible) */}
+        <div className="bg-white border-b sticky top-16 z-10 shadow-sm">
+          <div className="container mx-auto px-4 py-2">
+            {/* Breadcrumbs */}
+            <PillBreadcrumbs className="mb-2" overrideParams={parsedParams} />
 
-            <div className="mb-4 max-w-4xl">
+            {/* Search Bar (keep suggestions) */}
+            <div className="max-w-4xl mb-2">
               <DirectorySearchBar
                 enableSuggestions
-                className="shadow-xl"
+                className="shadow-sm"
                 initialService={parsedParams.serviceSlug}
                 initialState={parsedParams.stateSlug}
                 initialCity={parsedParams.citySlug}
               />
             </div>
 
-            <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
-              <div>
-                <motion.h1
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="text-xl md:text-2xl font-bold text-gray-900"
-                >
-                  {pageTitle}
-                </motion.h1>
-                <p className="text-sm text-gray-500 mt-1">{filteredResults.length} products found</p>
+            {/* Title + count in one compact row */}
+            <div className="flex items-start md:items-center justify-between gap-3">
+              <motion.h1
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-base md:text-lg font-bold text-gray-900 leading-snug line-clamp-2"
+              >
+                {pageTitle}
+              </motion.h1>
+
+              <div className="flex-shrink-0 text-xs md:text-sm text-gray-500 pt-1 md:pt-0">
+                {filteredResults.length} found
               </div>
             </div>
 
+            {/* ✅ Nearby always visible but compact (horizontal scroll to save height) */}
             {parsedParams.stateSlug && (
-              <NearbyLocationNav
-                serviceSlug={parsedParams.serviceSlug}
-                stateSlug={parsedParams.stateSlug}
-                currentCitySlug={parsedParams.citySlug}
-              />
+              <div className="mt-0 overflow-x-auto scrollbar-hide">
+                <div className="min-w-max">
+                  <NearbyLocationNav
+                    serviceSlug={parsedParams.serviceSlug}
+                    stateSlug={parsedParams.stateSlug}
+                    currentCitySlug={parsedParams.citySlug}
+                  />
+                </div>
+              </div>
             )}
           </div>
         </div>
 
-        {/* Main Content */}
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex flex-col lg:flex-row gap-8">
+        {/* Main content (reduced top padding) */}
+        <div className="container mx-auto px-4 py-5">
+          <div className="flex flex-col lg:flex-row gap-6">
             <aside className="w-full lg:w-64 flex-shrink-0 hidden lg:block">
               <SearchFilters filters={filters} setFilters={setFilters} />
             </aside>
 
             <main className="flex-1">
               {loading ? (
-                <div className="flex justify-center py-20">
+                <div className="flex justify-center py-16">
                   <Loader2 className="w-8 h-8 animate-spin text-[#003D82]" />
                 </div>
               ) : (
