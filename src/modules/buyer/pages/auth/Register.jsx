@@ -8,6 +8,7 @@ import Logo from '@/shared/components/Logo';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
+import { otpService } from '@/services/otpService';
 
 const OTP_TIMER_SECONDS = 600; // 10 minutes
 
@@ -126,25 +127,8 @@ const Register = () => {
 
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: formData.email,
-        password: formData.password,
-        options: {
-          data: {
-            full_name: formData.full_name,
-            role: 'BUYER'
-          }
-        }
-      });
-
-      if (error) {
-        if (error.message.includes('already registered')) {
-          toast({ title: "Account Exists", description: "This email is already registered.", variant: "destructive" });
-        } else {
-          throw error;
-        }
-        return;
-      }
+      // Request OTP using custom OTP service
+      await otpService.requestOtp(formData.email);
 
       setStep(2);
       setTimer(OTP_TIMER_SECONDS);
@@ -159,9 +143,9 @@ const Register = () => {
     }
   };
 
-  // ✅ OTP input handler: digits only + allow up to 8
+  // OTP input handler: digits only + 6 digits
   const handleOtpChange = (e) => {
-    const cleaned = e.target.value.replace(/\D/g, '').slice(0, 8); // ✅ allow 8
+    const cleaned = e.target.value.replace(/\D/g, '').slice(0, 6);
     setOtp(cleaned);
   };
 
@@ -170,11 +154,11 @@ const Register = () => {
 
     const cleaned = (otp || '').replace(/\D/g, '');
 
-    // ✅ accept 6–8 (or 4–8). Here we use 6–8 since you want OTP style
-    if (cleaned.length < 6 || cleaned.length > 8) {
+    // Verify 6-digit OTP
+    if (cleaned.length !== 6) {
       toast({
         title: "Invalid OTP",
-        description: "Email me jo code aaya hai wahi daalo (6–8 digits).",
+        description: "Please enter a valid 6-digit OTP code.",
         variant: "destructive"
       });
       return;
@@ -182,23 +166,22 @@ const Register = () => {
 
     setLoading(true);
     try {
-      // 1) Verify OTP (signup flow)
-      const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        email: formData.email,
-        token: cleaned,
-        type: 'signup'
+      // 1) Verify OTP using custom service
+      await otpService.verifyOtp(formData.email, cleaned);
+
+      // 2) Create auth user
+      const authData = await otpService.createAuthUser(formData.email, formData.password, {
+        full_name: formData.full_name,
+        role: 'BUYER'
       });
 
-      if (verifyError) throw verifyError;
-
-      const sessionUser = data?.session?.user || data?.user;
-      if (!sessionUser?.id) {
-        throw new Error("Verification failed. No user session created.");
+      if (!authData?.user?.id) {
+        throw new Error("Failed to create auth user");
       }
 
-      const userId = sessionUser.id;
+      const userId = authData.user.id;
 
-      // 2) Create Buyer Profile
+      // 3) Create Buyer Profile
       const { error: buyerError } = await supabase
         .from('buyers')
         .insert([{
@@ -209,17 +192,28 @@ const Register = () => {
           company_name: formData.company_name,
           state_id: formData.state_id,
           city_id: formData.city_id,
-          state: formData.state_name, // Legacy fallback
-          city: formData.city_name,   // Legacy fallback
+          state: formData.state_name,
+          city: formData.city_name,
         }]);
 
       if (buyerError) throw buyerError;
 
+      // 4) Set session if available
+      if (authData.session) {
+        await supabase.auth.setSession(authData.session);
+      }
+
       setStep(3);
+      
+      toast({
+        title: "Registration Successful!",
+        description: "Your account is verified. Redirecting to dashboard...",
+        className: 'bg-green-50 border-green-200',
+      });
 
       setTimeout(() => {
-        navigate('/buyer/login');
-      }, 3000);
+        navigate('/buyer/dashboard');
+      }, 2000);
 
     } catch (error) {
       console.error("Verification error:", error);
@@ -232,14 +226,10 @@ const Register = () => {
   const handleResendOtp = async () => {
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email: formData.email,
-      });
-      if (error) throw error;
+      await otpService.resendOtp(formData.email);
       setTimer(OTP_TIMER_SECONDS);
       setOtp('');
-      toast({ title: "OTP Resent", description: "Check your email inbox." });
+      toast({ title: "OTP Resent", description: "A new 6-digit code has been sent to your email." });
     } catch (error) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } finally {
@@ -346,10 +336,10 @@ const Register = () => {
                   value={otp}
                   onChange={handleOtpChange}
                   className="text-center text-2xl tracking-widest w-56 h-12 font-mono"
-                  maxLength={8}               // ✅ 8 digits allowed
+                  maxLength={6}
                   inputMode="numeric"
                   autoComplete="one-time-code"
-                  placeholder="--------"
+                  placeholder="000000"
                 />
 
                 <div className="text-sm text-gray-500 flex flex-col items-center gap-1">
@@ -370,7 +360,7 @@ const Register = () => {
                 <Button
                   type="submit"
                   className="w-full bg-[#00A699] hover:bg-[#008c81]"
-                  disabled={loading || otp.replace(/\D/g, '').length < 6} // ✅ not fixed to 6 only
+                  disabled={loading || otp.replace(/\D/g, '').length !== 6}
                 >
                   {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : "Verify & Create Account"}
                 </Button>

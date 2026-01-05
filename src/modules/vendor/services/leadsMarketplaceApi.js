@@ -2,6 +2,90 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from './vendorApi';
 
+// ============ HELPER FUNCTIONS ============
+
+// Calculate days remaining until plan expiry
+const calculateDaysLeft = (endDate) => {
+  if (!endDate) return 0;
+  const end = new Date(endDate);
+  const now = new Date();
+  const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+  return Math.max(0, daysLeft);
+};
+
+// Check if subscription is valid and not expired
+const isSubscriptionActive = (subscription) => {
+  if (!subscription) return false;
+  if (subscription.status !== 'ACTIVE') return false;
+  // If no end_date or end_date is in future, subscription is valid
+  if (!subscription.end_date) return true;
+  const daysLeft = calculateDaysLeft(subscription.end_date);
+  return daysLeft > 0;
+};
+
+// Get last reset date for daily quota (midnight today)
+const getLastDailyReset = () => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+};
+
+// Get last reset date for weekly quota (last Monday midnight)
+const getLastWeeklyReset = () => {
+  const today = new Date();
+  const dayOfWeek = today.getDay();
+  const lastMonday = new Date(today);
+  const diff = today.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+  lastMonday.setDate(diff);
+  lastMonday.setHours(0, 0, 0, 0);
+  return lastMonday;
+};
+
+// Reset quota based on time intervals
+const resetQuota = async (vendorId, quota) => {
+  if (!quota) return null;
+  
+  const lastDaily = new Date(quota.daily_reset_at || quota.updated_at || quota.created_at);
+  const lastWeekly = new Date(quota.weekly_reset_at || quota.updated_at || quota.created_at);
+  const todayMidnight = getLastDailyReset();
+  const lastMondayMidnight = getLastWeeklyReset();
+  
+  let updated = { ...quota };
+  let needsUpdate = false;
+  
+  // Reset daily quota if day changed
+  if (lastDaily < todayMidnight) {
+    updated.daily_used = 0;
+    updated.daily_reset_at = todayMidnight.toISOString();
+    needsUpdate = true;
+  }
+  
+  // Reset weekly quota if week changed (Monday passed)
+  if (lastWeekly < lastMondayMidnight) {
+    updated.weekly_used = 0;
+    updated.weekly_reset_at = lastMondayMidnight.toISOString();
+    needsUpdate = true;
+  }
+  
+  // Update database if reset needed
+  if (needsUpdate) {
+    const { error } = await supabase
+      .from('vendor_lead_quota')
+      .update({
+        daily_used: updated.daily_used,
+        weekly_used: updated.weekly_used,
+        daily_reset_at: updated.daily_reset_at,
+        weekly_reset_at: updated.weekly_reset_at,
+        updated_at: new Date().toISOString()
+      })
+      .eq('vendor_id', vendorId);
+    
+    if (error) console.error('Quota reset error:', error);
+  }
+  
+  return updated;
+};
+
 export const leadsMarketplaceApi = {
   // ============ VENDOR PREFERENCES ============
   
@@ -77,22 +161,68 @@ export const leadsMarketplaceApi = {
     const preferences = await leadsMarketplaceApi.getPreferences();
     
     // Get vendor's quota
-    const { data: quota } = await supabase
+    let { data: quota } = await supabase
       .from('vendor_lead_quota')
       .select('*')
       .eq('vendor_id', vendor.id)
       .maybeSingle();
 
-    // Check quota limits
+    // Reset quota if needed
     if (quota) {
-      if (quota.daily_limit > 0 && quota.daily_used >= quota.daily_limit) {
-        return { data: [], quota, message: 'Daily lead limit reached' };
+      quota = await resetQuota(vendor.id, quota);
+    }
+
+    // ✅ Check active subscription and plan expiry
+    const { data: allSubscriptions } = await supabase
+      .from('vendor_plan_subscriptions')
+      .select('*')
+      .eq('vendor_id', vendor.id);
+    
+    // Find the first ACTIVE subscription
+    let subData = null;
+    if (allSubscriptions && allSubscriptions.length > 0) {
+      subData = allSubscriptions.find(sub => sub.status === 'ACTIVE');
+    }
+    
+    // Fetch plan separately if subscription exists
+    let subscription = null;
+    if (subData && subData.plan_id) {
+      const { data: planData } = await supabase
+        .from('vendor_plans')
+        .select('*')
+        .eq('id', subData.plan_id)
+        .maybeSingle();
+      subscription = { ...subData, plan: planData };
+    } else {
+      subscription = subData;
+    }
+
+    // If no active subscription, cannot view leads
+    if (!isSubscriptionActive(subscription)) {
+      return { 
+        data: [], 
+        quota, 
+        subscription,
+        message: 'No active subscription plan. Please subscribe to view leads.' 
+      };
+    }
+
+    // Get plan limits from subscription
+    const plan = subscription?.plan;
+    const dailyLimit = plan?.daily_limit || 0;
+    const weeklyLimit = plan?.weekly_limit || 0;
+    const yearlyLimit = plan?.yearly_limit || 0;
+
+    // Check quota limits against plan
+    if (quota) {
+      if (dailyLimit > 0 && quota.daily_used >= dailyLimit) {
+        return { data: [], quota, subscription, message: 'Daily lead limit reached' };
       }
-      if (quota.weekly_limit > 0 && quota.weekly_used >= quota.weekly_limit) {
-        return { data: [], quota, message: 'Weekly lead limit reached' };
+      if (weeklyLimit > 0 && quota.weekly_used >= weeklyLimit) {
+        return { data: [], quota, subscription, message: 'Weekly lead limit reached' };
       }
-      if (quota.yearly_limit > 0 && quota.yearly_used >= quota.yearly_limit) {
-        return { data: [], quota, message: 'Yearly lead limit reached' };
+      if (yearlyLimit > 0 && quota.yearly_used >= yearlyLimit) {
+        return { data: [], quota, subscription, message: 'Yearly lead limit reached' };
       }
     }
 
@@ -137,6 +267,7 @@ export const leadsMarketplaceApi = {
       data: data || [],
       quota,
       preferences,
+      subscription,
       pagination: { page, limit, total: count }
     };
   },
@@ -163,6 +294,8 @@ export const leadsMarketplaceApi = {
     const vendor = await vendorApi.auth.me();
     if (!vendor?.id) throw new Error('Vendor not found');
 
+    console.log('[TRACE] Starting purchaseLead for vendor:', vendor.id);
+
     // Get lead
     const { data: lead, error: leadError } = await supabase
       .from('leads')
@@ -183,16 +316,113 @@ export const leadsMarketplaceApi = {
 
     if (alreadyPurchased) throw new Error('You already purchased this lead');
 
-    // Check quota
-    const { data: quota } = await supabase
+    // ✅ Check active subscription and plan validity
+    console.log('[TRACE] Querying subscriptions for vendor:', vendor.id);
+    
+    // Due to RLS blocking the query, fetch ALL subscriptions and filter client-side
+    const { data: allSubscriptions, error: allError } = await supabase
+      .from('vendor_plan_subscriptions')
+      .select('*')
+      .eq('vendor_id', vendor.id);
+    
+    console.log('[TRACE] All subscriptions query result:', { error: allError, count: allSubscriptions?.length });
+    
+    // Find the first ACTIVE subscription
+    let subData = null;
+    if (allSubscriptions && allSubscriptions.length > 0) {
+      subData = allSubscriptions.find(sub => sub.status === 'ACTIVE');
+      console.log('[TRACE] Found ACTIVE subscription:', { exists: !!subData, subData });
+    }
+    
+    // If subscription exists, fetch the plan separately
+    let subscription = null;
+    if (subData && subData.plan_id) {
+      const { data: planData } = await supabase
+        .from('vendor_plans')
+        .select('*')
+        .eq('id', subData.plan_id)
+        .maybeSingle();
+      
+      subscription = { ...subData, plan: planData };
+      console.log('[TRACE] Plan fetched:', { planExists: !!planData, planName: planData?.name });
+    } else {
+      subscription = subData;
+      console.log('[TRACE] No ACTIVE subscription found or missing plan_id');
+    }
+
+    console.log('[DEBUG] Subscription check:', {
+      vendor_id: vendor.id,
+      subscription_exists: !!subscription,
+      subscription_status: subscription?.status,
+      subscription_end_date: subscription?.end_date,
+      subscription_plan_id: subscription?.plan_id,
+      plan_exists: !!subscription?.plan,
+      plan_data: subscription?.plan,
+      is_subscription_null: subscription === null,
+      is_subscription_undefined: subscription === undefined,
+      is_active_result: isSubscriptionActive(subscription)
+    });
+
+    if (!isSubscriptionActive(subscription)) {
+      console.error('[ERROR] Subscription check failed:', {
+        subscription,
+        vendor_id: vendor.id,
+        subscription_status: subscription?.status,
+        subscription_end_date: subscription?.end_date
+      });
+      throw new Error('No active subscription plan. Please subscribe to purchase leads.');
+    }
+
+    // Get plan limits from subscription
+    const plan = subscription.plan;
+    const dailyLimit = plan?.daily_limit || 0;
+    const weeklyLimit = plan?.weekly_limit || 0;
+    const yearlyLimit = plan?.yearly_limit || 0;
+
+    // Get and reset quota - create if doesn't exist
+    let { data: quota } = await supabase
       .from('vendor_lead_quota')
       .select('*')
       .eq('vendor_id', vendor.id)
       .maybeSingle();
 
+    // If quota doesn't exist, create it
+    if (!quota) {
+      const { data: newQuota, error: quotaError } = await supabase
+        .from('vendor_lead_quota')
+        .insert([{
+          vendor_id: vendor.id,
+          plan_id: subscription.plan_id,
+          daily_used: 0,
+          weekly_used: 0,
+          yearly_used: 0,
+          daily_reset_at: new Date().toISOString(),
+          weekly_reset_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
+      
+      if (quotaError) {
+        console.error('Failed to create quota:', quotaError);
+        // Continue anyway - maybe quota check isn't critical
+      } else {
+        quota = newQuota;
+      }
+    } else if (quota) {
+      quota = await resetQuota(vendor.id, quota);
+    }
+
+    // Check quota against plan limits (only if limit > 0, meaning it's enforced)
     if (quota) {
-      if (quota.daily_limit > 0 && quota.daily_used >= quota.daily_limit) {
-        throw new Error('Daily lead limit reached');
+      if (dailyLimit > 0 && quota.daily_used >= dailyLimit) {
+        throw new Error(`Daily lead limit (${dailyLimit}) reached`);
+      }
+      if (weeklyLimit > 0 && quota.weekly_used >= weeklyLimit) {
+        throw new Error(`Weekly lead limit (${weeklyLimit}) reached`);
+      }
+      if (yearlyLimit > 0 && quota.yearly_used >= yearlyLimit) {
+        throw new Error(`Yearly lead limit (${yearlyLimit}) reached`);
       }
     }
 
@@ -431,16 +661,49 @@ export const leadsMarketplaceApi = {
 
   // ============ STATS & ANALYTICS ============
 
-  // Get vendor's lead stats
+  // Get vendor's lead stats - Enhanced with daily/weekly/yearly/direct tracking
   getLeadStats: async () => {
     const vendor = await vendorApi.auth.me();
     if (!vendor?.id) throw new Error('Vendor not found');
 
-    // Total purchased
-    const { count: totalPurchased } = await supabase
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const oneYearAgo = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Daily purchased leads
+    const { count: dailyPurchased } = await supabase
       .from('lead_purchases')
       .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id)
+      .gte('purchase_date', today);
+
+    // Weekly purchased leads
+    const { count: weeklyPurchased } = await supabase
+      .from('lead_purchases')
+      .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id)
+      .gte('purchase_date', sevenDaysAgo);
+
+    // Yearly purchased leads
+    const { count: yearlyPurchased } = await supabase
+      .from('lead_purchases')
+      .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id)
+      .gte('purchase_date', oneYearAgo);
+
+    // Total purchased
+    const { count: totalPurchased, data: allPurchases } = await supabase
+      .from('lead_purchases')
+      .select('amount', { count: 'exact' })
       .eq('vendor_id', vendor.id);
+
+    // Direct leads from buyer proposals
+    const { count: directLeads } = await supabase
+      .from('proposals')
+      .select('*', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'SENT');
 
     // Total contacted
     const { count: totalContacted } = await supabase
@@ -455,6 +718,9 @@ export const leadsMarketplaceApi = {
       .eq('vendor_id', vendor.id)
       .eq('status', 'CONVERTED');
 
+    // Calculate total purchase amount
+    const totalAmount = (allPurchases || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+
     // Get quota
     const { data: quota } = await supabase
       .from('vendor_lead_quota')
@@ -463,7 +729,12 @@ export const leadsMarketplaceApi = {
       .maybeSingle();
 
     return {
+      daily: dailyPurchased || 0,
+      weekly: weeklyPurchased || 0,
+      yearly: yearlyPurchased || 0,
+      direct: directLeads || 0,
       totalPurchased: totalPurchased || 0,
+      totalAmount: totalAmount || 0,
       totalContacted: totalContacted || 0,
       converted: converted || 0,
       conversionRate: totalPurchased ? ((converted || 0) / totalPurchased * 100).toFixed(2) : 0,

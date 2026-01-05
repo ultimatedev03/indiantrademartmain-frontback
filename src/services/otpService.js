@@ -206,7 +206,7 @@ export const otpService = {
         options: {
           data: {
             ...userData,
-            role: 'VENDOR',
+            role: userData.role || 'VENDOR',
             email_verified: true, // metadata only
           },
         },

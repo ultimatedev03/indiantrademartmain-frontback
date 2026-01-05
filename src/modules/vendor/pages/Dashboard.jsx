@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
+import SubscriptionBadge from '@/modules/vendor/components/SubscriptionBadge';
 
 // ✅ Clickable + Hover premium stats card (FIXED overflow)
 const StatsCardWithDetail = ({ label, value, icon: Icon, detail, hint, to }) => {
@@ -97,13 +98,16 @@ const Dashboard = () => {
   const [vendorId, setVendorId] = useState(null);
   const [recentProducts, setRecentProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [subscription, setSubscription] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   useEffect(() => {
     const loadDashboard = async () => {
       try {
-        const [data, products] = await Promise.all([
+        const [data, products, sub] = await Promise.all([
           vendorApi.dashboard.getStats(),
-          vendorApi.products.list()
+          vendorApi.products.list(),
+          vendorApi.subscriptions.getCurrent()
         ]);
 
         const normalized = {
@@ -123,6 +127,7 @@ const Dashboard = () => {
         setVendorId(vendId);
 
         setRecentProducts(products?.slice(0, 3) || []);
+        setSubscription(sub || null);
 
         if (vendId && !paramVendorId) {
           navigate(`/vendor/${vendId}/dashboard`, { replace: true });
@@ -131,6 +136,7 @@ const Dashboard = () => {
         console.error("Failed to load dashboard", error);
       } finally {
         setLoading(false);
+        setSubscriptionLoading(false);
       }
     };
 
@@ -164,29 +170,93 @@ const Dashboard = () => {
           <p className="text-neutral-500">Here's what's happening with your store today.</p>
         </div>
 
-        {stats.kycStatus !== 'VERIFIED' ? (
-          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow">
-            <AlertTriangle className="h-5 w-5" />
-            <div>
-              <p className="font-semibold text-sm">KYC {stats.kycStatus}</p>
-              <p className="text-xs">Complete verification to unlock all features.</p>
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          {/* Subscription Status */}
+          <Link to="/vendor/subscriptions" className="block">
+            <SubscriptionBadge subscription={subscription} loading={subscriptionLoading} />
+          </Link>
+
+          {/* KYC Status */}
+          {/* Subscription Expiration Alert */}
+          {subscription && (() => {
+            const endDate = new Date(subscription.end_date);
+            const today = new Date();
+            // Set time to start of day for accurate calculation
+            today.setHours(0, 0, 0, 0);
+            endDate.setHours(0, 0, 0, 0);
+            const daysRemaining = Math.ceil((endDate - today) / (1000 * 60 * 60 * 24));
+            const isExpiringSoon = daysRemaining <= 7 && daysRemaining > 0;
+            const isExpired = daysRemaining < 0;
+
+            if (isExpired) {
+              return (
+                <Link to="/vendor/subscriptions" className="block">
+                  <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow cursor-pointer">
+                    <AlertTriangle className="h-5 w-5" />
+                    <div>
+                      <p className="font-semibold text-sm">Subscription Expired</p>
+                      <p className="text-xs">Renew now to restore access to leads.</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-2 border-red-600 text-red-800 hover:bg-red-100"
+                    >
+                      Renew Now
+                    </Button>
+                  </div>
+                </Link>
+              );
+            }
+
+            if (isExpiringSoon) {
+              return (
+                <Link to="/vendor/subscriptions" className="block">
+                  <div className="bg-orange-50 border border-orange-200 text-orange-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow cursor-pointer">
+                    <AlertTriangle className="h-5 w-5" />
+                    <div>
+                      <p className="font-semibold text-sm">Plan Expiring Soon</p>
+                      <p className="text-xs">Your {subscription.vendor_plans?.name} plan expires in {daysRemaining} days.</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="ml-2 border-orange-600 text-orange-800 hover:bg-orange-100"
+                    >
+                      Renew
+                    </Button>
+                  </div>
+                </Link>
+              );
+            }
+
+            return null;
+          })()}
+
+          {stats.kycStatus !== 'VERIFIED' ? (
+            <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow">
+              <AlertTriangle className="h-5 w-5" />
+              <div>
+                <p className="font-semibold text-sm">KYC {stats.kycStatus}</p>
+                <p className="text-xs">Complete verification to unlock all features.</p>
+              </div>
+              <Link to="/vendor/profile?tab=kyc">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-2 border-yellow-600 text-yellow-800 hover:bg-yellow-100"
+                >
+                  Verify Now
+                </Button>
+              </Link>
             </div>
-            <Link to="/vendor/profile?tab=kyc">
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-2 border-yellow-600 text-yellow-800 hover:bg-yellow-100"
-              >
-                Verify Now
-              </Button>
-            </Link>
-          </div>
-        ) : (
-          <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:shadow-sm transition-shadow">
-            <CheckCircle className="w-4 h-4" />
-            <span className="text-sm font-medium">Account Verified</span>
-          </div>
-        )}
+          ) : (
+            <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-2 rounded-lg flex items-center gap-2 hover:shadow-sm transition-shadow">
+              <CheckCircle className="w-4 h-4" />
+              <span className="text-sm font-medium">Account Verified</span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stats Grid */}

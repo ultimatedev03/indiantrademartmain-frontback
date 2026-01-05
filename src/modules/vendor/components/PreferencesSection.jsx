@@ -79,7 +79,7 @@ const PreferencesSection = () => {
         // Load cities for first selected state
         if (prefs.preferred_states?.length > 0) {
           try {
-            const cities = await vendorApi.getCities(prefs.preferred_states[0]);
+            const cities = await vendorApi.locations.getCities(prefs.preferred_states[0]);
             setAllCities(cities || []);
             console.log('Cities loaded for state:', prefs.preferred_states[0]);
           } catch (e) {
@@ -88,7 +88,7 @@ const PreferencesSection = () => {
         } else if (states && states.length > 0) {
           // Auto-load cities for first state if no preferences exist
           try {
-            const cities = await vendorApi.getCities(states[0].id);
+            const cities = await vendorApi.locations.getCities(states[0].id);
             setAllCities(cities || []);
             setSelectedStateId(states[0].id);
             console.log('Auto-loaded cities for first state');
@@ -133,7 +133,7 @@ const PreferencesSection = () => {
 
     // Load cities for this state
     try {
-      const cities = await vendorApi.getCities(selectedStateId);
+      const cities = await vendorApi.locations.getCities(selectedStateId);
       setAllCities(cities || []);
     } catch (e) {
       console.error('Error loading cities:', e);
@@ -250,7 +250,7 @@ const PreferencesSection = () => {
                 setSelectedStateId(e.target.value);
                 // Auto load cities when state is selected
                 if (e.target.value) {
-                  vendorApi.getCities(e.target.value).then(cities => {
+                  vendorApi.locations.getCities(e.target.value).then(cities => {
                     setAllCities(cities || []);
                   }).catch(err => console.error('Error loading cities:', err));
                 }

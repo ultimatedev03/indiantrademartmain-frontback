@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { leadsMarketplaceApi } from '@/modules/vendor/services/leadsMarketplaceApi';
+import { leadApi } from '@/modules/lead/services/leadApi';
+import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -133,42 +135,60 @@ const LeadDetail = () => {
   const loadLead = async () => {
     setLoading(true);
     try {
-      // ✅ 1) Check My Leads (purchased)
-      const purchasedRes = await leadsMarketplaceApi.getPurchasedLeads();
-      const purchasedRows = purchasedRes?.data || [];
+      // ✅ Get current vendor ID
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({ title: 'Not authenticated', variant: 'destructive' });
+        navigate('/vendor/leads');
+        return;
+      }
+      
+      const { data: vendor } = await supabase
+        .from('vendors')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+        
+      if (!vendor?.id) {
+        toast({ title: 'Vendor profile not found', variant: 'destructive' });
+        navigate('/vendor/leads');
+        return;
+      }
 
-      const matchRow = purchasedRows.find((r) => {
-        const leadId = r?.leads?.id || r?.lead_id || r?.leadId || r?.id;
-        return String(leadId) === String(id);
+      // ✅ Load the lead from database
+      const leadData = await leadApi.get(id);
+      if (!leadData) {
+        toast({ title: 'Lead not found', variant: 'destructive' });
+        navigate('/vendor/leads');
+        return;
+      }
+
+      // ✅ Determine source based on vendor_id and purchase status
+      let isPurchasedFlag = false;
+      let source = 'Marketplace';
+      let purchaseDate = null;
+
+      // If current vendor is the creator, it's Direct
+      if (leadData.vendor_id === vendor.id) {
+        source = 'Direct';
+        purchaseDate = leadData.created_at;
+      } else {
+        // Check if vendor purchased this lead
+        const purchased = await leadApi.purchases.list(vendor.id);
+        const purchasedLead = purchased.find(p => p.lead_id === id);
+        if (purchasedLead) {
+          source = 'Purchased';
+          isPurchasedFlag = true;
+          purchaseDate = purchasedLead.purchase_date;
+        }
+      }
+
+      setLead({
+        ...leadData,
+        __source: source,
+        __purchaseDate: purchaseDate
       });
-
-      if (matchRow) {
-        const purchasedLead = matchRow?.leads || matchRow;
-        setLead({
-          ...purchasedLead,
-          __purchaseDate:
-            matchRow?.purchase_date ||
-            matchRow?.purchaseDate ||
-            matchRow?.purchased_at ||
-            null,
-        });
-        setIsPurchased(true);
-        return;
-      }
-
-      // ✅ 2) Else marketplace list
-      const marketRes = await leadsMarketplaceApi.getAvailableLeads();
-      const marketLeads = marketRes?.data || [];
-      const found = marketLeads.find((l) => String(l?.id) === String(id));
-
-      if (found) {
-        setLead(found);
-        setIsPurchased(false);
-        return;
-      }
-
-      toast({ title: 'Lead not found', variant: 'destructive' });
-      navigate('/vendor/leads');
+      setIsPurchased(isPurchasedFlag);
     } catch (err) {
       console.error(err);
       toast({
@@ -176,6 +196,7 @@ const LeadDetail = () => {
         description: err?.message || 'Something went wrong',
         variant: 'destructive',
       });
+      setLoading(false);
     } finally {
       setLoading(false);
     }
@@ -227,7 +248,7 @@ const LeadDetail = () => {
     if (!lead?.id) return;
     setPurchasing(true);
     try {
-      await leadsMarketplaceApi.purchaseLead(lead.id);
+      await leadApi.purchases.create(undefined, lead.id, lead.price || 50);
       toast({ title: 'Lead Purchased Successfully!', description: 'Contact details are now visible.' });
       setIsPurchased(true);
       await loadLead();
@@ -265,8 +286,8 @@ const LeadDetail = () => {
               <div className="flex flex-wrap gap-2 mb-2">
                 {meta.category ? <Badge variant="outline">{meta.category}</Badge> : <Badge variant="outline">General</Badge>}
                 {meta.product ? <Badge variant="secondary">{meta.product}</Badge> : null}
-                <Badge variant={isPurchased ? 'success' : 'outline'}>
-                  {isPurchased ? 'Purchased' : 'Fresh Lead'}
+                <Badge variant={isPurchased ? 'success' : lead?.__source === 'Direct' ? 'secondary' : 'outline'}>
+                  {lead?.__source || (isPurchased ? 'Purchased' : 'Fresh Lead')}
                 </Badge>
               </div>
 
@@ -366,7 +387,7 @@ const LeadDetail = () => {
           <CardTitle className="text-lg">Buyer Information</CardTitle>
         </CardHeader>
         <CardContent>
-          {isPurchased ? (
+          {isPurchased || lead?.__source === 'Direct' ? (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <User className="h-5 w-5 text-green-700" />

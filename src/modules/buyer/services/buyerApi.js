@@ -128,12 +128,26 @@ export const buyerApi = {
   // --- PROPOSALS ---
   createProposal: async (proposalData) => {
     const buyerId = await getBuyerId();
+    const { data: { user } } = await supabase.auth.getUser();
+    
+    // Get buyer profile for contact details
+    const { data: buyerProfile } = await supabase
+      .from('buyers')
+      .select('*')
+      .eq('id', buyerId)
+      .single();
+    
+    // Determine buyer name and company
+    const buyerName = buyerProfile?.company_name || user?.user_metadata?.full_name || user?.email || 'Buyer';
+    const buyerCompany = buyerProfile?.company_name || user?.user_metadata?.full_name || '';
+    const buyerEmail = user?.email || '';
+    const buyerPhone = buyerProfile?.phone || buyerProfile?.mobile_number || '';
     
     const payload = {
       buyer_id: buyerId,
       vendor_id: proposalData.vendor_id || null,
-      title: proposalData.title || proposalData.product_name,
-      product_name: proposalData.product_name,
+      title: proposalData.title || proposalData.product_name || proposalData.category,
+      product_name: proposalData.product_name || proposalData.category,
       quantity: proposalData.quantity,
       budget: parseFloat(proposalData.budget) || 0,
       required_by_date: proposalData.required_by_date || null,
@@ -143,14 +157,56 @@ export const buyerApi = {
       updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await supabase
+    const { data: proposal, error: propError } = await supabase
       .from('proposals')
       .insert([payload])
       .select()
       .single();
 
-    if (error) throw error;
-    return data;
+    if (propError) throw propError;
+    
+    // Create a lead record for ALL proposals (direct requirement to marketplace)
+    // This will be visible in vendor's marketplace leads if no vendor_id, or as direct lead if vendor_id is set
+    const leadPayload = {
+      vendor_id: null, // Always null so ALL vendors can see it as marketplace lead
+      title: payload.title,
+      product_name: payload.product_name,
+      category: proposalData.category || '',
+      quantity: payload.quantity,
+      budget: payload.budget,
+      location: proposalData.location || 'India',
+      city: proposalData.city || null,
+      state: proposalData.state || null,
+      message: payload.description,
+      buyer_name: buyerName,
+      buyer_email: buyerEmail,
+      buyer_phone: buyerPhone,
+      company_name: buyerCompany,
+      status: 'AVAILABLE',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      proposal_id: proposal.id
+    };
+    
+    // Validate lead has required buyer fields
+    if (!leadPayload.buyer_name || !leadPayload.buyer_email) {
+      console.warn('Lead missing buyer details:', { buyer_name: leadPayload.buyer_name, buyer_email: leadPayload.buyer_email });
+    }
+    
+    // Create lead with proper error handling
+    const { error: leadError, data: leadData } = await supabase
+      .from('leads')
+      .insert([leadPayload])
+      .select()
+      .single();
+    
+    if (leadError) {
+      console.error('Failed to create lead record:', leadError, 'Payload:', leadPayload);
+      throw new Error(`Proposal created but failed to register as lead: ${leadError.message}`);
+    }
+    
+    console.log('Lead created successfully:', leadData);
+    return proposal;
   },
 
   getProposals: async (buyerId) => {

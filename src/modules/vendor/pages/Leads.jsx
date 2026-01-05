@@ -1,7 +1,9 @@
 // ✅ File: src/modules/vendor/pages/Leads.jsx
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { leadsMarketplaceApi } from '@/modules/vendor/services/leadsMarketplaceApi';
+import { leadApi } from '@/modules/lead/services/leadApi';
+import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +22,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { phoneUtils } from '@/shared/utils/phoneUtils';
+import LeadStatsPanel from '@/modules/vendor/components/LeadStatsPanel';
 
 const safeDate = (v) => {
   try {
@@ -121,6 +124,7 @@ const Leads = () => {
     toDate: '',        // yyyy-mm-dd
     categories: {},    // { [category]: true }
     locations: {},     // { [location]: true }
+    source: 'all',     // all | purchased | direct
     sort: 'recent_bought', // only one for now
   });
 
@@ -135,8 +139,13 @@ const Leads = () => {
 
   const loadStats = async () => {
     try {
-      const data = await leadsMarketplaceApi.getLeadStats();
-      setStats(data);
+      // Get stats from vendor API which has the stats calculation
+      const data = await vendorApi.dashboard.getStats();
+      setStats({
+        totalPurchased: 0, // Calculate from lead purchases
+        totalContacted: 0, // Calculate from lead contacts
+        converted: 0, // Calculate from converted leads
+      });
     } catch (error) {
       console.error('Failed to load stats:', error);
     }
@@ -147,28 +156,24 @@ const Leads = () => {
     setLoading(true);
     try {
       if (activeTab === 'my_leads') {
-        const result = await leadsMarketplaceApi.getPurchasedLeads();
-        setLeads(result?.data || []);
+        // Fetch purchased + direct leads from new marketplace API
+        const myLeads = await leadApi.marketplace.getMyLeads();
+        
+        // Apply source filter
+        let filtered = myLeads || [];
+        if (myFilters.source === 'purchased') {
+          filtered = filtered.filter(l => l.source === 'Purchased');
+        } else if (myFilters.source === 'direct') {
+          filtered = filtered.filter(l => l.source === 'Direct');
+        }
+        
+        setLeads(filtered);
         return;
       }
 
-      // Marketplace load with purchased exclusion
-      const [availRes, purchasedRes] = await Promise.allSettled([
-        leadsMarketplaceApi.getAvailableLeads(),
-        leadsMarketplaceApi.getPurchasedLeads(),
-      ]);
-
-      const available = availRes.status === 'fulfilled' ? (availRes.value?.data || []) : [];
-      const purchasedRows = purchasedRes.status === 'fulfilled' ? (purchasedRes.value?.data || []) : [];
-
-      // purchasedRows can be wrapped: { leads: {...} } OR may have lead_id
-      const purchasedIds = new Set(
-        (purchasedRows || []).map((row) => row?.leads?.id || row?.lead_id || row?.leadId).filter(Boolean)
-      );
-
-      const filteredAvailable = (available || []).filter((l) => !purchasedIds.has(l?.id));
-
-      setLeads(filteredAvailable);
+      // Marketplace load - only true marketplace leads (vendor_id is null)
+      const available = await leadApi.marketplace.listAvailable();
+      setLeads(available);
     } catch (error) {
       console.error(error);
       toast({ title: "Failed to load leads", variant: "destructive" });
@@ -181,6 +186,12 @@ const Leads = () => {
   const handlePurchaseLead = async (leadId) => {
     setPurchasing(prev => ({ ...prev, [leadId]: true }));
     try {
+      // Get the lead and purchase it using marketplace API
+      const lead = leads.find(l => l.id === leadId);
+      if (!lead) throw new Error('Lead not found');
+
+      // Use leadsMarketplaceApi.purchaseLead which handles RLS properly
+      const { leadsMarketplaceApi } = await import('@/modules/vendor/services/leadsMarketplaceApi');
       await leadsMarketplaceApi.purchaseLead(leadId);
 
       toast({ title: "Lead purchased successfully!" });
@@ -279,6 +290,7 @@ const Leads = () => {
       toDate: '',
       categories: {},
       locations: {},
+      source: 'all',
       sort: 'recent_bought',
     });
   };
@@ -605,8 +617,44 @@ const Leads = () => {
                 </div>
               </div>
             ) : (
-              // ✅ MY LEADS FILTER BAR (only 4 filters)
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+              // ✅ MY LEADS FILTER BAR (with source filter)
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                {/* Source Filter */}
+                <div className="rounded-md border bg-gray-50 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="font-semibold text-sm text-gray-800">Source</div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="source"
+                        checked={myFilters.source === 'all'}
+                        onChange={() => setMyFilters(p => ({ ...p, source: 'all' }))}
+                      />
+                      <span>All</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="source"
+                        checked={myFilters.source === 'purchased'}
+                        onChange={() => setMyFilters(p => ({ ...p, source: 'purchased' }))}
+                      />
+                      <span>Purchased</span>
+                    </label>
+                    <label className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="radio"
+                        name="source"
+                        checked={myFilters.source === 'direct'}
+                        onChange={() => setMyFilters(p => ({ ...p, source: 'direct' }))}
+                      />
+                      <span>Direct Leads</span>
+                    </label>
+                  </div>
+                </div>
+
                 {/* Date wise */}
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="font-semibold text-sm text-gray-800 mb-2">Date wise</div>
@@ -724,35 +772,48 @@ const Leads = () => {
         </TabsContent>
 
         {/* My Leads */}
-        <TabsContent value="my_leads" className="space-y-4">
-          {loading ? (
-            <div className="p-8 text-center text-gray-500">Loading...</div>
-          ) : filteredMyLeads.length === 0 ? (
-            <div className="p-8 text-center border rounded bg-white">You haven't purchased any leads yet.</div>
-          ) : (
-            filteredMyLeads.map(({ __raw, __lead, __purchaseDate }) => (
-              <LeadCard
-                key={__raw?.id || __lead?.id}
-                lead={__lead}
-                purchased={true}
-                purchaseDate={__purchaseDate}
-                onView={handleViewDetails}
-              />
-            ))
-          )}
+        <TabsContent value="my_leads" className="">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Main content */}
+            <div className="lg:col-span-2 space-y-4">
+              {loading ? (
+                <div className="p-8 text-center text-gray-500">Loading...</div>
+              ) : filteredMyLeads.length === 0 ? (
+                <div className="p-8 text-center border rounded bg-white">You haven't purchased any leads yet.</div>
+              ) : (
+                filteredMyLeads.map(({ __raw, __lead, __purchaseDate }) => (
+                  <LeadCard
+                    key={__raw?.id || __lead?.id}
+                    lead={__lead}
+                    source={__raw?.source || 'Purchased'}
+                    purchaseDate={__purchaseDate}
+                    onView={handleViewDetails}
+                  />
+                ))
+              )}
+            </div>
+            
+            {/* Right sidebar - Stats Panel */}
+            <div className="lg:col-span-1">
+              <LeadStatsPanel stats={stats} loading={loading} />
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
     </div>
   );
 };
 
-const LeadCard = ({ lead, purchased, onBuy, isPurchasing, purchaseDate, onView }) => {
+const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, onView }) => {
   const meta = getLeadMeta(lead);
 
   const displayTitle = meta.title;
   const displayLocation = meta.location;
 
-  const dateObj = safeDate(purchased ? purchaseDate : (lead?.created_at || lead?.createdAt)) || meta.createdAt;
+  const isPurchased = purchased || source === 'Purchased';
+  const isDirect = source === 'Direct';
+
+  const dateObj = safeDate(isPurchased || isDirect ? purchaseDate : (lead?.created_at || lead?.createdAt)) || meta.createdAt;
   const displayDate = dateObj ? dateObj.toLocaleDateString() : '—';
 
   const maskPhone = (phone) => phone ? phoneUtils.maskPhoneWithCode(phone) : 'N/A';
@@ -771,7 +832,7 @@ const LeadCard = ({ lead, purchased, onBuy, isPurchasing, purchaseDate, onView }
                 <div className="mt-1 flex flex-wrap gap-2">
                   {meta.product ? <Badge variant="outline" className="text-xs">{meta.product}</Badge> : null}
                   {meta.category ? <Badge variant="outline" className="text-xs">{meta.category}</Badge> : null}
-                  {meta.isRecommended && !purchased ? (
+                  {meta.isRecommended && !isPurchased && !isDirect ? (
                     <Badge className="text-xs bg-[#fff3c4] text-[#7a5b00] hover:bg-[#ffeaa0] border border-[#ffe08a]">
                       Recommended
                     </Badge>
@@ -779,8 +840,8 @@ const LeadCard = ({ lead, purchased, onBuy, isPurchasing, purchaseDate, onView }
                 </div>
               </div>
 
-              <Badge variant={purchased ? 'success' : 'outline'}>
-                {purchased ? 'Purchased' : 'Fresh Lead'}
+              <Badge variant={isPurchased || isDirect ? 'success' : 'outline'}>
+                {isDirect ? 'Direct Lead' : isPurchased ? 'Purchased' : 'Fresh Lead'}
               </Badge>
             </div>
 
@@ -799,7 +860,7 @@ const LeadCard = ({ lead, purchased, onBuy, isPurchasing, purchaseDate, onView }
               )}
             </div>
 
-            {purchased ? (
+            {isPurchased || isDirect || (lead?.buyer_name && lead?.buyer_email) ? (
               <div className="mt-4 p-3 bg-green-50 border border-green-100 rounded-md space-y-1">
                 <p className="text-sm font-semibold text-green-800">Buyer Details:</p>
                 <div className="flex flex-wrap gap-4 text-sm text-green-700">
@@ -816,7 +877,7 @@ const LeadCard = ({ lead, purchased, onBuy, isPurchasing, purchaseDate, onView }
           </div>
 
           <div className="flex flex-col justify-center items-end gap-2 min-w-[160px]">
-            {!purchased && (
+            {!isPurchased && !isDirect && (
               <>
                 <div className="text-right">
                   <p className="text-xs text-gray-500">Price</p>

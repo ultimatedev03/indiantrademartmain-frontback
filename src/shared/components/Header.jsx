@@ -20,7 +20,7 @@ const Header = () => {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/auth/login');
+    navigate('/');
   };
 
   const NavLinks = ({ mobile = false, onClick = () => {} }) => (

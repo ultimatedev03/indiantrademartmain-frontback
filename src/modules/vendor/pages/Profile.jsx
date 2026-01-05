@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
 import PreferencesSection from '@/modules/vendor/components/PreferencesSection';
+import SubscriptionBadge from '@/modules/vendor/components/SubscriptionBadge';
 import {
   Loader2, Save, Camera, Pencil, MapPin, Phone, Mail,
   Plus, Trash2, Check, ExternalLink, FileText
@@ -31,6 +32,8 @@ const Profile = () => {
 
   const [banks, setBanks] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [subscription, setSubscription] = useState(null);
+  const [subscriptionLoading, setSubscriptionLoading] = useState(true);
 
   // ✅ keep tab in sync with URL ?tab=
   useEffect(() => {
@@ -41,10 +44,11 @@ const Profile = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [prof, bankList, docList] = await Promise.all([
+      const [prof, bankList, docList, sub] = await Promise.all([
         vendorApi.auth.me(),
         vendorApi.banking.list(),
-        vendorApi.documents.list()
+        vendorApi.documents.list(),
+        vendorApi.subscriptions.getCurrent()
       ]);
 
       const p = prof || {};
@@ -74,6 +78,7 @@ const Profile = () => {
       setDraft(normalizedProfile);
       setBanks(bankList || []);
       setDocuments(docList || []);
+      setSubscription(sub || null);
     } catch (e) {
       console.error(e);
       toast({
@@ -83,6 +88,7 @@ const Profile = () => {
       });
     } finally {
       setLoading(false);
+      setSubscriptionLoading(false);
     }
   }, []);
 
@@ -255,6 +261,14 @@ const Profile = () => {
                   {profile.vendorId || profile.vendor_id || 'Generating...'}
                 </p>
               </div>
+            </div>
+          </Card>
+
+          {/* Subscription Status Card */}
+          <Card className="shadow-sm">
+            <div className="p-5">
+              <p className="text-xs text-slate-500 font-semibold mb-3">Subscription Status</p>
+              <SubscriptionBadge subscription={subscription} loading={subscriptionLoading} />
             </div>
           </Card>
         </div>

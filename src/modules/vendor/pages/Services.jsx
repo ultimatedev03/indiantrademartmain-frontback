@@ -196,6 +196,7 @@ const Services = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      // Force fresh data from Supabase (no cache)
       const { data: plansData, error: plansErr } = await supabase
         .from('vendor_plans')
         .select('*')
@@ -205,15 +206,19 @@ const Services = () => {
       if (plansErr) throw plansErr;
       setPlans(plansData || []);
 
-      const { data: sub, error: subErr } = await supabase
+      // Query for ACTIVE subscription - this will get the latest one
+      const { data: subs, error: subsErr } = await supabase
         .from('vendor_plan_subscriptions')
         .select('*, plan:vendor_plans(id,name,price)')
         .eq('vendor_id', vendorId)
         .eq('status', 'ACTIVE')
-        .maybeSingle();
+        .order('created_at', { ascending: false })
+        .limit(1);
 
-      if (subErr) throw subErr;
-      setCurrentSub(sub);
+      if (subsErr) throw subsErr;
+      // Get the first (most recent) active subscription
+      const currentActive = subs && subs.length > 0 ? subs[0] : null;
+      setCurrentSub(currentActive);
 
       const { data: q, error: qErr } = await supabase
         .from('vendor_lead_quota')
@@ -238,18 +243,56 @@ const Services = () => {
     toast({ title: 'Processing...', description: `Subscribing to ${plan.name}` });
 
     try {
+      // If already subscribed to a plan, deactivate it first
+      if (currentSub && currentSub.id) {
+        await supabase
+          .from('vendor_plan_subscriptions')
+          .update({ status: 'INACTIVE' })
+          .eq('id', currentSub.id);
+      }
+
+      // Now activate the new plan
+      const startDate = new Date();
+      const endDate = new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+      
       await supabase.from('vendor_plan_subscriptions').insert({
         vendor_id: vendorId,
         plan_id: plan.id,
+        start_date: startDate.toISOString(),
+        end_date: endDate.toISOString(),
         status: 'ACTIVE',
+        plan_duration_days: 365,
+        auto_renewal_enabled: false,
+        renewal_notification_sent: false
       });
 
       toast({ title: 'Success!', description: 'Plan activated.' });
       setDetailsOpen(false);
-      loadData();
+      // Reload immediately to refresh UI and badges
+      setTimeout(() => loadData(), 500);
     } catch (e) {
+      console.error('Subscription error:', e);
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
+      // Reload anyway to sync state
+      setTimeout(() => loadData(), 500);
     }
+  };
+
+  // Check if subscription is active and not expired
+  const isSubscriptionActive = (sub) => {
+    if (!sub) return false;
+    if (sub.status !== 'ACTIVE') return false;
+    const endDate = new Date(sub.end_date);
+    return endDate > new Date();
+  };
+
+  // Calculate days remaining
+  const getDaysRemaining = (sub) => {
+    if (!sub?.end_date) return 0;
+    const end = new Date(sub.end_date);
+    const now = new Date();
+    const daysLeft = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+    return Math.max(0, daysLeft);
   };
 
   const buyLeads = async () => {
@@ -257,6 +300,17 @@ const Services = () => {
       toast({ title: 'Error', description: 'Vendor ID not found', variant: 'destructive' });
       return;
     }
+
+    // ✅ Check if subscription is active and not expired
+    if (!isSubscriptionActive(currentSub)) {
+      toast({
+        title: 'No Active Subscription',
+        description: 'Please subscribe to a plan to purchase additional leads.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
     if (window.confirm('Buy 10 additional leads for ₹1500?')) {
       try {
         await supabase.from('vendor_additional_leads').insert({
@@ -320,8 +374,34 @@ const Services = () => {
             <p className="text-slate-600 mt-1">Choose a plan to get more visibility, more leads, and premium support.</p>
           </div>
 
-          <div className="flex gap-2 items-center">
-            <Button variant="outline" onClick={buyLeads} className="bg-white">
+          <div className="flex gap-2 items-center flex-col sm:flex-row">
+            {/* ✅ Subscription Status */}
+            {currentSub && (
+              <div className={cx(
+                'px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 whitespace-nowrap',
+                isSubscriptionActive(currentSub)
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : 'bg-red-50 text-red-700 border border-red-200'
+              )}>
+                <Crown className="w-4 h-4" />
+                {isSubscriptionActive(currentSub) ? (
+                  <span>{getDaysRemaining(currentSub)} days left</span>
+                ) : (
+                  <span>Plan Expired</span>
+                )}
+              </div>
+            )}
+
+            <Button
+              variant="outline"
+              onClick={buyLeads}
+              disabled={!isSubscriptionActive(currentSub)}
+              className={cx(
+                'bg-white',
+                !isSubscriptionActive(currentSub) && 'opacity-50 cursor-not-allowed'
+              )}
+              title={!isSubscriptionActive(currentSub) ? 'Please subscribe to a plan first' : ''}
+            >
               <ShoppingCart className="w-4 h-4 mr-2" />
               Buy Leads
             </Button>

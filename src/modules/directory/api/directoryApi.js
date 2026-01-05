@@ -154,6 +154,43 @@ export const directoryApi = {
   return unique.slice(0, 10);
 },
 
+searchProducts: async ({ q, stateId, cityId, sort = '', page = 1, limit = 20 }) => {
+  const from = (page - 1) * limit;
+  const to = from + limit - 1;
+
+  let query = supabase
+    .from('products')
+    .select(`
+      *,
+      vendors!inner (
+        id, company_name, city, state, state_id, city_id,
+        seller_rating, kyc_status, verification_badge, trust_score
+      )
+    `, { count: 'exact' })
+    .eq('status', 'ACTIVE');
+
+  // Search by product name
+  if (q) query = query.ilike('name', `%${q}%`);
+
+  // Filter by state
+  if (stateId) query = query.eq('vendors.state_id', stateId);
+
+  // Filter by city
+  if (cityId) query = query.eq('vendors.city_id', cityId);
+
+  // Sorting
+  if (sort === 'price_asc') query = query.order('price', { ascending: true });
+  else if (sort === 'price_desc') query = query.order('price', { ascending: false });
+  else query = query.order('created_at', { ascending: false });
+
+  query = query.range(from, to);
+
+  const { data, count, error } = await query;
+  if (error) throw error;
+
+  return { data: data || [], count };
+},
+
 listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, limit = 20 }) => {
   const from = (page - 1) * limit;
   const to = from + limit - 1;

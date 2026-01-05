@@ -87,13 +87,8 @@ export const publicApi = {
 
   // --- BRANDS ---
   getBrands: async () => {
-    const { data, error } = await supabase
-      .from('brands')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-    if (error) throw error;
-    return data || [];
+    // Brands table doesn't exist in schema - return empty array
+    return [];
   },
 
   // --- PRODUCTS ---

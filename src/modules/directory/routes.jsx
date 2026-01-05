@@ -1,11 +1,11 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
-import DirectoryHome from '@/modules/directory/pages/DirectoryHome';
 import SubCategoryPage from '@/modules/directory/pages/SubCategoryPage';
 import MicroCategoryPage from '@/modules/directory/pages/MicroCategoryPage';
-import ProductsListingPage from '@/modules/directory/pages/ProductsListingPage';
-import ProductDetailPage from '@/modules/directory/pages/ProductDetailPage';
+import Directory from '@/modules/directory/pages/Directory';
+import ProductListing from '@/modules/directory/pages/ProductListing';
+import ProductDetail from '@/modules/directory/pages/ProductDetail';
 
 import Home from '@/modules/directory/pages/Home';
 import AboutUs from '@/modules/directory/pages/AboutUs';
@@ -26,16 +26,17 @@ export const DirectoryRoutes = () => {
         <Route index element={<Home />} />
         
         {/* Directory Structure */}
-        <Route path="directory" element={<DirectoryHome />} />
+        <Route path="directory" element={<Directory />} />
         <Route path="directory/:headSlug" element={<SubCategoryPage />} />
         <Route path="directory/:headSlug/:subSlug" element={<MicroCategoryPage />} />
-        <Route path="directory/:headSlug/:subSlug/:microSlug" element={<ProductsListingPage />} />
+        <Route path="directory/:headSlug/:subSlug/:microSlug" element={<ProductListing />} />
         
         {/* Search Alias */}
-        <Route path="directory/search" element={<ProductsListingPage />} />
+        <Route path="directory/search" element={<ProductListing />} />
+        <Route path="search" element={<Navigate to="/directory" replace />} />
 
         {/* Product Detail */}
-        <Route path="p/:productSlug" element={<ProductDetailPage />} />
+        <Route path="p/:productSlug" element={<ProductDetail />} />
 
         {/* Other Pages */}
         <Route path="about-us" element={<AboutUs />} />

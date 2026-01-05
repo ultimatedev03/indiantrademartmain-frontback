@@ -54,16 +54,7 @@ export const directoryApi = {
   },
 
   getBrands: async () => {
-    const { data, error } = await supabase
-      .from('brands')
-      .select('*')
-      .eq('is_active', true)
-      .order('name');
-
-    if (error) {
-      console.error('Error fetching brands:', error);
-      return [];
-    }
-    return data;
+    // Brands table doesn't exist in schema - return empty array
+    return [];
   }
 };

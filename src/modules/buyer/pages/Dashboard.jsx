@@ -48,15 +48,15 @@ const Dashboard = () => {
 
       // Parallel data fetching for stats
       const [proposals, favorites, tickets] = await Promise.all([
-        supabase.from('proposals').select('id', { count: 'exact', head: true }).eq('buyer_id', buyer.id).eq('status', 'PENDING'),
+        supabase.from('proposals').select('id', { count: 'exact', head: true }).eq('buyer_id', buyer.id),
         supabase.from('favorites').select('id', { count: 'exact', head: true }).eq('buyer_id', buyer.id),
         supabase.from('buyer_support_tickets').select('id', { count: 'exact', head: true }).eq('buyer_id', buyer.id).neq('status', 'CLOSED'),
       ]);
 
-      // Recent Activity - Fetch recent proposals
+      // Recent Activity - Fetch recent proposals/leads
       const { data: recent } = await supabase
         .from('proposals')
-        .select('*, vendors(company_name)')
+        .select('id, title, product_name, status, created_at, vendors(company_name)')
         .eq('buyer_id', buyer.id)
         .order('created_at', { ascending: false })
         .limit(5);

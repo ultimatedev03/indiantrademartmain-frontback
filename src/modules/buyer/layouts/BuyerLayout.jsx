@@ -40,7 +40,7 @@ const BuyerLayout = () => {
 
   const handleLogout = () => {
     logout();
-    navigate(resolvePath('login', 'buyer'));
+    navigate('/');
   };
 
   const getPageTitle = () => {

@@ -33,7 +33,10 @@ export const buyerProposalApi = {
   },
 
   create: async (proposalData) => {
-    const { data: buyer } = await supabase.from('buyers').select('id').eq('user_id', (await supabase.auth.getUser()).data.user.id).single();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
+    const { data: buyer } = await supabase.from('buyers').select('id, full_name').eq('user_id', user.id).single();
     
     const { data, error } = await supabase
       .from('proposals')
@@ -42,6 +45,44 @@ export const buyerProposalApi = {
       .single();
 
     if (error) throw error;
+
+    // Get vendor details to send notification
+    const { data: vendor, error: vendorError } = await supabase
+      .from('vendors')
+      .select('id, user_id, company_name')
+      .eq('id', proposalData.vendor_id)
+      .single();
+
+    if (vendorError) throw vendorError;
+
+    // Create notification for vendor
+    try {
+      const notificationPayload = {
+        user_id: vendor.user_id,
+        title: 'New Proposal Received',
+        message: `${buyer.full_name || 'A buyer'} sent a proposal for ${proposalData.product_name || 'a product'}`,
+        type: 'PROPOSAL',
+        reference_id: data.id,
+        is_read: false,
+        created_at: new Date().toISOString()
+      };
+
+      console.log('Creating notification with payload:', notificationPayload);
+      
+      const { data: notifData, error: notifError } = await supabase
+        .from('notifications')
+        .insert([notificationPayload])
+        .select();
+
+      if (notifError) {
+        console.error('Failed to create notification:', notifError);
+      } else {
+        console.log('Notification created successfully:', notifData);
+      }
+    } catch (notifException) {
+      console.error('Error creating notification:', notifException);
+    }
+
     return data;
   },
 

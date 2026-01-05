@@ -42,7 +42,7 @@ const VendorHeader = ({ onMenuClick }) => {
 
   const handleLogout = async () => {
     await logout();
-    navigate('/vendor/login');
+    navigate('/');
   };
 
   return (

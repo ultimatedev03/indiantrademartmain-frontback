@@ -22,12 +22,11 @@ import HrStaff from '@/modules/hr/pages/Staff';
 // Employee Pages
 import EmployeeLogin from '@/modules/employee/pages/auth/Login';
 import DataEntryDashboard from '@/modules/employee/pages/dataentry/Dashboard';
-import DataEntryLocations from '@/modules/employee/pages/dataentry/Locations';
+import DataEntryLocations from '@/modules/employee/pages/dataentry/LocationsFixed';
 import DataEntryVendors from '@/modules/employee/pages/dataentry/Vendors';
 import DataEntryVendorProducts from '@/modules/employee/pages/dataentry/VendorProducts';
 import DataEntryAddProduct from '@/modules/employee/pages/dataentry/AddProduct';
-import DataEntryCategories from '@/modules/employee/pages/dataentry/Categories';
-import LocationsCategoryPreview from '@/modules/employee/pages/dataentry/LocationsCategoryPreview';
+import DataEntryCategories from '@/modules/employee/pages/dataentry/CategoriesFixed';
 import DataEntryCsvUpload from '@/modules/employee/pages/dataentry/CsvUpload';
 import DataEntryBulkImport from '@/modules/employee/pages/dataentry/BulkImport';
 import DataEntryVendorOnboarding from '@/modules/employee/pages/dataentry/VendorOnboarding';
@@ -82,7 +81,6 @@ export const AdminRoutes = () => {
             <Route path="dashboard" element={<DataEntryDashboard />} />
             <Route path="categories" element={<DataEntryCategories />} />
             <Route path="categories/upload" element={<DataEntryCsvUpload />} />
-            <Route path="categories/preview" element={<LocationsCategoryPreview />} />
             <Route path="locations" element={<DataEntryLocations />} />
             <Route path="bulk-import" element={<DataEntryBulkImport />} />
             <Route path="vendor-onboarding" element={<DataEntryVendorOnboarding />} />

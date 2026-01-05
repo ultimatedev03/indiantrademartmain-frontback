@@ -6,6 +6,7 @@ import quotationRoutes from './routes/quotation.js';
 import passwordResetRoutes from './routes/passwordReset.js';
 import migrationRoutes from './routes/migration.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
+import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 
 dotenv.config({ path: '.env.local' });
 
@@ -28,6 +29,9 @@ app.use('/api/otp', otpRoutes);
 app.use('/api/quotation', quotationRoutes);
 app.use('/api/password-reset', passwordResetRoutes);
 app.use('/api/migration', migrationRoutes);
+
+// Initialize subscription monitoring cron jobs
+initializeSubscriptionCronJobs();
 
 // Health check
 app.get('/health', (req, res) => {

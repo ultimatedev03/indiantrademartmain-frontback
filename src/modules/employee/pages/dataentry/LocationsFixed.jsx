@@ -91,8 +91,27 @@ const LocationsFixed = () => {
 
     try {
       setAddingCity(true);
-      const slug = newCityName.toLowerCase().replace(/\s+/g, '-');
+      let slug = newCityName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
       
+      // Check if slug already exists for this state
+      const { data: existing, error: checkError } = await supabase
+        .from('cities')
+        .select('id, slug')
+        .eq('state_id', selectedState.id)
+        .eq('slug', slug)
+        .maybeSingle();
+      
+      if (checkError && !checkError.message.includes('PGRST116')) {
+        throw checkError;
+      }
+      
+      // If slug exists, append random suffix
+      if (existing) {
+        const randomSuffix = Math.random().toString(36).substring(2, 8);
+        slug = `${slug}-${randomSuffix}`;
+      }
+      
+      // Try direct insert
       const { data, error } = await supabase
         .from('cities')
         .insert([{
@@ -105,7 +124,16 @@ const LocationsFixed = () => {
         }])
         .select();
       
-      if (error) throw error;
+      if (error) {
+        // If RLS error, show helpful message
+        if (error.message.includes('row-level security')) {
+          throw new Error('RLS policy not configured. Please contact admin to enable city creation.');
+        }
+        if (error.message.includes('unique constraint')) {
+          throw new Error('A city with this name already exists in this state.');
+        }
+        throw error;
+      }
       
       toast({ 
         title: "Success", 
