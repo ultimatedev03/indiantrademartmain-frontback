@@ -104,7 +104,6 @@ const SearchResults = () => {
         if (cityId) query = query.eq('vendors.city_id', cityId);
 
         // ✅ MAIN SEARCH: match product name + category fields + description
-        // (this is the missing part in your previous vendorService approach)
         const q1 = serviceText;
         const q2 = extraQ;
 
@@ -173,7 +172,9 @@ const SearchResults = () => {
   const stateName = formatName(parsedParams.stateSlug);
 
   const pageTitle = serviceName
-    ? `${serviceName} Suppliers & Manufacturers${cityName ? ` in ${cityName}` : ''}${stateName && !cityName ? ` in ${stateName}` : ''}`
+    ? `${serviceName} Suppliers & Manufacturers${cityName ? ` in ${cityName}` : ''}${
+        stateName && !cityName ? ` in ${stateName}` : ''
+      }`
     : 'Search Results';
 
   // Canonical
@@ -205,6 +206,8 @@ const SearchResults = () => {
 
             <div className="mb-4 max-w-4xl">
               <DirectorySearchBar
+                enableSuggestions
+                className="shadow-xl"
                 initialService={parsedParams.serviceSlug}
                 initialState={parsedParams.stateSlug}
                 initialCity={parsedParams.citySlug}
@@ -247,11 +250,7 @@ const SearchResults = () => {
                   <Loader2 className="w-8 h-8 animate-spin text-[#003D82]" />
                 </div>
               ) : (
-                <SearchResultsList
-                  products={filteredResults}
-                  city={cityName || stateName}
-                  category={serviceName}
-                />
+                <SearchResultsList products={filteredResults} city={cityName || stateName} category={serviceName} />
               )}
             </main>
           </div>
