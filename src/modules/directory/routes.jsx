@@ -3,6 +3,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
 
 import Directory from '@/modules/directory/pages/Directory';
+import CitiesPage from '@/modules/directory/pages/CitiesPage';
+import CityPage from '@/modules/directory/pages/CityPage';
 import SubCategoryPage from '@/modules/directory/pages/SubCategoryPage';
 import MicroCategoryPage from '@/modules/directory/pages/MicroCategoryPage';
 import DynamicCategory from '@/modules/directory/pages/DynamicCategory';
@@ -46,6 +48,10 @@ export const DirectoryRoutes = () => {
 
         {/* Directory Base */}
         <Route path="directory" element={<Directory />} />
+
+        {/* Cities */}
+        <Route path="directory/cities" element={<CitiesPage />} />
+        <Route path="directory/city/:citySlug" element={<CityPage />} />
 
         {/* Vendor */}
         <Route path="directory/vendor" element={<VendorListing />} />

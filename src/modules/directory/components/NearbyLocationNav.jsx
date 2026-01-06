@@ -1,74 +1,260 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin } from 'lucide-react';
+import { MapPin, ChevronLeft } from 'lucide-react';
 import { locationService } from '@/shared/services/locationService';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
   const navigate = useNavigate();
-  const [cities, setCities] = useState([]);
-  const [loading, setLoading] = useState(true);
 
+  const [loading, setLoading] = useState(true);
+  const [cities, setCities] = useState([]);
+
+  const [showOtherStates, setShowOtherStates] = useState(false);
+
+  const [statesLoading, setStatesLoading] = useState(false);
+  const [states, setStates] = useState([]);
+
+  const [selectedState, setSelectedState] = useState(null); // { slug, name }
+  const [otherCitiesLoading, setOtherCitiesLoading] = useState(false);
+  const [otherCities, setOtherCities] = useState([]);
+
+  const currentStateName = useMemo(() => {
+    const found = states?.find((s) => s.slug === stateSlug);
+    if (found?.name) return found.name;
+    // fallback from slug
+    return (stateSlug || '').replace(/-/g, ' ');
+  }, [states, stateSlug]);
+
+  // Load current state cities (Nearby in current state)
   useEffect(() => {
     const fetchCities = async () => {
       if (!stateSlug) {
         setLoading(false);
         return;
       }
-      
+
       setLoading(true);
       const data = await locationService.getCitiesByStateSlug(stateSlug);
-      // Filter out current city to avoid redundancy in suggestions
-      const filtered = data.filter(c => c.slug !== currentCitySlug);
+
+      // Filter out current city
+      const filtered = (data || []).filter((c) => c.slug !== currentCitySlug);
+
       setCities(filtered);
       setLoading(false);
+
+      // Reset other state UI when route changes
+      setShowOtherStates(false);
+      setSelectedState(null);
+      setOtherCities([]);
     };
 
     fetchCities();
   }, [stateSlug, currentCitySlug]);
 
-  if (!stateSlug) return null; // Don't show if no state is selected context
+  // Preload states (for showing state name + state list)
+  useEffect(() => {
+    const loadStates = async () => {
+      // avoid reloading again and again
+      if (states && states.length > 0) return;
+
+      setStatesLoading(true);
+      const s = await locationService.getStates();
+      setStates(s || []);
+      setStatesLoading(false);
+    };
+    loadStates();
+  }, [states]);
+
+  const otherStates = useMemo(() => {
+    return (states || []).filter((s) => s.slug !== stateSlug);
+  }, [states, stateSlug]);
+
+  const openOtherStates = async () => {
+    setShowOtherStates(true);
+    setSelectedState(null);
+    setOtherCities([]);
+    // ensure states loaded
+    if (!states || states.length === 0) {
+      setStatesLoading(true);
+      const s = await locationService.getStates();
+      setStates(s || []);
+      setStatesLoading(false);
+    }
+  };
+
+  const pickState = async (st) => {
+    if (!st?.slug) return;
+    setSelectedState({ slug: st.slug, name: st.name || st.slug.replace(/-/g, ' ') });
+
+    setOtherCitiesLoading(true);
+    const data = await locationService.getCitiesByStateSlug(st.slug);
+    setOtherCities(data || []);
+    setOtherCitiesLoading(false);
+  };
+
+  const goBackToNearbyCities = () => {
+    setShowOtherStates(false);
+    setSelectedState(null);
+    setOtherCities([]);
+  };
+
+  const goBackToStates = () => {
+    setSelectedState(null);
+    setOtherCities([]);
+  };
+
+  if (!stateSlug) return null;
+
+  const headerLabel = selectedState?.name
+    ? `Cities in ${selectedState.name}`
+    : `Nearby in ${currentStateName}`;
 
   return (
     <div className="w-full mt-4">
       <div className="flex items-center gap-2 mb-2">
         <MapPin className="w-4 h-4 text-gray-400" />
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Nearby in {stateSlug.replace(/-/g, ' ')}</span>
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+          {headerLabel}
+        </span>
       </div>
-      
+
       <div className="flex overflow-x-auto pb-2 gap-3 scrollbar-hide">
-        {loading ? (
-           Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-8 w-24 rounded-full flex-shrink-0" />)
-        ) : (
-            <>
-              {cities.map((city) => (
-                <button
-                  key={city.id}
-                  onClick={() => navigate(`/directory/${serviceSlug}/${stateSlug}/${city.slug}`)}
-                  className={cn(
-                    "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
-                    "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
-                  )}
-                >
-                  {city.name}
-                </button>
-              ))}
-              
-              {cities.length > 0 && (
-                  <button 
-                    onClick={() => navigate(`/directory/${serviceSlug}`)}
-                    className="flex-shrink-0 px-4 py-1.5 rounded-full border border-dashed border-gray-300 text-sm text-gray-500 hover:text-blue-600 hover:border-blue-400"
+        {/* 1) Default view: Nearby cities in current state */}
+        {!showOtherStates && (
+          <>
+            {loading ? (
+              Array(6)
+                .fill(0)
+                .map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-24 rounded-full flex-shrink-0" />
+                ))
+            ) : (
+              <>
+                {cities.map((city) => (
+                  <button
+                    key={city.id}
+                    onClick={() => navigate(`/directory/${serviceSlug}/${stateSlug}/${city.slug}`)}
+                    className={cn(
+                      "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                      "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
+                    )}
                   >
-                    View Other States
+                    {city.name}
                   </button>
-              )}
-              
-              {cities.length === 0 && (
-                <span className="text-sm text-gray-400 italic px-2">No other cities found nearby.</span>
-              )}
-            </>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={openOtherStates}
+                  className="flex-shrink-0 px-4 py-1.5 rounded-full border border-dashed border-gray-300 text-sm text-gray-500 hover:text-blue-600 hover:border-blue-400"
+                >
+                  View Other States
+                </button>
+
+                {cities.length === 0 && (
+                  <span className="text-sm text-gray-400 italic px-2">
+                    No other cities found nearby.
+                  </span>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {/* 2) Other States view */}
+        {showOtherStates && !selectedState && (
+          <>
+            <button
+              type="button"
+              onClick={goBackToNearbyCities}
+              className="flex-shrink-0 px-3 py-1.5 rounded-full border bg-white text-sm font-medium text-gray-700 hover:border-blue-400 hover:text-blue-600"
+              title="Back"
+            >
+              <span className="inline-flex items-center gap-1">
+                <ChevronLeft className="w-4 h-4" /> Back
+              </span>
+            </button>
+
+            {statesLoading ? (
+              Array(8)
+                .fill(0)
+                .map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-28 rounded-full flex-shrink-0" />
+                ))
+            ) : (
+              <>
+                {otherStates.map((st) => (
+                  <button
+                    key={st.id || st.slug}
+                    onClick={() => pickState(st)}
+                    className={cn(
+                      "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                      "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
+                    )}
+                    title={st.name}
+                  >
+                    {st.name}
+                  </button>
+                ))}
+
+                {otherStates.length === 0 && (
+                  <span className="text-sm text-gray-400 italic px-2">
+                    No other states found.
+                  </span>
+                )}
+              </>
+            )}
+          </>
+        )}
+
+        {/* 3) Selected other state -> show its cities */}
+        {showOtherStates && selectedState && (
+          <>
+            <button
+              type="button"
+              onClick={goBackToStates}
+              className="flex-shrink-0 px-3 py-1.5 rounded-full border bg-white text-sm font-medium text-gray-700 hover:border-blue-400 hover:text-blue-600"
+              title="Back to states"
+            >
+              <span className="inline-flex items-center gap-1">
+                <ChevronLeft className="w-4 h-4" /> States
+              </span>
+            </button>
+
+            {otherCitiesLoading ? (
+              Array(8)
+                .fill(0)
+                .map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-24 rounded-full flex-shrink-0" />
+                ))
+            ) : (
+              <>
+                {(otherCities || []).map((city) => (
+                  <button
+                    key={city.id || city.slug}
+                    onClick={() =>
+                      navigate(`/directory/${serviceSlug}/${selectedState.slug}/${city.slug}`)
+                    }
+                    className={cn(
+                      "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                      "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
+                    )}
+                    title={city.name}
+                  >
+                    {city.name}
+                  </button>
+                ))}
+
+                {(otherCities || []).length === 0 && (
+                  <span className="text-sm text-gray-400 italic px-2">
+                    No cities found for {selectedState.name}.
+                  </span>
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
