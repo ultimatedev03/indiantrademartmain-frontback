@@ -1,11 +1,20 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { Helmet } from 'react-helmet';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { ChevronRight, Home, Image as ImageIcon, Loader2, ExternalLink } from 'lucide-react';
 
 const safeStr = (v) => (typeof v === 'string' ? v.trim() : '');
 const safeImg = (url) => (typeof url === 'string' && url.trim().length > 0 ? url.trim() : null);
 const humanTitle = (slug) => safeStr(slug).replace(/-/g, ' ').trim();
+
+const stripHtml = (s) => safeStr(s).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+const truncate = (s, n = 160) => {
+  const t = stripHtml(s);
+  if (!t) return '';
+  if (t.length <= n) return t;
+  return `${t.slice(0, n - 1).trim()}…`;
+};
 
 const safeFirstImage = (product) => {
   const raw = product?.images;
@@ -160,6 +169,30 @@ const MicroCategoryPage = () => {
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
 
+  // ✅ SEO (so home title/desc doesn't stick)
+  const seoTitle = useMemo(() => {
+    const head = humanTitle(headSlug) || 'Directory';
+    const sub = humanTitle(subSlug) || 'Category';
+    return `${sub} | ${head} - IndianTradeMart`;
+  }, [headSlug, subSlug]);
+
+  const seoDescription = useMemo(() => {
+    const head = humanTitle(headSlug) || 'Directory';
+    const sub = humanTitle(subSlug) || 'Category';
+    return truncate(
+      `Browse micro-categories and products in ${sub} under ${head}. Find suppliers, compare prices, and get quotations on IndianTradeMart.`
+    );
+  }, [headSlug, subSlug]);
+
+  const canonicalUrl = useMemo(() => {
+    try {
+      const origin = window.location?.origin || '';
+      return origin ? `${origin}/directory/${headSlug}/${subSlug}` : '';
+    } catch {
+      return '';
+    }
+  }, [headSlug, subSlug]);
+
   useEffect(() => {
     let alive = true;
 
@@ -171,14 +204,12 @@ const MicroCategoryPage = () => {
       setPreviews({});
 
       try {
-        // ✅ 1) Micro categories (must work)
         const list = await directoryApi.getMicroCategories(subSlug, headSlug);
         if (!alive) return;
         setMicros(list || []);
 
         const ids = (list || []).map((m) => m.id).filter(Boolean);
 
-        // ✅ 2) Covers (optional)
         try {
           const coverMap = await directoryApi.getMicroCategoryCovers(ids);
           if (!alive) return;
@@ -187,7 +218,6 @@ const MicroCategoryPage = () => {
           console.warn('Cover fetch failed:', e);
         }
 
-        // ✅ 3) Product previews (optional) — if fail, still show micros
         try {
           if (typeof directoryApi.getProductsPreviewByMicroIds === 'function') {
             const previewMap = await directoryApi.getProductsPreviewByMicroIds({ microIds: ids, perMicro: 6 });
@@ -217,6 +247,13 @@ const MicroCategoryPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
+      <Helmet>
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDescription} />
+        <meta name="keywords" content={`${title}, ${humanTitle(headSlug)}, suppliers, products, IndianTradeMart`} />
+        {canonicalUrl ? <link rel="canonical" href={canonicalUrl} /> : null}
+      </Helmet>
+
       <div className="bg-white border-b py-4">
         <div className="container mx-auto px-4">
           <nav className="flex text-sm text-gray-500 mb-4 items-center flex-wrap">

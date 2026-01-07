@@ -402,6 +402,8 @@ export const directoryApi = {
           .from('micro_category_meta')
           .select('meta_tags, description')
           .eq('micro_categories', product.micro_category_id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
 
         if (primaryMeta) {
@@ -443,7 +445,9 @@ export const directoryApi = {
           )
         `)
         .eq('slug', microSlug)
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (error || !micro) return null;
 
@@ -451,6 +455,8 @@ export const directoryApi = {
         .from('micro_category_meta')
         .select('meta_tags, description')
         .eq('micro_categories', micro.id)
+        .order('updated_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       return {
@@ -473,7 +479,9 @@ export const directoryApi = {
         .from('micro_categories')
         .select('id')
         .eq('slug', microSlug)
-        .single();
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (microError || !micro) return { data: [], count: 0 };
 

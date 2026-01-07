@@ -38,9 +38,9 @@ const Login = () => {
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
     if (tab === 'buyer') {
-      setFormData({ email: 'rajesh@buyer.com', password: '' });
+      setFormData({ email: 'abc@example.com', password: '' });
     } else {
-      setFormData({ email: 'vikram@vendor.com', password: '' });
+      setFormData({ email: 'abc@example.com', password: '' });
     }
   };
 
@@ -229,30 +229,6 @@ const Login = () => {
                      Create Account
                   </Link>
                </p>
-            </div>
-
-            <div className="mt-12 pt-6 border-t border-slate-100 flex justify-center opacity-50 hover:opacity-100 transition-opacity">
-               <AlertDialog open={showResetDialog} onOpenChange={setShowResetDialog}>
-                  <AlertDialogTrigger asChild>
-                     <button className="flex items-center text-xs text-slate-400 hover:text-red-500 transition-colors">
-                        <RefreshCw className="w-3 h-3 mr-1" />
-                        Reset Database
-                     </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                     <AlertDialogTitle>Reset Database?</AlertDialogTitle>
-                     <AlertDialogDescription>
-                        This will delete all current data and reset to the original 7 demo users.
-                     </AlertDialogDescription>
-                     <div className="flex gap-3 justify-end">
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleResetData} disabled={resetting}>
-                           {resetting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                           Reset
-                        </AlertDialogAction>
-                     </div>
-                  </AlertDialogContent>
-               </AlertDialog>
             </div>
          </div>
       </div>
