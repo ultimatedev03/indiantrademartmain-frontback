@@ -25,18 +25,106 @@ export const directoryApi = {
     return data || [];
   },
 
-  getMicroCategories: async (subSlug) => {
-    const { data: sub } = await supabase.from('sub_categories').select('id').eq('slug', subSlug).single();
-    if (!sub) return [];
+  // ✅ Micro categories for a sub-category
+  // IMPORTANT:
+  // - Earlier we used `.single()` on `sub_categories.slug`.
+  // - If two different head categories have the same sub slug, Supabase throws "Multiple rows returned"
+  //   and UI shows "No categories found".
+  // - So we resolve sub id safely using LIMIT 1 (and if headSlug is provided, we also filter by head).
+  getMicroCategories: async (subSlug, headSlug = null) => {
+    if (!subSlug) return [];
+
+    let subId = null;
+
+    // If headSlug is available, resolve head -> sub uniquely
+    if (headSlug) {
+      const { data: head, error: headErr } = await supabase
+        .from('head_categories')
+        .select('id')
+        .eq('slug', headSlug)
+        .limit(1);
+
+      if (headErr) throw headErr;
+      const headId = head?.[0]?.id;
+      if (!headId) return [];
+
+      const { data: subs, error: subErr } = await supabase
+        .from('sub_categories')
+        .select('id')
+        .eq('slug', subSlug)
+        .eq('head_category_id', headId)
+        .limit(1);
+
+      if (subErr) throw subErr;
+      subId = subs?.[0]?.id || null;
+    } else {
+      // Fallback: pick first match to avoid `.single()` multiple rows error
+      const { data: subs, error: subErr } = await supabase
+        .from('sub_categories')
+        .select('id')
+        .eq('slug', subSlug)
+        .limit(1);
+
+      if (subErr) throw subErr;
+      subId = subs?.[0]?.id || null;
+    }
+
+    if (!subId) return [];
 
     const { data, error } = await supabase
       .from('micro_categories')
       .select('id, name, slug, description')
-      .eq('sub_category_id', sub.id)
+      .eq('sub_category_id', subId)
       .eq('is_active', true)
       .order('name');
+
     if (error) throw error;
     return data || [];
+  },
+  /**
+   * ✅ Micro Category cover images (NO hardcode)
+   * We don't have image_url in micro_categories table.
+   * So we derive a cover image from the first ACTIVE product image for each micro category.
+   * Returns: { [microId]: imageUrl }
+   */
+  getMicroCategoryCovers: async (microIds = []) => {
+    try {
+      const ids = Array.isArray(microIds) ? microIds.filter(Boolean) : [];
+      if (ids.length === 0) return {};
+
+      const { data, error } = await supabase
+        .from('products')
+        .select('micro_category_id, images, created_at')
+        .in('micro_category_id', ids)
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const map = {};
+      for (const row of data || []) {
+        const mid = row.micro_category_id;
+        if (!mid || map[mid]) continue;
+
+        const imgs = row.images;
+        let url = null;
+
+        if (Array.isArray(imgs) && imgs.length > 0) {
+          const first = imgs[0];
+          if (typeof first === 'string') url = first;
+          else if (first && typeof first === 'object') url = first.url || first.image_url || first.src || null;
+        }
+
+        if (typeof url === 'string' && url.trim().length > 0) {
+          map[mid] = url.trim();
+        }
+      }
+
+      return map;
+    } catch (e) {
+      console.error('Error loading micro category covers:', e);
+      return {};
+    }
   },
 
   searchMicroCategories: async (q) => {

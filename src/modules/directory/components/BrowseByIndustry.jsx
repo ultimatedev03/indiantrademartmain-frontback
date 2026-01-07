@@ -46,7 +46,7 @@ const BrowseByIndustry = ({ limit = 9 }) => {
     try {
       setLoadingSubFor(headCategory.id);
       const subCategories = await directoryApi.getSubCategories(headCategory.slug);
-      setSubCategoriesMap(prev => ({
+      setSubCategoriesMap((prev) => ({
         ...prev,
         [headCategory.id]: subCategories
       }));
@@ -59,12 +59,12 @@ const BrowseByIndustry = ({ limit = 9 }) => {
   };
 
   // Load micro categories when sub category is expanded
-  const handleExpandSub = async (subCategory, headCategoryId) => {
-    const key = `${headCategoryId}-${subCategory.id}`;
+  const handleExpandSub = async (subCategory, headCategory) => {
+    const key = `${headCategory.id}-${subCategory.id}`;
 
     if (microCategoriesMap[key]) {
       // Toggle off
-      setMicroCategoriesMap(prev => ({
+      setMicroCategoriesMap((prev) => ({
         ...prev,
         [key]: null
       }));
@@ -72,8 +72,9 @@ const BrowseByIndustry = ({ limit = 9 }) => {
     }
 
     try {
-      const microCategories = await directoryApi.getMicroCategories(subCategory.slug);
-      setMicroCategoriesMap(prev => ({
+      // ✅ Pass head slug too so sub-category resolves uniquely even if slug duplicates across heads
+      const microCategories = await directoryApi.getMicroCategories(subCategory.slug, headCategory.slug);
+      setMicroCategoriesMap((prev) => ({
         ...prev,
         [key]: microCategories
       }));
@@ -97,9 +98,7 @@ const BrowseByIndustry = ({ limit = 9 }) => {
       <div className="container mx-auto px-4">
         {/* Header */}
         <div className="mb-12">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">
-            Browse by Industry
-          </h1>
+          <h1 className="text-4xl font-bold text-gray-900 mb-4">Browse by Industry</h1>
           <p className="text-gray-600 text-lg max-w-2xl">
             Comprehensive product listings from top manufacturers and verified suppliers across key sectors.
           </p>
@@ -135,12 +134,8 @@ const BrowseByIndustry = ({ limit = 9 }) => {
                   className="cursor-pointer flex items-start justify-between mb-4"
                 >
                   <div className="flex-1">
-                    <h3 className="text-lg font-bold text-gray-900">
-                      {headCategory.name}
-                    </h3>
-                    <p className="text-blue-600 text-sm font-medium">
-                      High Demand
-                    </p>
+                    <h3 className="text-lg font-bold text-gray-900">{headCategory.name}</h3>
+                    <p className="text-blue-600 text-sm font-medium">High Demand</p>
                   </div>
                   <ChevronRight
                     className={`h-5 w-5 text-gray-400 transition-transform ${
@@ -170,12 +165,10 @@ const BrowseByIndustry = ({ limit = 9 }) => {
                           return (
                             <div key={subCategory.id}>
                               <button
-                                onClick={() => handleExpandSub(subCategory, headCategory.id)}
+                                onClick={() => handleExpandSub(subCategory, headCategory)}
                                 className="w-full text-left flex items-center justify-between p-2 rounded hover:bg-blue-50 transition-colors text-sm"
                               >
-                                <span className="font-medium text-gray-700">
-                                  {subCategory.name}
-                                </span>
+                                <span className="font-medium text-gray-700">{subCategory.name}</span>
                                 <ChevronRight
                                   className={`h-4 w-4 text-gray-400 transition-transform ${
                                     hasMicro ? 'rotate-90' : ''
@@ -189,7 +182,11 @@ const BrowseByIndustry = ({ limit = 9 }) => {
                                   {microCategories.slice(0, 4).map((microCategory) => (
                                     <button
                                       key={microCategory.id}
-                                      onClick={() => navigate(`/directory/${microCategory.slug}`)}
+                                      onClick={() =>
+                                        navigate(
+                                          `/directory/${headCategory.slug}/${subCategory.slug}/${microCategory.slug}`
+                                        )
+                                      }
                                       className="block text-xs text-blue-600 hover:text-blue-800 hover:underline transition-colors text-left"
                                     >
                                       • {microCategory.name}
@@ -197,7 +194,7 @@ const BrowseByIndustry = ({ limit = 9 }) => {
                                   ))}
                                   {microCategories.length > 4 && (
                                     <button
-                                      onClick={() => navigate(`/directory/${subCategory.slug}`)}
+                                      onClick={() => navigate(`/directory/${headCategory.slug}/${subCategory.slug}`)}
                                       className="block text-xs text-blue-600 hover:text-blue-800 font-medium transition-colors text-left"
                                     >
                                       + View All

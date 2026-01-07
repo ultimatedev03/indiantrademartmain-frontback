@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
-import { ChevronRight, ChevronDown, Plus, Edit2, Trash2, Tag, Search, X } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Edit2, Trash2, Tag, Search, X, Loader2 } from 'lucide-react';
 import AddEditCategoryDialog from '@/modules/employee/components/AddEditCategoryDialog';
 import DeleteCategoryDialog from '@/modules/employee/components/DeleteCategoryDialog';
 import { headCategoryApi, subCategoryApi, microCategoryApi } from '@/modules/employee/services/categoryApi';
@@ -27,20 +26,19 @@ const CategoriesFixed = () => {
   // State for micro category meta
   const [microMeta, setMicroMeta] = useState({});
 
-  // State for dialogs
+  // Meta dialog
   const [selectedMicroCategory, setSelectedMicroCategory] = useState(null);
   const [showMetaDialog, setShowMetaDialog] = useState(false);
-  const [metaData, setMetaData] = useState({ meta_tags: '', description: '', states: '', cities: '' });
-  const [states, setStates] = useState([]);
-  const [cities, setCities] = useState([]);
+  const [metaData, setMetaData] = useState({ meta_tags: '', description: '' });
 
-  // State for search
+  // Search
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState({ heads: [], subs: [], micros: [] });
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const [loading, setLoading] = useState(false);
 
-  // State for CRUD dialogs
+  // CRUD dialogs
   const [showAddEditDialog, setShowAddEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [dialogLevel, setDialogLevel] = useState(null); // 'head', 'sub', 'micro'
@@ -48,6 +46,15 @@ const CategoriesFixed = () => {
   const [parentCategory, setParentCategory] = useState(null); // for sub/micro
   const [childCount, setChildCount] = useState(0);
   const [savingCategory, setSavingCategory] = useState(false);
+
+  // Refs for scroll (optional but helpful)
+  const headRefs = useRef({});
+  const subRefs = useRef({});
+  const microRefs = useRef({});
+
+  const badgeHead = 'text-[10px] px-2 py-0.5 rounded bg-orange-100 text-orange-700 border border-orange-200';
+  const badgeSub = 'text-[10px] px-2 py-0.5 rounded bg-green-100 text-green-700 border border-green-200';
+  const badgeMicro = 'text-[10px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 border border-blue-200';
 
   useEffect(() => {
     fetchHeadCategories();
@@ -102,7 +109,6 @@ const CategoriesFixed = () => {
       if (error) throw error;
       setMicroCategories((prev) => ({ ...prev, [subCategoryId]: data || [] }));
 
-      // Fetch meta for each micro category
       if (data && data.length > 0) {
         data.forEach((micro) => {
           fetchMicroMeta(micro.id);
@@ -124,7 +130,6 @@ const CategoriesFixed = () => {
 
       if (error && error.code !== 'PGRST116') {
         console.error('Error fetching meta:', error);
-        // Don't throw - silently skip if RLS blocks it
         return;
       }
       setMicroMeta((prev) => ({ ...prev, [microCategoryId]: data || null }));
@@ -133,47 +138,120 @@ const CategoriesFixed = () => {
     }
   };
 
-  // Search across all categories
-  const handleSearch = (query) => {
-    setSearchQuery(query);
+  // ✅ Better Search: Direct DB search (Head/Sub/Micro) with debounce
+  useEffect(() => {
+    const q = (searchQuery || '').trim();
+    const t = setTimeout(() => {
+      if (!q) {
+        setSearchResults({ heads: [], subs: [], micros: [] });
+        setSearchLoading(false);
+        return;
+      }
+      runSearch(q);
+    }, 250);
 
-    if (!query.trim()) {
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
+
+  const runSearch = async (q) => {
+    try {
+      setSearchLoading(true);
+
+      const pattern = `%${q}%`;
+
+      const headPromise = supabase
+        .from('head_categories')
+        .select('id,name,slug')
+        .eq('is_active', true)
+        .or(`name.ilike.${pattern},slug.ilike.${pattern}`)
+        .order('name')
+        .limit(25);
+
+      const subPromise = supabase
+        .from('sub_categories')
+        .select('id,name,slug,head_category_id')
+        .eq('is_active', true)
+        .or(`name.ilike.${pattern},slug.ilike.${pattern}`)
+        .order('name')
+        .limit(25);
+
+      const microPromise = supabase
+        .from('micro_categories')
+        .select('id,name,slug,sub_category_id')
+        .eq('is_active', true)
+        .or(`name.ilike.${pattern},slug.ilike.${pattern}`)
+        .order('name')
+        .limit(25);
+
+      const [{ data: headData, error: headErr }, { data: subData, error: subErr }, { data: microData, error: microErr }] =
+        await Promise.all([headPromise, subPromise, microPromise]);
+
+      if (headErr) throw headErr;
+      if (subErr) throw subErr;
+      if (microErr) throw microErr;
+
+      const heads = headData || [];
+      const subsRaw = subData || [];
+      const microsRaw = microData || [];
+
+      // Load parent head names for subs
+      const headIdsForSubs = [...new Set(subsRaw.map((s) => s.head_category_id).filter(Boolean))];
+      const { data: subsHeads, error: subsHeadsErr } = headIdsForSubs.length
+        ? await supabase.from('head_categories').select('id,name,slug').in('id', headIdsForSubs)
+        : { data: [], error: null };
+      if (subsHeadsErr) throw subsHeadsErr;
+
+      const headMap = new Map();
+      (heads || []).forEach((h) => headMap.set(h.id, h));
+      (subsHeads || []).forEach((h) => headMap.set(h.id, h));
+
+      const subs = subsRaw.map((s) => ({
+        ...s,
+        headCategoryId: s.head_category_id,
+        headName: headMap.get(s.head_category_id)?.name || 'Head',
+      }));
+
+      // Load parent sub + head for micros
+      const subIdsForMicros = [...new Set(microsRaw.map((m) => m.sub_category_id).filter(Boolean))];
+      const { data: microsSubs, error: microsSubsErr } = subIdsForMicros.length
+        ? await supabase.from('sub_categories').select('id,name,slug,head_category_id').in('id', subIdsForMicros)
+        : { data: [], error: null };
+      if (microsSubsErr) throw microsSubsErr;
+
+      const subMap = new Map();
+      (microsSubs || []).forEach((s) => subMap.set(s.id, s));
+
+      const headIdsForMicros = [
+        ...new Set((microsSubs || []).map((s) => s.head_category_id).filter(Boolean)),
+      ].filter((id) => !headMap.has(id));
+
+      const { data: microsHeads, error: microsHeadsErr } = headIdsForMicros.length
+        ? await supabase.from('head_categories').select('id,name,slug').in('id', headIdsForMicros)
+        : { data: [], error: null };
+      if (microsHeadsErr) throw microsHeadsErr;
+
+      (microsHeads || []).forEach((h) => headMap.set(h.id, h));
+
+      const micros = microsRaw.map((m) => {
+        const parentSub = subMap.get(m.sub_category_id);
+        const headId = parentSub?.head_category_id || null;
+        return {
+          ...m,
+          subCategoryId: m.sub_category_id,
+          subName: parentSub?.name || 'Sub',
+          headCategoryId: headId,
+          headName: headId ? headMap.get(headId)?.name || 'Head' : 'Head',
+        };
+      });
+
+      setSearchResults({ heads, subs, micros });
+    } catch (error) {
+      toast({ title: 'Search Error', description: error.message, variant: 'destructive' });
       setSearchResults({ heads: [], subs: [], micros: [] });
-      return;
+    } finally {
+      setSearchLoading(false);
     }
-
-    const lowerQuery = query.toLowerCase();
-
-    // Search in head categories
-    const matchedHeads = headCategories.filter(
-      (head) => head.name.toLowerCase().includes(lowerQuery) || head.slug.toLowerCase().includes(lowerQuery)
-    );
-
-    // Search in sub categories
-    const matchedSubs = [];
-    Object.entries(subCategories).forEach(([headId, subs]) => {
-      subs.forEach((sub) => {
-        if (sub.name.toLowerCase().includes(lowerQuery) || sub.slug.toLowerCase().includes(lowerQuery)) {
-          matchedSubs.push({ ...sub, headCategoryId: headId });
-        }
-      });
-    });
-
-    // Search in micro categories
-    const matchedMicros = [];
-    Object.entries(microCategories).forEach(([subId, micros]) => {
-      micros.forEach((micro) => {
-        if (micro.name.toLowerCase().includes(lowerQuery) || micro.slug.toLowerCase().includes(lowerQuery)) {
-          matchedMicros.push({ ...micro, subCategoryId: subId });
-        }
-      });
-    });
-
-    setSearchResults({
-      heads: matchedHeads,
-      subs: matchedSubs,
-      micros: matchedMicros,
-    });
   };
 
   // Toggle head category expansion
@@ -196,6 +274,60 @@ const CategoriesFixed = () => {
     }
   };
 
+  // Ensure expanded + loaded (for search navigation)
+  const ensureHeadOpen = async (headId) => {
+    setExpandedHeads((prev) => ({ ...prev, [headId]: true }));
+    if (!subCategories[headId]) {
+      await fetchSubCategories(headId);
+    }
+  };
+
+  const ensureSubOpen = async (subId) => {
+    setExpandedSubs((prev) => ({ ...prev, [subId]: true }));
+    if (!microCategories[subId]) {
+      await fetchMicroCategories(subId);
+    }
+  };
+
+  // Search navigation
+  const navigateToCategory = async (level, category) => {
+    try {
+      if (level === 'head') {
+        await ensureHeadOpen(category.id);
+        setTimeout(() => headRefs.current[category.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+        return;
+      }
+
+      if (level === 'sub') {
+        const headId = category.headCategoryId || category.head_category_id;
+        if (!headId) return;
+
+        await ensureHeadOpen(headId);
+        // Wait a bit for subs to render
+        setTimeout(async () => {
+          await ensureSubOpen(category.id);
+          setTimeout(() => subRefs.current[category.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+        }, 250);
+        return;
+      }
+
+      if (level === 'micro') {
+        const headId = category.headCategoryId;
+        const subId = category.subCategoryId;
+
+        if (!headId || !subId) return;
+
+        await ensureHeadOpen(headId);
+        setTimeout(async () => {
+          await ensureSubOpen(subId);
+          setTimeout(() => microRefs.current[category.id]?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+        }, 300);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   // Open meta dialog for micro category
   const openMetaDialog = (microCategory) => {
     setSelectedMicroCategory(microCategory);
@@ -213,7 +345,6 @@ const CategoriesFixed = () => {
       const existing = microMeta[selectedMicroCategory.id];
 
       if (existing) {
-        // Update existing
         const { error } = await supabase
           .from('micro_category_meta')
           .update({
@@ -236,7 +367,6 @@ const CategoriesFixed = () => {
           return;
         }
       } else {
-        // Insert new
         const { error } = await supabase.from('micro_category_meta').insert([
           {
             micro_categories: selectedMicroCategory.id,
@@ -288,14 +418,10 @@ const CategoriesFixed = () => {
     setSelectedCategory(category);
     setParentCategory(parentId ? { id: parentId } : null);
 
-    // Get child count
     try {
       let count = 0;
-      if (level === 'head') {
-        count = await headCategoryApi.getChildCount(category.id);
-      } else if (level === 'sub') {
-        count = await subCategoryApi.getChildCount(category.id);
-      }
+      if (level === 'head') count = await headCategoryApi.getChildCount(category.id);
+      else if (level === 'sub') count = await subCategoryApi.getChildCount(category.id);
       setChildCount(count);
     } catch (error) {
       console.error('Error getting child count:', error);
@@ -378,39 +504,23 @@ const CategoriesFixed = () => {
     }
   };
 
-  // Expand/collapse logic for search navigation
-  const navigateToCategory = (level, category) => {
-    if (level === 'head') {
-      toggleHeadExpansion(category.id);
-    } else if (level === 'sub') {
-      toggleHeadExpansion(category.headCategoryId);
-      setTimeout(() => toggleSubExpansion(category.id), 500);
-    } else if (level === 'micro') {
-      // Find parent sub and head
-      const parentSubId = category.subCategoryId;
-      let parentHeadId = null;
-
-      Object.entries(subCategories).forEach(([headId, subs]) => {
-        if (subs.some((s) => s.id === parentSubId)) {
-          parentHeadId = headId;
-        }
-      });
-
-      if (parentHeadId) {
-        toggleHeadExpansion(parentHeadId);
-        setTimeout(() => {
-          toggleSubExpansion(parentSubId);
-        }, 500);
-      }
-    }
-  };
+  const hasAnyResults = useMemo(() => {
+    return (
+      (searchResults.heads?.length || 0) +
+        (searchResults.subs?.length || 0) +
+        (searchResults.micros?.length || 0) >
+      0
+    );
+  }, [searchResults]);
 
   return (
     <div className="p-6">
       <div className="flex items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold">Category Management</h1>
-          <p className="text-sm text-gray-500">Click on categories to expand and manage subcategories and meta information</p>
+          <p className="text-sm text-gray-500">
+            Click on categories to expand and manage subcategories and meta information
+          </p>
         </div>
 
         <Button onClick={() => openAddDialog('head')} className="gap-2">
@@ -425,14 +535,15 @@ const CategoriesFixed = () => {
           <Search className="w-4 h-4 absolute left-3 top-3 text-gray-400" />
           <Input
             value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
+            onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search head, sub, or micro categories..."
             className="pl-10 pr-10"
           />
           {searchQuery && (
             <button
               className="absolute right-3 top-3 text-gray-400 hover:text-gray-600"
-              onClick={() => handleSearch('')}
+              onClick={() => setSearchQuery('')}
+              type="button"
             >
               <X className="w-4 h-4" />
             </button>
@@ -440,43 +551,62 @@ const CategoriesFixed = () => {
         </div>
 
         {/* Search Results */}
-        {searchQuery && (searchResults.heads.length || searchResults.subs.length || searchResults.micros.length) ? (
+        {searchQuery.trim() ? (
           <div className="mt-2 bg-white border rounded-lg shadow-sm p-3">
-            <div className="text-xs font-semibold text-gray-500 mb-2">Search Results</div>
-            <div className="space-y-2 max-h-60 overflow-auto">
-              {searchResults.heads.map((head) => (
-                <button
-                  key={head.id}
-                  className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
-                  onClick={() => navigateToCategory('head', head)}
-                >
-                  <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">HEAD</span>
-                  <span className="text-sm">{head.name}</span>
-                </button>
-              ))}
-
-              {searchResults.subs.map((sub) => (
-                <button
-                  key={sub.id}
-                  className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
-                  onClick={() => navigateToCategory('sub', sub)}
-                >
-                  <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">SUB</span>
-                  <span className="text-sm">{sub.name}</span>
-                </button>
-              ))}
-
-              {searchResults.micros.map((micro) => (
-                <button
-                  key={micro.id}
-                  className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
-                  onClick={() => navigateToCategory('micro', micro)}
-                >
-                  <span className="text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">MICRO</span>
-                  <span className="text-sm">{micro.name}</span>
-                </button>
-              ))}
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="text-xs font-semibold text-gray-500">Search Results</div>
+              {searchLoading && (
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching...
+                </div>
+              )}
             </div>
+
+            {!searchLoading && !hasAnyResults ? (
+              <div className="text-sm text-gray-500 py-3">No results found.</div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-auto">
+                {searchResults.heads.map((head) => (
+                  <button
+                    key={head.id}
+                    className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => navigateToCategory('head', head)}
+                    type="button"
+                  >
+                    <span className={badgeHead}>HEAD</span>
+                    <span className="text-sm">{head.name}</span>
+                  </button>
+                ))}
+
+                {searchResults.subs.map((sub) => (
+                  <button
+                    key={sub.id}
+                    className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => navigateToCategory('sub', sub)}
+                    type="button"
+                  >
+                    <span className={badgeSub}>SUB</span>
+                    <span className="text-sm">{sub.name}</span>
+                    <span className="text-xs text-gray-500">— in {sub.headName}</span>
+                  </button>
+                ))}
+
+                {searchResults.micros.map((micro) => (
+                  <button
+                    key={micro.id}
+                    className="w-full text-left px-2 py-1 rounded hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => navigateToCategory('micro', micro)}
+                    type="button"
+                  >
+                    <span className={badgeMicro}>MICRO</span>
+                    <span className="text-sm">{micro.name}</span>
+                    <span className="text-xs text-gray-500">
+                      — {micro.subName} / {micro.headName}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : null}
       </div>
@@ -486,7 +616,7 @@ const CategoriesFixed = () => {
           <div className="p-8 text-center text-gray-500">Loading categories...</div>
         ) : (
           headCategories.map((headCategory) => (
-            <div key={headCategory.id} className="border-b last:border-b-0">
+            <div key={headCategory.id} className="border-b last:border-b-0" ref={(el) => (headRefs.current[headCategory.id] = el)}>
               {/* HEAD CATEGORY */}
               <div
                 className="p-4 hover:bg-gray-50 cursor-pointer flex items-center justify-between group"
@@ -498,21 +628,37 @@ const CategoriesFixed = () => {
                   ) : (
                     <ChevronRight className="w-5 h-5 text-gray-500" />
                   )}
+
+                  <span className={badgeHead}>HEAD</span>
+
                   <div>
                     <div className="font-semibold text-lg">{headCategory.name}</div>
                     <div className="text-xs text-gray-500">{headCategory.slug}</div>
                   </div>
                 </div>
+
                 <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button size="sm" variant="outline" onClick={() => openEditDialog('head', headCategory)} className="gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEditDialog('head', headCategory);
+                    }}
+                    className="gap-1"
+                  >
                     <Edit2 className="w-4 h-4" />
                     Edit
                   </Button>
+
                   <Button
                     size="sm"
                     variant="outline"
                     className="text-red-600 hover:text-red-700"
-                    onClick={() => openDeleteDialog('head', headCategory)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDeleteDialog('head', headCategory);
+                    }}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
@@ -522,7 +668,7 @@ const CategoriesFixed = () => {
               {/* SUB CATEGORIES */}
               {expandedHeads[headCategory.id] && (
                 <div className="bg-gray-50 border-t">
-                  {/* ✅ Always show Add Sub Category even when there are 0 sub-categories */}
+                  {/* Always show Add Sub Category */}
                   <div className="flex items-center justify-between gap-3 ml-8 px-4 py-2 bg-gray-50 border-b">
                     <div className="text-xs text-gray-500">
                       Sub-categories for <span className="font-medium text-gray-700">{headCategory.name}</span>
@@ -541,19 +687,26 @@ const CategoriesFixed = () => {
                   </div>
 
                   {subCategories[headCategory.id]?.map((subCategory) => (
-                    <div key={subCategory.id} className="border-b">
+                    <div key={subCategory.id} className="border-b" ref={(el) => (subRefs.current[subCategory.id] = el)}>
                       <div className="p-4 ml-8 hover:bg-white flex items-center gap-3 justify-between group">
-                        <div className="flex-1 cursor-pointer flex items-center gap-3" onClick={() => toggleSubExpansion(subCategory.id)}>
+                        <div
+                          className="flex-1 cursor-pointer flex items-center gap-3"
+                          onClick={() => toggleSubExpansion(subCategory.id)}
+                        >
                           {expandedSubs[subCategory.id] ? (
                             <ChevronDown className="w-4 h-4" />
                           ) : (
                             <ChevronRight className="w-4 h-4" />
                           )}
+
+                          <span className={badgeSub}>SUB</span>
+
                           <div>
                             <div className="font-medium">{subCategory.name}</div>
                             <div className="text-xs text-gray-500">{subCategory.slug}</div>
                           </div>
                         </div>
+
                         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <Button
                             size="sm"
@@ -593,10 +746,14 @@ const CategoriesFixed = () => {
                           {microCategories[subCategory.id]?.map((microCategory) => (
                             <div
                               key={microCategory.id}
+                              ref={(el) => (microRefs.current[microCategory.id] = el)}
                               className="p-4 ml-16 border-b hover:bg-blue-50 flex items-center justify-between gap-3 group"
                             >
                               <div className="flex-1">
-                                <div className="font-medium text-sm">{microCategory.name}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className={badgeMicro}>MICRO</span>
+                                  <div className="font-medium text-sm">{microCategory.name}</div>
+                                </div>
                                 <div className="text-xs text-gray-500">{microCategory.slug}</div>
                                 {microMeta[microCategory.id] && (
                                   <div className="text-xs text-green-600 mt-1">✓ Meta tags configured</div>
@@ -652,7 +809,9 @@ const CategoriesFixed = () => {
                                         <Label>Base Description</Label>
                                         <Textarea
                                           value={metaData.description}
-                                          onChange={(e) => setMetaData((prev) => ({ ...prev, description: e.target.value }))}
+                                          onChange={(e) =>
+                                            setMetaData((prev) => ({ ...prev, description: e.target.value }))
+                                          }
                                           placeholder="e.g. High-quality mobile phones with latest features and competitive prices"
                                           rows={4}
                                         />
@@ -687,15 +846,11 @@ const CategoriesFixed = () => {
                                 </Button>
                               </div>
                             </div>
-                          )) || (
-                            <div className="p-4 ml-16 text-sm text-gray-500">No micro categories</div>
-                          )}
+                          )) || <div className="p-4 ml-16 text-sm text-gray-500">No micro categories</div>}
                         </div>
                       )}
                     </div>
-                  )) || (
-                    <div className="p-4 ml-8 text-sm text-gray-500">No sub categories</div>
-                  )}
+                  )) || <div className="p-4 ml-8 text-sm text-gray-500">No sub categories</div>}
                 </div>
               )}
             </div>
@@ -729,4 +884,5 @@ const CategoriesFixed = () => {
     </div>
   );
 };
+
 export default CategoriesFixed;
