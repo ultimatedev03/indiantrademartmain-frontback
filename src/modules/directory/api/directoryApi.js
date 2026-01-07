@@ -21,22 +21,17 @@ export const directoryApi = {
       .eq('head_category_id', head.id)
       .eq('is_active', true)
       .order('name');
+
     if (error) throw error;
     return data || [];
   },
 
-  // ✅ Micro categories for a sub-category
-  // IMPORTANT:
-  // - Earlier we used `.single()` on `sub_categories.slug`.
-  // - If two different head categories have the same sub slug, Supabase throws "Multiple rows returned"
-  //   and UI shows "No categories found".
-  // - So we resolve sub id safely using LIMIT 1 (and if headSlug is provided, we also filter by head).
+  // ✅ FIXED: micro_categories table me `description` column exist nahi karta
   getMicroCategories: async (subSlug, headSlug = null) => {
     if (!subSlug) return [];
 
     let subId = null;
 
-    // If headSlug is available, resolve head -> sub uniquely
     if (headSlug) {
       const { data: head, error: headErr } = await supabase
         .from('head_categories')
@@ -45,6 +40,7 @@ export const directoryApi = {
         .limit(1);
 
       if (headErr) throw headErr;
+
       const headId = head?.[0]?.id;
       if (!headId) return [];
 
@@ -58,7 +54,6 @@ export const directoryApi = {
       if (subErr) throw subErr;
       subId = subs?.[0]?.id || null;
     } else {
-      // Fallback: pick first match to avoid `.single()` multiple rows error
       const { data: subs, error: subErr } = await supabase
         .from('sub_categories')
         .select('id')
@@ -73,20 +68,17 @@ export const directoryApi = {
 
     const { data, error } = await supabase
       .from('micro_categories')
-      .select('id, name, slug, description')
+      .select('id, name, slug, sort_order') // ✅ only existing columns
       .eq('sub_category_id', subId)
       .eq('is_active', true)
-      .order('name');
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true });
 
     if (error) throw error;
     return data || [];
   },
-  /**
-   * ✅ Micro Category cover images (NO hardcode)
-   * We don't have image_url in micro_categories table.
-   * So we derive a cover image from the first ACTIVE product image for each micro category.
-   * Returns: { [microId]: imageUrl }
-   */
+
+  // ✅ cover images derived from products
   getMicroCategoryCovers: async (microIds = []) => {
     try {
       const ids = Array.isArray(microIds) ? microIds.filter(Boolean) : [];
@@ -127,207 +119,225 @@ export const directoryApi = {
     }
   },
 
-  searchMicroCategories: async (q) => {
-  if (!q || q.length < 2) return [];
+  /**
+   * ✅ NEW: micro-wise products preview (single query, then group client-side)
+   * Returns: { [microId]: Product[] }
+   */
+  getProductsPreviewByMicroIds: async ({ microIds = [], perMicro = 6 }) => {
+    try {
+      const ids = Array.isArray(microIds) ? microIds.filter(Boolean) : [];
+      const per = Math.max(1, Math.min(Number(perMicro) || 6, 12));
+      if (ids.length === 0) return {};
 
-  let results = [];
+      const fetchLimit = Math.min(ids.length * per * 3, 600);
 
-  // ✅ 1) First: search in micro_categories (same as before)
-  const { data: microData, error: microError } = await supabase
-    .from('micro_categories')
-    .select(`
-      id, name, slug, 
-      sub_categories(id, name, slug, head_categories(id, name, slug))
-    `)
-    .ilike('name', `%${q}%`)
-    .limit(10);
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, slug, price, images, micro_category_id, created_at')
+        .in('micro_category_id', ids)
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false })
+        .limit(fetchLimit);
 
-  if (!microError && microData) {
-    results = microData.map(item => ({
-      id: item.id,
-      name: item.name,
-      slug: item.slug,
-      path: `${item.sub_categories?.head_categories?.name} > ${item.sub_categories?.name} > ${item.name}`,
-      head_id: item.sub_categories?.head_categories?.id,
-      sub_id: item.sub_categories?.id,
-      sub_slug: item.sub_categories?.slug,
-      head_slug: item.sub_categories?.head_categories?.slug,
-      type: 'micro'
-    }));
-  }
+      if (error) throw error;
 
-  // ✅ 2) If micro results are low, try product name -> map to its micro_category
-  if (results.length < 6) {
-    const { data: prodData, error: prodError } = await supabase
-      .from('products')
-      .select('id, micro_category_id, status')
-      .ilike('name', `%${q}%`)
-      .or('status.eq.ACTIVE,status.is.null')
-      .limit(20);
-
-    if (!prodError && prodData) {
-      const microIds = Array.from(
-        new Set((prodData || []).map(p => p.micro_category_id).filter(Boolean))
-      );
-
-      if (microIds.length > 0) {
-        const { data: microFromProducts, error: mpErr } = await supabase
-          .from('micro_categories')
-          .select(`
-            id, name, slug,
-            sub_categories(id, name, slug, head_categories(id, name, slug))
-          `)
-          .in('id', microIds)
-          .limit(10);
-
-        if (!mpErr && microFromProducts) {
-          const mapped = microFromProducts.map(item => ({
-            id: item.id,
-            name: item.name,
-            slug: item.slug,
-            path: `${item.sub_categories?.head_categories?.name} > ${item.sub_categories?.name} > ${item.name}`,
-            head_id: item.sub_categories?.head_categories?.id,
-            sub_id: item.sub_categories?.id,
-            sub_slug: item.sub_categories?.slug,
-            head_slug: item.sub_categories?.head_categories?.slug,
-            type: 'micro'
-          }));
-
-          // merge (product-based microcategories should come first)
-          results = [...mapped, ...results];
-        }
+      const map = {};
+      for (const row of data || []) {
+        const mid = row.micro_category_id;
+        if (!mid) continue;
+        if (!map[mid]) map[mid] = [];
+        if (map[mid].length >= per) continue;
+        map[mid].push(row);
       }
-    }
-  }
 
-  // ✅ 3) If still low, fallback search sub_categories (same as before)
-  if (results.length < 5) {
-    const { data: subData, error: subError } = await supabase
-      .from('sub_categories')
+      return map;
+    } catch (e) {
+      console.error('Error loading products preview:', e);
+      // ✅ IMPORTANT: never break the page
+      return {};
+    }
+  },
+
+  searchMicroCategories: async (q) => {
+    if (!q || q.length < 2) return [];
+
+    let results = [];
+
+    const { data: microData, error: microError } = await supabase
+      .from('micro_categories')
       .select(`
-        id, name, slug,
-        head_categories(id, name, slug)
+        id, name, slug, 
+        sub_categories(id, name, slug, head_categories(id, name, slug))
       `)
       .ilike('name', `%${q}%`)
       .limit(10);
 
-    if (!subError && subData) {
-      const subResults = subData.map(item => ({
+    if (!microError && microData) {
+      results = microData.map(item => ({
         id: item.id,
         name: item.name,
         slug: item.slug,
-        path: `${item.head_categories?.name} > ${item.name}`,
-        head_id: item.head_categories?.id,
-        sub_id: item.id,
-        sub_slug: item.slug,
-        head_slug: item.head_categories?.slug,
-        type: 'sub'
+        path: `${item.sub_categories?.head_categories?.name} > ${item.sub_categories?.name} > ${item.name}`,
+        head_id: item.sub_categories?.head_categories?.id,
+        sub_id: item.sub_categories?.id,
+        sub_slug: item.sub_categories?.slug,
+        head_slug: item.sub_categories?.head_categories?.slug,
+        type: 'micro'
       }));
-
-      results = [...results, ...subResults];
     }
-  }
 
-  // ✅ Deduplicate by type+slug (important)
-  const seen = new Set();
-  const unique = [];
-  for (const r of results) {
-    const key = `${r.type}:${r.slug}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(r);
+    if (results.length < 6) {
+      const { data: prodData, error: prodError } = await supabase
+        .from('products')
+        .select('id, micro_category_id, status')
+        .ilike('name', `%${q}%`)
+        .or('status.eq.ACTIVE,status.is.null')
+        .limit(20);
+
+      if (!prodError && prodData) {
+        const microIds = Array.from(new Set((prodData || []).map(p => p.micro_category_id).filter(Boolean)));
+
+        if (microIds.length > 0) {
+          const { data: microFromProducts, error: mpErr } = await supabase
+            .from('micro_categories')
+            .select(`
+              id, name, slug,
+              sub_categories(id, name, slug, head_categories(id, name, slug))
+            `)
+            .in('id', microIds)
+            .limit(10);
+
+          if (!mpErr && microFromProducts) {
+            const mapped = microFromProducts.map(item => ({
+              id: item.id,
+              name: item.name,
+              slug: item.slug,
+              path: `${item.sub_categories?.head_categories?.name} > ${item.sub_categories?.name} > ${item.name}`,
+              head_id: item.sub_categories?.head_categories?.id,
+              sub_id: item.sub_categories?.id,
+              sub_slug: item.sub_categories?.slug,
+              head_slug: item.sub_categories?.head_categories?.slug,
+              type: 'micro'
+            }));
+
+            results = [...mapped, ...results];
+          }
+        }
+      }
     }
-  }
 
-  return unique.slice(0, 10);
-},
+    if (results.length < 5) {
+      const { data: subData, error: subError } = await supabase
+        .from('sub_categories')
+        .select(`
+          id, name, slug,
+          head_categories(id, name, slug)
+        `)
+        .ilike('name', `%${q}%`)
+        .limit(10);
 
-searchProducts: async ({ q, stateId, cityId, sort = '', page = 1, limit = 20 }) => {
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
+      if (!subError && subData) {
+        const subResults = subData.map(item => ({
+          id: item.id,
+          name: item.name,
+          slug: item.slug,
+          path: `${item.head_categories?.name} > ${item.name}`,
+          head_id: item.head_categories?.id,
+          sub_id: item.id,
+          sub_slug: item.slug,
+          head_slug: item.head_categories?.slug,
+          type: 'sub'
+        }));
 
-  let query = supabase
-    .from('products')
-    .select(`
-      *,
-      vendors!inner (
-        id, company_name, city, state, state_id, city_id,
-        seller_rating, kyc_status, verification_badge, trust_score
-      )
-    `, { count: 'exact' })
-    .eq('status', 'ACTIVE');
+        results = [...results, ...subResults];
+      }
+    }
 
-  // Search by product name
-  if (q) query = query.ilike('name', `%${q}%`);
+    const seen = new Set();
+    const unique = [];
+    for (const r of results) {
+      const key = `${r.type}:${r.slug}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(r);
+      }
+    }
 
-  // Filter by state
-  if (stateId) query = query.eq('vendors.state_id', stateId);
+    return unique.slice(0, 10);
+  },
 
-  // Filter by city
-  if (cityId) query = query.eq('vendors.city_id', cityId);
+  searchProducts: async ({ q, stateId, cityId, sort = '', page = 1, limit = 20 }) => {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-  // Sorting
-  if (sort === 'price_asc') query = query.order('price', { ascending: true });
-  else if (sort === 'price_desc') query = query.order('price', { ascending: false });
-  else query = query.order('created_at', { ascending: false });
+    let query = supabase
+      .from('products')
+      .select(`
+        *,
+        vendors!inner (
+          id, company_name, city, state, state_id, city_id,
+          seller_rating, kyc_status, verification_badge, trust_score
+        )
+      `, { count: 'exact' })
+      .eq('status', 'ACTIVE');
 
-  query = query.range(from, to);
+    if (q) query = query.ilike('name', `%${q}%`);
+    if (stateId) query = query.eq('vendors.state_id', stateId);
+    if (cityId) query = query.eq('vendors.city_id', cityId);
 
-  const { data, count, error } = await query;
-  if (error) throw error;
+    if (sort === 'price_asc') query = query.order('price', { ascending: true });
+    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
 
-  return { data: data || [], count };
-},
+    query = query.range(from, to);
 
-listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, limit = 20 }) => {
-  const from = (page - 1) * limit;
-  const to = from + limit - 1;
+    const { data, count, error } = await query;
+    if (error) throw error;
 
-  let query = supabase
-    .from('products')
-    .select(`
-      *,
-      vendors!inner (
-        id, company_name, city, state, state_id, city_id,
-        seller_rating, kyc_status, verification_badge, trust_score
-      )
-    `, { count: 'exact' })
-    .eq('status', 'ACTIVE');
+    return { data: data || [], count };
+  },
 
-  // ✅ filter by micro category
-  if (microSlug) {
-    const { data: micro, error: microErr } = await supabase
-      .from('micro_categories')
-      .select('id')
-      .eq('slug', microSlug)
-      .single();
+  listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, limit = 20 }) => {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    if (microErr) throw microErr;
-    if (micro) query = query.eq('micro_category_id', micro.id);
-  }
+    let query = supabase
+      .from('products')
+      .select(`
+        *,
+        vendors!inner (
+          id, company_name, city, state, state_id, city_id,
+          seller_rating, kyc_status, verification_badge, trust_score
+        )
+      `, { count: 'exact' })
+      .eq('status', 'ACTIVE');
 
-  // ✅ search within micro
-  if (q) query = query.ilike('name', `%${q}%`);
+    if (microSlug) {
+      const { data: micro, error: microErr } = await supabase
+        .from('micro_categories')
+        .select('id')
+        .eq('slug', microSlug)
+        .single();
 
-  // ✅ FIX: state filter (UUID) directly on vendors table
-  if (stateId) query = query.eq('vendors.state_id', stateId);
+      if (microErr) throw microErr;
+      if (micro) query = query.eq('micro_category_id', micro.id);
+    }
 
-  // ✅ optional city filter if used later
-  if (cityId) query = query.eq('vendors.city_id', cityId);
+    if (q) query = query.ilike('name', `%${q}%`);
+    if (stateId) query = query.eq('vendors.state_id', stateId);
+    if (cityId) query = query.eq('vendors.city_id', cityId);
 
-  // ✅ sorting
-  if (sort === 'price_asc') query = query.order('price', { ascending: true });
-  else if (sort === 'price_desc') query = query.order('price', { ascending: false });
-  else query = query.order('created_at', { ascending: false });
+    if (sort === 'price_asc') query = query.order('price', { ascending: true });
+    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
 
-  query = query.range(from, to);
+    query = query.range(from, to);
 
-  const { data, count, error } = await query;
-  if (error) throw error;
+    const { data, count, error } = await query;
+    if (error) throw error;
 
-  return { data: data || [], count };
-},
-
+    return { data: data || [], count };
+  },
 
   getProductDetailBySlug: async (slug) => {
     const { data: product, error } = await supabase
@@ -338,10 +348,9 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
       `)
       .eq('slug', slug)
       .single();
-    
+
     if (error) throw error;
-    
-    // Fetch category separately if needed
+
     if (product && product.micro_category_id) {
       const { data: catData } = await supabase
         .from('micro_categories')
@@ -354,63 +363,51 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
         `)
         .eq('id', product.micro_category_id)
         .single();
+
       if (catData) {
         product.micro_categories = catData;
       }
     }
-    
-    // Fetch meta tags and descriptions for extra_micro_categories from micro_category_meta table
+
     if (product && product.extra_micro_categories) {
       try {
         let extraCategories = product.extra_micro_categories;
-        
-        // Parse JSON string if necessary
-        if (typeof extraCategories === 'string') {
-          extraCategories = JSON.parse(extraCategories);
-        }
-        
+        if (typeof extraCategories === 'string') extraCategories = JSON.parse(extraCategories);
+
         if (Array.isArray(extraCategories) && extraCategories.length > 0) {
           const extraIds = extraCategories.map(c => c?.id).filter(Boolean);
-          
+
           if (extraIds.length > 0) {
-            // Fetch meta tags and descriptions from micro_category_meta table
             const { data: metaData } = await supabase
               .from('micro_category_meta')
               .select('micro_categories, meta_tags, description')
               .in('micro_categories', extraIds);
-            
+
             if (metaData && metaData.length > 0) {
-              // Merge meta tags and descriptions with extra_micro_categories
               product.extra_micro_categories = extraCategories.map(cat => {
                 const withMeta = metaData.find(m => m.micro_categories === cat?.id);
-                return withMeta 
-                  ? { ...cat, meta_tags: withMeta.meta_tags, description: withMeta.description } 
-                  : cat;
+                return withMeta ? { ...cat, meta_tags: withMeta.meta_tags, description: withMeta.description } : cat;
               });
             }
           }
         }
       } catch (err) {
         console.warn('Error processing extra_micro_categories:', err);
-        // Keep original data if parsing fails
       }
     }
-    
-    // Also fetch meta tags and description for the primary micro_category
+
     if (product && product.micro_category_id) {
       try {
-        const { data: primaryMeta, error: metaError } = await supabase
+        const { data: primaryMeta } = await supabase
           .from('micro_category_meta')
           .select('meta_tags, description')
           .eq('micro_categories', product.micro_category_id)
-          .maybeSingle(); // Use maybeSingle to handle no rows gracefully
-        
+          .maybeSingle();
+
         if (primaryMeta) {
           product.primary_meta_tags = primaryMeta.meta_tags;
           product.primary_meta_description = primaryMeta.description;
         } else {
-          console.info('No meta data found for micro_category_id:', product.micro_category_id);
-          // Use category name and product name as fallback
           if (product.micro_categories?.name) {
             product.primary_meta_tags = `${product.name} | ${product.micro_categories.name}`;
           }
@@ -419,10 +416,10 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
         console.warn('Error fetching primary micro category meta:', err);
       }
     }
-    
+
     return product;
   },
-  
+
   getStates: async () => {
     const { data } = await supabase.from('states').select('id, name, slug').order('name');
     return data || [];
@@ -434,7 +431,6 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
     return data || [];
   },
 
-  // Get micro-category by slug with metadata
   getMicroCategoryBySlug: async (microSlug) => {
     try {
       const { data: micro, error } = await supabase
@@ -448,16 +444,15 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
         `)
         .eq('slug', microSlug)
         .single();
-      
+
       if (error || !micro) return null;
-      
-      // Fetch meta tags and description from micro_category_meta
+
       const { data: metaData } = await supabase
         .from('micro_category_meta')
         .select('meta_tags, description')
         .eq('micro_categories', micro.id)
         .maybeSingle();
-      
+
       return {
         ...micro,
         meta_tags: metaData?.meta_tags,
@@ -469,22 +464,19 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
     }
   },
 
-  // Get products by micro-category and location
   getProductsByMicroAndLocation: async ({ microSlug, stateId, cityId, page = 1, limit = 20 }) => {
     try {
       const from = (page - 1) * limit;
       const to = from + limit - 1;
 
-      // First get micro-category by slug
       const { data: micro, error: microError } = await supabase
         .from('micro_categories')
         .select('id')
         .eq('slug', microSlug)
         .single();
-      
+
       if (microError || !micro) return { data: [], count: 0 };
 
-      // Build query for products
       let query = supabase
         .from('products')
         .select(`
@@ -496,19 +488,15 @@ listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, lim
         `, { count: 'exact' })
         .eq('micro_category_id', micro.id)
         .eq('status', 'ACTIVE');
-      
-      // Filter by state if provided
+
       if (stateId) query = query.eq('vendors.state_id', stateId);
-      
-      // Filter by city if provided
       if (cityId) query = query.eq('vendors.city_id', cityId);
-      
-      // Apply sorting and pagination
+
       query = query.order('created_at', { ascending: false }).range(from, to);
-      
+
       const { data, count, error } = await query;
       if (error) throw error;
-      
+
       return { data: data || [], count };
     } catch (err) {
       console.warn('Error fetching products by micro and location:', err);

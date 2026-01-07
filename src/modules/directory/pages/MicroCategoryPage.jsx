@@ -1,23 +1,54 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
-import { ChevronRight, Home, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { ChevronRight, Home, Image as ImageIcon, Loader2, ExternalLink } from 'lucide-react';
 
+const safeStr = (v) => (typeof v === 'string' ? v.trim() : '');
 const safeImg = (url) => (typeof url === 'string' && url.trim().length > 0 ? url.trim() : null);
+const humanTitle = (slug) => safeStr(slug).replace(/-/g, ' ').trim();
 
-const MicroCategoryCard = ({ headSlug, subSlug, micro, coverUrl }) => {
+const safeFirstImage = (product) => {
+  const raw = product?.images;
+
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed[0]) {
+        const first = parsed[0];
+        if (typeof first === 'string') return first;
+        if (first && typeof first === 'object') return first.url || first.image_url || first.src || null;
+      }
+    } catch (_) {}
+  }
+
+  if (Array.isArray(raw) && raw[0]) {
+    const first = raw[0];
+    if (typeof first === 'string') return first;
+    if (first && typeof first === 'object') return first.url || first.image_url || first.src || null;
+  }
+
+  return product?.image || null;
+};
+
+const formatINR = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `₹${n.toLocaleString('en-IN')}`;
+};
+
+const MicroSideCard = ({ to, title, coverUrl }) => {
   const img = safeImg(coverUrl);
 
   return (
     <Link
-      to={`/directory/${headSlug}/${subSlug}/${micro.slug}`}
-      className="bg-white rounded-xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all overflow-hidden group"
+      to={to}
+      className="group bg-white rounded-xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all overflow-hidden flex lg:flex-col"
     >
-      <div className="h-36 bg-slate-50 overflow-hidden flex items-center justify-center">
+      <div className="relative h-24 w-28 lg:w-full lg:h-40 bg-slate-50 overflow-hidden flex items-center justify-center shrink-0">
         {img ? (
           <img
             src={img}
-            alt={micro.name}
+            alt={title}
             loading="lazy"
             className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
             onError={(e) => {
@@ -26,48 +57,163 @@ const MicroCategoryCard = ({ headSlug, subSlug, micro, coverUrl }) => {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-slate-400">
-            <ImageIcon className="w-8 h-8" />
+            <ImageIcon className="w-7 h-7" />
           </div>
         )}
       </div>
 
-      <div className="p-4">
-        <h3 className="font-extrabold text-slate-900 mb-1 group-hover:text-blue-700 line-clamp-2">
-          {micro.name}
+      <div className="p-3 lg:p-4 flex-1">
+        <h3 className="font-extrabold text-slate-900 group-hover:text-blue-700 transition-colors line-clamp-2">
+          {title}
         </h3>
-        <div className="text-xs text-slate-500 mt-2">View Products →</div>
+        <div className="mt-2 text-xs text-slate-500 flex items-center gap-1">
+          View all <ExternalLink className="w-3.5 h-3.5" />
+        </div>
       </div>
     </Link>
   );
 };
 
+const ProductMiniCard = ({ product }) => {
+  const img = safeImg(safeFirstImage(product));
+  const price = formatINR(product?.price);
+  const slug = product?.slug || product?.id;
+
+  return (
+    <Link
+      to={slug ? `/p/${slug}` : '/directory'}
+      className="group bg-white rounded-lg border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all overflow-hidden"
+      title={product?.name}
+    >
+      <div className="h-28 bg-slate-50 overflow-hidden flex items-center justify-center">
+        {img ? (
+          <img
+            src={img}
+            alt={product?.name || 'Product'}
+            loading="lazy"
+            className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none';
+            }}
+          />
+        ) : (
+          <div className="text-slate-400">
+            <ImageIcon className="w-6 h-6" />
+          </div>
+        )}
+      </div>
+
+      <div className="p-3">
+        <div className="text-sm font-bold text-slate-900 line-clamp-2 group-hover:text-blue-700 transition-colors">
+          {product?.name || 'Product'}
+        </div>
+        <div className="mt-2 text-xs text-slate-600">{price || 'Get latest price'}</div>
+      </div>
+    </Link>
+  );
+};
+
+const MicroCategorySection = ({ headSlug, subSlug, micro, coverUrl, products = [] }) => {
+  const title = micro?.name || humanTitle(micro?.slug);
+  const microTo = `/directory/${headSlug}/${subSlug}/${micro.slug}`;
+
+  return (
+    <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-0">
+        <div className="lg:col-span-3 p-4 border-b lg:border-b-0 lg:border-r border-slate-200 bg-white">
+          <MicroSideCard to={microTo} title={title} coverUrl={coverUrl} />
+        </div>
+
+        <div className="lg:col-span-9 p-4 bg-white">
+          {products.length === 0 ? (
+            <div className="text-slate-500 text-sm py-8 text-center">
+              No products added in this category yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {products.map((p) => (
+                <ProductMiniCard key={p.id} product={p} />
+              ))}
+            </div>
+          )}
+
+          <div className="mt-4 flex justify-end">
+            <Link
+              to={microTo}
+              className="text-sm font-semibold text-blue-700 hover:text-blue-900 underline underline-offset-4"
+            >
+              View all products →
+            </Link>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+};
+
 const MicroCategoryPage = () => {
   const { headSlug, subSlug } = useParams();
+
   const [micros, setMicros] = useState([]);
   const [covers, setCovers] = useState({});
+  const [previews, setPreviews] = useState({});
   const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
 
   useEffect(() => {
+    let alive = true;
+
     const load = async () => {
       setLoading(true);
-      try {
-        const data = await directoryApi.getMicroCategories(subSlug, headSlug);
-        setMicros(data || []);
+      setErrorMsg('');
+      setMicros([]);
+      setCovers({});
+      setPreviews({});
 
-        const ids = (data || []).map((m) => m.id).filter(Boolean);
-        const coverMap = await directoryApi.getMicroCategoryCovers(ids);
-        setCovers(coverMap || {});
+      try {
+        // ✅ 1) Micro categories (must work)
+        const list = await directoryApi.getMicroCategories(subSlug, headSlug);
+        if (!alive) return;
+        setMicros(list || []);
+
+        const ids = (list || []).map((m) => m.id).filter(Boolean);
+
+        // ✅ 2) Covers (optional)
+        try {
+          const coverMap = await directoryApi.getMicroCategoryCovers(ids);
+          if (!alive) return;
+          setCovers(coverMap || {});
+        } catch (e) {
+          console.warn('Cover fetch failed:', e);
+        }
+
+        // ✅ 3) Product previews (optional) — if fail, still show micros
+        try {
+          if (typeof directoryApi.getProductsPreviewByMicroIds === 'function') {
+            const previewMap = await directoryApi.getProductsPreviewByMicroIds({ microIds: ids, perMicro: 6 });
+            if (!alive) return;
+            setPreviews(previewMap || {});
+          }
+        } catch (e) {
+          console.warn('Preview fetch failed:', e);
+        }
       } catch (e) {
         console.error(e);
+        if (!alive) return;
+        setErrorMsg('Something went wrong while loading this category. Please try again.');
       } finally {
+        if (!alive) return;
         setLoading(false);
       }
     };
 
     if (subSlug) load();
+    return () => {
+      alive = false;
+    };
   }, [subSlug, headSlug]);
 
-  const title = useMemo(() => (subSlug || '').replace(/-/g, ' ').trim(), [subSlug]);
+  const title = useMemo(() => humanTitle(subSlug), [subSlug]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
@@ -79,13 +225,14 @@ const MicroCategoryPage = () => {
             </Link>
             <ChevronRight className="w-4 h-4 mx-2" />
             <Link to={`/directory/${headSlug}`} className="hover:text-blue-700 capitalize">
-              {headSlug?.replace(/-/g, ' ')}
+              {humanTitle(headSlug)}
             </Link>
             <ChevronRight className="w-4 h-4 mx-2" />
             <span className="font-semibold text-gray-900 capitalize">{title}</span>
           </nav>
 
           <h1 className="text-3xl font-extrabold text-slate-900 capitalize">{title}</h1>
+          <p className="mt-1 text-sm text-slate-600">Browse micro-categories and products in this sub-category.</p>
         </div>
       </div>
 
@@ -94,21 +241,26 @@ const MicroCategoryPage = () => {
           <div className="flex justify-center py-12">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
+        ) : errorMsg ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-slate-700">
+            {errorMsg}
+          </div>
+        ) : micros.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-slate-500">
+            No micro categories found.
+          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="space-y-5">
             {micros.map((m) => (
-              <MicroCategoryCard
+              <MicroCategorySection
                 key={m.id}
                 headSlug={headSlug}
                 subSlug={subSlug}
                 micro={m}
-                coverUrl={covers?.[m.id]}
+                coverUrl={covers?.[m.id] || safeFirstImage((previews?.[m.id] || [])[0])}
+                products={previews?.[m.id] || []}
               />
             ))}
-
-            {micros.length === 0 && (
-              <div className="col-span-full text-center text-slate-500 py-10">No categories found.</div>
-            )}
           </div>
         )}
       </div>
