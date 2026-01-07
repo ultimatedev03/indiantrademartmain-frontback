@@ -1,8 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Helmet } from 'react-helmet';
 import { Loader2 } from 'lucide-react';
 import DirectorySearchBar from '@/modules/directory/components/DirectorySearchBar';
 import HeadCategoryShowcase from '@/modules/directory/components/HeadCategoryShowcase';
 import { categoryApi } from '@/modules/directory/services/categoryApi';
+
+const DIRECTORY_SEO = {
+  title: 'Business Directory, India Business Directory,Companies Directory in India',
+  description:
+    'India Business Directory - Online business & companies directory with free business listings of indian companies, exporter importer and detailed information about their business profiles. Free list yourself at largest & most trusted business directory in india.',
+  keywords:
+    'Business directory, india business directory, directory of companies, exporter importer directory, companies directory in india, companies database india, business directory in india, business listings, companies directories, online business directory, free directory, Indian companies directory, free business listings in india, free business listings, business directory, companies directory, business to business companies, directory of indian companies, exporters business directory, companies business listings, companies directory india, free indian companies business listings, indiamart',
+};
 
 const Directory = () => {
   const [homeCategories, setHomeCategories] = useState([]);
@@ -36,6 +45,12 @@ const Directory = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
+      <Helmet>
+        <title>{DIRECTORY_SEO.title}</title>
+        <meta name="description" content={DIRECTORY_SEO.description} />
+        <meta name="keywords" content={DIRECTORY_SEO.keywords} />
+      </Helmet>
+
       {/* ✅ Hero Search (KEEP THIS SAME) */}
       <div className="bg-[#003D82] py-16 px-4">
         <div className="container mx-auto max-w-4xl text-center">
