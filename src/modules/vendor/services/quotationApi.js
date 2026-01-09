@@ -1,325 +1,207 @@
-/* eslint-disable no-console */
-const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
+// ✅ Frontend Quotation API (Vite bundle-safe)
+//
+// This file is imported by React pages (SendQuotation.jsx, Buyer Quotations, etc.)
+// so it MUST be an ESM module and MUST export `quotationApi`.
+//
+// Local dev:
+//   Vite proxy routes /api -> http://localhost:3001 (see vite.config.js)
+// Production (Netlify):
+//   Netlify Functions are available at /.netlify/functions/<name>
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+import { supabase } from '@/lib/customSupabaseClient';
+import { vendorApi } from '@/modules/vendor/services/vendorApi';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
-  }
-});
+// Helper to decide whether we're on localhost dev or Netlify
+const isLocal =
+  typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
-async function sendQuotationEmail(to, data, isRegistered) {
-  const vendor = data.vendor || {};
-  const quotation = data.quotation || {};
+const API_BASE = isLocal ? '/api' : '/.netlify/functions';
 
-  const subject = `Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}`;
-
-  const text = `
-Quotation Details
------------------
-Title: ${quotation.title || ''}
-Amount: ${quotation.quotation_amount || ''}
-Quantity: ${quotation.quantity || ''}
-Validity Days: ${quotation.validity_days || ''}
-Delivery Days: ${quotation.delivery_days || ''}
-Terms: ${quotation.terms_conditions || ''}
-
-Vendor
-------
-Name: ${vendor.owner_name || ''}
-Company: ${vendor.company_name || ''}
-Phone: ${vendor.phone || ''}
-Email: ${vendor.email || ''}
-
-${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Register on IndianTradeMart to view quotations in your dashboard.'}
-`;
-
-  const html = `
-  <div style="font-family: Arial, sans-serif; line-height: 1.6;">
-    <h2 style="margin:0 0 10px 0;">Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}</h2>
-
-    <h3 style="margin:20px 0 8px 0;">Quotation Details</h3>
-    <ul>
-      <li><b>Title:</b> ${quotation.title || ''}</li>
-      <li><b>Amount:</b> ${quotation.quotation_amount || ''}</li>
-      <li><b>Quantity:</b> ${quotation.quantity || ''}</li>
-      <li><b>Validity Days:</b> ${quotation.validity_days || ''}</li>
-      <li><b>Delivery Days:</b> ${quotation.delivery_days || ''}</li>
-    </ul>
-
-    <h3 style="margin:20px 0 8px 0;">Terms & Conditions</h3>
-    <p>${(quotation.terms_conditions || '').replace(/\n/g, '<br/>')}</p>
-
-    <h3 style="margin:20px 0 8px 0;">Vendor</h3>
-    <ul>
-      <li><b>Name:</b> ${vendor.owner_name || ''}</li>
-      <li><b>Company:</b> ${vendor.company_name || ''}</li>
-      <li><b>Phone:</b> ${vendor.phone || ''}</li>
-      <li><b>Email:</b> ${vendor.email || ''}</li>
-    </ul>
-
-    <p style="margin-top: 18px;">
-      ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Register on IndianTradeMart to view quotations in your dashboard.'}
-    </p>
-  </div>
-  `;
-
-  const mailOptions = {
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
-    to,
-    subject,
-    text,
-    html
-  };
-
-  await transporter.sendMail(mailOptions);
-}
-
-exports.handler = async (event) => {
+const safeJson = async (res) => {
   try {
-    const method = event.httpMethod;
-
-    if (method === 'OPTIONS') {
-      return {
-        statusCode: 204,
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS'
-        }
-      };
-    }
-
-    if (method !== 'POST') {
-      return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
-    }
-
-    const path = event.path || '';
-
-    if (path.endsWith('/send')) {
-      const body = JSON.parse(event.body || '{}');
-
-      const {
-        quotation_title,
-        quotation_amount,
-        quantity,
-        unit,
-        validity_days,
-        delivery_days,
-        terms_conditions,
-        buyer_email,
-        vendor_id,
-        vendor_name,
-        vendor_company,
-        vendor_phone,
-        vendor_email,
-
-        // ⚠️ Ignore buyer_id from request (UI was sending lead.id)
-        buyer_id
-      } = body;
-
-      if (!buyer_email || !vendor_id || !quotation_title) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Missing required fields' }) };
-      }
-
-      // Check if buyer is registered in the system
-      // NOTE: some setups use buyers.id as FK target, some use buyers.user_id.
-      // We fetch both so we can retry safely.
-      const { data: buyerCheck } = await supabase
-        .from('buyers')
-        .select('id, user_id, full_name, email, is_registered')
-        .eq('email', buyer_email.toLowerCase())
-        .maybeSingle();
-
-      const isRegistered = !!buyerCheck;
-
-      // Candidate buyer_id values to try (depends on FK target)
-      const buyerCandidates = [];
-      if (buyerCheck?.id) buyerCandidates.push(buyerCheck.id);
-      if (buyerCheck?.user_id && buyerCheck.user_id !== buyerCheck.id) buyerCandidates.push(buyerCheck.user_id);
-
-      // Fallback: if some older flow sends a real buyers.id, we can still accept it.
-      // But we first validate it exists in buyers.
-      if (buyer_id) {
-        const { data: buyerById } = await supabase
-          .from('buyers')
-          .select('id')
-          .eq('id', buyer_id)
-          .maybeSingle();
-        if (buyerById?.id) buyerCandidates.push(buyerById.id);
-      }
-
-      // Prepare base quotation data - match proposals table schema
-      const baseQuotationPayload = {
-        vendor_id: vendor_id,
-        buyer_id: null,
-        buyer_email: buyer_email.toLowerCase(),
-        title: quotation_title,
-        product_name: quotation_title,
-        quantity: quantity || null,
-        budget: quotation_amount ? parseFloat(quotation_amount) : null,
-        description: terms_conditions || '',
-        status: 'SENT'
-      };
-
-      // Save quotation to database with safe retry logic.
-      // Why: some DBs have FK proposals.buyer_id -> buyers.id, some -> buyers.user_id.
-      // We'll try candidates, then finally NULL.
-      const tryInsert = async (buyerIdValue) => {
-        const payload = { ...baseQuotationPayload, buyer_id: buyerIdValue ?? null };
-        console.log('Attempting to save quotation with payload:', JSON.stringify(payload, null, 2));
-        return supabase
-          .from('proposals')
-          .insert([payload])
-          .select('id, vendor_id, buyer_id, title')
-          .single();
-      };
-
-      let savedQuotation = null;
-      let lastError = null;
-
-      for (const candidate of buyerCandidates) {
-        const { data, error } = await tryInsert(candidate);
-        if (!error && data) {
-          savedQuotation = data;
-          break;
-        }
-        lastError = error;
-        // If it's a FK violation (or invalid UUID), try next candidate
-        const msg = (error?.message || '').toLowerCase();
-        const code = error?.code;
-        const retryable = msg.includes('foreign key') || code === '23503' || code === '22P02';
-        if (!retryable) break;
-      }
-
-      if (!savedQuotation) {
-        // Final attempt with NULL buyer_id (works for unregistered buyers)
-        const { data, error } = await tryInsert(null);
-        if (!error && data) {
-          savedQuotation = data;
-        } else {
-          lastError = error;
-        }
-      }
-
-      if (!savedQuotation) {
-        console.error('Database INSERT error:', JSON.stringify(lastError, null, 2));
-        return {
-          statusCode: 500,
-          body: JSON.stringify({
-            error: lastError?.message || 'Failed to save quotation',
-            details: lastError
-          })
-        };
-      }
-
-      console.log('Quotation saved successfully:', savedQuotation.id);
-
-      // Prepare vendor data for email
-      const vendorData = {
-        owner_name: vendor_name,
-        company_name: vendor_company,
-        phone: vendor_phone,
-        email: vendor_email
-      };
-
-      // Send quotation email
-      let emailSent = false;
-      try {
-        await sendQuotationEmail(buyer_email, {
-          vendor: vendorData,
-          quotation: {
-            title: quotation_title,
-            quotation_amount: quotation_amount,
-            quantity: quantity,
-            validity_days: validity_days,
-            delivery_days: delivery_days,
-            terms_conditions: terms_conditions
-          }
-        }, isRegistered);
-        emailSent = true;
-
-        // Log email to quotation_emails table
-        await supabase
-          .from('quotation_emails')
-          .insert([{
-            quotation_id: savedQuotation.id,
-            recipient_email: buyer_email.toLowerCase(),
-            subject: `Quotation from ${vendor_company || vendor_name}`,
-            status: 'SENT'
-          }]);
-      } catch (emailError) {
-        console.error('Email sending error (non-blocking):', emailError);
-        // Log failed email attempt
-        try {
-          await supabase
-            .from('quotation_emails')
-            .insert([{
-              quotation_id: savedQuotation.id,
-              recipient_email: buyer_email.toLowerCase(),
-              subject: `Quotation from ${vendor_company || vendor_name}`,
-              status: 'FAILED',
-              error_message: emailError.message
-            }]);
-        } catch (_) {}
-      }
-
-      // Create notification if buyer is registered
-      if (isRegistered && buyerCheck?.id) {
-        try {
-          await supabase
-            .from('buyer_notifications')
-            .insert([{
-              buyer_id: buyerCheck.id,
-              type: 'QUOTATION_RECEIVED',
-              title: `New Quotation from ${vendor_company || vendor_name}`,
-              message: `Received quotation: ${quotation_title}`,
-              reference_id: savedQuotation.id,
-              reference_type: 'quotation',
-              is_read: false,
-              created_at: new Date().toISOString()
-            }]);
-        } catch (notifError) {
-          console.warn('Notification creation failed:', notifError);
-        }
-      } else {
-        // Track unregistered buyer quotation
-        try {
-          await supabase
-            .from('quotation_unregistered')
-            .insert([{
-              email: buyer_email.toLowerCase(),
-              quotation_id: savedQuotation.id,
-              vendor_id: vendor_id,
-              created_at: new Date().toISOString()
-            }]);
-        } catch (trackError) {
-          console.warn('Unregistered tracking failed:', trackError);
-        }
-      }
-
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          message: `Quotation sent successfully to ${buyer_email}${isRegistered ? ' and added to their dashboard' : ' - they will see it after registering'}`,
-          quotation_id: savedQuotation.id,
-          buyer_registered: isRegistered
-        })
-      };
-    }
-
-    return { statusCode: 404, body: JSON.stringify({ error: "Unknown action" }) };
-  } catch (e) {
-    console.error('Quotation function error:', e);
-    return { statusCode: 500, body: JSON.stringify({ error: e.message || "Server error" }) };
+    return await res.json();
+  } catch {
+    return null;
   }
+};
+
+const normalizeQuotationRow = (row) => {
+  if (!row) return row;
+  return {
+    ...row,
+
+    // Backward-compatible aliases used by UI
+    quotation_amount: row.quotation_amount ?? row.budget ?? null,
+    terms_conditions: row.terms_conditions ?? row.description ?? null,
+
+    // Common aliases
+    amount: row.amount ?? row.quotation_amount ?? row.budget ?? null,
+  };
+};
+
+export const quotationApi = {
+  /**
+   * Send quotation to a buyer email.
+   * - Local:   POST /api/quotation/send (proxied to Express on :3001)
+   * - Netlify: POST /.netlify/functions/quotation/send
+   */
+  sendQuotation: async (quotationData) => {
+    const vendor = await vendorApi.auth.me();
+    if (!vendor?.id) throw new Error('Vendor not found');
+
+    const payload = {
+      quotation_title: quotationData?.quotation_title,
+      quotation_amount: quotationData?.quotation_amount,
+      quantity: quotationData?.quantity || null,
+      unit: quotationData?.unit || 'pieces',
+      validity_days: quotationData?.validity_days || 30,
+      delivery_days: quotationData?.delivery_days || null,
+      terms_conditions: quotationData?.terms_conditions || '',
+      buyer_email: quotationData?.buyer_email,
+      // ⚠️ Backend validates buyer_id itself; kept for backwards compatibility.
+      buyer_id: quotationData?.buyer_id || null,
+
+      vendor_id: vendor.id,
+      vendor_name: vendor.owner_name || vendor.ownerName || null,
+      vendor_company: vendor.company_name || vendor.companyName || null,
+      vendor_phone: vendor.phone || null,
+      vendor_email: vendor.email || null,
+    };
+
+    const url = `${API_BASE}/quotation/send`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await safeJson(res);
+    if (!res.ok) {
+      throw new Error(data?.error || data?.message || 'Failed to send quotation');
+    }
+
+    return data;
+  },
+
+  /**
+   * Get quotations sent by the logged-in vendor.
+   * NOTE: Stored in `proposals` with status='SENT'.
+   */
+  getSentQuotations: async (opts = {}) => {
+    const vendor = await vendorApi.auth.me();
+    if (!vendor?.id) throw new Error('Vendor not found');
+
+    let q = supabase
+      .from('proposals')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .eq('status', 'SENT')
+      .order('created_at', { ascending: false });
+
+    if (opts?.limit) q = q.limit(opts.limit);
+
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(normalizeQuotationRow);
+  },
+
+  /**
+   * Get quotations received by a buyer.
+   * Caller usually passes buyer EMAIL.
+   *
+   * We support both:
+   * - Registered buyer: find buyers.id by email and fetch proposals by buyer_id
+   * - Unregistered buyer: fetch proposals by buyer_email (buyer_id may be null)
+   */
+  getReceivedQuotations: async (buyerEmailOrId) => {
+    if (!buyerEmailOrId) throw new Error('Buyer ID or email required');
+
+    const raw = String(buyerEmailOrId).trim();
+    const looksLikeEmail = raw.includes('@');
+    const email = looksLikeEmail ? raw.toLowerCase() : null;
+
+    let buyerId = looksLikeEmail ? null : raw;
+
+    // If email provided, attempt to resolve buyers.id
+    if (looksLikeEmail) {
+      const { data: buyer, error: bErr } = await supabase
+        .from('buyers')
+        .select('id')
+        .eq('email', email)
+        .maybeSingle();
+      if (bErr) throw bErr;
+      buyerId = buyer?.id || null;
+    }
+
+    const results = [];
+    const seen = new Set();
+
+    // 1) Registered flow: by buyer_id
+    if (buyerId) {
+      const { data, error } = await supabase
+        .from('proposals')
+        .select(
+          `
+          id, title, budget, quantity, description, status, created_at, buyer_email, vendor_id,
+          vendors:vendor_id(id, company_name, owner_name, phone, email)
+        `
+        )
+        .eq('buyer_id', buyerId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        const norm = normalizeQuotationRow(row);
+        if (norm?.id && !seen.has(norm.id)) {
+          seen.add(norm.id);
+          results.push(norm);
+        }
+      });
+    }
+
+    // 2) Email flow (covers unregistered and also acts as fallback)
+    if (email) {
+      const { data, error } = await supabase
+        .from('proposals')
+        .select(
+          `
+          id, title, budget, quantity, description, status, created_at, buyer_email, vendor_id,
+          vendors:vendor_id(id, company_name, owner_name, phone, email)
+        `
+        )
+        .eq('buyer_email', email)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      (data || []).forEach((row) => {
+        const norm = normalizeQuotationRow(row);
+        if (norm?.id && !seen.has(norm.id)) {
+          seen.add(norm.id);
+          results.push(norm);
+        }
+      });
+    }
+
+    // Sort newest first (in case we merged two lists)
+    results.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return results;
+  },
+
+  /**
+   * Optional helper: update quotation/proposal status.
+   * Example: quotationApi.updateStatus(id, 'ACCEPTED')
+   */
+  updateStatus: async (proposalId, status) => {
+    if (!proposalId) throw new Error('proposalId is required');
+    if (!status) throw new Error('status is required');
+
+    const { data, error } = await supabase
+      .from('proposals')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', proposalId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) throw error;
+    return normalizeQuotationRow(data);
+  },
 };
