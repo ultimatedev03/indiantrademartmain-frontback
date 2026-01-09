@@ -8,6 +8,18 @@ import { Skeleton } from '@/components/ui/skeleton';
 const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
   const navigate = useNavigate();
 
+  // ✅ IMPORTANT
+  // Nearby city pills must navigate to the SEARCH route.
+  // If we use `/directory/${serviceSlug}/${stateSlug}/${citySlug}` it collides with
+  // category hierarchy routes and opens MicroCategory/ProductListing pages by mistake.
+  const buildSearchUrl = (svc, st, ct) => {
+    if (!svc) return '/directory';
+    let url = `/directory/search/${svc}`;
+    if (st) url += `/${st}`;
+    if (ct) url += `/${ct}`;
+    return url;
+  };
+
   const [loading, setLoading] = useState(true);
   const [cities, setCities] = useState([]);
 
@@ -23,7 +35,6 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
   const currentStateName = useMemo(() => {
     const found = states?.find((s) => s.slug === stateSlug);
     if (found?.name) return found.name;
-    // fallback from slug
     return (stateSlug || '').replace(/-/g, ' ');
   }, [states, stateSlug]);
 
@@ -56,7 +67,6 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
   // Preload states (for showing state name + state list)
   useEffect(() => {
     const loadStates = async () => {
-      // avoid reloading again and again
       if (states && states.length > 0) return;
 
       setStatesLoading(true);
@@ -75,7 +85,7 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
     setShowOtherStates(true);
     setSelectedState(null);
     setOtherCities([]);
-    // ensure states loaded
+
     if (!states || states.length === 0) {
       setStatesLoading(true);
       const s = await locationService.getStates();
@@ -132,10 +142,40 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
                 ))
             ) : (
               <>
+                {/* ✅ State-level (All Cities) pill */}
+                <button
+                  type="button"
+                  onClick={() => navigate(buildSearchUrl(serviceSlug, stateSlug, ''))}
+                  className={cn(
+                    "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                    !currentCitySlug
+                      ? "bg-blue-50 border-blue-300 text-blue-700"
+                      : "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
+                  )}
+                  title={`All Cities in ${currentStateName}`}
+                >
+                  {currentStateName}
+                </button>
+
+                {/* ✅ Current city pill (active) */}
+                {!!currentCitySlug && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(buildSearchUrl(serviceSlug, stateSlug, currentCitySlug))}
+                    className={cn(
+                      "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                      "bg-blue-50 border-blue-300 text-blue-700"
+                    )}
+                    title="Current city"
+                  >
+                    {(currentCitySlug || '').replace(/-/g, ' ')}
+                  </button>
+                )}
+
                 {cities.map((city) => (
                   <button
                     key={city.id}
-                    onClick={() => navigate(`/directory/${serviceSlug}/${stateSlug}/${city.slug}`)}
+                    onClick={() => navigate(buildSearchUrl(serviceSlug, stateSlug, city.slug))}
                     className={cn(
                       "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
                       "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"
@@ -223,6 +263,19 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
               </span>
             </button>
 
+            {/* ✅ Selected state (All Cities) pill */}
+            <button
+              type="button"
+              onClick={() => navigate(buildSearchUrl(serviceSlug, selectedState.slug, ''))}
+              className={cn(
+                "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
+                "bg-blue-50 border-blue-300 text-blue-700"
+              )}
+              title={`All Cities in ${selectedState.name}`}
+            >
+              {selectedState.name}
+            </button>
+
             {otherCitiesLoading ? (
               Array(8)
                 .fill(0)
@@ -234,9 +287,7 @@ const NearbyLocationNav = ({ serviceSlug, stateSlug, currentCitySlug }) => {
                 {(otherCities || []).map((city) => (
                   <button
                     key={city.id || city.slug}
-                    onClick={() =>
-                      navigate(`/directory/${serviceSlug}/${selectedState.slug}/${city.slug}`)
-                    }
+                    onClick={() => navigate(buildSearchUrl(serviceSlug, selectedState.slug, city.slug))}
                     className={cn(
                       "flex-shrink-0 px-4 py-1.5 rounded-full border text-sm font-medium transition-all",
                       "bg-white border-gray-300 text-gray-700 hover:border-blue-500 hover:text-blue-600 hover:shadow-sm"

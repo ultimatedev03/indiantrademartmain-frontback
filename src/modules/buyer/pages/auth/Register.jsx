@@ -10,7 +10,9 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
 import { otpService } from '@/services/otpService';
 
-const OTP_TIMER_SECONDS = 600; // 10 minutes
+// Keep UI timer aligned with backend (Netlify function returns expiresIn).
+// Default to 2 minutes.
+const OTP_TIMER_SECONDS = 120; // 2 minutes
 
 const StepIndicator = ({ step }) => {
   const steps = [
@@ -128,10 +130,12 @@ const Register = () => {
     setLoading(true);
     try {
       // Request OTP using custom OTP service
-      await otpService.requestOtp(formData.email);
+      const otpResp = await otpService.requestOtp(formData.email);
 
       setStep(2);
-      setTimer(OTP_TIMER_SECONDS);
+      // Prefer server-provided expiresIn (seconds). Fallback to default.
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TIMER_SECONDS);
       setOtp('');
       toast({ title: "OTP Sent", description: `Verification code sent to ${formData.email}` });
 
@@ -226,8 +230,9 @@ const Register = () => {
   const handleResendOtp = async () => {
     setLoading(true);
     try {
-      await otpService.resendOtp(formData.email);
-      setTimer(OTP_TIMER_SECONDS);
+      const otpResp = await otpService.resendOtp(formData.email);
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TIMER_SECONDS);
       setOtp('');
       toast({ title: "OTP Resent", description: "A new 6-digit code has been sent to your email." });
     } catch (error) {

@@ -38,9 +38,9 @@ const Login = () => {
   const handleTabSwitch = (tab) => {
     setActiveTab(tab);
     if (tab === 'buyer') {
-      setFormData({ email: 'abc@example.com', password: '' });
+      setFormData({ email: '', password: '' });
     } else {
-      setFormData({ email: 'abc@example.com', password: '' });
+      setFormData({ email: '', password: '' });
     }
   };
 

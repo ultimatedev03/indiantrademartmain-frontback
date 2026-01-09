@@ -19,10 +19,10 @@ const transporter = nodemailer.createTransport({
 async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
   try {
     const { vendor, quotation } = quotationData;
-    
+
     // Registration link for unregistered buyers
-    const registrationLink = isRegistered 
-      ? '' 
+    const registrationLink = isRegistered
+      ? ''
       : `<p style="color: #666; margin: 15px 0; text-align: center; background: #fff3cd; padding: 15px; border-radius: 6px;">
           📌 <strong>New to our platform?</strong> <br/>
           <a href="${process.env.VITE_FRONTEND_URL || 'https://indiantrademart.netlify.app'}/buyer/register?email=${encodeURIComponent(buyerEmail)}" style="color: #00A699; text-decoration: none; font-weight: bold;">
@@ -38,7 +38,7 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
         <html>
           <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5;">
             <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-              
+
               <!-- Header -->
               <div style="text-align: center; margin-bottom: 30px;">
                 <h2 style="color: #003D82; margin: 0; font-size: 28px;">New Quotation Received</h2>
@@ -52,25 +52,25 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
               <!-- Vendor Info Box -->
               <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f0fff4 100%); border-left: 4px solid #00A699; padding: 20px; margin: 20px 0; border-radius: 6px;">
                 <p style="margin: 0 0 15px 0; font-weight: bold; color: #003D82; font-size: 16px;">From Vendor:</p>
-                
+
                 <div style="margin: 10px 0;">
                   <p style="margin: 5px 0; font-size: 15px;">
                     <strong style="color: #003D82;">👤 Vendor Name:</strong> ${vendor.owner_name || 'N/A'}
                   </p>
                 </div>
-                
+
                 <div style="margin: 10px 0;">
                   <p style="margin: 5px 0; font-size: 15px;">
                     <strong style="color: #003D82;">🏢 Company:</strong> ${vendor.company_name || 'N/A'}
                   </p>
                 </div>
-                
+
                 <div style="margin: 10px 0;">
                   <p style="margin: 5px 0; font-size: 15px;">
                     <strong style="color: #003D82;">📞 Phone:</strong> ${vendor.phone || 'N/A'}
                   </p>
                 </div>
-                
+
                 <div style="margin: 10px 0;">
                   <p style="margin: 5px 0; font-size: 15px;">
                     <strong style="color: #003D82;">📧 Email:</strong> ${vendor.email || 'N/A'}
@@ -81,13 +81,13 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
               <!-- Quotation Details Box -->
               <div style="background: #f0f8ff; border-left: 4px solid #003D82; padding: 20px; margin: 20px 0; border-radius: 6px;">
                 <p style="margin: 0 0 15px 0; font-weight: bold; color: #003D82; font-size: 16px;">📋 Quotation Details:</p>
-                
+
                 <div style="margin: 10px 0;">
                   <p style="margin: 5px 0; font-size: 14px;">
                     <strong>Title:</strong> ${quotation.title}
                   </p>
                 </div>
-                
+
                 <div style="margin: 10px 0; padding: 15px; background: white; border-radius: 6px;">
                   <p style="margin: 0; font-size: 24px; font-weight: bold; color: #00A699; text-align: center;">
                     ₹${quotation.quotation_amount?.toLocaleString?.('en-IN') || quotation.quotation_amount || '0'}
@@ -132,7 +132,7 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
 
               <!-- Action Button -->
               <div style="text-align: center; margin: 30px 0;">
-                <a href="${process.env.VITE_FRONTEND_URL || 'https://indiantrademart.netlify.app'}/buyer/quotations" 
+                <a href="${process.env.VITE_FRONTEND_URL || 'https://indiantrademart.netlify.app'}/buyer/quotations"
                    style="background: #00A699; color: white; padding: 14px 40px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block;">
                   View Quotation
                 </a>
@@ -188,7 +188,7 @@ export const handler = async (event) => {
 
     // ✅ SEND QUOTATION
     if (action === "send") {
-      const { 
+      const {
         quotation_title,
         quotation_amount,
         quantity,
@@ -206,11 +206,11 @@ export const handler = async (event) => {
 
       // Validate required fields
       if (!quotation_title || !quotation_amount || !buyer_email || !vendor_id) {
-        return { 
-          statusCode: 400, 
-          body: JSON.stringify({ 
-            error: 'Missing required fields: quotation_title, quotation_amount, buyer_email, vendor_id' 
-          }) 
+        return {
+          statusCode: 400,
+          body: JSON.stringify({
+            error: 'Missing required fields: quotation_title, quotation_amount, buyer_email, vendor_id'
+          })
         };
       }
 
@@ -228,10 +228,29 @@ export const handler = async (event) => {
 
       const isRegistered = !!buyerCheck;
 
+      // ✅ IMPORTANT:
+      // The proposals.buyer_id column has a foreign key to public.buyers(id).
+      // Sometimes the frontend might send an auth.users id (or some random id) as buyer_id,
+      // which will violate the FK constraint. So we NEVER trust the incoming buyer_id.
+      // If the buyer exists (matched by email), we use buyerCheck.id.
+      // Otherwise we store buyer_id as NULL and track it in quotation_unregistered.
+      let safeBuyerId = buyerCheck?.id || null;
+
+      // If no buyer found by email but a buyer_id is provided, validate it exists in buyers.
+      // (This keeps backward compatibility if some flow sends the correct buyers.id)
+      if (!safeBuyerId && buyer_id) {
+        const { data: buyerById } = await supabase
+          .from('buyers')
+          .select('id')
+          .eq('id', buyer_id)
+          .maybeSingle();
+        safeBuyerId = buyerById?.id || null;
+      }
+
       // Prepare quotation data - match proposals table schema
       const quotationPayload = {
         vendor_id: vendor_id,
-        buyer_id: buyer_id || null,
+        buyer_id: safeBuyerId,
         buyer_email: buyer_email.toLowerCase(),
         title: quotation_title,
         product_name: quotation_title,
@@ -243,11 +262,11 @@ export const handler = async (event) => {
 
       // Save quotation to database
       console.log('Attempting to save quotation with payload:', JSON.stringify(quotationPayload, null, 2));
-      
-      const { data: insertData, error: dbError } = await supabase
+
+      const { error: dbError } = await supabase
         .from('proposals')
         .insert([quotationPayload]);
-      
+
       // If insert successful, fetch the saved record
       let savedQuotation = null;
       if (!dbError && quotationPayload.vendor_id) {
@@ -263,25 +282,25 @@ export const handler = async (event) => {
 
       if (dbError) {
         console.error('Database INSERT error:', JSON.stringify(dbError, null, 2));
-        return { 
-          statusCode: 500, 
-          body: JSON.stringify({ 
-            error: dbError.message || 'Failed to save quotation', 
-            details: dbError 
-          }) 
+        return {
+          statusCode: 500,
+          body: JSON.stringify({
+            error: dbError.message || 'Failed to save quotation',
+            details: dbError
+          })
         };
       }
-      
+
       if (!savedQuotation) {
         console.error('No quotation data returned from insert');
-        return { 
-          statusCode: 500, 
-          body: JSON.stringify({ 
-            error: 'Failed to save quotation - no data returned' 
-          }) 
+        return {
+          statusCode: 500,
+          body: JSON.stringify({
+            error: 'Failed to save quotation - no data returned'
+          })
         };
       }
-      
+
       console.log('Quotation saved successfully:', savedQuotation.id);
 
       // Prepare vendor data for email
@@ -307,7 +326,7 @@ export const handler = async (event) => {
           }
         }, isRegistered);
         emailSent = true;
-        
+
         // Log email to quotation_emails table
         await supabase
           .from('quotation_emails')
@@ -330,7 +349,7 @@ export const handler = async (event) => {
               status: 'FAILED',
               error_message: emailError.message
             }]);
-        } catch (_) {}
+        } catch (_) { }
         // Don't fail the quotation if email fails - it's already saved
       }
 
@@ -374,7 +393,8 @@ export const handler = async (event) => {
           success: true,
           message: `Quotation sent successfully to ${buyer_email}${isRegistered ? ' and added to their dashboard' : ' - they will see it after registering'}`,
           quotation_id: savedQuotation.id,
-          buyer_registered: isRegistered
+          buyer_registered: isRegistered,
+          email_sent: emailSent
         })
       };
     }

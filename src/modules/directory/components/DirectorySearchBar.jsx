@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { locationService } from '@/shared/services/locationService';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { urlParser } from '@/shared/utils/urlParser';
+import { supabase } from '@/lib/customSupabaseClient';
 
 const slugify = (value) => {
   if (!value) return '';
@@ -16,6 +17,90 @@ const slugify = (value) => {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
+};
+
+// ✅ Resolve free-text location like "Delhi" / "New Delhi" to state/city slugs.
+// Used when user types: "land survey in delhi" without selecting dropdowns.
+const resolveLocationSlugs = async (locText) => {
+  const clean = (locText || '').trim();
+  if (!clean) return { stateSlug: '', citySlug: '' };
+
+  const locSlug = slugify(clean);
+
+  // 1) Try CITY by slug
+  try {
+    const { data: cityBySlug } = await supabase
+      .from('cities')
+      .select('slug, state_id, name')
+      .eq('slug', locSlug)
+      .maybeSingle();
+
+    if (cityBySlug?.slug && cityBySlug?.state_id) {
+      const { data: st } = await supabase
+        .from('states')
+        .select('slug, name')
+        .eq('id', cityBySlug.state_id)
+        .maybeSingle();
+
+      return { stateSlug: st?.slug || '', citySlug: cityBySlug.slug };
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2) Try STATE by slug
+  try {
+    const { data: stateBySlug } = await supabase
+      .from('states')
+      .select('slug, name')
+      .eq('slug', locSlug)
+      .maybeSingle();
+
+    if (stateBySlug?.slug) {
+      return { stateSlug: stateBySlug.slug, citySlug: '' };
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3) Fallback: name partial match (city first)
+  try {
+    const { data: cities } = await supabase
+      .from('cities')
+      .select('slug, state_id, name')
+      .ilike('name', `%${clean}%`)
+      .limit(1);
+
+    const city = cities?.[0];
+    if (city?.slug && city?.state_id) {
+      const { data: st } = await supabase
+        .from('states')
+        .select('slug, name')
+        .eq('id', city.state_id)
+        .maybeSingle();
+
+      return { stateSlug: st?.slug || '', citySlug: city.slug };
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const { data: states } = await supabase
+      .from('states')
+      .select('slug, name')
+      .ilike('name', `%${clean}%`)
+      .limit(1);
+
+    const st = states?.[0];
+    if (st?.slug) {
+      return { stateSlug: st.slug, citySlug: '' };
+    }
+  } catch {
+    // ignore
+  }
+
+  return { stateSlug: '', citySlug: '' };
 };
 
 /**
@@ -52,6 +137,9 @@ const DirectorySearchBar = ({
   // Typeahead (optional)
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Submit loading (for resolving "... in delhi" to slugs)
+  const [submitting, setSubmitting] = useState(false);
 
   // Sync with props (e.g. navigation)
   useEffect(() => {
@@ -134,17 +222,60 @@ const DirectorySearchBar = ({
     [enableSuggestions, showSuggestions, suggestions.length]
   );
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const finalServiceSlug = serviceSlug || slugify(serviceText);
+    if (submitting) return;
+
+    // ✅ If user did NOT pick state/city but typed "service in delhi", auto-parse location.
+    let finalServiceText = (serviceText || '').trim();
+    let freeLocText = '';
+
+    if (!selectedStateSlug && !selectedCitySlug) {
+      const m = finalServiceText.match(/^(.*)\s+in\s+(.+)$/i);
+      if (m && m[1] && m[2]) {
+        finalServiceText = m[1].trim();
+        freeLocText = m[2].trim();
+      }
+    }
+
+    const finalServiceSlug = serviceSlug || slugify(finalServiceText);
     if (!finalServiceSlug) return;
 
-    const url = urlParser.createStructuredUrl(
-      finalServiceSlug,
-      selectedStateSlug || '',
-      selectedCitySlug || ''
-    );
+    // If dropdowns already selected, use them.
+    if (selectedStateSlug || selectedCitySlug) {
+      const url = urlParser.createStructuredUrl(finalServiceSlug, selectedStateSlug || '', selectedCitySlug || '');
+      navigate(url);
+      return;
+    }
+
+    // If no dropdowns selected but we extracted location from query, resolve it to slugs.
+    if (freeLocText) {
+      setSubmitting(true);
+      try {
+        const resolved = await resolveLocationSlugs(freeLocText);
+
+        // Update UI inputs so user sees clean service text
+        setServiceText(finalServiceText);
+        setServiceSlug('');
+
+        if (resolved?.stateSlug || resolved?.citySlug) {
+          const url = urlParser.createStructuredUrl(finalServiceSlug, resolved.stateSlug || '', resolved.citySlug || '');
+          navigate(url);
+        } else {
+          // Fallback: still pass loc text for filtering on results page
+          const sp = new URLSearchParams();
+          sp.set('loc', freeLocText);
+          navigate(`/directory/search/${finalServiceSlug}?${sp.toString()}`);
+        }
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // Default: no location
+    const url = urlParser.createStructuredUrl(finalServiceSlug, '', '');
     navigate(url);
   };
 
@@ -250,8 +381,15 @@ const DirectorySearchBar = ({
           )}
         </div>
 
-        <Button type="submit" className="bg-[#003D82] text-white px-8">
-          Search
+        <Button type="submit" className="bg-[#003D82] text-white px-8" disabled={submitting}>
+          {submitting ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Searching...
+            </span>
+          ) : (
+            'Search'
+          )}
         </Button>
       </form>
     </div>

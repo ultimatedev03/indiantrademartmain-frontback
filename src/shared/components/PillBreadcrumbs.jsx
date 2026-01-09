@@ -8,20 +8,14 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
   const location = useLocation();
   const routeParams = useParams();
 
-  // Use override params if provided (from SearchResults parsing), otherwise route params
   const params = overrideParams || routeParams;
 
-  // ------------------------------
-  // Helpers
-  // ------------------------------
   const prettify = (slug) => String(slug || '').replace(/-/g, ' ').trim();
 
-  // Category browsing route params
   const headSlug = params.headSlug;
   const subSlug = params.subSlug;
   const microSlugFromRoute = params.microSlug;
 
-  // Search route uses :service (micro/category slug) + optional state/city
   const serviceSlug = params.service || params.serviceSlug;
   const stateSlug = params.state || params.stateSlug;
   const citySlug = params.city || params.citySlug;
@@ -31,8 +25,8 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
     [location.pathname, serviceSlug]
   );
 
-  // When we're on /directory/search/:service..., we want:
-  // IndianTradeMart -> Head -> Sub -> Micro -> Location
+  // IndianTradeMart -> Head -> Sub -> (Micro?) -> Location
+  // NOTE: :service can be a micro slug, sub slug, or head slug.
   const [microHierarchy, setMicroHierarchy] = useState(null);
 
   useEffect(() => {
@@ -46,7 +40,6 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
         return;
       }
 
-      // If route already provides full hierarchy (head/sub/micro), no need to fetch.
       if (headSlug && subSlug && microSlugFromRoute) {
         setMicroHierarchy({
           head: { slug: headSlug, name: prettify(headSlug) },
@@ -57,7 +50,8 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
       }
 
       try {
-        const { data, error } = await supabase
+        // 1) MICRO
+        const { data: microData } = await supabase
           .from('micro_categories')
           .select(
             `
@@ -69,26 +63,66 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
             `
           )
           .eq('slug', serviceSlug)
-          .single();
+          .maybeSingle();
 
         if (cancelled) return;
 
-        if (error || !data) {
-          setMicroHierarchy(null);
+        if (microData?.slug) {
+          setMicroHierarchy({
+            head: {
+              slug: microData?.sub_categories?.head_categories?.slug,
+              name: microData?.sub_categories?.head_categories?.name,
+            },
+            sub: {
+              slug: microData?.sub_categories?.slug,
+              name: microData?.sub_categories?.name,
+            },
+            micro: { slug: microData.slug, name: microData.name },
+          });
           return;
         }
 
-        setMicroHierarchy({
-          head: {
-            slug: data?.sub_categories?.head_categories?.slug,
-            name: data?.sub_categories?.head_categories?.name,
-          },
-          sub: {
-            slug: data?.sub_categories?.slug,
-            name: data?.sub_categories?.name,
-          },
-          micro: { slug: data.slug, name: data.name },
-        });
+        // 2) SUB
+        const { data: subData } = await supabase
+          .from('sub_categories')
+          .select(
+            `
+              id, name, slug,
+              head_categories (id, name, slug)
+            `
+          )
+          .eq('slug', serviceSlug)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (subData?.slug) {
+          setMicroHierarchy({
+            head: {
+              slug: subData?.head_categories?.slug,
+              name: subData?.head_categories?.name,
+            },
+            sub: { slug: subData.slug, name: subData.name },
+            micro: null,
+          });
+          return;
+        }
+
+        // 3) HEAD
+        const { data: headData } = await supabase
+          .from('head_categories')
+          .select('id, name, slug')
+          .eq('slug', serviceSlug)
+          .maybeSingle();
+
+        if (cancelled) return;
+
+        if (headData?.slug) {
+          setMicroHierarchy({ head: { slug: headData.slug, name: headData.name }, sub: null, micro: null });
+          return;
+        }
+
+        setMicroHierarchy(null);
       } catch (_) {
         if (!cancelled) setMicroHierarchy(null);
       }
@@ -100,87 +134,47 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
     };
   }, [isDirectorySearch, serviceSlug, headSlug, subSlug, microSlugFromRoute]);
 
-  // ------------------------------
-  // Build breadcrumb items
-  // ------------------------------
   let items = [{ label: 'IndianTradeMart', path: '/', icon: Home }];
 
-  // ✅ Category browsing routes: /directory/:headSlug/:subSlug/:microSlug
   if (location.pathname.startsWith('/directory') && (headSlug || subSlug || microSlugFromRoute)) {
-    if (headSlug) {
-      items.push({ label: prettify(headSlug), path: `/directory/${headSlug}` });
-    }
-    if (headSlug && subSlug) {
-      items.push({ label: prettify(subSlug), path: `/directory/${headSlug}/${subSlug}` });
-    }
+    if (headSlug) items.push({ label: prettify(headSlug), path: `/directory/${headSlug}` });
+    if (headSlug && subSlug) items.push({ label: prettify(subSlug), path: `/directory/${headSlug}/${subSlug}` });
     if (headSlug && subSlug && microSlugFromRoute) {
-      items.push({
-        label: prettify(microSlugFromRoute),
-        path: `/directory/${headSlug}/${subSlug}/${microSlugFromRoute}`,
-      });
+      items.push({ label: prettify(microSlugFromRoute), path: `/directory/${headSlug}/${subSlug}/${microSlugFromRoute}` });
     }
 
-    // Optional: if any location exists in route params, show at end
     const locationLabel = citySlug || stateSlug;
-    if (locationLabel) {
-      items.push({ label: prettify(locationLabel), path: location.pathname });
-    }
-  }
-  // ✅ Search results routes: /directory/search/:service/:state?/:city?
-  else if (isDirectorySearch) {
+    if (locationLabel) items.push({ label: prettify(locationLabel), path: location.pathname });
+  } else if (isDirectorySearch) {
     const h = microHierarchy?.head;
     const s = microHierarchy?.sub;
     const m = microHierarchy?.micro;
 
     if (h?.slug) items.push({ label: h.name || prettify(h.slug), path: `/directory/${h.slug}` });
-    if (h?.slug && s?.slug)
-      items.push({ label: s.name || prettify(s.slug), path: `/directory/${h.slug}/${s.slug}` });
-    if (h?.slug && s?.slug && m?.slug)
-      items.push({
-        label: m.name || prettify(m.slug),
-        path: `/directory/${h.slug}/${s.slug}/${m.slug}`,
-      });
+    if (h?.slug && s?.slug) items.push({ label: s.name || prettify(s.slug), path: `/directory/${h.slug}/${s.slug}` });
+    if (h?.slug && s?.slug && m?.slug) items.push({ label: m.name || prettify(m.slug), path: `/directory/${h.slug}/${s.slug}/${m.slug}` });
 
-    // Fallback: if hierarchy isn't found (typed random text), just show service text
-    if (!m?.slug && serviceSlug) {
+    // Fallback only when hierarchy not found
+    if (!h?.slug && !s?.slug && !m?.slug && serviceSlug) {
       items.push({ label: prettify(serviceSlug), path: `/directory/search/${serviceSlug}` });
     }
 
-    // Location should be last
     const locLabel = citySlug || stateSlug;
     if (locLabel) {
       const base = `/directory/search/${serviceSlug || ''}`;
       const locPath =
-        citySlug && stateSlug
-          ? `${base}/${stateSlug}/${citySlug}`
-          : stateSlug
-            ? `${base}/${stateSlug}`
-            : location.pathname;
-
+        citySlug && stateSlug ? `${base}/${stateSlug}/${citySlug}` : stateSlug ? `${base}/${stateSlug}` : location.pathname;
       items.push({ label: prettify(locLabel), path: locPath });
     }
-  }
-  // ✅ Standard categories section
-  else if (location.pathname.startsWith('/categories')) {
+  } else if (location.pathname.startsWith('/categories')) {
     items.push({ label: 'All Categories', path: '/categories' });
-    if (params.slug) {
-      items.push({ label: prettify(params.slug), path: `/categories/${params.slug}` });
-    }
+    if (params.slug) items.push({ label: prettify(params.slug), path: `/categories/${params.slug}` });
   }
 
-  // ------------------------------
-  // UI COMPACT SETTINGS ✅
-  // ------------------------------
-  const pillBase =
-    'inline-flex items-center rounded-full border transition-colors leading-none';
-
-  // smaller pills + smaller text
-  const pillSize = 'px-3 py-1 text-xs'; // ✅ reduced padding + font size
-  const pillGap = 'gap-1.5'; // ✅ reduce spacing
-
-  // truncate to reduce width
-  const labelClass =
-    'capitalize truncate max-w-[140px] sm:max-w-[180px] md:max-w-[220px]'; // ✅ max width + truncate
+  const pillBase = 'inline-flex items-center rounded-full border transition-colors leading-none';
+  const pillSize = 'px-3 py-1 text-xs';
+  const pillGap = 'gap-1.5';
+  const labelClass = 'capitalize truncate max-w-[140px] sm:max-w-[180px] md:max-w-[220px]';
 
   return (
     <nav className={cn('w-full overflow-x-auto pb-1 scrollbar-hide', className)} aria-label="Breadcrumb">
@@ -191,13 +185,11 @@ const PillBreadcrumbs = ({ className, overrideParams }) => {
 
           return (
             <React.Fragment key={`${item.path}-${index}`}>
-              {index > 0 && (
-                <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" /> // ✅ smaller chevron
-              )}
+              {index > 0 && <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
 
               <Link
                 to={item.path}
-                title={item.label} // ✅ hover pe full text dikh jaayega
+                title={item.label}
                 className={cn(
                   pillBase,
                   pillSize,

@@ -1,176 +1,93 @@
-import express from 'express';
-import nodemailer from 'nodemailer';
-import { supabase } from '../lib/supabaseClient.js';
-
+const express = require('express');
 const router = express.Router();
+const { createClient } = require('@supabase/supabase-js');
+const nodemailer = require('nodemailer');
 
-// Setup Gmail SMTP (same as OTP)
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true',
   auth: {
-    user: process.env.GMAIL_EMAIL,
-    pass: process.env.GMAIL_APP_PASSWORD
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
   }
 });
 
-// Send Quotation Email
-async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
-  try {
-    const { vendor, quotation } = quotationData;
-    
-    // Registration link for unregistered buyers
-    const registrationLink = isRegistered 
-      ? '' 
-      : `<p style="color: #666; margin: 15px 0; text-align: center; background: #fff3cd; padding: 15px; border-radius: 6px;">
-          📌 <strong>New to our platform?</strong> <br/>
-          <a href="${process.env.FRONTEND_URL}/buyer/register?email=${encodeURIComponent(buyerEmail)}" style="color: #00A699; text-decoration: none; font-weight: bold;">
-            Click here to Register
-          </a> to view all quotations in your dashboard.
-         </p>`;
+async function sendQuotationEmail(to, data, isRegistered) {
+  const vendor = data.vendor || {};
+  const quotation = data.quotation || {};
 
-    const mailOptions = {
-      from: `${process.env.APP_NAME || 'IndianTradeMart'} <${process.env.GMAIL_EMAIL}>`,
-      to: buyerEmail,
-      subject: `Quotation from ${vendor.company_name || vendor.owner_name}`,
-      html: `
-        <html>
-          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5;">
-            <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-              
-              <!-- Header -->
-              <div style="text-align: center; margin-bottom: 30px;">
-                <h2 style="color: #003D82; margin: 0; font-size: 28px;">New Quotation Received</h2>
-              </div>
+  const subject = `Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}`;
 
-              <!-- Greeting -->
-              <p style="font-size: 16px; color: #333; margin-bottom: 20px;">
-                Hello <strong>${buyerEmail.split('@')[0] || 'Buyer'}</strong>,
-              </p>
+  const text = `
+Quotation Details
+-----------------
+Title: ${quotation.title || ''}
+Amount: ${quotation.quotation_amount || ''}
+Quantity: ${quotation.quantity || ''}
+Validity Days: ${quotation.validity_days || ''}
+Delivery Days: ${quotation.delivery_days || ''}
+Terms: ${quotation.terms_conditions || ''}
 
-              <!-- Vendor Info Box -->
-              <div style="background: linear-gradient(135deg, #f0f8ff 0%, #f0fff4 100%); border-left: 4px solid #00A699; padding: 20px; margin: 20px 0; border-radius: 6px;">
-                <p style="margin: 0 0 15px 0; font-weight: bold; color: #003D82; font-size: 16px;">From Vendor:</p>
-                
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 15px;">
-                    <strong style="color: #003D82;">👤 Vendor Name:</strong> ${vendor.owner_name || 'N/A'}
-                  </p>
-                </div>
-                
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 15px;">
-                    <strong style="color: #003D82;">🏢 Company:</strong> ${vendor.company_name || 'N/A'}
-                  </p>
-                </div>
-                
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 15px;">
-                    <strong style="color: #003D82;">📞 Phone:</strong> ${vendor.phone || 'N/A'}
-                  </p>
-                </div>
-                
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 15px;">
-                    <strong style="color: #003D82;">📧 Email:</strong> ${vendor.email || 'N/A'}
-                  </p>
-                </div>
-              </div>
+Vendor
+------
+Name: ${vendor.owner_name || ''}
+Company: ${vendor.company_name || ''}
+Phone: ${vendor.phone || ''}
+Email: ${vendor.email || ''}
 
-              <!-- Quotation Details Box -->
-              <div style="background: #f0f8ff; border-left: 4px solid #003D82; padding: 20px; margin: 20px 0; border-radius: 6px;">
-                <p style="margin: 0 0 15px 0; font-weight: bold; color: #003D82; font-size: 16px;">📋 Quotation Details:</p>
-                
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 14px;">
-                    <strong>Title:</strong> ${quotation.title}
-                  </p>
-                </div>
-                
-                <div style="margin: 10px 0; padding: 15px; background: white; border-radius: 6px;">
-                  <p style="margin: 0; font-size: 24px; font-weight: bold; color: #00A699; text-align: center;">
-                    ₹${quotation.quotation_amount?.toLocaleString?.('en-IN') || quotation.quotation_amount || '0'}
-                  </p>
-                  <p style="margin: 5px 0 0 0; text-align: center; font-size: 12px; color: #666;">Quote Amount</p>
-                </div>
+${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Register on IndianTradeMart to view quotations in your dashboard.'}
+`;
 
-                ${quotation.quantity ? `
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 14px;">
-                    <strong>Quantity:</strong> ${quotation.quantity}
-                  </p>
-                </div>
-                ` : ''}
+  const html = `
+  <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+    <h2 style="margin:0 0 10px 0;">Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}</h2>
 
-                ${quotation.validity_days ? `
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 14px;">
-                    <strong>Valid For:</strong> ${quotation.validity_days} days
-                  </p>
-                </div>
-                ` : ''}
+    <h3 style="margin:20px 0 8px 0;">Quotation Details</h3>
+    <ul>
+      <li><b>Title:</b> ${quotation.title || ''}</li>
+      <li><b>Amount:</b> ${quotation.quotation_amount || ''}</li>
+      <li><b>Quantity:</b> ${quotation.quantity || ''}</li>
+      <li><b>Validity Days:</b> ${quotation.validity_days || ''}</li>
+      <li><b>Delivery Days:</b> ${quotation.delivery_days || ''}</li>
+    </ul>
 
-                ${quotation.delivery_days ? `
-                <div style="margin: 10px 0;">
-                  <p style="margin: 5px 0; font-size: 14px;">
-                    <strong>Delivery Time:</strong> ${quotation.delivery_days} days
-                  </p>
-                </div>
-                ` : ''}
-              </div>
+    <h3 style="margin:20px 0 8px 0;">Terms & Conditions</h3>
+    <p>${(quotation.terms_conditions || '').replace(/\n/g, '<br/>')}</p>
 
-              <!-- Terms & Conditions -->
-              ${quotation.terms_conditions ? `
-              <div style="background: #f9f9f9; padding: 15px; margin: 20px 0; border-radius: 6px;">
-                <p style="margin: 0 0 10px 0; font-weight: bold; color: #003D82; font-size: 14px;">📝 Terms & Conditions:</p>
-                <p style="margin: 0; font-size: 13px; color: #555; white-space: pre-wrap; line-height: 1.6;">
-                  ${quotation.terms_conditions}
-                </p>
-              </div>
-              ` : ''}
+    <h3 style="margin:20px 0 8px 0;">Vendor</h3>
+    <ul>
+      <li><b>Name:</b> ${vendor.owner_name || ''}</li>
+      <li><b>Company:</b> ${vendor.company_name || ''}</li>
+      <li><b>Phone:</b> ${vendor.phone || ''}</li>
+      <li><b>Email:</b> ${vendor.email || ''}</li>
+    </ul>
 
-              <!-- Action Button -->
-              <div style="text-align: center; margin: 30px 0;">
-                <a href="${process.env.FRONTEND_URL}/buyer/quotations" 
-                   style="background: #00A699; color: white; padding: 14px 40px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px; display: inline-block;">
-                  View Quotation
-                </a>
-              </div>
+    <p style="margin-top: 18px;">
+      ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Register on IndianTradeMart to view quotations in your dashboard.'}
+    </p>
+  </div>
+  `;
 
-              <!-- Registration Message for Unregistered -->
-              ${registrationLink}
+  const mailOptions = {
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    text,
+    html
+  };
 
-              <!-- Footer -->
-              <div style="border-top: 1px solid #e0e0e0; margin-top: 30px; padding-top: 20px; text-align: center;">
-                <p style="color: #999; font-size: 12px; margin: 5px 0;">
-                  This is an automated email from IndianTradeMart.
-                </p>
-                <p style="color: #999; font-size: 12px; margin: 5px 0;">
-                  For inquiries, contact the vendor directly at ${vendor.phone || vendor.email}
-                </p>
-                <p style="color: #ccc; font-size: 11px; margin: 10px 0 0 0;">
-                  © 2025 IndianTradeMart. All rights reserved.
-                </p>
-              </div>
-
-            </div>
-          </body>
-        </html>
-      `
-    };
-
-    const info = await transporter.sendMail(mailOptions);
-    console.log('Quotation email sent:', info.messageId, 'to:', buyerEmail);
-    return true;
-  } catch (error) {
-    console.error('Quotation email sending failed:', error);
-    throw new Error('Failed to send quotation email');
-  }
+  await transporter.sendMail(mailOptions);
 }
 
-// POST /api/quotation/send - Send quotation with email
+// POST /api/quotation/send
 router.post('/send', async (req, res) => {
   try {
-    const { 
+    const {
       quotation_title,
       quotation_amount,
       quantity,
@@ -179,39 +96,51 @@ router.post('/send', async (req, res) => {
       delivery_days,
       terms_conditions,
       buyer_email,
-      buyer_id,
       vendor_id,
       vendor_name,
       vendor_company,
       vendor_phone,
-      vendor_email
-    } = req.body;
+      vendor_email,
 
-    // Validate required fields
-    if (!quotation_title || !quotation_amount || !buyer_email || !vendor_id) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: quotation_title, quotation_amount, buyer_email, vendor_id' 
-      });
-    }
+      // ⚠️ Ignore buyer_id from request (UI was sending lead.id)
+      buyer_id
+    } = req.body || {};
 
-    // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyer_email)) {
-      return res.status(400).json({ error: 'Invalid email format' });
+    if (!buyer_email || !vendor_id || !quotation_title) {
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     // Check if buyer is registered in the system
+    // NOTE: some setups use buyers.id as FK target, some use buyers.user_id.
+    // We fetch both so we can retry safely.
     const { data: buyerCheck } = await supabase
       .from('buyers')
-      .select('id, full_name, email, is_registered')
+      .select('id, user_id, full_name, email, is_registered')
       .eq('email', buyer_email.toLowerCase())
       .maybeSingle();
 
     const isRegistered = !!buyerCheck;
 
-    // Prepare quotation data - match proposals table schema
-    const quotationPayload = {
+    // Candidate buyer_id values to try (depends on FK target)
+    const buyerCandidates = [];
+    if (buyerCheck?.id) buyerCandidates.push(buyerCheck.id);
+    if (buyerCheck?.user_id && buyerCheck.user_id !== buyerCheck.id) buyerCandidates.push(buyerCheck.user_id);
+
+    // Fallback: if some older flow sends a real buyers.id, we can still accept it.
+    // But we first validate it exists in buyers.
+    if (buyer_id) {
+      const { data: buyerById } = await supabase
+        .from('buyers')
+        .select('id')
+        .eq('id', buyer_id)
+        .maybeSingle();
+      if (buyerById?.id) buyerCandidates.push(buyerById.id);
+    }
+
+    // Prepare base quotation data - match proposals table schema
+    const baseQuotationPayload = {
       vendor_id: vendor_id,
-      buyer_id: buyer_id || null,
+      buyer_id: null,
       buyer_email: buyer_email.toLowerCase(),
       title: quotation_title,
       product_name: quotation_title,
@@ -221,37 +150,49 @@ router.post('/send', async (req, res) => {
       status: 'SENT'
     };
 
-    // Save quotation to database
-    console.log('Attempting to save quotation with payload:', JSON.stringify(quotationPayload, null, 2));
-    
-    const { data: insertData, error: dbError } = await supabase
-      .from('proposals')
-      .insert([quotationPayload]);
-    
-    // If insert successful, fetch the saved record
-    let savedQuotation = null;
-    if (!dbError && quotationPayload.vendor_id) {
-      const { data: fetchedData } = await supabase
+    // Save quotation to database with safe retry logic.
+    const tryInsert = async (buyerIdValue) => {
+      const payload = { ...baseQuotationPayload, buyer_id: buyerIdValue ?? null };
+      console.log('Attempting to save quotation with payload:', JSON.stringify(payload, null, 2));
+      return supabase
         .from('proposals')
+        .insert([payload])
         .select('id, vendor_id, buyer_id, title')
-        .eq('vendor_id', quotationPayload.vendor_id)
-        .order('created_at', { ascending: false })
-        .limit(1)
         .single();
-      savedQuotation = fetchedData;
+    };
+
+    let savedQuotation = null;
+    let lastError = null;
+
+    for (const candidate of buyerCandidates) {
+      const { data, error } = await tryInsert(candidate);
+      if (!error && data) {
+        savedQuotation = data;
+        break;
+      }
+      lastError = error;
+      const msg = (error?.message || '').toLowerCase();
+      const code = error?.code;
+      const retryable = msg.includes('foreign key') || code === '23503' || code === '22P02';
+      if (!retryable) break;
     }
 
-    if (dbError) {
-      console.error('Database INSERT error:', JSON.stringify(dbError, null, 2));
-      return res.status(500).json({ error: dbError.message || 'Failed to save quotation', details: dbError });
-    }
-    
     if (!savedQuotation) {
-      console.error('No quotation data returned from insert');
-      return res.status(500).json({ error: 'Failed to save quotation - no data returned' });
+      const { data, error } = await tryInsert(null);
+      if (!error && data) {
+        savedQuotation = data;
+      } else {
+        lastError = error;
+      }
     }
-    
-    console.log('Quotation saved successfully:', savedQuotation.id);
+
+    if (!savedQuotation) {
+      console.error('Database INSERT error:', JSON.stringify(lastError, null, 2));
+      return res.status(500).json({
+        error: lastError?.message || 'Failed to save quotation',
+        details: lastError
+      });
+    }
 
     // Prepare vendor data for email
     const vendorData = {
@@ -262,7 +203,6 @@ router.post('/send', async (req, res) => {
     };
 
     // Send quotation email
-    let emailSent = false;
     try {
       await sendQuotationEmail(buyer_email, {
         vendor: vendorData,
@@ -275,8 +215,7 @@ router.post('/send', async (req, res) => {
           terms_conditions: terms_conditions
         }
       }, isRegistered);
-      emailSent = true;
-      
+
       // Log email to quotation_emails table
       await supabase
         .from('quotation_emails')
@@ -288,7 +227,6 @@ router.post('/send', async (req, res) => {
         }]);
     } catch (emailError) {
       console.error('Email sending error (non-blocking):', emailError);
-      // Log failed email attempt
       try {
         await supabase
           .from('quotation_emails')
@@ -300,7 +238,6 @@ router.post('/send', async (req, res) => {
             error_message: emailError.message
           }]);
       } catch (_) {}
-      // Don't fail the quotation if email fails - it's already saved
     }
 
     // Create notification if buyer is registered
@@ -337,49 +274,16 @@ router.post('/send', async (req, res) => {
       }
     }
 
-    res.json({
+    return res.status(200).json({
       success: true,
       message: `Quotation sent successfully to ${buyer_email}${isRegistered ? ' and added to their dashboard' : ' - they will see it after registering'}`,
       quotation_id: savedQuotation.id,
       buyer_registered: isRegistered
     });
-
-  } catch (error) {
-    console.error('Quotation send error:', error);
-    res.status(500).json({ error: error.message || 'Failed to send quotation' });
+  } catch (e) {
+    console.error('Quotation route error:', e);
+    return res.status(500).json({ error: e.message || 'Server error' });
   }
 });
 
-// GET /api/quotation/test - Test email sending
-router.get('/test', async (req, res) => {
-  try {
-    const testEmail = process.env.TEST_EMAIL || 'test@example.com';
-    
-    await sendQuotationEmail(testEmail, {
-      vendor: {
-        owner_name: 'Raj Kumar',
-        company_name: 'ABC Steel Exports',
-        phone: '9876543210',
-        email: 'vendor@example.com'
-      },
-      quotation: {
-        title: 'Steel Pipes - 2 Inch',
-        quotation_amount: 50000,
-        quantity: 100,
-        validity_days: 30,
-        delivery_days: 7,
-        terms_conditions: 'Payment: 50% advance, 50% on delivery'
-      }
-    }, false);
-
-    res.json({ 
-      success: true, 
-      message: `Test email sent to ${testEmail}` 
-    });
-  } catch (error) {
-    console.error('Test email error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-export default router;
+module.exports = router;

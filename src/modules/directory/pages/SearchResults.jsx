@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
-import { useSearchParams, useParams, useLocation } from 'react-router-dom';
+import { useSearchParams, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import SearchFilters from '@/modules/directory/components/SearchFilters';
 import SearchResultsList from '@/modules/directory/components/SearchResultsList';
@@ -11,11 +11,155 @@ import { urlParser } from '@/shared/utils/urlParser';
 import { Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { locationService } from '@/shared/services/locationService';
+import { toast } from '@/components/ui/use-toast';
+
+const normalizeText = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+const safeJsonParse = (s) => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+};
+
+// ✅ Levenshtein distance (typo fix)
+const levenshtein = (a = '', b = '') => {
+  a = String(a);
+  b = String(b);
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,
+        dp[i][j - 1] + 1,
+        dp[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return dp[m][n];
+};
+
+const getTargetLocations = (raw) => {
+  if (!raw) return { tl: null, rawStr: null };
+  if (typeof raw === 'object') return { tl: raw, rawStr: null };
+  if (typeof raw === 'string') {
+    const parsed = safeJsonParse(raw);
+    if (parsed && typeof parsed === 'object') return { tl: parsed, rawStr: null };
+    return { tl: null, rawStr: raw };
+  }
+  return { tl: null, rawStr: null };
+};
+
+const productMatchesLocation = (product, stateId, cityId, stateCityIdSet) => {
+  if (!stateId && !cityId) return true;
+
+  const { tl, rawStr } = getTargetLocations(product?.target_locations);
+
+  const vendorFallback = () => {
+    const vState = product?.vendors?.state_id ? String(product.vendors.state_id) : '';
+    const vCity = product?.vendors?.city_id ? String(product.vendors.city_id) : '';
+
+    if (cityId) return vCity === String(cityId) || (stateId ? vState === String(stateId) : false);
+    if (stateId) return vState === String(stateId);
+    return false;
+  };
+
+  // broken JSON string handling
+  if (!tl && rawStr) {
+    const s = rawStr.replace(/\s+/g, '').toLowerCase();
+    const pan = s.includes('"pan_india":true') || s.includes('"panindia":true');
+    if (pan) return true;
+
+    if (cityId && rawStr.includes(String(cityId))) return true;
+    if (stateId && rawStr.includes(String(stateId))) return true;
+
+    return vendorFallback();
+  }
+
+  if (!tl) return vendorFallback();
+
+  if (!!tl.pan_india) return true;
+
+  const targetStateIds = (tl.states || []).map((x) => String(x?.id)).filter(Boolean);
+  const targetCityIds = (tl.cities || []).map((x) => String(x?.id)).filter(Boolean);
+
+  const hasTargets = targetStateIds.length > 0 || targetCityIds.length > 0;
+  if (!hasTargets) return vendorFallback();
+
+  if (cityId) {
+    if (targetCityIds.includes(String(cityId))) return true;
+    if (stateId && targetStateIds.includes(String(stateId))) return true;
+    return false;
+  }
+
+  if (stateId) {
+    if (targetStateIds.includes(String(stateId))) return true;
+
+    if (stateCityIdSet && targetCityIds.length > 0) {
+      for (const cid of targetCityIds) {
+        if (stateCityIdSet.has(String(cid))) return true;
+      }
+    }
+    return false;
+  }
+
+  return true;
+};
+
+const resolveCategoryContext = async (slug) => {
+  const s = String(slug || '').trim();
+  if (!s) return { type: 'text' };
+
+  // micro
+  {
+    const { data } = await supabase
+      .from('micro_categories')
+      .select('id, sub_category_id')
+      .eq('slug', s)
+      .maybeSingle();
+    if (data?.id) return { type: 'micro', microId: data.id, subId: data.sub_category_id || null };
+  }
+
+  // sub
+  {
+    const { data } = await supabase
+      .from('sub_categories')
+      .select('id, head_category_id')
+      .eq('slug', s)
+      .maybeSingle();
+    if (data?.id) return { type: 'sub', subId: data.id, headId: data.head_category_id || null };
+  }
+
+  // head
+  {
+    const { data } = await supabase
+      .from('head_categories')
+      .select('id')
+      .eq('slug', s)
+      .maybeSingle();
+    if (data?.id) return { type: 'head', headId: data.id };
+  }
+
+  return { type: 'text' };
+};
 
 const SearchResults = () => {
   const [searchParams] = useSearchParams();
-  const params = useParams(); // { service, state, city } OR { slug }
+  const params = useParams();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [parsedParams, setParsedParams] = useState({
     serviceSlug: '',
@@ -33,20 +177,28 @@ const SearchResults = () => {
     inStock: false,
   });
 
-  // 1) Parse URL
+  // ✅ avoid repeated redirects
+  const autoCorrectedRef = useRef(false);
+
+  const buildSearchUrl = (svc, st, ct) => {
+    if (!svc) return '/directory';
+    let u = `/directory/search/${svc}`;
+    if (st) u += `/${st}`;
+    if (ct) u += `/${ct}`;
+    return u;
+  };
+
+  // Parse URL
   useEffect(() => {
     let service = '';
     let state = '';
     let city = '';
 
-    // ✅ /directory/search/:service/:state?/:city?
     if (params.service) {
       service = params.service;
       state = params.state || '';
       city = params.city || '';
-    }
-    // ✅ /directory/:slug (seo format)
-    else if (params.slug) {
+    } else if (params.slug) {
       const parsed = urlParser.parseSeoSlug(params.slug);
       service = parsed?.serviceSlug || '';
       state = parsed?.stateSlug || '';
@@ -58,9 +210,95 @@ const SearchResults = () => {
       stateSlug: state || '',
       citySlug: city || '',
     });
-  }, [params, location.pathname]);
 
-  // 2) Fetch Products
+    // user changed search => allow one autocorrect again
+    autoCorrectedRef.current = false;
+  }, [params, location.pathname, location.search]);
+
+  // ✅ Improved Auto-correct (NO limit issue)
+  const tryAutoCorrect = async ({ wrongSlug, stateSlug, citySlug }) => {
+    if (!wrongSlug) return null;
+    if (autoCorrectedRef.current) return null;
+
+    const wrong = normalizeText(wrongSlug);
+    if (wrong.length < 4) return null;
+
+    // tokens from slug: land-servey -> ["land","servey"]
+    const tokens = wrong
+      .replace(/[^a-z0-9-]/g, '')
+      .split('-')
+      .map((x) => x.trim())
+      .filter((x) => x.length >= 3);
+
+    // build candidate list by searching DB with ilike (fast, relevant, no missing land-survey)
+    const candidateMap = new Map();
+
+    const fetchCandidatesByToken = async (tok) => {
+      const { data, error } = await supabase
+        .from('sub_categories')
+        .select('id, name, slug')
+        .or(`slug.ilike.%${tok}%,name.ilike.%${tok}%`)
+        .limit(400);
+
+      if (!error && Array.isArray(data)) {
+        data.forEach((c) => {
+          if (c?.slug) candidateMap.set(c.slug, c);
+        });
+      }
+    };
+
+    // fetch by all tokens (max 2-3 calls)
+    for (const tok of tokens.slice(0, 3)) {
+      await fetchCandidatesByToken(tok);
+    }
+
+    // fallback: if still empty, fetch ordered slice so land-survey doesn't get skipped randomly
+    if (candidateMap.size === 0) {
+      const { data } = await supabase
+        .from('sub_categories')
+        .select('id, name, slug')
+        .order('slug', { ascending: true })
+        .limit(5000);
+
+      (data || []).forEach((c) => {
+        if (c?.slug) candidateMap.set(c.slug, c);
+      });
+    }
+
+    const candidates = Array.from(candidateMap.values());
+    if (candidates.length === 0) return null;
+
+    let best = null;
+    let bestDist = Number.POSITIVE_INFINITY;
+
+    for (const c of candidates) {
+      const cand = normalizeText(c.slug);
+      const d = levenshtein(wrong, cand);
+      if (d < bestDist) {
+        bestDist = d;
+        best = c;
+      }
+      if (bestDist === 0) break;
+    }
+
+    // strict threshold
+    const allowed = wrong.length >= 14 ? 3 : wrong.length >= 8 ? 2 : 1;
+    if (!best || bestDist > allowed) return null;
+
+    autoCorrectedRef.current = true;
+
+    const correctedUrl = buildSearchUrl(best.slug, stateSlug, citySlug);
+    navigate(correctedUrl, { replace: true });
+
+    toast({
+      title: 'Auto-corrected search',
+      description: `Showing results for "${best.name}" (corrected from "${wrongSlug.replace(/-/g, ' ')}")`,
+    });
+
+    return best;
+  };
+
+  // Fetch products
   useEffect(() => {
     const fetchResults = async () => {
       if (!parsedParams.serviceSlug) {
@@ -71,60 +309,57 @@ const SearchResults = () => {
 
       setLoading(true);
       try {
-        const serviceText = (parsedParams.serviceSlug || '').replace(/-/g, ' ').trim();
-        const extraQ = (searchParams.get('q') || '').trim();
+        const serviceSlug = parsedParams.serviceSlug;
+        const servicePhrase = normalizeText(serviceSlug.replace(/-/g, ' '));
 
-        // Resolve state/city IDs from slugs
+        // Resolve state/city IDs
         const { state, city } = await locationService.getLocationBySlug(
           parsedParams.stateSlug,
           parsedParams.citySlug
         );
-
         const stateId = state?.id || null;
         const cityId = city?.id || null;
 
-        // products + vendors join
+        // Build stateCityIdSet for state page
+        let stateCityIdSet = null;
+        if (stateId) {
+          const allCities = await locationService.getCities(stateId);
+          stateCityIdSet = new Set((allCities || []).map((c) => String(c.id)));
+        }
+
+        // Resolve category by slug
+        const ctx = await resolveCategoryContext(serviceSlug);
+
         let query = supabase
           .from('products')
           .select(
             `
             *,
-            vendors!inner (
+            vendors (
               id, company_name, city, state, state_id, city_id,
               seller_rating, kyc_status, verification_badge, trust_score
             )
-          `,
-            { count: 'exact' }
+          `
           )
           .eq('status', 'ACTIVE');
 
-        // location filters
-        if (stateId) query = query.eq('vendors.state_id', stateId);
-        if (cityId) query = query.eq('vendors.city_id', cityId);
-
-        // search (service + optional q)
-        const orParts = [];
-        if (serviceText) {
-          orParts.push(
-            `name.ilike.%${serviceText}%`,
-            `category.ilike.%${serviceText}%`,
-            `category_path.ilike.%${serviceText}%`,
-            `category_other.ilike.%${serviceText}%`,
-            `description.ilike.%${serviceText}%`
-          );
+        if (ctx.type === 'micro' && ctx.microId) query = query.eq('micro_category_id', ctx.microId);
+        else if (ctx.type === 'sub' && ctx.subId) query = query.eq('sub_category_id', ctx.subId);
+        else if (ctx.type === 'head' && ctx.headId) query = query.eq('head_category_id', ctx.headId);
+        else {
+          // keyword mode only
+          const orParts = [
+            `name.ilike.%${servicePhrase}%`,
+            `category.ilike.%${servicePhrase}%`,
+            `category_path.ilike.%${servicePhrase}%`,
+            `category_other.ilike.%${servicePhrase}%`,
+            `description.ilike.%${servicePhrase}%`,
+            `category_slug.eq.${serviceSlug}`,
+          ];
+          query = query.or(orParts.join(','));
         }
-        if (extraQ) {
-          orParts.push(
-            `name.ilike.%${extraQ}%`,
-            `category.ilike.%${extraQ}%`,
-            `category_path.ilike.%${extraQ}%`,
-            `category_other.ilike.%${extraQ}%`,
-            `description.ilike.%${extraQ}%`
-          );
-        }
-        if (orParts.length) query = query.or(orParts.join(','));
 
-        query = query.order('created_at', { ascending: false }).limit(120);
+        query = query.order('created_at', { ascending: false }).limit(300);
 
         const { data, error } = await query;
         if (error) throw error;
@@ -139,9 +374,33 @@ const SearchResults = () => {
           vendorVerified: p.vendors?.kyc_status === 'VERIFIED' || !!p.vendors?.verification_badge,
         }));
 
-        setResults(mapped);
-      } catch (error) {
-        console.error('Search failed', error);
+        const locationFiltered = mapped.filter((p) =>
+          productMatchesLocation(p, stateId, cityId, stateCityIdSet)
+        );
+
+        // ✅ if no results -> autocorrect and return (redirect)
+        if (locationFiltered.length === 0) {
+          await tryAutoCorrect({
+            wrongSlug: serviceSlug,
+            stateSlug: parsedParams.stateSlug,
+            citySlug: parsedParams.citySlug,
+          });
+          setResults([]);
+          return;
+        }
+
+        const sorted = locationFiltered
+          .map((p) => {
+            const nm = normalizeText(p?.name);
+            const exact = nm === servicePhrase ? 1000 : 0;
+            const contains = nm.includes(servicePhrase) ? 200 : 0;
+            return { ...p, __sortScore: exact + contains };
+          })
+          .sort((a, b) => (b.__sortScore || 0) - (a.__sortScore || 0));
+
+        setResults(sorted);
+      } catch (err) {
+        console.error('Search failed', err);
         setResults([]);
       } finally {
         setLoading(false);
@@ -151,14 +410,12 @@ const SearchResults = () => {
     fetchResults();
   }, [parsedParams.serviceSlug, parsedParams.stateSlug, parsedParams.citySlug, searchParams]);
 
-  // Client-side filtering (basic)
-  const filteredResults = results.filter((item) => {
+  const filteredResults = (results || []).filter((item) => {
     if (filters.verified && !item.vendorVerified) return false;
     if (filters.inStock && !item.inStock) return false;
     return true;
   });
 
-  // SEO text helpers
   const formatName = (s) => (s ? s.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) : '');
   const serviceName = formatName(parsedParams.serviceSlug);
   const cityName = formatName(parsedParams.citySlug);
@@ -170,7 +427,6 @@ const SearchResults = () => {
       }`
     : 'Search Results';
 
-  // Canonical
   const canonicalPath =
     parsedParams.citySlug && parsedParams.stateSlug
       ? `/directory/${parsedParams.serviceSlug}-in-${parsedParams.citySlug}-${parsedParams.stateSlug}`
@@ -192,13 +448,10 @@ const SearchResults = () => {
       </Helmet>
 
       <div className="min-h-screen bg-neutral-50 pb-16">
-        {/* ✅ Compact Sticky Header (Nearby always visible) */}
         <div className="bg-white border-b sticky top-16 z-10 shadow-sm">
           <div className="container mx-auto px-4 py-2">
-            {/* Breadcrumbs */}
             <PillBreadcrumbs className="mb-2" overrideParams={parsedParams} />
 
-            {/* Search Bar (keep suggestions) */}
             <div className="max-w-4xl mb-2">
               <DirectorySearchBar
                 enableSuggestions
@@ -209,7 +462,6 @@ const SearchResults = () => {
               />
             </div>
 
-            {/* Title + count in one compact row */}
             <div className="flex items-start md:items-center justify-between gap-3">
               <motion.h1
                 initial={{ opacity: 0, y: 6 }}
@@ -224,7 +476,6 @@ const SearchResults = () => {
               </div>
             </div>
 
-            {/* ✅ Nearby always visible but compact (horizontal scroll to save height) */}
             {parsedParams.stateSlug && (
               <div className="mt-0 overflow-x-auto scrollbar-hide">
                 <div className="min-w-max">
@@ -239,7 +490,6 @@ const SearchResults = () => {
           </div>
         </div>
 
-        {/* Main content (reduced top padding) */}
         <div className="container mx-auto px-4 py-5">
           <div className="flex flex-col lg:flex-row gap-6">
             <aside className="w-full lg:w-64 flex-shrink-0 hidden lg:block">

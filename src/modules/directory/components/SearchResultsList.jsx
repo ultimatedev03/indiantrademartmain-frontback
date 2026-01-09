@@ -12,9 +12,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
   const displayProducts = Array.isArray(products) ? products : [];
   const isUsingMock = false;
 
-  // ✅ IMPORTANT FIX:
-  // Directory product detail route is: /p/:productSlug
-  // Previously navigating to /product/:id (no route), so product details were not showing.
+  // ✅ Directory product detail route is: /p/:productSlug
   const getProductDetailPath = (product) => {
     const slugOrId = product?.slug || product?.productSlug || product?.id;
     return slugOrId ? `/p/${slugOrId}` : '/directory';
@@ -43,6 +41,58 @@ const SearchResultsList = ({ products, query, city, category }) => {
       title: 'Feature Coming Soon',
       description: "🚧 This feature isn't implemented yet.",
     });
+  };
+
+  // ✅ Extract unit safely (your CSV shows: price_unit, qty_unit)
+  const getUnit = (product) => {
+    const u =
+      (product?.price_unit ||
+        product?.qty_unit ||
+        product?.unit ||
+        product?.priceUnit ||
+        product?.qtyUnit ||
+        '')
+        ?.toString?.()
+        ?.trim?.() || '';
+
+    // ignore junk values
+    if (!u) return '';
+    if (u.toLowerCase() === 'nan' || u.toLowerCase() === 'null' || u.toLowerCase() === 'undefined') return '';
+    return u;
+  };
+
+  const getPriceNumber = (rawPrice) => {
+    if (rawPrice === null || rawPrice === undefined) return null;
+    if (typeof rawPrice === 'number') return Number.isFinite(rawPrice) ? rawPrice : null;
+
+    // if string like "₹4,522" or "4522"
+    const cleaned = String(rawPrice).replace(/[₹,\s]/g, '').trim();
+    if (!cleaned) return null;
+
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const renderPrice = (product) => {
+    const unit = getUnit(product);
+    const priceNum = getPriceNumber(product?.price);
+
+    // If price not set, show "Price on Request"
+    if (priceNum === null) {
+      return (
+        <span className="text-[#00A699] font-bold">
+          Price on Request
+          {unit ? <span className="text-xs font-semibold text-gray-500"> / {unit}</span> : null}
+        </span>
+      );
+    }
+
+    return (
+      <span className="text-[#00A699] font-bold">
+        ₹{priceNum.toLocaleString()}
+        {unit ? <span className="text-xs font-semibold text-gray-500"> / {unit}</span> : null}
+      </span>
+    );
   };
 
   if (!isUsingMock && displayProducts.length === 0) {
@@ -113,9 +163,10 @@ const SearchResultsList = ({ products, query, city, category }) => {
 
               <div className="space-y-2 mb-4 mt-auto">
                 <div className="flex items-center justify-between">
-                  <span className="text-xl font-bold text-[#00A699]">
-                    {typeof product.price === 'number' ? `₹${product.price.toLocaleString()}` : product.price}
+                  <span className="text-xl">
+                    {renderPrice(product)}
                   </span>
+
                   {product.minOrder && (
                     <Badge variant="default" className="text-xs">
                       MOQ: {product.minOrder}
@@ -148,6 +199,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
                 >
                   View Details
                 </Button>
+
                 <Button
                   variant="outline"
                   size="icon"
