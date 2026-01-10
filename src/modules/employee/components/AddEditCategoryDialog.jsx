@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,8 +18,14 @@ const AddEditCategoryDialog = ({
     name: '',
     slug: '',
     description: '',
+    image_url: '',
     is_active: true
   });
+
+  // image upload (optional)
+  const [imageFile, setImageFile] = useState(null);
+  const [removeImage, setRemoveImage] = useState(false);
+  const [imageFilePreview, setImageFilePreview] = useState('');
   
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -31,6 +37,7 @@ const AddEditCategoryDialog = ({
         name: category.name || '',
         slug: category.slug || '',
         description: category.description || '',
+        image_url: category.image_url || '',
         is_active: category.is_active !== false
       });
     } else {
@@ -38,11 +45,40 @@ const AddEditCategoryDialog = ({
         name: '',
         slug: '',
         description: '',
+        image_url: '',
         is_active: true
       });
     }
+    setImageFile(null);
+    setRemoveImage(false);
     setErrors({});
   }, [category, isOpen]);
+
+  const showImageField = useMemo(() => {
+    // user asked specifically for head + micro, but we support sub too (since schema already has image_url)
+    return level === 'head' || level === 'sub' || level === 'micro';
+  }, [level]);
+
+  // Preview for local file (cleanup URL on change/unmount)
+  useEffect(() => {
+    if (!imageFile) {
+      setImageFilePreview('');
+      return;
+    }
+    const url = URL.createObjectURL(imageFile);
+    setImageFilePreview(url);
+    return () => {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (_) {}
+    };
+  }, [imageFile]);
+
+  const previewUrl = useMemo(() => {
+    if (imageFilePreview) return imageFilePreview;
+    const url = (formData.image_url || '').trim();
+    return url.length > 0 ? url : '';
+  }, [imageFilePreview, formData.image_url]);
   
   // Auto-generate slug from name
   const generateSlug = (name) => {
@@ -84,6 +120,8 @@ const AddEditCategoryDialog = ({
     try {
       await onSave({
         ...formData,
+        imageFile,
+        removeImage,
         parentId,
         id: category?.id
       });
@@ -157,6 +195,93 @@ const AddEditCategoryDialog = ({
                 placeholder={`Optional description for ${getLevelName().toLowerCase()}`}
                 rows={3}
               />
+            </div>
+          )}
+
+          {showImageField && (
+            <div className="space-y-2">
+              <Label>Image (optional)</Label>
+
+              {/* Preview */}
+              <div className="flex items-start gap-4">
+                <div className="w-28 h-20 rounded-md border bg-slate-50 overflow-hidden flex items-center justify-center">
+                  {previewUrl && !removeImage ? (
+                    <img
+                      src={previewUrl}
+                      alt={formData.name || 'Category image'}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-500 font-semibold">
+                      {String(formData.name || '?').slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex-1 space-y-3">
+                  <div>
+                    <Label htmlFor="image_file" className="text-xs text-slate-600">
+                      Upload image
+                    </Label>
+                    <Input
+                      id="image_file"
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0] || null;
+                        setImageFile(f);
+                        if (f) {
+                          setRemoveImage(false);
+                          // user picked a file -> ignore any typed url
+                        }
+                      }}
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      PNG/JPG/WebP recommended. This will be shown on directory pages.
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="image_url" className="text-xs text-slate-600">
+                      Or paste image URL
+                    </Label>
+                    <Input
+                      id="image_url"
+                      value={formData.image_url || ''}
+                      onChange={(e) => {
+                        setFormData((prev) => ({ ...prev, image_url: e.target.value }));
+                        if (e.target.value?.trim()) {
+                          setImageFile(null);
+                          setRemoveImage(false);
+                        }
+                      }}
+                      placeholder="https://..."
+                    />
+                  </div>
+
+                  {!!category?.image_url && (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id="remove_image"
+                        checked={removeImage}
+                        onCheckedChange={(checked) => {
+                          const v = !!checked;
+                          setRemoveImage(v);
+                          if (v) {
+                            setImageFile(null);
+                          }
+                        }}
+                      />
+                      <Label htmlFor="remove_image" className="cursor-pointer text-sm">
+                        Remove existing image
+                      </Label>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
           

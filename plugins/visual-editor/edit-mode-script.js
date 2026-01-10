@@ -1,4 +1,10 @@
-import { POPUP_STYLES } from "./plugins/visual-editor/visual-editor-config.js";
+// NOTE:
+// This script is injected inline by a Vite dev plugin.
+// Relative imports inside inline module scripts resolve relative to the current page URL.
+// So on routes like /auth/forgot-password it would try to load:
+//   /auth/plugins/visual-editor/visual-editor-config.js (404)
+// Using an absolute path fixes that.
+import { POPUP_STYLES } from "/plugins/visual-editor/visual-editor-config.js";
 
 const PLUGIN_APPLY_EDIT_API_URL = "/api/apply-edit";
 
@@ -154,7 +160,6 @@ function getParentOrigin() {
 
 async function handleEditSave(updatedText) {
 	const newText = updatedText
-		// Replacing characters that cause Babel parser to crash
 		.replace(/</g, "&lt;")
 		.replace(/>/g, "&gt;")
 		.replace(/{/g, "&#123;")
@@ -205,152 +210,3 @@ async function handleEditSave(updatedText) {
 		);
 	}
 }
-
-function createDisabledTooltip() {
-	if (disabledTooltipElement) return;
-
-	disabledTooltipElement = document.createElement("div");
-	disabledTooltipElement.id = "inline-editor-disabled-tooltip";
-	document.body.appendChild(disabledTooltipElement);
-}
-
-function showDisabledTooltip(targetElement, isImage = false) {
-	if (!disabledTooltipElement) createDisabledTooltip();
-
-	disabledTooltipElement.textContent = isImage
-		? translations.disabledTooltipTextImage
-		: translations.disabledTooltipText;
-
-	if (!disabledTooltipElement.isConnected) {
-		document.body.appendChild(disabledTooltipElement);
-	}
-	disabledTooltipElement.classList.add("tooltip-active");
-
-	const tooltipWidth = disabledTooltipElement.offsetWidth;
-	const tooltipHeight = disabledTooltipElement.offsetHeight;
-	const rect = targetElement.getBoundingClientRect();
-
-	// Ensures that tooltip is not off the screen with 5px margin
-	let newLeft = rect.left + window.scrollX + rect.width / 2 - tooltipWidth / 2;
-	let newTop = rect.bottom + window.scrollY + 5;
-
-	if (newLeft < window.scrollX) {
-		newLeft = window.scrollX + 5;
-	}
-	if (newLeft + tooltipWidth > window.innerWidth + window.scrollX) {
-		newLeft = window.innerWidth + window.scrollX - tooltipWidth - 5;
-	}
-	if (newTop + tooltipHeight > window.innerHeight + window.scrollY) {
-		newTop = rect.top + window.scrollY - tooltipHeight - 5;
-	}
-	if (newTop < window.scrollY) {
-		newTop = window.scrollY + 5;
-	}
-
-	disabledTooltipElement.style.left = `${newLeft}px`;
-	disabledTooltipElement.style.top = `${newTop}px`;
-}
-
-function hideDisabledTooltip() {
-	if (disabledTooltipElement) {
-		disabledTooltipElement.classList.remove("tooltip-active");
-	}
-}
-
-function handleDisabledElementHover(event) {
-	const isImage = event.currentTarget.tagName.toLowerCase() === "img";
-
-	showDisabledTooltip(event.currentTarget, isImage);
-}
-
-function handleDisabledElementLeave() {
-	hideDisabledTooltip();
-}
-
-function handleDisabledGlobalHover(event) {
-	const disabledElement = findDisabledElementAtPoint(event);
-	if (disabledElement) {
-		if (currentDisabledHoverElement !== disabledElement) {
-			currentDisabledHoverElement = disabledElement;
-			const isImage = disabledElement.tagName.toLowerCase() === "img";
-			showDisabledTooltip(disabledElement, isImage);
-		}
-	} else {
-		if (currentDisabledHoverElement) {
-			currentDisabledHoverElement = null;
-			hideDisabledTooltip();
-		}
-	}
-}
-
-function enableEditMode() {
-	// Don't enable if selection mode is active
-	if (document.getElementById("root")?.getAttribute("data-selection-mode-enabled") === "true") {
-		console.warn("[EDIT MODE] Cannot enable edit mode while selection mode is active");
-		return;
-	}
-
-	document
-		.getElementById("root")
-		?.setAttribute("data-edit-mode-enabled", "true");
-
-	injectPopupStyles();
-
-	if (!globalEventHandlers) {
-		globalEventHandlers = {
-			mousedown: handleGlobalEvent,
-			pointerdown: handleGlobalEvent,
-			click: handleGlobalEvent,
-		};
-
-		Object.entries(globalEventHandlers).forEach(([eventType, handler]) => {
-			document.addEventListener(eventType, handler, true);
-		});
-	}
-
-	document.addEventListener("mousemove", handleDisabledGlobalHover, true);
-
-	document.querySelectorAll("[data-edit-disabled]").forEach((el) => {
-		el.removeEventListener("mouseenter", handleDisabledElementHover);
-		el.addEventListener("mouseenter", handleDisabledElementHover);
-		el.removeEventListener("mouseleave", handleDisabledElementLeave);
-		el.addEventListener("mouseleave", handleDisabledElementLeave);
-	});
-}
-
-function disableEditMode() {
-	document.getElementById("root")?.removeAttribute("data-edit-mode-enabled");
-
-	hideDisabledTooltip();
-
-	if (globalEventHandlers) {
-		Object.entries(globalEventHandlers).forEach(([eventType, handler]) => {
-			document.removeEventListener(eventType, handler, true);
-		});
-		globalEventHandlers = null;
-	}
-
-	document.removeEventListener("mousemove", handleDisabledGlobalHover, true);
-	currentDisabledHoverElement = null;
-
-	document.querySelectorAll("[data-edit-disabled]").forEach((el) => {
-		el.removeEventListener("mouseenter", handleDisabledElementHover);
-		el.removeEventListener("mouseleave", handleDisabledElementLeave);
-	});
-}
-
-window.addEventListener("message", function (event) {
-	if (event.data?.type === "edit-save") {
-		handleEditSave(event.data?.payload?.newText);
-	}
-	if (event.data?.type === "enable-edit-mode") {
-		if (event.data?.translations) {
-			translations = { ...translations, ...event.data.translations };
-		}
-
-		enableEditMode();
-	}
-	if (event.data?.type === "disable-edit-mode") {
-		disableEditMode();
-	}
-});

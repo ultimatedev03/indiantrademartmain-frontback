@@ -1,10 +1,9 @@
-
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate, useLocation, Link } from 'react-router-dom';
 import { useBuyerAuth } from '@/modules/buyer/context/AuthContext';
 import { useSubdomain } from '@/contexts/SubdomainContext';
-import { 
-  LayoutDashboard, FileText, PlusCircle, User, LogOut, 
+import {
+  LayoutDashboard, FileText, PlusCircle, User, LogOut,
   Menu, Bell, Search, MessageSquare, Ticket, Heart, Lightbulb
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,8 +18,8 @@ const SidebarLink = ({ to, icon: Icon, children, onClick }) => {
       onClick={onClick}
       className={({ isActive }) =>
         `flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors min-h-[48px] ${
-          isActive 
-            ? 'bg-[#003D82] text-white' 
+          isActive
+            ? 'bg-[#003D82] text-white'
             : 'text-neutral-600 hover:bg-neutral-100 hover:text-[#003D82]'
         }`
       }
@@ -54,10 +53,11 @@ const BuyerLayout = () => {
     <div className="flex flex-col h-full">
       {!mobile && (
         <div className="h-20 flex items-center justify-center border-b border-neutral-100 px-4">
-           <Logo className="h-8" />
+          {/* ✅ Clean, compact logo (no tagline) */}
+          <Logo className="h-8" showTagline={false} />
         </div>
       )}
-      
+
       <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
         <SidebarLink to={resolvePath('dashboard', 'buyer')} icon={LayoutDashboard} onClick={() => setIsMobileMenuOpen(false)}>Dashboard</SidebarLink>
         <SidebarLink to={resolvePath('proposals', 'buyer')} icon={FileText} onClick={() => setIsMobileMenuOpen(false)}>My Proposals</SidebarLink>
@@ -79,8 +79,8 @@ const BuyerLayout = () => {
             <p className="text-xs text-neutral-500 truncate">{user?.company}</p>
           </div>
         </div>
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 h-11"
           onClick={handleLogout}
         >
@@ -110,27 +110,33 @@ const BuyerLayout = () => {
               </SheetTrigger>
               <SheetContent side="left" className="w-[300px] p-0">
                 <SheetHeader className="p-4 border-b text-left">
-                  <Logo className="h-6" />
+                  {/* ✅ Mobile header logo also compact */}
+                  <Logo className="h-6" showTagline={false} />
                   <SheetTitle className="sr-only">Navigation</SheetTitle>
                 </SheetHeader>
                 <SidebarContent mobile />
               </SheetContent>
             </Sheet>
-            
+
             <h1 className="text-lg md:text-xl font-semibold text-neutral-800 truncate max-w-[200px] md:max-w-none">
               {getPageTitle()}
             </h1>
           </div>
-          
+
           <div className="flex items-center gap-2 md:gap-4">
-             <Link to="/search">
-               <Button variant="ghost" size="icon" className="h-10 w-10">
-                 <Search className="h-5 w-5 text-neutral-500" />
-               </Button>
-             </Link>
-             <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => toast({ title: "No new notifications" })}>
-               <Bell className="h-5 w-5 text-neutral-500" />
-             </Button>
+            <Link to="/search">
+              <Button variant="ghost" size="icon" className="h-10 w-10">
+                <Search className="h-5 w-5 text-neutral-500" />
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10"
+              onClick={() => toast({ title: 'No new notifications' })}
+            >
+              <Bell className="h-5 w-5 text-neutral-500" />
+            </Button>
           </div>
         </header>
 

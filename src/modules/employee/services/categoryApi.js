@@ -20,6 +20,44 @@ const firstRowOrThrow = (data, message) => {
   return data;
 };
 
+// --- CATEGORY IMAGE UPLOAD ---
+// We reuse the existing Supabase Storage bucket `avatars` (known to be public in this project).
+// Images are stored under: avatars/category-images/<level>/<slug>-<timestamp>.<ext>
+const CATEGORY_IMAGE_BUCKET = 'avatars';
+
+const safeSlug = (v) =>
+  String(v || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+const uploadCategoryImage = async ({ level, slug, file }) => {
+  if (!file) return null;
+
+  const ext = String(file?.name || '').split('.').pop() || 'png';
+  const safe = safeSlug(slug) || 'category';
+  const key = `category-images/${level}/${safe}-${Date.now()}.${ext}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from(CATEGORY_IMAGE_BUCKET)
+    .upload(key, file, {
+      upsert: true,
+      contentType: file.type || undefined
+    });
+
+  if (uploadError) {
+    throw new Error(`Image upload failed: ${uploadError.message}`);
+  }
+
+  const { data } = supabase.storage.from(CATEGORY_IMAGE_BUCKET).getPublicUrl(key);
+  const publicUrl = data?.publicUrl;
+  if (!publicUrl) throw new Error('Image upload succeeded but public URL was not generated.');
+  return publicUrl;
+};
+
 // HEAD CATEGORIES
 export const headCategoryApi = {
   getAll: async () => {
@@ -42,7 +80,13 @@ export const headCategoryApi = {
   },
 
   create: async (categoryData) => {
-    const { name, slug, description, is_active } = categoryData;
+    const { name, slug, description, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'head', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('head_categories')
@@ -50,6 +94,7 @@ export const headCategoryApi = {
         name: name.trim(),
         slug: slug.trim(),
         description: description?.trim() || null,
+        image_url: finalImageUrl,
         is_active: is_active !== false
       }])
       .select()
@@ -60,7 +105,13 @@ export const headCategoryApi = {
   },
 
   update: async (id, categoryData) => {
-    const { name, slug, description, is_active } = categoryData;
+    const { name, slug, description, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'head', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('head_categories')
@@ -68,6 +119,7 @@ export const headCategoryApi = {
         name: name.trim(),
         slug: slug.trim(),
         description: description?.trim() || null,
+        image_url: finalImageUrl,
         is_active: is_active !== false
       })
       .eq('id', id)
@@ -143,7 +195,13 @@ export const subCategoryApi = {
   },
 
   create: async (categoryData, headCategoryId) => {
-    const { name, slug, description, is_active } = categoryData;
+    const { name, slug, description, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'sub', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('sub_categories')
@@ -152,6 +210,7 @@ export const subCategoryApi = {
         name: name.trim(),
         slug: slug.trim(),
         description: description?.trim() || null,
+        image_url: finalImageUrl,
         is_active: is_active !== false
       }])
       .select()
@@ -162,7 +221,13 @@ export const subCategoryApi = {
   },
 
   update: async (id, categoryData) => {
-    const { name, slug, description, is_active } = categoryData;
+    const { name, slug, description, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'sub', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('sub_categories')
@@ -170,6 +235,7 @@ export const subCategoryApi = {
         name: name.trim(),
         slug: slug.trim(),
         description: description?.trim() || null,
+        image_url: finalImageUrl,
         is_active: is_active !== false
       })
       .eq('id', id)
@@ -245,7 +311,13 @@ export const microCategoryApi = {
   },
 
   create: async (categoryData, subCategoryId) => {
-    const { name, slug, is_active } = categoryData;
+    const { name, slug, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'micro', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('micro_categories')
@@ -253,6 +325,7 @@ export const microCategoryApi = {
         sub_category_id: subCategoryId,
         name: name.trim(),
         slug: slug.trim(),
+        image_url: finalImageUrl,
         is_active: is_active !== false
       }])
       .select()
@@ -263,13 +336,20 @@ export const microCategoryApi = {
   },
 
   update: async (id, categoryData) => {
-    const { name, slug, is_active } = categoryData;
+    const { name, slug, is_active, image_url, imageFile, removeImage } = categoryData;
+
+    let finalImageUrl = (image_url || '').trim() || null;
+    if (imageFile) {
+      finalImageUrl = await uploadCategoryImage({ level: 'micro', slug, file: imageFile });
+    }
+    if (removeImage) finalImageUrl = null;
 
     const { data, error } = await supabase
       .from('micro_categories')
       .update({
         name: name.trim(),
         slug: slug.trim(),
+        image_url: finalImageUrl,
         is_active: is_active !== false
       })
       .eq('id', id)

@@ -23,6 +23,30 @@ const HOME_SEO = {
 const Home = () => {
   const navigate = useNavigate();
 
+  // Small helper to avoid broken images in Featured Suppliers.
+  const VendorImage = ({ src, name }) => {
+    const [failed, setFailed] = useState(false);
+    const letter = String(name || 'S').trim().charAt(0).toUpperCase() || 'S';
+
+    if (!src || failed) {
+      return (
+        <div className="w-full h-full flex items-center justify-center bg-slate-100 text-5xl font-extrabold text-slate-300">
+          {letter}
+        </div>
+      );
+    }
+
+    return (
+      <img
+        src={src}
+        alt={name}
+        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+        onError={() => setFailed(true)}
+        loading="lazy"
+      />
+    );
+  };
+
   const [homeCategories, setHomeCategories] = useState([]);
   const [featuredVendors, setFeaturedVendors] = useState([]);
   const [loadingCategories, setLoadingCategories] = useState(true);
@@ -170,11 +194,7 @@ const Home = () => {
                 onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
               >
                 <div className="relative h-48 mb-4 rounded-lg bg-slate-100 overflow-hidden">
-                  <img
-                    src={vendor.image}
-                    alt={vendor.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
+                  <VendorImage src={vendor.image} name={vendor.name} />
                   {vendor.verified && (
                     <span className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-md text-xs font-bold text-blue-700 flex items-center gap-1.5 shadow-sm">
                       <CheckCircle className="w-3.5 h-3.5 fill-blue-100" /> Verified

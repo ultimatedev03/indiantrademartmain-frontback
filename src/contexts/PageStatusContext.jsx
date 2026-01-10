@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 
 const PageStatusContext = createContext(null);
@@ -7,11 +7,17 @@ export const PageStatusProvider = ({ children }) => {
   const [pageStatuses, setPageStatuses] = useState({});
   const [isLoading, setIsLoading] = useState(true);
 
+  // Prevent noisy logs + aggressive polling in dev.
+  // Enable logs only when you explicitly want them:
+  //   VITE_DEBUG_PAGE_STATUS=true
+  const DEBUG = Boolean(import.meta?.env?.VITE_DEBUG_PAGE_STATUS === 'true');
+  const pollRef = useRef(null);
+
   useEffect(() => {
     const fetchAllPageStatuses = async () => {
       try {
-        console.log('[PageStatusContext] Fetching all page statuses...');
-        
+        if (DEBUG) console.log('[PageStatusContext] Fetching all page statuses...');
+
         const { data, error } = await supabase
           .from('page_status')
           .select('*');
@@ -22,7 +28,6 @@ export const PageStatusProvider = ({ children }) => {
           return;
         }
 
-        // Convert array to object for quick lookup
         const statusMap = {};
         if (data) {
           data.forEach(page => {
@@ -30,12 +35,12 @@ export const PageStatusProvider = ({ children }) => {
               is_blanked: page.is_blanked === true,
               error_message: page.error_message || ''
             };
-            console.log('[PageStatusContext] Loaded:', page.page_route, { is_blanked: page.is_blanked });
+            if (DEBUG) console.log('[PageStatusContext] Loaded:', page.page_route, { is_blanked: page.is_blanked });
           });
         }
 
         setPageStatuses(statusMap);
-        console.log('[PageStatusContext] All page statuses loaded:', statusMap);
+        if (DEBUG) console.log('[PageStatusContext] All page statuses loaded:', statusMap);
         setIsLoading(false);
       } catch (err) {
         console.error('[PageStatusContext] Exception:', err);
@@ -45,25 +50,18 @@ export const PageStatusProvider = ({ children }) => {
 
     fetchAllPageStatuses();
 
-    // Subscribe to realtime changes on page_status table
     const subscription = supabase
       .channel('all_page_statuses', { config: { broadcast: { self: true } } })
       .on(
         'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'page_status'
-        },
+        { event: 'UPDATE', schema: 'public', table: 'page_status' },
         (payload) => {
-          console.log('[PageStatusContext] Realtime UPDATE received:', payload);
-          
+          if (DEBUG) console.log('[PageStatusContext] Realtime UPDATE received:', payload);
+
           if (payload.new) {
             const route = payload.new.page_route;
             const isBlanked = payload.new.is_blanked === true;
-            
-            console.log('[PageStatusContext] Updating status for:', route, '- is_blanked:', isBlanked);
-            
+
             setPageStatuses(prev => ({
               ...prev,
               [route]: {
@@ -76,18 +74,14 @@ export const PageStatusProvider = ({ children }) => {
       )
       .on(
         'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'page_status'
-        },
+        { event: 'INSERT', schema: 'public', table: 'page_status' },
         (payload) => {
-          console.log('[PageStatusContext] Realtime INSERT received:', payload);
-          
+          if (DEBUG) console.log('[PageStatusContext] Realtime INSERT received:', payload);
+
           if (payload.new) {
             const route = payload.new.page_route;
             const isBlanked = payload.new.is_blanked === true;
-            
+
             setPageStatuses(prev => ({
               ...prev,
               [route]: {
@@ -99,14 +93,26 @@ export const PageStatusProvider = ({ children }) => {
         }
       )
       .subscribe((status) => {
-        console.log('[PageStatusContext] Subscription status:', status);
+        if (DEBUG) console.log('[PageStatusContext] Subscription status:', status);
+
+        const isSubscribed = String(status).toUpperCase() === 'SUBSCRIBED';
+
+        // Only poll as a fallback when realtime isn't subscribed.
+        if (!isSubscribed && !pollRef.current) {
+          pollRef.current = setInterval(fetchAllPageStatuses, 30000);
+        }
+
+        if (isSubscribed && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
       });
 
-    // Poll every 5 seconds as aggressive fallback
-    const interval = setInterval(fetchAllPageStatuses, 5000);
-
     return () => {
-      clearInterval(interval);
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
       subscription.unsubscribe();
     };
   }, []);

@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
 import { dataEntryApi } from '@/modules/employee/services/dataEntryApi';
@@ -33,9 +32,10 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
+        const effectiveUserId = user?.user_id || user?.id;
         const [statsData, activitiesData] = await Promise.all([
-          dataEntryApi.getDashboardStats(user?.id),
-          dataEntryApi.getRecentActivities(user?.id)
+          dataEntryApi.getDashboardStats(effectiveUserId),
+          dataEntryApi.getRecentActivities(effectiveUserId)
         ]);
         setStats(statsData);
         setActivities(activitiesData);

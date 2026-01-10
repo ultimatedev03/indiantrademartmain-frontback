@@ -1,18 +1,66 @@
-
 import { supabase } from '@/lib/customSupabaseClient';
 
 export const vendorService = {
-  getFeaturedVendors: async () => {
+  /**
+   * Returns vendors from DB but also adds UI-friendly fields:
+   * - name (company_name fallback)
+   * - image (profile_image fallback)
+   * - verified (from is_verified / verification_badge / kyc_status)
+   *
+   * NOTE: We keep the original DB columns intact by spreading the row.
+   */
+  getFeaturedVendors: async (options = {}) => {
+    const limit = Number(options?.limit || 6);
+
     const { data, error } = await supabase
       .from('vendors')
-      .select('*')
-      .limit(6);
-    
+      .select(
+        `
+          *,
+          city_ref:city_id (name, slug),
+          state_ref:state_id (name, slug)
+        `
+      )
+      .eq('is_active', true)
+      .order('is_verified', { ascending: false })
+      .order('verification_badge', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
     if (error) {
       console.error('Error fetching featured vendors:', error);
       return [];
     }
-    return data;
+
+    const rows = Array.isArray(data) ? data : [];
+
+    return rows.map((v) => {
+      const companyName =
+        v.company_name ||
+        `${v.first_name || ''} ${v.last_name || ''}`.trim() ||
+        v.owner_name ||
+        'Supplier';
+
+      const cityName = v?.city_ref?.name || v.city || '';
+      const stateName = v?.state_ref?.name || v.state || '';
+
+      const kyc = String(v.kyc_status || '').toUpperCase();
+      const verified =
+        Boolean(v.is_verified) || Boolean(v.verification_badge) || kyc === 'APPROVED';
+
+      return {
+        ...v,
+        name: companyName,
+        image: v.profile_image || v.image_url || v.avatar_url || '',
+        city: cityName,
+        state: stateName,
+        verified,
+        // best-effort fields used by older UI blocks
+        rating: v.seller_rating ?? null,
+        reviews: null,
+        description: v.primary_business_type || v.secondary_business || ''
+      };
+    });
   },
 
   getVendorById: async (vendorId) => {
@@ -21,7 +69,7 @@ export const vendorService = {
       .select('*, products(*)')
       .eq('id', vendorId)
       .single();
-    
+
     if (error) {
       console.error('Error fetching vendor:', error);
       return null;
@@ -40,77 +88,71 @@ export const vendorService = {
           city:city_id (slug, name),
           state:state_id (slug, name)
         `)
-        .eq('kyc_status', 'VERIFIED'); // Only verified vendors
+        .eq('is_active', true)
+        // NOTE: Your schema has kyc_status like APPROVED/PENDING etc (no VERIFIED).
+        // So we treat vendor as "verified" if any of these match.
+        .or('is_verified.eq.true,verification_badge.eq.true,kyc_status.ilike.APPROVED');
 
       // 1. Filter by Location (State)
       if (stateSlug) {
-        // Find state ID first (Optimization: could use join filter if Supabase supported it easily deep down)
         const { data: stateData } = await supabase
-           .from('states')
-           .select('id')
-           .eq('slug', stateSlug)
-           .single();
-        
+          .from('states')
+          .select('id')
+          .eq('slug', stateSlug)
+          .single();
+
         if (stateData) {
-            dbQuery = dbQuery.eq('state_id', stateData.id);
+          dbQuery = dbQuery.eq('state_id', stateData.id);
         }
       }
 
       // 2. Filter by Location (City)
       if (citySlug) {
         const { data: cityData } = await supabase
-           .from('cities')
-           .select('id')
-           .eq('slug', citySlug)
-           .single();
-        
+          .from('cities')
+          .select('id')
+          .eq('slug', citySlug)
+          .single();
+
         if (cityData) {
-            dbQuery = dbQuery.eq('city_id', cityData.id);
+          dbQuery = dbQuery.eq('city_id', cityData.id);
         }
       }
-      
+
       // Execute Vendor Query
       const { data: vendors, error } = await dbQuery;
-      
+
       if (error) throw error;
       if (!vendors) return [];
 
-      // 3. Filter by Service/Category (Client-side or complex Join)
-      // Since 'serviceSlug' matches product categories, we filter the products inside vendors
-      // OR filtered vendors who have at least one product in that category.
-      
       let filteredVendors = vendors;
 
       if (serviceSlug) {
-          // Normalize slug for comparison (very basic fuzzy match)
-          const searchTerm = serviceSlug.replace(/-/g, ' ').toLowerCase();
-          
-          filteredVendors = vendors.filter(v => {
-              // Check if vendor has products matching the service
-              const hasMatchingProduct = v.products?.some(p => 
-                  (p.category && p.category.toLowerCase().includes(searchTerm)) ||
-                  (p.name && p.name.toLowerCase().includes(searchTerm)) ||
-                  (p.description && p.description.toLowerCase().includes(searchTerm))
-              );
-              
-              // Also check if company name matches (e.g. "ABC Electronics" matches "electronics")
-              const companyMatch = v.company_name.toLowerCase().includes(searchTerm);
-              
-              return hasMatchingProduct || companyMatch;
-          });
+        const searchTerm = serviceSlug.replace(/-/g, ' ').toLowerCase();
+
+        filteredVendors = vendors.filter((v) => {
+          const hasMatchingProduct = v.products?.some(
+            (p) =>
+              (p.category && p.category.toLowerCase().includes(searchTerm)) ||
+              (p.name && p.name.toLowerCase().includes(searchTerm)) ||
+              (p.description && p.description.toLowerCase().includes(searchTerm))
+          );
+
+          const companyMatch = (v.company_name || '').toLowerCase().includes(searchTerm);
+          return hasMatchingProduct || companyMatch;
+        });
       }
 
-      // 4. General Query Filter
       if (query) {
-         const q = query.toLowerCase();
-         filteredVendors = filteredVendors.filter(v => 
-             v.company_name.toLowerCase().includes(q) ||
-             v.products?.some(p => p.name.toLowerCase().includes(q))
-         );
+        const q = query.toLowerCase();
+        filteredVendors = filteredVendors.filter(
+          (v) =>
+            (v.company_name || '').toLowerCase().includes(q) ||
+            v.products?.some((p) => (p.name || '').toLowerCase().includes(q))
+        );
       }
 
       return filteredVendors;
-
     } catch (error) {
       console.error('Search error:', error);
       return [];

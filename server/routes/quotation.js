@@ -1,21 +1,43 @@
-const express = require('express');
+import express from 'express';
+import nodemailer from 'nodemailer';
+import { supabase } from '../lib/supabaseClient.js';
+
 const router = express.Router();
-const { createClient } = require('@supabase/supabase-js');
-const nodemailer = require('nodemailer');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS
+/**
+ * Create transporter:
+ * - Prefer SMTP_* (production)
+ * - Fallback to Gmail (local dev) if SMTP not configured
+ */
+const createTransporter = () => {
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
   }
-});
+
+  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_EMAIL,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
+  }
+
+  throw new Error(
+    'Email transporter config missing. Set SMTP_HOST/SMTP_USER/SMTP_PASS (recommended) or GMAIL_EMAIL/GMAIL_APP_PASSWORD for local.'
+  );
+};
+
+const transporter = createTransporter();
 
 async function sendQuotationEmail(to, data, isRegistered) {
   const vendor = data.vendor || {};
@@ -28,7 +50,7 @@ Quotation Details
 -----------------
 Title: ${quotation.title || ''}
 Amount: ${quotation.quotation_amount || ''}
-Quantity: ${quotation.quantity || ''}
+Quantity: ${quotation.quantity || ''} ${quotation.unit || ''}
 Validity Days: ${quotation.validity_days || ''}
 Delivery Days: ${quotation.delivery_days || ''}
 Terms: ${quotation.terms_conditions || ''}
@@ -51,7 +73,7 @@ ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Regist
     <ul>
       <li><b>Title:</b> ${quotation.title || ''}</li>
       <li><b>Amount:</b> ${quotation.quotation_amount || ''}</li>
-      <li><b>Quantity:</b> ${quotation.quantity || ''}</li>
+      <li><b>Quantity:</b> ${quotation.quantity || ''} ${quotation.unit || ''}</li>
       <li><b>Validity Days:</b> ${quotation.validity_days || ''}</li>
       <li><b>Delivery Days:</b> ${quotation.delivery_days || ''}</li>
     </ul>
@@ -73,15 +95,19 @@ ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Regist
   </div>
   `;
 
-  const mailOptions = {
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+  const from =
+    process.env.MAIL_FROM ||
+    process.env.SMTP_USER ||
+    process.env.GMAIL_EMAIL ||
+    'no-reply@indiantrademart.com';
+
+  await transporter.sendMail({
+    from,
     to,
     subject,
     text,
-    html
-  };
-
-  await transporter.sendMail(mailOptions);
+    html,
+  });
 }
 
 // POST /api/quotation/send
@@ -102,63 +128,56 @@ router.post('/send', async (req, res) => {
       vendor_phone,
       vendor_email,
 
-      // ⚠️ Ignore buyer_id from request (UI was sending lead.id)
-      buyer_id
+      // ⚠️ Ignore buyer_id from request (UI was sending lead.id sometimes)
+      buyer_id,
     } = req.body || {};
 
     if (!buyer_email || !vendor_id || !quotation_title) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Check if buyer is registered in the system
-    // NOTE: some setups use buyers.id as FK target, some use buyers.user_id.
-    // We fetch both so we can retry safely.
-    const { data: buyerCheck } = await supabase
+    const buyerEmail = String(buyer_email).toLowerCase().trim();
+
+    // Check if buyer exists
+    const { data: buyerCheck, error: buyerErr } = await supabase
       .from('buyers')
-      .select('id, user_id, full_name, email, is_registered')
-      .eq('email', buyer_email.toLowerCase())
+      .select('id, user_id, full_name, email')
+      .eq('email', buyerEmail)
       .maybeSingle();
+
+    if (buyerErr) {
+      console.warn('Buyer lookup warning:', buyerErr);
+    }
 
     const isRegistered = !!buyerCheck;
 
-    // Candidate buyer_id values to try (depends on FK target)
+    // Buyer candidates depending on FK configuration
     const buyerCandidates = [];
     if (buyerCheck?.id) buyerCandidates.push(buyerCheck.id);
     if (buyerCheck?.user_id && buyerCheck.user_id !== buyerCheck.id) buyerCandidates.push(buyerCheck.user_id);
 
-    // Fallback: if some older flow sends a real buyers.id, we can still accept it.
-    // But we first validate it exists in buyers.
+    // Optional legacy: if buyer_id provided and exists in buyers, accept it as candidate
     if (buyer_id) {
-      const { data: buyerById } = await supabase
-        .from('buyers')
-        .select('id')
-        .eq('id', buyer_id)
-        .maybeSingle();
+      const { data: buyerById } = await supabase.from('buyers').select('id').eq('id', buyer_id).maybeSingle();
       if (buyerById?.id) buyerCandidates.push(buyerById.id);
     }
 
-    // Prepare base quotation data - match proposals table schema
     const baseQuotationPayload = {
-      vendor_id: vendor_id,
+      vendor_id,
       buyer_id: null,
-      buyer_email: buyer_email.toLowerCase(),
+      buyer_email: buyerEmail,
       title: quotation_title,
       product_name: quotation_title,
       quantity: quantity || null,
+      unit: unit || null,
       budget: quotation_amount ? parseFloat(quotation_amount) : null,
       description: terms_conditions || '',
-      status: 'SENT'
+      status: 'SENT',
     };
 
-    // Save quotation to database with safe retry logic.
     const tryInsert = async (buyerIdValue) => {
       const payload = { ...baseQuotationPayload, buyer_id: buyerIdValue ?? null };
-      console.log('Attempting to save quotation with payload:', JSON.stringify(payload, null, 2));
-      return supabase
-        .from('proposals')
-        .insert([payload])
-        .select('id, vendor_id, buyer_id, title')
-        .single();
+      return supabase.from('proposals').insert([payload]).select('id, vendor_id, buyer_id, title').single();
     };
 
     let savedQuotation = null;
@@ -187,65 +206,68 @@ router.post('/send', async (req, res) => {
     }
 
     if (!savedQuotation) {
-      console.error('Database INSERT error:', JSON.stringify(lastError, null, 2));
+      console.error('Database INSERT error:', lastError);
       return res.status(500).json({
         error: lastError?.message || 'Failed to save quotation',
-        details: lastError
+        details: lastError,
       });
     }
 
-    // Prepare vendor data for email
+    // Email vendor data
     const vendorData = {
       owner_name: vendor_name,
       company_name: vendor_company,
       phone: vendor_phone,
-      email: vendor_email
+      email: vendor_email,
     };
 
-    // Send quotation email
+    // Send email (non-blocking for DB)
     try {
-      await sendQuotationEmail(buyer_email, {
-        vendor: vendorData,
-        quotation: {
-          title: quotation_title,
-          quotation_amount: quotation_amount,
-          quantity: quantity,
-          validity_days: validity_days,
-          delivery_days: delivery_days,
-          terms_conditions: terms_conditions
-        }
-      }, isRegistered);
+      await sendQuotationEmail(
+        buyerEmail,
+        {
+          vendor: vendorData,
+          quotation: {
+            title: quotation_title,
+            quotation_amount,
+            quantity,
+            unit,
+            validity_days,
+            delivery_days,
+            terms_conditions,
+          },
+        },
+        isRegistered
+      );
 
-      // Log email to quotation_emails table
-      await supabase
-        .from('quotation_emails')
-        .insert([{
+      await supabase.from('quotation_emails').insert([
+        {
           quotation_id: savedQuotation.id,
-          recipient_email: buyer_email.toLowerCase(),
+          recipient_email: buyerEmail,
           subject: `Quotation from ${vendor_company || vendor_name}`,
-          status: 'SENT'
-        }]);
+          status: 'SENT',
+        },
+      ]);
     } catch (emailError) {
       console.error('Email sending error (non-blocking):', emailError);
       try {
-        await supabase
-          .from('quotation_emails')
-          .insert([{
+        await supabase.from('quotation_emails').insert([
+          {
             quotation_id: savedQuotation.id,
-            recipient_email: buyer_email.toLowerCase(),
+            recipient_email: buyerEmail,
             subject: `Quotation from ${vendor_company || vendor_name}`,
             status: 'FAILED',
-            error_message: emailError.message
-          }]);
+            error_message: emailError?.message || 'Email failed',
+          },
+        ]);
       } catch (_) {}
     }
 
-    // Create notification if buyer is registered
+    // Create notification if registered buyer
     if (isRegistered && buyerCheck?.id) {
       try {
-        await supabase
-          .from('buyer_notifications')
-          .insert([{
+        await supabase.from('buyer_notifications').insert([
+          {
             buyer_id: buyerCheck.id,
             type: 'QUOTATION_RECEIVED',
             title: `New Quotation from ${vendor_company || vendor_name}`,
@@ -253,22 +275,23 @@ router.post('/send', async (req, res) => {
             reference_id: savedQuotation.id,
             reference_type: 'quotation',
             is_read: false,
-            created_at: new Date().toISOString()
-          }]);
+            created_at: new Date().toISOString(),
+          },
+        ]);
       } catch (notifError) {
         console.warn('Notification creation failed:', notifError);
       }
     } else {
-      // Track unregistered buyer quotation
+      // Track unregistered buyer
       try {
-        await supabase
-          .from('quotation_unregistered')
-          .insert([{
-            email: buyer_email.toLowerCase(),
+        await supabase.from('quotation_unregistered').insert([
+          {
+            email: buyerEmail,
             quotation_id: savedQuotation.id,
-            vendor_id: vendor_id,
-            created_at: new Date().toISOString()
-          }]);
+            vendor_id,
+            created_at: new Date().toISOString(),
+          },
+        ]);
       } catch (trackError) {
         console.warn('Unregistered tracking failed:', trackError);
       }
@@ -276,9 +299,11 @@ router.post('/send', async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `Quotation sent successfully to ${buyer_email}${isRegistered ? ' and added to their dashboard' : ' - they will see it after registering'}`,
+      message: `Quotation sent successfully to ${buyerEmail}${
+        isRegistered ? ' and added to their dashboard' : ' - they will see it after registering'
+      }`,
       quotation_id: savedQuotation.id,
-      buyer_registered: isRegistered
+      buyer_registered: isRegistered,
     });
   } catch (e) {
     console.error('Quotation route error:', e);
@@ -286,4 +311,4 @@ router.post('/send', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

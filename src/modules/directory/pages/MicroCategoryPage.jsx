@@ -294,7 +294,7 @@ const MicroCategoryPage = () => {
                 headSlug={headSlug}
                 subSlug={subSlug}
                 micro={m}
-                coverUrl={covers?.[m.id] || safeFirstImage((previews?.[m.id] || [])[0])}
+                coverUrl={m?.image_url || covers?.[m.id] || safeFirstImage((previews?.[m.id] || [])[0])}
                 products={previews?.[m.id] || []}
               />
             ))}

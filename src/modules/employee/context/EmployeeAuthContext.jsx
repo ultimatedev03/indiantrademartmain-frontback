@@ -1,75 +1,110 @@
-
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { employeeApi } from '@/modules/employee/services/employeeApi';
+import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 
 const EmployeeAuthContext = createContext(null);
 
 export const EmployeeAuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  const isAuthenticated = !!user;
+
   useEffect(() => {
-    const checkSession = async () => {
+    let isMounted = true;
+
+    const bootstrap = async () => {
       try {
-        const storedUser = localStorage.getItem('itm_employee_user');
-        if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          // simple validation check or re-fetch profile could go here
-          setUser(parsedUser);
-          setIsAuthenticated(true);
+        // 1) try restore from supabase session (source of truth)
+        const current = await employeeApi.auth.getCurrentUser();
+        if (isMounted) setUser(current);
+
+        // 2) keep local cache (optional, helps faster UI)
+        if (current) {
+          localStorage.setItem('itm_employee_user', JSON.stringify(current));
+        } else {
+          localStorage.removeItem('itm_employee_user');
         }
       } catch (e) {
-        console.error("Session check failed", e);
+        console.error('[EmployeeAuth] bootstrap failed:', e);
         localStorage.removeItem('itm_employee_user');
+        if (isMounted) setUser(null);
       } finally {
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
       }
     };
-    checkSession();
+
+    bootstrap();
+
+    // Keep UI synced if token refresh / logout happens in another tab
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event) => {
+      try {
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          localStorage.removeItem('itm_employee_user');
+          return;
+        }
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          const current = await employeeApi.auth.getCurrentUser();
+          setUser(current);
+          if (current) localStorage.setItem('itm_employee_user', JSON.stringify(current));
+        }
+      } catch (e) {
+        console.error('[EmployeeAuth] onAuthStateChange failed:', e);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      sub?.subscription?.unsubscribe?.();
+    };
   }, []);
 
   const login = async (email, password) => {
     try {
-      // In a real app, this calls the backend API
-      const response = await employeeApi.auth.login(email, password);
-      
-      if (response && response.user) {
-        setUser(response.user);
-        setIsAuthenticated(true);
-        localStorage.setItem('itm_employee_user', JSON.stringify(response.user));
-        toast({ 
-          title: "Welcome back!", 
-          description: `Logged in as ${response.user.role.replace('_', ' ')}`,
-          className: "bg-green-50 border-green-200"
+      const res = await employeeApi.auth.login(email, password);
+      if (res?.user) {
+        setUser(res.user);
+        localStorage.setItem('itm_employee_user', JSON.stringify(res.user));
+
+        toast({
+          title: 'Welcome back!',
+          description: `Logged in as ${String(res.user.role || 'EMPLOYEE').replace('_', ' ')}`,
+          className: 'bg-green-50 border-green-200'
         });
-        return response.user;
+        return res.user;
       }
       return null;
     } catch (error) {
-      console.error("Login Error:", error);
-      toast({ 
-        title: "Login Failed", 
-        description: error.message || "Invalid credentials. Please try again.", 
-        variant: "destructive" 
+      console.error('Login Error:', error);
+      toast({
+        title: 'Login Failed',
+        description: error.message || 'Invalid credentials. Please try again.',
+        variant: 'destructive'
       });
       return null;
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    setIsAuthenticated(false);
-    localStorage.removeItem('itm_employee_user');
-    toast({ title: "Logged Out", description: "You have been successfully logged out." });
+  const logout = async () => {
+    try {
+      await employeeApi.auth.logout();
+    } catch (e) {
+      console.error('Logout error:', e);
+    } finally {
+      setUser(null);
+      localStorage.removeItem('itm_employee_user');
+      toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+    }
   };
 
-  return (
-    <EmployeeAuthContext.Provider value={{ user, isAuthenticated, isLoading, login, logout }}>
-      {children}
-    </EmployeeAuthContext.Provider>
+  const value = useMemo(
+    () => ({ user, isAuthenticated, isLoading, login, logout }),
+    [user, isAuthenticated, isLoading]
   );
+
+  return <EmployeeAuthContext.Provider value={value}>{children}</EmployeeAuthContext.Provider>;
 };
 
 export const useEmployeeAuth = () => useContext(EmployeeAuthContext);
