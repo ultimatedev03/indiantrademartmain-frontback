@@ -35,6 +35,29 @@ async function downloadViaFetch(url, filename = 'document') {
   }
 }
 
+// ✅ Netlify vs Local API base
+const isLocalHost = () => {
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1';
+};
+
+// ✅ safest: allow override by env, else auto
+const getKycBase = () => {
+  const override = import.meta.env.VITE_KYC_API_BASE;
+  if (override && String(override).trim()) return String(override).trim();
+  return isLocalHost() ? '/api/kyc' : '/.netlify/functions/kyc';
+};
+
+// ✅ Prevent "Unexpected token <" by validating response content-type
+async function safeReadJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) {
+    return await res.json();
+  }
+  const text = await res.text();
+  throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 80)}...`);
+}
+
 const KYCApproval = () => {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -50,6 +73,8 @@ const KYCApproval = () => {
   const [processing, setProcessing] = useState(false);
   const [docsLoading, setDocsLoading] = useState(false);
   const [imgErrors, setImgErrors] = useState({});
+
+  const KYC_API_BASE = getKycBase();
 
   useEffect(() => {
     loadVendors();
@@ -99,9 +124,9 @@ const KYCApproval = () => {
 
     setProcessing(true);
     try {
-      const res = await fetch(`/api/kyc/vendors/${vendor.id}/approve`, { method: 'POST' });
-      const json = await res.json();
-      if (!json?.success) throw new Error(json?.details || 'Approve failed');
+      const res = await fetch(`${KYC_API_BASE}/vendors/${vendor.id}/approve`, { method: 'POST' });
+      const json = await safeReadJson(res);
+      if (!json?.success) throw new Error(json?.details || json?.error || 'Approve failed');
 
       toast({ title: 'Success', description: 'Vendor KYC Approved' });
       loadVendors();
@@ -121,13 +146,13 @@ const KYCApproval = () => {
 
     setProcessing(true);
     try {
-      const res = await fetch(`/api/kyc/vendors/${selectedVendor.id}/reject`, {
+      const res = await fetch(`${KYC_API_BASE}/vendors/${selectedVendor.id}/reject`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ remarks: rejectRemarks }),
       });
-      const json = await res.json();
-      if (!json?.success) throw new Error(json?.details || 'Reject failed');
+      const json = await safeReadJson(res);
+      if (!json?.success) throw new Error(json?.details || json?.error || 'Reject failed');
 
       toast({ title: 'Success', description: 'Vendor KYC Rejected' });
       loadVendors();
@@ -149,22 +174,19 @@ const KYCApproval = () => {
     setDocsLoading(true);
 
     try {
-      // ✅ always prefer server (it returns signed working url)
-      const res = await fetch(`/api/kyc/vendors/${vendor.id}/documents`);
-      const json = await res.json();
-      if (!json?.success) throw new Error(json?.details || 'Could not load documents');
+      const res = await fetch(`${KYC_API_BASE}/vendors/${vendor.id}/documents`);
+      const json = await safeReadJson(res);
+      if (!json?.success) throw new Error(json?.details || json?.error || 'Could not load documents');
 
-      // keep vendor fresh (server may return extra fields)
       if (json?.vendor) {
         setSelectedVendor((prev) => ({ ...(prev || {}), ...(json.vendor || {}) }));
       }
 
-      // normalize fallback keys too
       const normalized = (json.documents || []).map((d) => ({
         ...d,
         url: d.url || d.document_url || d.file_path || d.documentUrl || d.public_url || '',
         document_type: d.document_type || d.type || 'document',
-        status: d.status || 'PENDING',
+        status: d.status || d.verification_status || 'PENDING',
       }));
 
       setVendorDocs(normalized);
@@ -328,7 +350,6 @@ const KYCApproval = () => {
             <DialogDescription>Review submitted documents before approval.</DialogDescription>
           </DialogHeader>
 
-          {/* ✅ Vendor details summary */}
           {selectedVendor && (
             <div className="rounded-lg border bg-white">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-4 py-3 border-b bg-gray-50">

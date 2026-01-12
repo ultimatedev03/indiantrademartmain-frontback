@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
+import mongoSanitize from 'express-mongo-sanitize';
 import otpRoutes from './routes/otp.js';
 import quotationRoutes from './routes/quotation.js';
 import passwordResetRoutes from './routes/passwordReset.js';
@@ -25,6 +27,44 @@ app.use(cors(getSubdomainAwareCORS()));
 app.use(subdomainRedirectMiddleware);
 
 app.use(express.json());
+
+// Input sanitization - prevent NoSQL injection and XSS
+app.use(mongoSanitize()); // Sanitize data against NoSQL injection
+app.use((req, res, next) => {
+  // Sanitize string fields in request body
+  if (req.body && typeof req.body === 'object') {
+    Object.keys(req.body).forEach(key => {
+      if (typeof req.body[key] === 'string') {
+        // Remove potentially dangerous characters
+        req.body[key] = req.body[key]
+          .replace(/[<>"']/g, '') // Remove HTML/quotes
+          .trim(); // Remove leading/trailing whitespace
+      }
+    });
+  }
+  next();
+});
+
+// Rate limiting middleware
+const otpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 requests per window
+  message: 'Too many OTP attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 requests per minute
+  message: 'Too many requests, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Apply rate limiting
+app.use('/api/', apiLimiter);
+app.use('/api/otp', otpLimiter);
 
 // Routes
 app.use('/api/otp', otpRoutes);

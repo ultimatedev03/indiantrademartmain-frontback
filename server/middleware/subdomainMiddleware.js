@@ -144,14 +144,25 @@ export function getSubdomainAwareCORS() {
   const isProduction = process.env.NODE_ENV === 'production';
 
   if (isProduction) {
-    // Production: Allow all subdomains of main domain
+    // Production: Only allow specific subdomains
+    const allowedOrigins = [
+      'https://indiantrademart.com',
+      'https://www.indiantrademart.com',
+      'https://vendor.indiantrademart.com',
+      'https://buyer.indiantrademart.com',
+      'https://dir.indiantrademart.com',
+      'https://directory.indiantrademart.com',
+      'https://admin.indiantrademart.com',
+      'https://career.indiantrademart.com',
+    ];
+
     return {
       origin: function (origin, callback) {
         // Allow requests without origin (mobile apps, curl, etc.)
         if (!origin) return callback(null, true);
 
-        // Check if origin matches our domain or subdomains
-        if (origin.includes(MAIN_DOMAIN) || origin.includes('localhost')) {
+        // Only allow whitelisted origins
+        if (allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
 
@@ -164,16 +175,25 @@ export function getSubdomainAwareCORS() {
     };
   }
 
-  // Development: Allow all localhost variants
+  // Development: Allow specific localhost variants only
   return {
-    origin: [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-      'http://127.0.0.1:5173',
-    ],
+    origin: function (origin, callback) {
+      const devOrigins = [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:5173',
+        'http://127.0.0.1:3000',
+        'http://127.0.0.1:3001',
+        'http://127.0.0.1:5173',
+      ];
+
+      if (!origin || devOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      console.warn(`[CORS] Rejected dev origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

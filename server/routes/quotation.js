@@ -5,6 +5,31 @@ import { supabase } from '../lib/supabaseClient.js';
 const router = express.Router();
 
 /**
+ * Middleware to check basic request validation
+ */
+const validateQuotationRequest = (req, res, next) => {
+  // Ensure required fields are present
+  const { buyer_email, vendor_id, quotation_title } = req.body || {};
+  
+  if (!buyer_email || !vendor_id || !quotation_title) {
+    return res.status(400).json({ error: 'Missing required fields: buyer_email, vendor_id, quotation_title' });
+  }
+  
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(buyer_email)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  
+  // Validate vendor_id is UUID or numeric
+  if (!/^[a-f0-9-]{36}$|^\d+$/.test(vendor_id.toString())) {
+    return res.status(400).json({ error: 'Invalid vendor_id format' });
+  }
+  
+  next();
+};
+
+/**
  * Create transporter:
  * - Prefer SMTP_* (production)
  * - Fallback to Gmail (local dev) if SMTP not configured
@@ -111,7 +136,7 @@ ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Regist
 }
 
 // POST /api/quotation/send
-router.post('/send', async (req, res) => {
+router.post('/send', validateQuotationRequest, async (req, res) => {
   try {
     const {
       quotation_title,

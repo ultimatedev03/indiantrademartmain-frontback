@@ -1,8 +1,8 @@
-// src/modules/directory/components/PremiumBrandsSection.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 
-const HARD_CODED_BRANDS = [
+// ✅ Hardcoded brands (same as your list)
+const PREMIUM_BRANDS = [
   {
     id: "pdce",
     name: "PDCE",
@@ -56,94 +56,21 @@ const HARD_CODED_BRANDS = [
 const PremiumBrandsSection = () => {
   const navigate = useNavigate();
 
-  // ✅ Hardcoded brands (no API)
-  const brands = HARD_CODED_BRANDS;
+  // ✅ for seamless marquee, we duplicate once (2 sets)
+  const items = useMemo(() => {
+    const arr = PREMIUM_BRANDS || [];
+    return [...arr, ...arr];
+  }, []);
 
-  const [repeatCount, setRepeatCount] = useState(1);
-  const wrapRef = useRef(null);
-  const unitRef = useRef(null);
-
-  // ✅ Logo size controlled (so huge images don't break spacing)
+  // ✅ Bigger logos
   const logoClass =
-    "max-h-12 md:max-h-14 lg:max-h-16 max-w-[170px] md:max-w-[190px] lg:max-w-[210px] " +
-    "w-auto object-contain transition-all";
+    "max-h-20 md:max-h-24 lg:max-h-28 w-auto object-contain";
 
-  /**
-   * ✅ MAIN FIX: remove fixed tile width (w-56 etc)
-   * Because w-56 creates big empty space inside each tile when logo is smaller.
-   * Now tile width is content-based with padding.
-   */
+  // ✅ Pass-pass (gap kam + card width kam)
   const tileClass =
-    "flex-none h-20 md:h-24 lg:h-28 " +
-    "px-6 md:px-8 lg:px-10 " +
-    "flex items-center justify-center " +
-    "cursor-pointer hover:scale-105 transition-transform duration-300";
-
-  // ✅ compute repeat count based on actual measured width of ONE set
-  useEffect(() => {
-    if (!brands?.length) return;
-
-    const computeRepeats = () => {
-      const wrapEl = wrapRef.current;
-      const unitEl = unitRef.current;
-      if (!wrapEl || !unitEl) return;
-
-      const wrapWidth = wrapEl.clientWidth || 0;
-      const unitWidth = unitEl.scrollWidth || 0;
-      if (!wrapWidth || !unitWidth) return;
-
-      // Ensure one full set > viewport width (add +1 buffer)
-      const needed = Math.max(1, Math.ceil(wrapWidth / unitWidth) + 1);
-      setRepeatCount(needed);
-    };
-
-    const raf = requestAnimationFrame(computeRepeats);
-    window.addEventListener("resize", computeRepeats);
-
-    return () => {
-      cancelAnimationFrame(raf);
-      window.removeEventListener("resize", computeRepeats);
-    };
-  }, [brands]);
-
-  const baseBrands = useMemo(() => {
-    if (!brands?.length) return [];
-    const out = [];
-    for (let i = 0; i < repeatCount; i++) out.push(...brands);
-    return out;
-  }, [brands, repeatCount]);
-
-  const duplicatedBrands = useMemo(() => {
-    if (!baseBrands.length) return [];
-    return [...baseBrands, ...baseBrands];
-  }, [baseBrands]);
-
-  const durationSeconds = useMemo(() => {
-    const n = baseBrands?.length || 0;
-    return `${Math.max(35, n * 2.2)}s`; // a bit faster than before but smooth
-  }, [baseBrands]);
-
-  const BrandLogo = ({ brand }) => {
-    const [imgOk, setImgOk] = useState(true);
-
-    if (brand?.logo_url && imgOk) {
-      return (
-        <img
-          alt={`${brand.name} Logo`}
-          className={logoClass}
-          src={brand.logo_url}
-          loading="lazy"
-          onError={() => setImgOk(false)}
-        />
-      );
-    }
-
-    return (
-      <span className="font-bold text-gray-500 whitespace-nowrap">
-        {brand?.name}
-      </span>
-    );
-  };
+    "flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 " +
+    "flex items-center justify-center cursor-pointer " +
+    "hover:scale-105 transition-transform duration-300";
 
   return (
     <section className="py-16 bg-gray-50 border-t border-gray-100 overflow-x-hidden">
@@ -154,23 +81,20 @@ const PremiumBrandsSection = () => {
         }
         .marquee-wrap {
           overflow: hidden;
-          position: relative;
           width: 100%;
+          position: relative;
         }
         .marquee-track {
           display: flex;
           width: max-content;
-          animation: brand-marquee var(--duration, 30s) linear infinite;
+          animation: brand-marquee 35s linear infinite; /* speed */
           will-change: transform;
         }
         .marquee-wrap:hover .marquee-track {
           animation-play-state: paused;
         }
         @media (prefers-reduced-motion: reduce) {
-          .marquee-track {
-            animation: none;
-            transform: translateX(0);
-          }
+          .marquee-track { animation: none; transform: translateX(0); }
         }
       `}</style>
 
@@ -182,34 +106,25 @@ const PremiumBrandsSection = () => {
           </h2>
         </div>
 
-        {/* ✅ Measuring row: doesn't affect layout */}
-        <div
-          ref={unitRef}
-          className="fixed left-0 top-0 invisible pointer-events-none -z-10"
-          style={{ width: 0, height: 0, overflow: "hidden" }}
-        >
-          <div className="flex items-center gap-4 md:gap-6">
-            {brands.map((brand) => (
-              <div key={`unit-${brand.id}`} className={tileClass}>
-                <BrandLogo brand={brand} />
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="marquee-wrap" ref={wrapRef}>
-          <div
-            className="marquee-track items-center py-2 gap-4 md:gap-6"
-            style={{ ["--duration"]: durationSeconds }}
-          >
-            {duplicatedBrands.map((brand, idx) => (
+        <div className="marquee-wrap">
+          {/* ✅ gap-2 (logos close) */}
+          <div className="marquee-track gap-2 items-center py-1">
+            {items.map((brand, idx) => (
               <div
                 key={`${brand.id}-${idx}`}
-                onClick={() => navigate(`/directory/brand/${brand.slug}`)}
                 className={tileClass}
                 title={brand.name}
+                onClick={() => navigate(`/directory/brand/${brand.slug}`)}
               >
-                <BrandLogo brand={brand} />
+                <img
+                  src={brand.logo_url}
+                  alt={brand.name}
+                  className={logoClass}
+                  loading="lazy"
+                  onError={(e) => {
+                    e.currentTarget.style.display = "none";
+                  }}
+                />
               </div>
             ))}
           </div>

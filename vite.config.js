@@ -233,6 +233,39 @@ logger.error = (msg, options) => {
 	loggerError(msg, options);
 }
 
+/**
+ * DATABASE OPTIMIZATION NOTES:
+ * ============================
+ * For 50k+ daily users, implement these optimizations:
+ *
+ * 1. Supabase Connection Pooling:
+ *    - Go to Supabase Dashboard > Settings > Database
+ *    - Increase connection pool from 10 to 50-100
+ *    - Set connection timeout to 30 seconds
+ *
+ * 2. Add Database Indexes (run in Supabase SQL editor):
+ *    CREATE INDEX idx_products_status ON products(status);
+ *    CREATE INDEX idx_products_vendor_id ON products(vendor_id);
+ *    CREATE INDEX idx_vendors_status ON vendors(status);
+ *    CREATE INDEX idx_categories_slug ON head_categories(slug);
+ *    CREATE INDEX idx_micro_categories_slug ON micro_categories(slug);
+ *
+ * 3. Implement Redis Caching for:
+ *    - Product listings (30 min TTL)
+ *    - Category hierarchies (1 hour TTL)
+ *    - Vendor profiles (15 min TTL)
+ *    - Search results (5 min TTL)
+ *
+ * 4. Enable CDN Caching:
+ *    - Static assets via CloudFlare (24 hour TTL)
+ *    - Dynamic content with Cache-Control headers
+ *
+ * 5. Query Optimization:
+ *    - Use pagination (limit: 20-50 per page)
+ *    - Avoid N+1 queries (use SQL joins)
+ *    - Cache frequently accessed data
+ */
+
 export default defineConfig({
 	customLogger: logger,
 	plugins: [

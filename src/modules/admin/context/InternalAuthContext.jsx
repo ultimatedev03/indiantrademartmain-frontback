@@ -55,7 +55,7 @@ const normalizeInternalUser = (raw, email, expectedRole) => {
     id,
     email: pickFirst(row?.email, email),
     name: name || (email ? email.split('@')[0] : 'User'),
-    role: role || expectedRole, // fallback if role missing
+    role: role || expectedRole,
     status,
   };
 };
@@ -65,7 +65,7 @@ export const InternalAuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ✅ If stored session exists but role missing, try to hydrate from DB
+  // ✅ safer hydrate (no hard-coded columns -> avoids PostgREST 400)
   const hydrateStoredUser = async (stored) => {
     try {
       const email = stored?.email;
@@ -75,29 +75,31 @@ export const InternalAuthProvider = ({ children }) => {
       let name = stored?.name;
 
       // Try employees table first
-      const { data: emp } = await supabase
+      const { data: emp, error: empErr } = await supabase
         .from('employees')
-        .select('id,user_id,full_name,email,role,status')
+        .select('*')
         .eq('email', email)
         .maybeSingle();
 
-      if (emp?.role) {
-        role = emp.role;
-        name = name || emp.full_name;
-        return { ...stored, role, name, status: stored.status || emp.status || 'ACTIVE' };
+      if (!empErr && emp) {
+        const normalizedEmp = normalizeInternalUser(emp, email, stored?.role);
+        role = normalizedEmp.role || role;
+        name = normalizedEmp.name || name;
+        return { ...stored, ...normalizedEmp, role, name };
       }
 
       // Try users table
-      const { data: usr } = await supabase
+      const { data: usr, error: usrErr } = await supabase
         .from('users')
-        .select('id,full_name,email,role,status')
+        .select('*')
         .eq('email', email)
         .maybeSingle();
 
-      if (usr?.role) {
-        role = usr.role;
-        name = name || usr.full_name;
-        return { ...stored, role, name, status: stored.status || usr.status || 'ACTIVE' };
+      if (!usrErr && usr) {
+        const normalizedUsr = normalizeInternalUser(usr, email, stored?.role);
+        role = normalizedUsr.role || role;
+        name = normalizedUsr.name || name;
+        return { ...stored, ...normalizedUsr, role, name };
       }
 
       return stored;
@@ -130,13 +132,11 @@ export const InternalAuthProvider = ({ children }) => {
 
   /**
    * ✅ login(email, password, expectedRole)
-   * expectedRole: 'ADMIN' | 'HR' | etc (PortalLogin will pass)
    */
   const login = async (email, password, expectedRole) => {
     try {
       setIsLoading(true);
 
-      // RPC login
       const { data, error } = await supabase.rpc('login_admin', {
         p_email: email,
         p_password: password
@@ -145,49 +145,34 @@ export const InternalAuthProvider = ({ children }) => {
       if (error) throw error;
       if (!data) throw new Error('Invalid credentials');
 
-      // Normalize fields from RPC response
       let normalized = normalizeInternalUser(data, email, expectedRole);
 
-      // ✅ If role still missing, fetch from employees/users
+      // ✅ If role still missing, fetch from employees/users safely
       if (!normalized.role) {
-        const { data: emp } = await supabase
+        const { data: emp, error: empErr } = await supabase
           .from('employees')
-          .select('id,user_id,full_name,email,role,status')
+          .select('*')
           .eq('email', email)
           .maybeSingle();
 
-        if (emp?.role) {
-          normalized = {
-            ...normalized,
-            role: emp.role,
-            name: normalized.name || emp.full_name,
-            status: normalized.status || emp.status || 'ACTIVE',
-            employee_id: normalized.employee_id || emp.id,
-            user_id: normalized.user_id || emp.user_id,
-          };
+        if (!empErr && emp) {
+          const nEmp = normalizeInternalUser(emp, email, expectedRole);
+          normalized = { ...normalized, ...nEmp };
         } else {
-          const { data: usr } = await supabase
+          const { data: usr, error: usrErr } = await supabase
             .from('users')
-            .select('id,full_name,email,role,status')
+            .select('*')
             .eq('email', email)
             .maybeSingle();
 
-          if (usr?.role) {
-            normalized = {
-              ...normalized,
-              role: usr.role,
-              name: normalized.name || usr.full_name,
-              status: normalized.status || usr.status || 'ACTIVE',
-              user_id: normalized.user_id || usr.id,
-            };
+          if (!usrErr && usr) {
+            const nUsr = normalizeInternalUser(usr, email, expectedRole);
+            normalized = { ...normalized, ...nUsr };
           }
         }
       }
 
-      // If still missing role, last fallback to expectedRole
-      if (!normalized.role && expectedRole) {
-        normalized.role = expectedRole;
-      }
+      if (!normalized.role && expectedRole) normalized.role = expectedRole;
 
       setUser(normalized);
       setIsAuthenticated(true);
