@@ -1,0 +1,476 @@
+import express from 'express';
+import { supabase } from '../lib/supabaseClient.js';
+
+const router = express.Router();
+
+// GET /api/support/tickets - Fetch all support tickets with filters
+router.get('/tickets', async (req, res) => {
+  try {
+    const { status, priority, search, page = 1, pageSize = 100 } = req.query;
+    
+    console.log('🔍 Fetching support tickets with filters:', { status, priority, search });
+    
+    let query = supabase
+      .from('support_tickets')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false });
+    
+    // Apply status filter
+    if (status && status !== 'ALL') {
+      query = query.eq('status', status);
+    }
+    
+    // Apply priority filter
+    if (priority && priority !== 'ALL') {
+      query = query.eq('priority', priority);
+    }
+    
+    // Apply search filter (search across subject and description)
+    if (search && search.trim()) {
+      const searchTerm = search.toLowerCase();
+      // Note: Supabase text search requires ilike operator
+      query = query.or(`subject.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%,ticket_display_id.ilike.%${searchTerm}%`);
+    }
+    
+    // Apply pagination
+    const offset = (page - 1) * pageSize;
+    query = query.range(offset, offset + pageSize - 1);
+    
+    const { data: tickets, error, count } = await query;
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      return res.status(500).json({ 
+        error: 'Failed to fetch tickets', 
+        details: error.message 
+      });
+    }
+    
+    console.log(`📋 Found ${tickets?.length || 0} support tickets`);
+    
+    res.json({
+      success: true,
+      tickets: tickets || [],
+      total: count || 0,
+      page: parseInt(page),
+      pageSize: parseInt(pageSize),
+      totalPages: Math.ceil((count || 0) / pageSize)
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching tickets:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch support tickets', 
+      details: error.message 
+    });
+  }
+});
+
+// GET /api/support/tickets/:id - Fetch single ticket
+router.get('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`🔍 Fetching ticket: ${id}`);
+    
+    const { data: ticket, error } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error || !ticket) {
+      console.error('❌ Ticket not found:', error);
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    res.json({
+      success: true,
+      ticket
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching ticket:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch ticket', 
+      details: error.message 
+    });
+  }
+});
+
+// POST /api/support/tickets - Create new support ticket
+router.post('/tickets', async (req, res) => {
+  try {
+    const {
+      subject,
+      description,
+      category,
+      priority = 'MEDIUM',
+      status = 'OPEN',
+      vendor_id,
+      buyer_id,
+      attachments = []
+    } = req.body;
+    
+    // Validate required fields
+    if (!subject || !description) {
+      return res.status(400).json({
+        error: 'Missing required fields: subject and description'
+      });
+    }
+    
+    // Generate ticket display ID
+    const ticketNumber = `TKT-${Date.now()}`;
+    
+    const ticketPayload = {
+      subject: subject.trim(),
+      description: description.trim(),
+      category: category || 'General',
+      priority: priority.toUpperCase(),
+      status: status.toUpperCase(),
+      vendor_id: vendor_id || null,
+      buyer_id: buyer_id || null,
+      ticket_display_id: ticketNumber,
+      attachments: JSON.stringify(attachments),
+      created_at: new Date().toISOString()
+    };
+    
+    console.log('📝 Creating support ticket:', ticketNumber);
+    
+    const { data: newTicket, error } = await supabase
+      .from('support_tickets')
+      .insert([ticketPayload])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      return res.status(500).json({
+        error: 'Failed to create ticket',
+        details: error.message
+      });
+    }
+    
+    console.log('✅ Ticket created:', newTicket.id);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Ticket created successfully',
+      ticket: newTicket
+    });
+    
+  } catch (error) {
+    console.error('❌ Error creating ticket:', error);
+    res.status(500).json({
+      error: 'Failed to create support ticket',
+      details: error.message
+    });
+  }
+});
+
+// PATCH /api/support/tickets/:id - Update ticket
+router.patch('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    console.log(`🔄 Updating ticket ${id}:`, updates);
+    
+    // Sanitize updates - only allow specific fields
+    const allowedFields = ['status', 'priority', 'category', 'attachments'];
+    const sanitizedUpdates = {};
+    
+    Object.keys(updates).forEach(key => {
+      if (allowedFields.includes(key)) {
+        sanitizedUpdates[key] = updates[key];
+      }
+    });
+    
+    if (Object.keys(sanitizedUpdates).length === 0) {
+      return res.status(400).json({
+        error: 'No valid fields to update'
+      });
+    }
+    
+    const { data: updatedTicket, error } = await supabase
+      .from('support_tickets')
+      .update(sanitizedUpdates)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Update error:', error);
+      return res.status(500).json({
+        error: 'Failed to update ticket',
+        details: error.message
+      });
+    }
+    
+    if (!updatedTicket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    console.log('✅ Ticket updated:', id);
+    
+    res.json({
+      success: true,
+      message: 'Ticket updated successfully',
+      ticket: updatedTicket
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating ticket:', error);
+    res.status(500).json({
+      error: 'Failed to update ticket',
+      details: error.message
+    });
+  }
+});
+
+// PUT /api/support/tickets/:id/status - Update ticket status
+router.put('/tickets/:id/status', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+    
+    const validStatuses = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED', 'CANCELLED'];
+    
+    if (!validStatuses.includes(status.toUpperCase())) {
+      return res.status(400).json({
+        error: `Invalid status. Must be one of: ${validStatuses.join(', ')}`
+      });
+    }
+    
+    console.log(`🔄 Updating ticket ${id} status to: ${status}`);
+    
+    const updatePayload = {
+      status: status.toUpperCase()
+    };
+    
+    // If resolving or closing, set resolved_at timestamp
+    if (['RESOLVED', 'CLOSED'].includes(status.toUpperCase())) {
+      updatePayload.resolved_at = new Date().toISOString();
+    }
+    
+    const { data: updatedTicket, error } = await supabase
+      .from('support_tickets')
+      .update(updatePayload)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Status update error:', error);
+      return res.status(500).json({
+        error: 'Failed to update ticket status',
+        details: error.message
+      });
+    }
+    
+    if (!updatedTicket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    console.log('✅ Ticket status updated:', id);
+    
+    res.json({
+      success: true,
+      message: 'Ticket status updated successfully',
+      ticket: updatedTicket
+    });
+    
+  } catch (error) {
+    console.error('❌ Error updating status:', error);
+    res.status(500).json({
+      error: 'Failed to update ticket status',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/support/stats - Get ticket statistics
+router.get('/stats', async (req, res) => {
+  try {
+    console.log('📊 Fetching ticket statistics');
+    
+    // Get count by status
+    const { data: tickets, error } = await supabase
+      .from('support_tickets')
+      .select('status, priority');
+    
+    if (error) {
+      console.error('❌ Stats fetch error:', error);
+      return res.status(500).json({
+        error: 'Failed to fetch statistics',
+        details: error.message
+      });
+    }
+    
+    const stats = {
+      totalTickets: tickets?.length || 0,
+      openTickets: 0,
+      inProgressTickets: 0,
+      resolvedTickets: 0,
+      closedTickets: 0,
+      highPriorityTickets: 0,
+      mediumPriorityTickets: 0,
+      lowPriorityTickets: 0,
+      resolutionRate: 0
+    };
+    
+    if (tickets && tickets.length > 0) {
+      tickets.forEach(ticket => {
+        // Count by status
+        switch (ticket.status) {
+          case 'OPEN':
+            stats.openTickets++;
+            break;
+          case 'IN_PROGRESS':
+            stats.inProgressTickets++;
+            break;
+          case 'RESOLVED':
+            stats.resolvedTickets++;
+            break;
+          case 'CLOSED':
+            stats.closedTickets++;
+            break;
+        }
+        
+        // Count by priority
+        switch (ticket.priority) {
+          case 'HIGH':
+          case 'URGENT':
+            stats.highPriorityTickets++;
+            break;
+          case 'MEDIUM':
+            stats.mediumPriorityTickets++;
+            break;
+          case 'LOW':
+            stats.lowPriorityTickets++;
+            break;
+        }
+      });
+      
+      // Calculate resolution rate
+      const resolved = stats.resolvedTickets + stats.closedTickets;
+      stats.resolutionRate = stats.totalTickets > 0 
+        ? Math.round((resolved / stats.totalTickets) * 100) 
+        : 0;
+    }
+    
+    console.log('✅ Statistics calculated');
+    
+    res.json({
+      success: true,
+      stats
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching stats:', error);
+    res.status(500).json({
+      error: 'Failed to fetch statistics',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/support/vendor/:vendorId - Get vendor's tickets
+router.get('/vendor/:vendorId', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { status, priority } = req.query;
+    
+    console.log(`🔍 Fetching tickets for vendor: ${vendorId}`);
+    
+    let query = supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false });
+    
+    if (status && status !== 'ALL') {
+      query = query.eq('status', status);
+    }
+    
+    if (priority && priority !== 'ALL') {
+      query = query.eq('priority', priority);
+    }
+    
+    const { data: tickets, error } = await query;
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      return res.status(500).json({
+        error: 'Failed to fetch vendor tickets',
+        details: error.message
+      });
+    }
+    
+    res.json({
+      success: true,
+      tickets: tickets || [],
+      total: tickets?.length || 0
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching vendor tickets:', error);
+    res.status(500).json({
+      error: 'Failed to fetch vendor tickets',
+      details: error.message
+    });
+  }
+});
+
+// GET /api/support/buyer/:buyerId - Get buyer's tickets
+router.get('/buyer/:buyerId', async (req, res) => {
+  try {
+    const { buyerId } = req.params;
+    const { status, priority } = req.query;
+    
+    console.log(`🔍 Fetching tickets for buyer: ${buyerId}`);
+    
+    let query = supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('buyer_id', buyerId)
+      .order('created_at', { ascending: false });
+    
+    if (status && status !== 'ALL') {
+      query = query.eq('status', status);
+    }
+    
+    if (priority && priority !== 'ALL') {
+      query = query.eq('priority', priority);
+    }
+    
+    const { data: tickets, error } = await query;
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      return res.status(500).json({
+        error: 'Failed to fetch buyer tickets',
+        details: error.message
+      });
+    }
+    
+    res.json({
+      success: true,
+      tickets: tickets || [],
+      total: tickets?.length || 0
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching buyer tickets:', error);
+    res.status(500).json({
+      error: 'Failed to fetch buyer tickets',
+      details: error.message
+    });
+  }
+});
+
+export default router;

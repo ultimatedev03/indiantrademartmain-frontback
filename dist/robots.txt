@@ -1,0 +1,6 @@
+User-agent: *
+Disallow:
+
+# NOTE:
+# - This file intentionally allows bots to crawl all pages, including individual product/service pages.
+# - Add a Sitemap line here later if/when you generate a sitemap.

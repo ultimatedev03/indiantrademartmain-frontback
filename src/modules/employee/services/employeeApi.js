@@ -1,0 +1,90 @@
+import { supabase } from '@/lib/customSupabaseClient';
+
+const buildEmployeeUser = (authUser, empRow) => {
+  const name = empRow?.full_name || empRow?.name || authUser?.user_metadata?.full_name || authUser?.email || 'Employee';
+  const firstLetter = String(name || 'E').trim().charAt(0).toUpperCase() || 'E';
+  return {
+    // keep both for safety
+    id: authUser?.id,
+    user_id: authUser?.id,
+    name,
+    email: empRow?.email || authUser?.email,
+    phone: empRow?.phone || null,
+    role: empRow?.role || 'UNKNOWN',
+    department: empRow?.department || null,
+    status: empRow?.status || null,
+    avatar: firstLetter
+  };
+};
+
+const fetchEmployeeRow = async (authUserId) => {
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('user_id', authUserId)
+    .maybeSingle();
+
+  if (error) {
+    // If RLS blocks, return null and let caller decide
+    console.error('[employeeApi] employees fetch error:', error);
+    return null;
+  }
+  return data || null;
+};
+
+export const employeeApi = {
+  auth: {
+    /**
+     * Real auth using Supabase Auth.
+     * Requires the employee to exist in Supabase Auth + public.employees (mapped by user_id).
+     */
+    login: async (email, password) => {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) throw new Error(error.message);
+      if (!data?.user) throw new Error('Login failed: user not returned');
+
+      const empRow = await fetchEmployeeRow(data.user.id);
+      if (!empRow) {
+        // If you want to allow auth-only login, you can remove this throw.
+        throw new Error('No employee profile found. Please ask admin to create your employee account.');
+      }
+
+      return { user: buildEmployeeUser(data.user, empRow) };
+    },
+
+    logout: async () => {
+      const { error } = await supabase.auth.signOut();
+      if (error) throw new Error(error.message);
+      return true;
+    },
+
+    /**
+     * Restore session and return employee profile (if available).
+     */
+    getCurrentUser: async () => {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('[employeeApi] getSession error:', sessionError);
+        return null;
+      }
+
+      const authUser = sessionData?.session?.user;
+      if (!authUser?.id) return null;
+
+      const empRow = await fetchEmployeeRow(authUser.id);
+      if (!empRow) return null;
+
+      return buildEmployeeUser(authUser, empRow);
+    }
+  },
+
+  // Placeholder for other employee functions
+  profile: {
+    get: () => Promise.resolve({}),
+    update: (data) => Promise.resolve(data)
+  }
+};
