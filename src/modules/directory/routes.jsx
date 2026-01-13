@@ -64,7 +64,11 @@ export const DirectoryRoutes = () => {
         <Route path="directory/search" element={<Navigate to="/directory" replace />} />
 
         {/* Category Hierarchy */}
+        {/* ✅ Product listing supports optional state/city slugs for auto-filter */}
+        <Route path="directory/:headSlug/:subSlug/:microSlug/:stateSlug/:citySlug" element={<ProductListing />} />
+        <Route path="directory/:headSlug/:subSlug/:microSlug/:stateSlug" element={<ProductListing />} />
         <Route path="directory/:headSlug/:subSlug/:microSlug" element={<ProductListing />} />
+
         <Route path="directory/:headSlug/:subSlug" element={<MicroCategoryPage />} />
         <Route path="directory/:headSlug" element={<SubCategoryPage />} />
 

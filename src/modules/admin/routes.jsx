@@ -7,6 +7,8 @@ import { useSubdomain } from '@/contexts/SubdomainContext';
 
 // Admin Pages
 import AdminDashboard from '@/modules/admin/pages/Dashboard';
+import AdminVendors from '@/modules/admin/pages/Vendors';
+import AdminVendorProducts from '@/modules/admin/pages/VendorProducts';
 import Staff from '@/modules/admin/pages/Staff';
 import AuditLogs from '@/modules/admin/pages/AuditLogs';
 import AdminSettings from '@/modules/admin/pages/Settings';
@@ -14,6 +16,8 @@ import KYCApproval from '@/modules/admin/pages/KYCApproval';
 import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
 import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
+
+
 
 // Reuse Employee Support pages for Admin
 import SupportTickets from '@/modules/employee/pages/support/Tickets';
@@ -108,9 +112,16 @@ export const AdminRoutes = () => {
         <Route element={<PortalLayout role="ADMIN" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
-          <Route path="vendors" element={<KYCApproval />} />
+
+          {/* Vendors (business management) */}
+          <Route path="vendors" element={<AdminVendors />} />
+          <Route path="vendors/:vendorId/products" element={<AdminVendorProducts />} />
+
           <Route path="tickets" element={<SupportTickets />} />
+
+          {/* KYC Approvals (verification) */}
           <Route path="kyc" element={<KYCApproval />} />
+
           <Route path="staff" element={<Staff />} />
           <Route path="audit-logs" element={<AuditLogs />} />
           <Route path="settings" element={<AdminSettings />} />

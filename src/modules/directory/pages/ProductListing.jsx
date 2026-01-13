@@ -1,11 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Helmet } from 'react-helmet';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Home, ChevronRight, Loader2 } from 'lucide-react';
+
+import DirectorySearchBar from '@/modules/directory/components/DirectorySearchBar';
+import SearchFilters from '@/modules/directory/components/SearchFilters';
+import SearchResultsList from '@/modules/directory/components/SearchResultsList';
+
 import { directoryApi } from '@/modules/directory/api/directoryApi';
-import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ChevronRight, Home, MapPin, Filter, Loader2 } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { supabase } from '@/lib/customSupabaseClient';
 
 const safeStr = (v) => (typeof v === 'string' ? v.trim() : '');
 
@@ -22,36 +25,61 @@ const toTitleCase = (slug) =>
     .replace(/-/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
-const ProductsListingPage = () => {
-  const { headSlug, subSlug, microSlug } = useParams();
+const numOrNull = (v) => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = Number(String(v).replace(/[₹,\s]/g, '').trim());
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * ✅ Category micro listing page
+ * URL supports:
+ *  - /directory/:headSlug/:subSlug/:microSlug
+ *  - /directory/:headSlug/:subSlug/:microSlug/:stateSlug
+ *  - /directory/:headSlug/:subSlug/:microSlug/:stateSlug/:citySlug
+ *
+ * Requirement:
+ *  - same UI as "SearchResults" cards (image, rating, price/unit)
+ *  - if URL contains state/city => auto-filter results
+ */
+const ProductListing = () => {
+  const { headSlug, subSlug, microSlug, stateSlug = '', citySlug = '' } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  // ✅ SEO data for micro category (meta_tags + description from micro_category_meta)
   const [microInfo, setMicroInfo] = useState(null);
   const [seoLoading, setSeoLoading] = useState(false);
 
-  // Filters
-  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') || '');
-  const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'relevance');
-  const [location, setLocation] = useState(searchParams.get('location') || '');
+  const [loading, setLoading] = useState(true);
+  const [results, setResults] = useState([]);
 
-  // ✅ Load micro seo info
+  // UI filters
+  const [filters, setFilters] = useState({
+    priceRange: [0, 100000],
+    rating: 0,
+    verified: false,
+    inStock: false,
+  });
+
+  // Search query inside category
+  const [q, setQ] = useState(searchParams.get('q') || '');
+
+  // cache ids for location slugs
+  const resolvedRef = useRef({ key: '', stateId: null, cityId: null });
+
+  const microTitle = useMemo(() => microInfo?.name || toTitleCase(microSlug), [microInfo, microSlug]);
+
+  // ✅ SEO info (meta tags/description)
   useEffect(() => {
     let alive = true;
-
-    const loadSeo = async () => {
+    const run = async () => {
       if (!microSlug) return;
-
       setSeoLoading(true);
       try {
         const m = await directoryApi.getMicroCategoryBySlug(microSlug);
         if (!alive) return;
         setMicroInfo(m || null);
       } catch (e) {
-        console.warn('Micro SEO fetch failed:', e);
         if (!alive) return;
         setMicroInfo(null);
       } finally {
@@ -59,112 +87,219 @@ const ProductsListingPage = () => {
         setSeoLoading(false);
       }
     };
-
-    loadSeo();
+    run();
     return () => {
       alive = false;
     };
   }, [microSlug]);
 
   const pageTitle = useMemo(() => {
-    const microName = microInfo?.name || toTitleCase(microSlug);
-    const headName = microInfo?.head_category?.name || toTitleCase(headSlug);
-    const subName = microInfo?.sub_category?.name || toTitleCase(subSlug);
-
-    // ✅ Prefer meta_tags as title if available
     const metaTitle = safeStr(microInfo?.meta_tags);
     if (metaTitle) return metaTitle;
-
-    return `${microName} | ${subName} - ${headName} Suppliers & Products | IndianTradeMart`;
-  }, [microInfo, microSlug, headSlug, subSlug]);
+    const h = microInfo?.sub_categories?.head_categories?.name || toTitleCase(headSlug);
+    const s = microInfo?.sub_categories?.name || toTitleCase(subSlug);
+    const m = microInfo?.name || toTitleCase(microSlug);
+    return `${m} | ${s} - ${h} Suppliers & Products | IndianTradeMart`;
+  }, [microInfo, headSlug, subSlug, microSlug]);
 
   const pageDescription = useMemo(() => {
-    const microName = microInfo?.name || toTitleCase(microSlug);
-
-    // ✅ Prefer meta_description from micro_category_meta.description
     const metaDesc = safeStr(microInfo?.meta_description);
     if (metaDesc) return truncate(metaDesc);
-
-    return truncate(
-      `Browse ${microName} products and verified suppliers in India. Compare prices, view details, and get quotations on IndianTradeMart.`
-    );
+    const m = microInfo?.name || toTitleCase(microSlug);
+    return truncate(`Browse ${m} products and verified suppliers in India. Compare prices, view details, and get quotations on IndianTradeMart.`);
   }, [microInfo, microSlug]);
-
-  const pageKeywords = useMemo(() => {
-    const microName = microInfo?.name || toTitleCase(microSlug);
-    const headName = microInfo?.head_category?.name || toTitleCase(headSlug);
-    const subName = microInfo?.sub_category?.name || toTitleCase(subSlug);
-
-    const metaTags = safeStr(microInfo?.meta_tags);
-    if (metaTags) return metaTags;
-
-    return `${microName}, ${subName}, ${headName}, suppliers, products, IndianTradeMart`;
-  }, [microInfo, microSlug, headSlug, subSlug]);
 
   const canonicalUrl = useMemo(() => {
     try {
       const origin = window.location?.origin || '';
-      return origin ? `${origin}/directory/${headSlug}/${subSlug}/${microSlug}` : '';
+      if (!origin) return '';
+      let u = `${origin}/directory/${headSlug}/${subSlug}/${microSlug}`;
+      if (stateSlug) u += `/${stateSlug}`;
+      if (citySlug) u += `/${citySlug}`;
+      return u;
     } catch {
       return '';
     }
-  }, [headSlug, subSlug, microSlug]);
-
-  // ✅ Fetch products
-  useEffect(() => {
-    const fetchProducts = async () => {
-      setLoading(true);
-      try {
-        const filters = {
-          q: searchQuery || null,
-          sort: sortBy || 'relevance',
-          location: location || null,
-        };
-
-        const data = await directoryApi.getDirectoryProducts({
-          headSlug,
-          subSlug,
-          microSlug,
-          ...filters,
-        });
-
-        setProducts(data || []);
-      } catch (error) {
-        console.error('Error fetching products:', error);
-        setProducts([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProducts();
-  }, [headSlug, subSlug, microSlug, searchQuery, sortBy, location]);
+  }, [headSlug, subSlug, microSlug, stateSlug, citySlug]);
 
   const updateUrlParams = (updates) => {
     const next = new URLSearchParams(searchParams);
-
     Object.entries(updates).forEach(([k, v]) => {
       if (v === null || v === undefined || v === '') next.delete(k);
       else next.set(k, String(v));
     });
-
     setSearchParams(next);
   };
 
-  const microTitle = microInfo?.name || toTitleCase(microSlug);
+  // ✅ Resolve stateSlug/citySlug -> ids
+  const resolveLocationIds = async () => {
+    const key = `${stateSlug || ''}::${citySlug || ''}`;
+    if (resolvedRef.current.key === key) return resolvedRef.current;
+
+    let stateId = null;
+    let cityId = null;
+
+    try {
+      if (stateSlug) {
+        const { data: st } = await supabase
+          .from('states')
+          .select('id')
+          .eq('slug', stateSlug)
+          .maybeSingle();
+        stateId = st?.id || null;
+      }
+
+      if (citySlug) {
+        // try match city within state first
+        if (stateId) {
+          const { data: ct } = await supabase
+            .from('cities')
+            .select('id')
+            .eq('slug', citySlug)
+            .eq('state_id', stateId)
+            .maybeSingle();
+          cityId = ct?.id || null;
+        }
+
+        // fallback: city by slug only
+        if (!cityId) {
+          const { data: ct2 } = await supabase
+            .from('cities')
+            .select('id, state_id')
+            .eq('slug', citySlug)
+            .maybeSingle();
+          cityId = ct2?.id || null;
+          if (!stateId) stateId = ct2?.state_id || null;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    resolvedRef.current = { key, stateId, cityId };
+    return resolvedRef.current;
+  };
+
+  // ✅ Fetch products (micro + optional state/city)
+  useEffect(() => {
+    let alive = true;
+
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const { stateId, cityId } = await resolveLocationIds();
+
+        // base query: micro + vendor join + location filter by vendor state/city
+        const { data } = await directoryApi.getProductsByMicroAndLocation({
+          microSlug,
+          stateId,
+          cityId,
+          page: 1,
+          limit: 200,
+        });
+
+        if (!alive) return;
+
+        // flatten vendor fields so SearchResultsList renders like marketplace cards
+        const flat = (data || []).map((p) => {
+          const v = p?.vendors || {};
+          return {
+            ...p,
+            vendorName: v?.company_name || p?.vendorName,
+            vendorCity: v?.city || p?.vendorCity,
+            vendorState: v?.state || p?.vendorState,
+            vendorRating: v?.seller_rating || p?.vendorRating,
+            vendorVerified: !!(v?.verification_badge || v?.is_verified || String(v?.kyc_status || '').toUpperCase() === 'APPROVED'),
+            seller_rating: v?.seller_rating,
+            verification_badge: v?.verification_badge,
+            // keep units for price display
+            price_unit: p?.price_unit,
+            qty_unit: p?.qty_unit,
+          };
+        });
+
+        setResults(flat);
+      } catch (e) {
+        console.error('ProductListing fetch error:', e);
+        if (!alive) return;
+        setResults([]);
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+    return () => {
+      alive = false;
+    };
+  }, [microSlug, stateSlug, citySlug]);
+
+  // ✅ Apply filters client-side (fast + reliable)
+  const filtered = useMemo(() => {
+    const list = Array.isArray(results) ? results : [];
+
+    // q
+    const query = safeStr(q).toLowerCase();
+    let out = list;
+    if (query) {
+      out = out.filter((p) => {
+        const name = String(p?.name || '').toLowerCase();
+        const desc = String(p?.description || '').toLowerCase();
+        return name.includes(query) || desc.includes(query);
+      });
+    }
+
+    // price range
+    const [minP, maxP] = filters.priceRange || [0, 100000];
+    out = out.filter((p) => {
+      const price = numOrNull(p?.price);
+      if (price === null) return true; // keep "price on request"
+      return price >= minP && price <= maxP;
+    });
+
+    // rating
+    if (filters.rating > 0) {
+      out = out.filter((p) => {
+        const r = numOrNull(p?.rating) ?? numOrNull(p?.vendorRating) ?? 0;
+        return r >= filters.rating;
+      });
+    }
+
+    // verified
+    if (filters.verified) {
+      out = out.filter((p) => !!p?.vendorVerified);
+    }
+
+    // in stock
+    if (filters.inStock) {
+      out = out.filter((p) => {
+        const stock = numOrNull(p?.stock);
+        return stock === null ? true : stock > 0;
+      });
+    }
+
+    return out;
+  }, [results, q, filters]);
+
+  const locationLabel = useMemo(() => {
+    if (citySlug) return toTitleCase(citySlug);
+    if (stateSlug) return toTitleCase(stateSlug);
+    return 'All India';
+  }, [stateSlug, citySlug]);
 
   return (
     <div className="min-h-screen bg-slate-50">
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
-        <meta name="keywords" content={pageKeywords} />
         {canonicalUrl ? <link rel="canonical" href={canonicalUrl} /> : null}
       </Helmet>
 
       {/* Header */}
-      <div className="bg-white border-b py-4">
-        <div className="container mx-auto px-4">
+      <div className="bg-white border-b">
+        <div className="container mx-auto px-4 py-6">
+          {/* Breadcrumb */}
           <nav className="flex text-sm text-gray-500 mb-4 items-center flex-wrap">
             <Link to="/directory" className="hover:text-blue-700 flex items-center">
               <Home className="w-3 h-3 mr-1" /> Directory
@@ -181,73 +316,44 @@ const ProductsListingPage = () => {
             <span className="font-semibold text-gray-900 capitalize">{microTitle}</span>
           </nav>
 
-          <div className="flex items-start justify-between gap-6 flex-wrap">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
               <h1 className="text-3xl font-extrabold text-slate-900 capitalize">{microTitle}</h1>
-
-              {/* ✅ show micro meta description if available */}
               <p className="mt-1 text-sm text-slate-600 max-w-3xl">
-                {seoLoading ? 'Loading description...' : (safeStr(microInfo?.meta_description) || 'Browse products and suppliers in this micro-category.')}
+                {seoLoading
+                  ? 'Loading description...'
+                  : safeStr(microInfo?.meta_description) || 'Browse products and suppliers in this micro-category.'}
               </p>
             </div>
 
-            <div className="flex gap-2 items-center">
-              <Badge variant="secondary" className="gap-1">
-                <Filter className="w-3.5 h-3.5" />
-                Filters
-              </Badge>
-              <Badge variant="outline" className="gap-1">
-                <MapPin className="w-3.5 h-3.5" />
-                {location ? toTitleCase(location) : 'All India'}
-              </Badge>
+            <div className="text-sm text-slate-600">
+              <span className="font-semibold text-slate-900">{locationLabel}</span>
             </div>
           </div>
 
-          {/* Filters row */}
-          <div className="mt-4 grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-6">
-              <Input
-                value={searchQuery}
-                placeholder="Search in this category..."
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setSearchQuery(v);
-                  updateUrlParams({ q: v });
-                }}
-              />
-            </div>
+          {/* Main search bar (same UI as directory search) */}
+          <div className="mt-5">
+            <DirectorySearchBar
+              initialService={microTitle}
+              initialState={stateSlug}
+              initialCity={citySlug}
+              className="w-full"
+              enableSuggestions
+            />
+          </div>
 
-            <div className="md:col-span-3">
-              <Select
-                value={sortBy}
-                onValueChange={(v) => {
-                  setSortBy(v);
-                  updateUrlParams({ sort: v });
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="relevance">Relevance</SelectItem>
-                  <SelectItem value="newest">Newest</SelectItem>
-                  <SelectItem value="price_low">Price: Low to High</SelectItem>
-                  <SelectItem value="price_high">Price: High to Low</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="md:col-span-3">
-              <Input
-                value={location}
-                placeholder="Location (city/state)"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setLocation(v);
-                  updateUrlParams({ location: v });
-                }}
-              />
-            </div>
+          {/* In-category search */}
+          <div className="mt-4">
+            <input
+              value={q}
+              placeholder="Search in this category..."
+              onChange={(e) => {
+                const v = e.target.value;
+                setQ(v);
+                updateUrlParams({ q: v });
+              }}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-[#003D82]"
+            />
           </div>
         </div>
       </div>
@@ -255,33 +361,17 @@ const ProductsListingPage = () => {
       {/* Content */}
       <div className="container mx-auto px-4 py-8">
         {loading ? (
-          <div className="flex justify-center py-12">
+          <div className="flex justify-center py-14">
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
-        ) : products.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-xl p-6 text-center text-slate-500">
-            No products found.
-          </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {products.map((p) => {
-              const slug = p?.slug || p?.id;
-              return (
-                <div key={p.id} className="bg-white rounded-xl border border-slate-200 p-4">
-                  <div className="text-lg font-bold text-slate-900 line-clamp-2">{p?.name}</div>
-                  <div className="mt-2 text-sm text-slate-600 line-clamp-3">{p?.description || '—'}</div>
-
-                  <div className="mt-4 flex justify-end">
-                    <Link
-                      to={slug ? `/p/${slug}` : '/directory'}
-                      className="text-sm font-semibold text-blue-700 hover:text-blue-900 underline underline-offset-4"
-                    >
-                      View details →
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="lg:col-span-3">
+              <SearchFilters filters={filters} setFilters={setFilters} />
+            </div>
+            <div className="lg:col-span-9">
+              <SearchResultsList products={filtered} query={microTitle} city={citySlug} category={microSlug} />
+            </div>
           </div>
         )}
       </div>
@@ -289,4 +379,4 @@ const ProductsListingPage = () => {
   );
 };
 
-export default ProductsListingPage;
+export default ProductListing;

@@ -136,22 +136,7 @@ When developers run the next build, they'll see:
 - ✅ Automatic: Every production build
 - ✅ Manual: `npm run generate:sitemaps` (development)
 
-## Common Questions
 
-**Q: How many products will be indexed?**  
-A: All products with status = 'PUBLISHED'. Draft products are excluded.
-
-**Q: Do I need to do anything else?**  
-A: Just submit the sitemaps in Search Console and monitor the reports.
-
-**Q: When will products appear in search results?**  
-A: Usually within 1-2 weeks after submission, depending on crawl budget.
-
-**Q: Will this affect ranking of existing pages?**  
-A: No, this only helps search engines discover more pages. Existing pages keep their rankings.
-
-**Q: What if a product doesn't appear in search?**  
-A: Check Search Console for crawl errors, ensure product has proper meta tags, verify product status is 'PUBLISHED'.
 
 ## Files Changed (Technical Reference)
 

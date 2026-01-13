@@ -9,6 +9,7 @@ import passwordResetRoutes from './routes/passwordReset.js';
 import migrationRoutes from './routes/migration.js';
 import supportTicketRoutes from './routes/supportTickets.js';
 import kycRoutes from './routes/kyc.js';
+import adminRoutes from './routes/admin.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 
@@ -27,6 +28,7 @@ app.use(cors(getSubdomainAwareCORS()));
 app.use(subdomainRedirectMiddleware);
 
 app.use(express.json());
+
 
 // Input sanitization - prevent NoSQL injection and XSS
 app.use(mongoSanitize()); // Sanitize data against NoSQL injection
@@ -73,6 +75,7 @@ app.use('/api/password-reset', passwordResetRoutes);
 app.use('/api/migration', migrationRoutes);
 app.use('/api/support', supportTicketRoutes);
 app.use('/api/kyc', kycRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();
