@@ -1,123 +1,55 @@
-import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { TrendingUp, Calendar, Users, Gift, ShoppingCart, DollarSign } from 'lucide-react';
+import React from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TrendingUp } from "lucide-react";
 
-const StatItem = ({ icon: Icon, label, value, color = 'blue' }) => {
-  const colorClasses = {
-    blue: 'bg-blue-50 text-blue-600 border-blue-200',
-    green: 'bg-green-50 text-green-600 border-green-200',
-    purple: 'bg-purple-50 text-purple-600 border-purple-200',
-    orange: 'bg-orange-50 text-orange-600 border-orange-200',
-    pink: 'bg-pink-50 text-pink-600 border-pink-200',
-    cyan: 'bg-cyan-50 text-cyan-600 border-cyan-200',
-  };
-
+const StatRow = ({ label, value }) => {
   return (
-    <div className={`p-4 rounded-lg border ${colorClasses[color]}`}>
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <span className="text-xs font-semibold uppercase tracking-wide">{label}</span>
-        <Icon className="w-4 h-4 flex-shrink-0" />
-      </div>
-      <div className="text-2xl font-bold">{value}</div>
+    <div
+      className="
+        flex items-center justify-between
+        rounded-md border bg-white
+        px-2.5 py-1.5
+        transition-all
+        hover:bg-gray-50 hover:shadow-sm hover:border-gray-300
+      "
+      title={`${label}: ${value}`}
+    >
+      <span className="text-[11px] font-semibold text-gray-700">{label}</span>
+
+      <span
+        className="
+          inline-flex items-center justify-center
+          h-6 w-6 rounded-full
+          border bg-gray-50
+          text-[11px] font-bold text-gray-900
+        "
+      >
+        {value}
+      </span>
     </div>
   );
 };
 
-const LeadStatsPanel = ({ stats, loading }) => {
+const LeadStatsPanel = ({ stats }) => {
   if (!stats) return null;
 
   return (
-    <div className="space-y-4">
-      <Card className="border shadow-sm sticky top-6">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-[#003D82]" />
+    <div className="space-y-3 w-full max-w-[260px]">
+      <Card className="border shadow-sm w-full">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-[13px] flex items-center gap-2">
+            <TrendingUp className="w-4 h-4 text-[#003D82]" />
             Lead Statistics
           </CardTitle>
+          <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+            Purchased by Period
+          </div>
         </CardHeader>
-        <CardContent className="space-y-3">
-          {/* Time-based stats */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Purchased by Period</h4>
-            
-            <StatItem
-              icon={Calendar}
-              label="Today"
-              value={stats.daily || 0}
-              color="blue"
-            />
-            
-            <StatItem
-              icon={Calendar}
-              label="This Week"
-              value={stats.weekly || 0}
-              color="green"
-            />
-            
-            <StatItem
-              icon={Calendar}
-              label="This Year"
-              value={stats.yearly || 0}
-              color="purple"
-            />
-          </div>
 
-          {/* Divider */}
-          <div className="border-t my-3"></div>
-
-          {/* Direct & Purchase stats */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Lead Sources</h4>
-            
-            <StatItem
-              icon={Gift}
-              label="Direct Leads"
-              value={stats.direct || 0}
-              color="orange"
-            />
-            
-            <StatItem
-              icon={ShoppingCart}
-              label="Total Purchased"
-              value={stats.totalPurchased || 0}
-              color="cyan"
-            />
-          </div>
-
-          {/* Divider */}
-          <div className="border-t my-3"></div>
-
-          {/* Amount stats */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Investment</h4>
-            
-            <div className="p-4 rounded-lg border bg-pink-50 text-pink-600 border-pink-200">
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <span className="text-xs font-semibold uppercase tracking-wide">Total Spent</span>
-                <DollarSign className="w-4 h-4 flex-shrink-0" />
-              </div>
-              <div className="text-2xl font-bold">₹{stats.totalAmount || 0}</div>
-              <p className="text-xs mt-2 text-pink-500">
-                Avg: ₹{stats.totalPurchased ? (stats.totalAmount / stats.totalPurchased).toFixed(0) : 0} per lead
-              </p>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div className="border-t my-3"></div>
-
-          {/* Conversion stats */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Performance</h4>
-            
-            <div className="p-4 rounded-lg border bg-gray-50 text-gray-600 border-gray-200">
-              <div className="text-sm font-medium mb-2">Conversion Rate</div>
-              <div className="text-2xl font-bold text-[#003D82]">{stats.conversionRate}%</div>
-              <p className="text-xs mt-2 text-gray-500">
-                {stats.converted} converted from {stats.totalPurchased} leads
-              </p>
-            </div>
-          </div>
+        <CardContent className="p-4 pt-0 space-y-2">
+          <StatRow label="Today" value={stats.daily || 0} />
+          <StatRow label="This Week" value={stats.weekly || 0} />
+          <StatRow label="This Year" value={stats.yearly || 0} />
         </CardContent>
       </Card>
     </div>

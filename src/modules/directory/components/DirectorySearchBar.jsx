@@ -20,14 +20,12 @@ const slugify = (value) => {
 };
 
 // ✅ Resolve free-text location like "Delhi" / "New Delhi" to state/city slugs.
-// Used when user types: "land survey in delhi" without selecting dropdowns.
 const resolveLocationSlugs = async (locText) => {
   const clean = (locText || '').trim();
   if (!clean) return { stateSlug: '', citySlug: '' };
 
   const locSlug = slugify(clean);
 
-  // 1) Try CITY by slug
   try {
     const { data: cityBySlug } = await supabase
       .from('cities')
@@ -48,7 +46,6 @@ const resolveLocationSlugs = async (locText) => {
     // ignore
   }
 
-  // 2) Try STATE by slug
   try {
     const { data: stateBySlug } = await supabase
       .from('states')
@@ -63,7 +60,6 @@ const resolveLocationSlugs = async (locText) => {
     // ignore
   }
 
-  // 3) Fallback: name partial match (city first)
   try {
     const { data: cities } = await supabase
       .from('cities')
@@ -93,9 +89,7 @@ const resolveLocationSlugs = async (locText) => {
       .limit(1);
 
     const st = states?.[0];
-    if (st?.slug) {
-      return { stateSlug: st.slug, citySlug: '' };
-    }
+    if (st?.slug) return { stateSlug: st.slug, citySlug: '' };
   } catch {
     // ignore
   }
@@ -103,45 +97,34 @@ const resolveLocationSlugs = async (locText) => {
   return { stateSlug: '', citySlug: '' };
 };
 
-/**
- * DirectorySearchBar
- * - Service/Product input
- * - State dropdown
- * - City dropdown (dependent on state)
- *
- * Navigates to: /directory/search/:service/:state?/:city?
- */
 const DirectorySearchBar = ({
   initialService = '',
   initialState = '',
   initialCity = '',
   className = '',
   enableSuggestions = false,
+
+  // ✅ when true -> Land Survey style slim bar
+  compact = false,
 }) => {
   const navigate = useNavigate();
 
-  // Service text (what user sees) + service slug (what we use for URL)
   const [serviceText, setServiceText] = useState('');
   const [serviceSlug, setServiceSlug] = useState('');
 
-  // Location selections are slugs
   const [selectedStateSlug, setSelectedStateSlug] = useState('');
   const [selectedCitySlug, setSelectedCitySlug] = useState('');
 
-  // Data lists
   const [states, setStates] = useState([]);
   const [cities, setCities] = useState([]);
   const [loadingStates, setLoadingStates] = useState(false);
   const [loadingCities, setLoadingCities] = useState(false);
 
-  // Typeahead (optional)
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Submit loading (for resolving "... in delhi" to slugs)
   const [submitting, setSubmitting] = useState(false);
 
-  // Sync with props (e.g. navigation)
   useEffect(() => {
     const s = initialService || '';
     setServiceSlug(s);
@@ -151,7 +134,6 @@ const DirectorySearchBar = ({
     setSelectedCitySlug(initialCity || '');
   }, [initialService, initialState, initialCity]);
 
-  // Load states
   useEffect(() => {
     const load = async () => {
       setLoadingStates(true);
@@ -165,7 +147,6 @@ const DirectorySearchBar = ({
     load();
   }, []);
 
-  // Load cities whenever state changes
   useEffect(() => {
     const loadCities = async () => {
       if (!selectedStateSlug) {
@@ -183,7 +164,6 @@ const DirectorySearchBar = ({
     loadCities();
   }, [selectedStateSlug]);
 
-  // If state changes, ensure city stays valid
   useEffect(() => {
     if (!selectedStateSlug) {
       if (selectedCitySlug) setSelectedCitySlug('');
@@ -195,7 +175,6 @@ const DirectorySearchBar = ({
     }
   }, [cities, selectedCitySlug, selectedStateSlug]);
 
-  // Suggestions debounce
   useEffect(() => {
     if (!enableSuggestions) return;
 
@@ -224,10 +203,8 @@ const DirectorySearchBar = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     if (submitting) return;
 
-    // ✅ If user did NOT pick state/city but typed "service in delhi", auto-parse location.
     let finalServiceText = (serviceText || '').trim();
     let freeLocText = '';
 
@@ -242,20 +219,17 @@ const DirectorySearchBar = ({
     const finalServiceSlug = serviceSlug || slugify(finalServiceText);
     if (!finalServiceSlug) return;
 
-    // If dropdowns already selected, use them.
     if (selectedStateSlug || selectedCitySlug) {
       const url = urlParser.createStructuredUrl(finalServiceSlug, selectedStateSlug || '', selectedCitySlug || '');
       navigate(url);
       return;
     }
 
-    // If no dropdowns selected but we extracted location from query, resolve it to slugs.
     if (freeLocText) {
       setSubmitting(true);
       try {
         const resolved = await resolveLocationSlugs(freeLocText);
 
-        // Update UI inputs so user sees clean service text
         setServiceText(finalServiceText);
         setServiceSlug('');
 
@@ -263,7 +237,6 @@ const DirectorySearchBar = ({
           const url = urlParser.createStructuredUrl(finalServiceSlug, resolved.stateSlug || '', resolved.citySlug || '');
           navigate(url);
         } else {
-          // Fallback: still pass loc text for filtering on results page
           const sp = new URLSearchParams();
           sp.set('loc', freeLocText);
           navigate(`/directory/search/${finalServiceSlug}?${sp.toString()}`);
@@ -274,35 +247,42 @@ const DirectorySearchBar = ({
       return;
     }
 
-    // Default: no location
     const url = urlParser.createStructuredUrl(finalServiceSlug, '', '');
     navigate(url);
   };
 
+  // ✅ Land Survey style sizing
+  const wrapperPad = compact ? 'p-1.5' : 'p-2';
+  const heightCls = compact ? 'h-11' : 'h-12'; // h-11 ≈ screenshot
+  const iconTop = compact ? 'top-3' : 'top-3.5';
+  const btnPx = compact ? 'px-10 text-sm' : 'px-12';
+
   return (
-    <div className={`w-full bg-white shadow-sm border rounded-lg p-2 ${className}`}>
-      <form onSubmit={handleSubmit} className="flex flex-col md:flex-row gap-2">
+    <div
+      className={`w-full bg-white border border-slate-200 rounded-xl overflow-hidden ${wrapperPad} ${className}`}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className={`flex flex-col md:flex-row md:items-center ${compact ? 'gap-1.5 md:gap-0' : 'gap-2 md:gap-0'}`}
+      >
         {/* Service Input */}
-        <div className="flex-1 relative">
-          <div className="absolute left-3 top-2.5 text-gray-400">
+        <div className="flex-1 relative md:border-r md:border-slate-200">
+          <div className={`absolute left-3 ${iconTop} text-gray-400`}>
             <Search className="w-5 h-5" />
           </div>
 
           <Input
-            placeholder="Search product/service (e.g. Geotechnical Investigation)"
-            className="pl-10 border-0 bg-transparent focus-visible:ring-0 md:border-r rounded-none"
+            placeholder="Search product/service"
+            className={`pl-10 border-0 bg-transparent focus-visible:ring-0 rounded-none ${heightCls}`}
             value={serviceText}
             onChange={(e) => {
               setServiceText(e.target.value);
-              setServiceSlug(''); // user typed manually, clear selected suggestion slug
+              setServiceSlug('');
             }}
             onFocus={() => setShowSuggestions(true)}
-            onBlur={() => {
-              setTimeout(() => setShowSuggestions(false), 150);
-            }}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
           />
 
-          {/* Suggestions dropdown (optional) */}
           {canShowSuggestions && (
             <div className="absolute top-full left-0 right-0 bg-white rounded-lg shadow-xl mt-2 z-50 overflow-hidden text-left border border-gray-100">
               {suggestions.map((item) => (
@@ -327,12 +307,13 @@ const DirectorySearchBar = ({
         </div>
 
         {/* State Select */}
-        <div className="flex-1 relative">
-          <div className="absolute left-3 top-2.5 text-gray-400">
+        <div className="flex-1 relative md:border-r md:border-slate-200">
+          <div className={`absolute left-3 ${iconTop} text-gray-400`}>
             <MapPin className="w-5 h-5" />
           </div>
+
           <select
-            className="w-full h-10 pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none"
+            className={`w-full ${heightCls} pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none`}
             value={selectedStateSlug}
             onChange={(e) => {
               setSelectedStateSlug(e.target.value);
@@ -349,19 +330,20 @@ const DirectorySearchBar = ({
           </select>
 
           {loadingStates && (
-            <div className="absolute right-3 top-2.5 text-gray-400">
+            <div className={`absolute right-3 ${iconTop} text-gray-400`}>
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
           )}
         </div>
 
         {/* City Select */}
-        <div className="flex-1 relative border-t md:border-t-0 md:border-l border-gray-100">
-          <div className="absolute left-3 top-2.5 text-gray-400">
+        <div className="flex-1 relative">
+          <div className={`absolute left-3 ${iconTop} text-gray-400`}>
             <MapPin className="w-5 h-5" />
           </div>
+
           <select
-            className="w-full h-10 pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none"
+            className={`w-full ${heightCls} pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none`}
             value={selectedCitySlug}
             onChange={(e) => setSelectedCitySlug(e.target.value)}
             disabled={!selectedStateSlug || loadingCities}
@@ -375,22 +357,28 @@ const DirectorySearchBar = ({
           </select>
 
           {loadingCities && (
-            <div className="absolute right-3 top-2.5 text-gray-400">
+            <div className={`absolute right-3 ${iconTop} text-gray-400`}>
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
           )}
         </div>
 
-        <Button type="submit" className="bg-[#003D82] text-white px-8" disabled={submitting}>
-          {submitting ? (
-            <span className="inline-flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              Searching...
-            </span>
-          ) : (
-            'Search'
-          )}
-        </Button>
+        <div className="md:pl-2">
+          <Button
+            type="submit"
+            className={`bg-[#003D82] hover:bg-[#00254E] text-white ${btnPx} ${heightCls} rounded-lg`}
+            disabled={submitting}
+          >
+            {submitting ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Searching...
+              </span>
+            ) : (
+              'Search'
+            )}
+          </Button>
+        </div>
       </form>
     </div>
   );

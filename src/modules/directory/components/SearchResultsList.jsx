@@ -86,6 +86,14 @@ const SearchResultsList = ({ products, query, city, category }) => {
     );
   };
 
+  // ✅ Avoid empty vendor rows when vendor name is missing
+  const getVendorLabel = (product) => {
+    const v = (product?.vendorName || product?.vendor || '')
+      ?.toString?.()
+      ?.trim?.();
+    return v || '';
+  };
+
   if (!isUsingMock && displayProducts.length === 0) {
     return (
       <div className="text-center py-16 bg-white rounded-lg border border-dashed border-gray-300">
@@ -152,7 +160,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
                 <span className="text-sm text-neutral-500">({product.reviews || 0} reviews)</span>
               </div>
 
-              <div className="space-y-2 mb-4 mt-auto">
+              <div className="space-y-2 mb-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xl">{renderPrice(product)}</span>
 
@@ -163,10 +171,14 @@ const SearchResultsList = ({ products, query, city, category }) => {
                   )}
                 </div>
 
-                <div className="flex items-center gap-2 text-sm text-neutral-600">
-                  <BadgeCheck className={`h-4 w-4 ${product.vendorVerified ? 'text-green-600' : 'text-gray-400'}`} />
-                  <span className="font-medium truncate">{product.vendorName || product.vendor}</span>
-                </div>
+                {getVendorLabel(product) ? (
+                  <div className="flex items-center gap-2 text-sm text-neutral-600">
+                    <BadgeCheck
+                      className={`h-4 w-4 ${product.vendorVerified ? 'text-green-600' : 'text-gray-400'}`}
+                    />
+                    <span className="font-medium truncate">{getVendorLabel(product)}</span>
+                  </div>
+                ) : null}
 
                 {(product.vendorCity || product.city) && (
                   <div className="flex items-center gap-2 text-xs text-neutral-500">
@@ -179,7 +191,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
               </div>
 
               {/* ✅ Cart button removed */}
-              <div className="mt-2">
+              <div className="mt-auto pt-2">
                 <Button
                   className="w-full bg-[#003D82] hover:bg-[#00254E] text-white"
                   onClick={(e) => {

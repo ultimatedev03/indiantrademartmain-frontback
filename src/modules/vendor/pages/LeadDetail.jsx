@@ -51,6 +51,34 @@ const formatINR = (v) => {
   return n.toLocaleString('en-IN');
 };
 
+
+// ✅ Combine images from product_images table + products.images jsonb
+const getProductImageUrls = (p) => {
+  const urls = [];
+
+  // product_images (array of rows)
+  if (Array.isArray(p?.product_images)) {
+    p.product_images.forEach((img) => {
+      if (img?.image_url) urls.push(img.image_url);
+    });
+  }
+
+  // products.images (jsonb) -> can be array of strings or objects
+  const imgs = p?.images;
+  if (Array.isArray(imgs)) {
+    imgs.forEach((it) => {
+      if (typeof it === 'string' && it.trim()) urls.push(it.trim());
+      else if (it && typeof it === 'object') {
+        if (typeof it.url === 'string' && it.url.trim()) urls.push(it.url.trim());
+        else if (typeof it.image_url === 'string' && it.image_url.trim()) urls.push(it.image_url.trim());
+        else if (typeof it.path === 'string' && it.path.trim()) urls.push(it.path.trim());
+      }
+    });
+  }
+
+  return Array.from(new Set(urls));
+};
+
 // quantity is text in DB ("100 units" / "100" / "100 kg")
 const parseQtyUnit = (lead) => {
   const raw =
@@ -183,10 +211,28 @@ const LeadDetail = () => {
         }
       }
 
+      // ✅ Optional: fetch product cover image (for direct/purchased lead view)
+      let __productCover = null;
+      try {
+        const pid = leadData?.product_id || leadData?.productId || leadData?.product?.id || null;
+        if (pid) {
+          const { data: p } = await supabase
+            .from('products')
+            .select('id, images, product_images(image_url)')
+            .eq('id', pid)
+            .single();
+          const urls = p ? getProductImageUrls(p) : [];
+          __productCover = urls && urls.length ? urls[0] : null;
+        }
+      } catch {
+        // ignore cover fetch errors
+      }
+
       setLead({
         ...leadData,
         __source: source,
-        __purchaseDate: purchaseDate
+        __purchaseDate: purchaseDate,
+        __productCover,
       });
       setIsPurchased(isPurchasedFlag);
     } catch (err) {
@@ -267,6 +313,7 @@ const LeadDetail = () => {
   if (!lead) return null;
 
   const price = lead?.price ?? 50;
+  const isDirect = String(lead?.__source || '').toLowerCase() === 'direct';
 
   const handleSendEmail = () => {
     // Open vendor quotation/proposal page with prefilled fields
@@ -326,9 +373,25 @@ const LeadDetail = () => {
                 </Badge>
               </div>
 
-              <CardTitle className="text-2xl text-[#003D82] truncate">
-                {meta.title}
-              </CardTitle>
+              <div className="flex items-center gap-3">
+                {lead?.__productCover ? (
+                  <div className="h-16 w-16 shrink-0 rounded-md overflow-hidden border bg-white">
+                    <img
+                      src={lead.__productCover}
+                      alt="product"
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                <CardTitle className="text-2xl text-[#003D82] truncate">
+                  {meta.title}
+                </CardTitle>
+              </div>
 
               <div className="mt-2 flex flex-wrap gap-4 text-sm text-gray-600">
                 <span className="flex items-center gap-2">
@@ -344,7 +407,7 @@ const LeadDetail = () => {
               <div className="text-xs text-gray-500">Lead ID</div>
               <div className="font-mono font-semibold text-gray-900">#{String(lead.id || '').slice(0, 8)}</div>
 
-              {!isPurchased && (
+              {!isPurchased && !isDirect && (
                 <div className="mt-3">
                   <div className="text-xs text-gray-500">Price</div>
                   <div className="text-2xl font-bold text-gray-900">₹{price}</div>

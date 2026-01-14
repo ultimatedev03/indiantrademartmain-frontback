@@ -1,4 +1,3 @@
-// ✅ File: src/modules/vendor/pages/Profile.jsx
 import React, { useEffect, useState, useCallback } from 'react';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -54,7 +53,7 @@ const Profile = () => {
       ]);
 
       const p = prof || {};
-      
+
       // Normalize the profile data to ensure both snake_case and camelCase keys exist
       const normalizedProfile = {
         ...p,
@@ -75,14 +74,14 @@ const Profile = () => {
         yearOfEstablishment: p.yearOfEstablishment ?? p.year_of_establishment,
         ownerDesignation: p.ownerDesignation || p.owner_designation,
       };
-      
+
       setProfile(normalizedProfile);
       setDraft(normalizedProfile);
       setKycStatus(normalizedProfile.kyc_status || 'PENDING');
       setBanks(bankList || []);
       setDocuments(docList || []);
       setSubscription(sub || null);
-      
+
       // Subscribe to real-time KYC status updates
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -219,107 +218,111 @@ const Profile = () => {
         ::-webkit-scrollbar-thumb { background: transparent !important; }
         * { scrollbar-width: none !important; }
       `}</style>
-      <div className="max-w-[1400px] mx-auto p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
 
-        {/* === LEFT SIDEBAR === */}
-        <div className="lg:col-span-3 space-y-6">
-          <Card className="border-t-4 border-t-[#003D82] shadow-sm sticky top-6">
-            <div className="p-6 text-center border-b border-slate-100">
-              <div className="relative inline-block group">
-                <div className="w-24 h-24 mx-auto bg-white rounded-full border-4 border-slate-100 shadow-sm overflow-hidden flex items-center justify-center">
-                  {profile.profile_image ? (
-                    <img src={profile.profile_image} className="w-full h-full object-cover" alt="Logo" />
-                  ) : (
-                    <span className="text-3xl font-bold text-slate-300">{(companyTitle?.[0] || 'M')}</span>
-                  )}
+      <div className="max-w-[1400px] mx-auto p-2 md:p-2 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        {/* === LEFT SIDEBAR (✅ FIXED: Both cards sticky together) === */}
+        <div className="lg:col-span-3 lg:self-start">
+          {/* ✅ Sticky wrapper: profile + subscription dono ek saath sticky */}
+          <div className="space-y-6 lg:sticky lg:top-6">
+            <Card className="border-t-4 border-t-[#003D82] shadow-sm">
+              <div className="p-2 text-center border-b border-slate-100">
+                <div className="relative inline-block group">
+                  <div className="w-24 h-24 mx-auto bg-white rounded-full border-4 border-slate-100 shadow-sm overflow-hidden flex items-center justify-center">
+                    {profile.profile_image ? (
+                      <img src={profile.profile_image} className="w-full h-full object-cover" alt="Logo" />
+                    ) : (
+                      <span className="text-3xl font-bold text-slate-300">{(companyTitle?.[0] || 'M')}</span>
+                    )}
+                  </div>
+
+                  <label className="absolute bottom-0 right-0 p-1.5 bg-[#003D82] rounded-full cursor-pointer hover:bg-blue-800 transition-colors shadow-sm">
+                    {uploading.profile_image ? (
+                      <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-3.5 h-3.5 text-white" />
+                    )}
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={e => handleImageUpload(e, 'profile_image')}
+                      disabled={!!uploading.profile_image}
+                    />
+                  </label>
                 </div>
 
-                <label className="absolute bottom-0 right-0 p-1.5 bg-[#003D82] rounded-full cursor-pointer hover:bg-blue-800 transition-colors shadow-sm">
-                  {uploading.profile_image ? (
-                    <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
-                  ) : (
-                    <Camera className="w-3.5 h-3.5 text-white" />
-                  )}
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={e => handleImageUpload(e, 'profile_image')}
-                    disabled={!!uploading.profile_image}
-                  />
-                </label>
+                <div className="mt-4">
+                  <h2 className="text-lg font-bold text-slate-900 leading-tight flex items-center justify-center gap-2">
+                    {companyTitle}
+                    <Pencil
+                      className="w-3 h-3 text-slate-400 cursor-pointer hover:text-[#003D82]"
+                      onClick={() => { setActiveTab('primary'); setEditingSection('primary'); navigate(`?tab=primary`, { replace: true }); }}
+                    />
+                  </h2>
+                  <p className="text-sm text-slate-500 font-medium mt-1">{ownerTitle}</p>
+                </div>
               </div>
 
-              <div className="mt-4">
-                <h2 className="text-lg font-bold text-slate-900 leading-tight flex items-center justify-center gap-2">
-                  {companyTitle}
-                  <Pencil
-                    className="w-3 h-3 text-slate-400 cursor-pointer hover:text-[#003D82]"
-                    onClick={() => { setActiveTab('primary'); setEditingSection('primary'); navigate(`?tab=primary`, { replace: true }); }}
-                  />
-                </h2>
-                <p className="text-sm text-slate-500 font-medium mt-1">{ownerTitle}</p>
-              </div>
-            </div>
+              <div className="p-5 space-y-4">
+                <div className="flex items-start gap-3 text-sm">
+                  <MapPin className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
+                  <span className="text-slate-600 leading-relaxed">
+                    {profile.address || 'Add Address'} <br />
+                    {profile.city || 'City'}, {profile.state || 'State'} - {profile.pincode || 'Pincode'}
+                  </span>
+                </div>
 
-            <div className="p-5 space-y-4">
-              <div className="flex items-start gap-3 text-sm">
-                <MapPin className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                <span className="text-slate-600 leading-relaxed">
-                  {profile.address || 'Add Address'} <br />
-                  {profile.city || 'City'}, {profile.state || 'State'} - {profile.pincode || 'Pincode'}
-                </span>
-              </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <Phone className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="text-slate-600">{profile.phone || 'Add Phone'}</span>
+                </div>
 
-              <div className="flex items-center gap-3 text-sm">
-                <Phone className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="text-slate-600">{profile.phone || 'Add Phone'}</span>
-              </div>
+                <div className="flex items-center gap-3 text-sm">
+                  <Mail className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="text-slate-600 truncate">{profile.email || '—'}</span>
+                </div>
 
-              <div className="flex items-center gap-3 text-sm">
-                <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                <span className="text-slate-600 truncate">{profile.email || '—'}</span>
-              </div>
+                <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                  <p className="text-xs text-blue-600 font-semibold mb-1">Your Vendor ID</p>
+                  <p className="text-sm font-bold text-blue-900">
+                    {profile.vendorId || profile.vendor_id || 'Generating...'}
+                  </p>
+                </div>
 
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                <p className="text-xs text-blue-600 font-semibold mb-1">Your Vendor ID</p>
-                <p className="text-sm font-bold text-blue-900">
-                  {profile.vendorId || profile.vendor_id || 'Generating...'}
-                </p>
-              </div>
-              
-              {/* KYC Status Badge */}
-              <div className="mt-4">
-                {['VERIFIED', 'APPROVED'].includes(kycStatus) ? (
-                  <div className="p-3 bg-green-50 rounded-lg border border-green-200 flex items-center gap-2">
-                    <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-                    <div>
-                      <p className="text-xs text-green-600 font-semibold">KYC Approved</p>
-                      <p className="text-xs text-green-700 mt-0.5">Your account is verified</p>
+                {/* KYC Status Badge */}
+                <div className="mt-4">
+                  {['VERIFIED', 'APPROVED'].includes(kycStatus) ? (
+                    <div className="p-3 bg-green-50 rounded-lg border border-green-200 flex items-center gap-2">
+                      <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs text-green-600 font-semibold">KYC Approved</p>
+                        <p className="text-xs text-green-700 mt-0.5">Your account is verified</p>
+                      </div>
                     </div>
-                  </div>
-                ) : kycStatus === 'REJECTED' ? (
-                  <div className="p-3 bg-red-50 rounded-lg border border-red-200">
-                    <p className="text-xs text-red-600 font-semibold mb-1">KYC Rejected</p>
-                    <p className="text-xs text-red-700">Please resubmit your documents</p>
-                  </div>
-                ) : (
-                  <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
-                    <p className="text-xs text-yellow-600 font-semibold mb-1">KYC Pending</p>
-                    <p className="text-xs text-yellow-700">Upload documents for verification</p>
-                  </div>
-                )}
+                  ) : kycStatus === 'REJECTED' ? (
+                    <div className="p-3 bg-red-50 rounded-lg border border-red-200">
+                      <p className="text-xs text-red-600 font-semibold mb-1">KYC Rejected</p>
+                      <p className="text-xs text-red-700">Please resubmit your documents</p>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-yellow-50 rounded-lg border border-yellow-200">
+                      <p className="text-xs text-yellow-600 font-semibold mb-1">KYC Pending</p>
+                      <p className="text-xs text-yellow-700">Upload documents for verification</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </Card>
+            </Card>
 
-          {/* Subscription Status Card */}
-          <Card className="shadow-sm">
-            <div className="p-5">
-              <p className="text-xs text-slate-500 font-semibold mb-3">Subscription Status</p>
-              <SubscriptionBadge subscription={subscription} loading={subscriptionLoading} />
-            </div>
-          </Card>
+            {/* Subscription Status Card (✅ Now sticky with profile card) */}
+            <Card className="shadow-sm">
+              <div className="p-5">
+                <p className="text-xs text-slate-500 font-semibold mb-3">Subscription Status</p>
+                <SubscriptionBadge subscription={subscription} loading={subscriptionLoading} />
+              </div>
+            </Card>
+          </div>
         </div>
 
         {/* === MAIN CONTENT === */}

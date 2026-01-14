@@ -1,13 +1,11 @@
-// ✅ File: src/modules/vendor/pages/Leads.jsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { leadApi } from '@/modules/lead/services/leadApi';
-import { vendorApi } from '@/modules/vendor/services/vendorApi';
-import { supabase } from '@/lib/customSupabaseClient';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { leadApi } from "@/modules/lead/services/leadApi";
+import { vendorApi } from "@/modules/vendor/services/vendorApi";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   MapPin,
@@ -15,14 +13,28 @@ import {
   Search,
   Phone,
   Mail,
+  User,
   Lock,
   ShoppingCart,
   Filter,
   X,
-} from 'lucide-react';
-import { toast } from '@/components/ui/use-toast';
-import { phoneUtils } from '@/shared/utils/phoneUtils';
-import LeadStatsPanel from '@/modules/vendor/components/LeadStatsPanel';
+} from "lucide-react";
+import { toast } from "@/components/ui/use-toast";
+import { phoneUtils } from "@/shared/utils/phoneUtils";
+import LeadStatsPanel from "@/modules/vendor/components/LeadStatsPanel";
+
+const CONTACTED_STORAGE_KEY = "itm_vendor_contacted_lead_ids";
+
+/**
+ * ✅ Bottom-right positioning tuning (My Leads tab, desktop only)
+ * bottom distance increases => moves UP slightly
+ * right distance increases => moves LEFT
+ */
+const STATS_BOTTOM = 18; // px
+const STATS_RIGHT_EXTRA = 0; // px
+
+// ✅ IMPORTANT: stats panel width (must match LeadStatsPanel max width)
+const STATS_PANEL_W = 260; // px
 
 const safeDate = (v) => {
   try {
@@ -34,17 +46,15 @@ const safeDate = (v) => {
 };
 
 const parseLocation = (lead) => {
-  // Prefer explicit fields
-  const city = (lead?.city || '').toString().trim();
-  const state = (lead?.state || lead?.state_name || '').toString().trim();
+  const city = (lead?.city || "").toString().trim();
+  const state = (lead?.state || lead?.state_name || "").toString().trim();
   if (city || state) return { city, state };
 
-  // Fallback to "City, State" from lead.location
-  const raw = (lead?.location || '').toString();
-  const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
-  if (parts.length >= 2) return { city: parts[0], state: parts.slice(1).join(', ') };
-  if (parts.length === 1) return { city: parts[0], state: '' };
-  return { city: '', state: '' };
+  const raw = (lead?.location || "").toString();
+  const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  if (parts.length >= 2) return { city: parts[0], state: parts.slice(1).join(", ") };
+  if (parts.length === 1) return { city: parts[0], state: "" };
+  return { city: "", state: "" };
 };
 
 const getLeadMeta = (lead) => {
@@ -53,20 +63,21 @@ const getLeadMeta = (lead) => {
     lead?.product_name ||
     lead?.service_name ||
     lead?.requirement_title ||
-    'Untitled Lead';
+    "Untitled Lead";
 
   const { city, state } = parseLocation(lead);
+
   const location =
-    (lead?.location || '').toString().trim() ||
-    [city, state].filter(Boolean).join(', ') ||
-    'India';
+    (lead?.location || "").toString().trim() ||
+    [city, state].filter(Boolean).join(", ") ||
+    "India";
 
   const category =
     lead?.category ||
     lead?.category_name ||
     lead?.categoryTitle ||
     lead?.head_category ||
-    '';
+    "";
 
   const product =
     lead?.product ||
@@ -74,7 +85,7 @@ const getLeadMeta = (lead) => {
     lead?.service_name ||
     lead?.service ||
     lead?.sub_category ||
-    '';
+    "";
 
   const createdAt =
     safeDate(lead?.created_at) ||
@@ -97,17 +108,56 @@ const topNFromCountMap = (map, n = 8) =>
     .map(([label, count]) => ({ label, count }));
 
 const anySelected = (obj) => Object.values(obj || {}).some(Boolean);
-const selectedKeys = (obj) => Object.keys(obj || {}).filter(k => obj[k]);
+const selectedKeys = (obj) => Object.keys(obj || {}).filter((k) => obj[k]);
+
+const readContactedIds = () => {
+  try {
+    const raw = localStorage.getItem(CONTACTED_STORAGE_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeContactedIds = (ids) => {
+  try {
+    localStorage.setItem(CONTACTED_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+};
+
+const startOfToday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const startOfWeekMonday = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d;
+};
+
+const startOfYear = () => {
+  const d = new Date();
+  d.setMonth(0, 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
 
 const Leads = () => {
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState('marketplace');
+  const [activeTab, setActiveTab] = useState("marketplace");
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Marketplace search + filters
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [marketFilters, setMarketFilters] = useState({
     recommendedOnly: false,
     indiaOnly: true,
@@ -115,21 +165,26 @@ const Leads = () => {
     states: {},
     categories: {},
     products: {},
-    sort: 'recent', // recent | relevant
+    sort: "recent",
   });
 
-  // ✅ My Leads filters (only required)
   const [myFilters, setMyFilters] = useState({
-    fromDate: '',      // yyyy-mm-dd
-    toDate: '',        // yyyy-mm-dd
-    categories: {},    // { [category]: true }
-    locations: {},     // { [location]: true }
-    source: 'all',     // all | purchased | direct
-    sort: 'recent_bought', // only one for now
+    fromDate: "",
+    toDate: "",
+    categories: {},
+    locations: {},
+    source: "all",
+    sort: "recent_bought",
   });
 
   const [stats, setStats] = useState(null);
   const [purchasing, setPurchasing] = useState({});
+
+  // ✅ Stats panel positioning (my_leads / desktop)
+  const statsColRef = useRef(null);
+  const statsCardRef = useRef(null);
+  const [floatingStyle, setFloatingStyle] = useState(null);
+  const [statsCardH, setStatsCardH] = useState(0);
 
   useEffect(() => {
     loadLeads();
@@ -137,41 +192,158 @@ const Leads = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
+  useEffect(() => {
+    const onContacted = (e) => {
+      const leadId = e?.detail?.leadId;
+      if (!leadId) return;
+
+      const current = readContactedIds();
+      if (current.includes(leadId)) return;
+
+      const updated = [...current, leadId];
+      writeContactedIds(updated);
+
+      setStats((prev) => {
+        if (!prev) return prev;
+        return { ...prev, totalContacted: updated.length };
+      });
+    };
+
+    window.addEventListener("itm:lead_contacted", onContacted);
+    return () => window.removeEventListener("itm:lead_contacted", onContacted);
+  }, []);
+
+  // ✅ FIX: keep stats card bottom-right aligned with its column (no overlap)
+  useEffect(() => {
+    const update = () => {
+      if (activeTab !== "my_leads") return;
+
+      const col = statsColRef.current;
+      const card = statsCardRef.current;
+      if (!col || !card) return;
+
+      const rect = col.getBoundingClientRect();
+      const baseRight = window.innerWidth - rect.right;
+      const rightPx = Math.max(12, baseRight + STATS_RIGHT_EXTRA);
+
+      setFloatingStyle({
+        position: "fixed",
+        bottom: `${STATS_BOTTOM}px`,
+        right: `${rightPx}px`,
+        width: `${Math.round(rect.width)}px`,
+        zIndex: 30,
+        display: "flex",
+        justifyContent: "flex-end",
+        pointerEvents: "auto",
+      });
+
+      setStatsCardH(card.offsetHeight || 0);
+    };
+
+    const raf1 = requestAnimationFrame(update);
+    const raf2 = requestAnimationFrame(update);
+
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+
+    let ro;
+    if (statsCardRef.current && "ResizeObserver" in window) {
+      ro = new ResizeObserver(() => update());
+      ro.observe(statsCardRef.current);
+    }
+
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+      if (ro) ro.disconnect();
+    };
+  }, [activeTab, stats, loading]);
+
   const loadStats = async () => {
     try {
-      // Get stats from vendor API which has the stats calculation
-      const data = await vendorApi.dashboard.getStats();
+      try {
+        await vendorApi.dashboard.getStats();
+      } catch {
+        // ignore
+      }
+
+      const myLeads = await leadApi.marketplace.getMyLeads();
+      const rows = myLeads || [];
+
+      const todayStart = startOfToday();
+      const weekStart = startOfWeekMonday();
+      const yearStart = startOfYear();
+
+      let purchasedCount = 0;
+      let directCount = 0;
+
+      let daily = 0;
+      let weekly = 0;
+      let yearly = 0;
+
+      rows.forEach((row) => {
+        const source = (row?.source || "").toString().toLowerCase();
+        const isDirect = source === "direct";
+        const isPurchased = source === "purchased" || !row?.source;
+
+        if (isDirect) directCount += 1;
+        if (isPurchased) purchasedCount += 1;
+
+        const leadObj = row?.leads || row;
+        const purchaseDate =
+          row?.purchase_date ||
+          row?.purchaseDate ||
+          row?.purchased_at ||
+          leadObj?.created_at ||
+          leadObj?.createdAt;
+
+        const d = safeDate(purchaseDate);
+        if (!d) return;
+
+        if (d >= todayStart) daily += 1;
+        if (d >= weekStart) weekly += 1;
+        if (d >= yearStart) yearly += 1;
+      });
+
+      const contactedIds = readContactedIds();
+      const totalContacted = contactedIds.length;
+
       setStats({
-        totalPurchased: 0, // Calculate from lead purchases
-        totalContacted: 0, // Calculate from lead contacts
-        converted: 0, // Calculate from converted leads
+        direct: directCount,
+        totalPurchased: purchasedCount,
+        totalContacted,
+        daily,
+        weekly,
+        yearly,
       });
     } catch (error) {
-      console.error('Failed to load stats:', error);
+      console.error("Failed to load stats:", error);
     }
   };
 
-  // ✅ IMPORTANT: Marketplace => hide leads that current vendor already purchased
   const loadLeads = async () => {
     setLoading(true);
     try {
-      if (activeTab === 'my_leads') {
-        // Fetch purchased + direct leads from new marketplace API
+      if (activeTab === "my_leads") {
         const myLeads = await leadApi.marketplace.getMyLeads();
-        
-        // Apply source filter
+
         let filtered = myLeads || [];
-        if (myFilters.source === 'purchased') {
-          filtered = filtered.filter(l => l.source === 'Purchased');
-        } else if (myFilters.source === 'direct') {
-          filtered = filtered.filter(l => l.source === 'Direct');
+        if (myFilters.source === "purchased") {
+          filtered = filtered.filter(
+            (l) => (l.source || "").toString().toLowerCase() === "purchased"
+          );
+        } else if (myFilters.source === "direct") {
+          filtered = filtered.filter(
+            (l) => (l.source || "").toString().toLowerCase() === "direct"
+          );
         }
-        
+
         setLeads(filtered);
         return;
       }
 
-      // Marketplace load - only true marketplace leads (vendor_id is null)
       const available = await leadApi.marketplace.listAvailable();
       setLeads(available);
     } catch (error) {
@@ -184,35 +356,32 @@ const Leads = () => {
   };
 
   const handlePurchaseLead = async (leadId) => {
-    setPurchasing(prev => ({ ...prev, [leadId]: true }));
+    setPurchasing((prev) => ({ ...prev, [leadId]: true }));
     try {
-      // Get the lead and purchase it using marketplace API
-      const lead = leads.find(l => l.id === leadId);
-      if (!lead) throw new Error('Lead not found');
+      const lead = leads.find((l) => l.id === leadId);
+      if (!lead) throw new Error("Lead not found");
 
-      // Use leadsMarketplaceApi.purchaseLead which handles RLS properly
-      const { leadsMarketplaceApi } = await import('@/modules/vendor/services/leadsMarketplaceApi');
+      const { leadsMarketplaceApi } = await import(
+        "@/modules/vendor/services/leadsMarketplaceApi"
+      );
       await leadsMarketplaceApi.purchaseLead(leadId);
 
       toast({ title: "Lead purchased successfully!" });
 
-      // ✅ instant hide from marketplace (no flicker)
-      setLeads(prev => (prev || []).filter(l => l?.id !== leadId));
+      setLeads((prev) => (prev || []).filter((l) => l?.id !== leadId));
 
       await loadStats();
-      // My leads will auto refresh when user switches tab
     } catch (error) {
       toast({
         title: "Failed to purchase lead",
         description: error?.message || "Something went wrong",
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
-      setPurchasing(prev => ({ ...prev, [leadId]: false }));
+      setPurchasing((prev) => ({ ...prev, [leadId]: false }));
     }
   };
 
-  // ✅ Normalize rows: marketplace => lead itself, my_leads => row.leads wrapped
   const normalizedLeads = useMemo(() => {
     return (leads || []).map((row) => {
       const leadObj = row?.leads || row;
@@ -221,7 +390,6 @@ const Leads = () => {
     });
   }, [leads]);
 
-  // Marketplace facets (same as before)
   const marketFacets = useMemo(() => {
     const cityCount = new Map();
     const stateCount = new Map();
@@ -244,7 +412,6 @@ const Leads = () => {
     };
   }, [normalizedLeads]);
 
-  // ✅ My Leads facets (only Category + Location)
   const myFacets = useMemo(() => {
     const categoryCount = new Map();
     const locationCount = new Map();
@@ -262,12 +429,12 @@ const Leads = () => {
   }, [normalizedLeads]);
 
   const toggleKey = (setter, group, key) => {
-    setter(prev => ({
+    setter((prev) => ({
       ...prev,
       [group]: {
         ...(prev[group] || {}),
         [key]: !prev?.[group]?.[key],
-      }
+      },
     }));
   };
 
@@ -279,25 +446,24 @@ const Leads = () => {
       states: {},
       categories: {},
       products: {},
-      sort: 'recent',
+      sort: "recent",
     });
-    setSearchTerm('');
+    setSearchTerm("");
   };
 
   const clearMyFilters = () => {
     setMyFilters({
-      fromDate: '',
-      toDate: '',
+      fromDate: "",
+      toDate: "",
       categories: {},
       locations: {},
-      source: 'all',
-      sort: 'recent_bought',
+      source: "all",
+      sort: "recent_bought",
     });
   };
 
-  // ✅ Marketplace filtered list
   const filteredMarketplaceLeads = useMemo(() => {
-    const term = (searchTerm || '').toLowerCase().trim();
+    const term = (searchTerm || "").toLowerCase().trim();
 
     const selectedCities = selectedKeys(marketFilters.cities);
     const selectedStates = selectedKeys(marketFilters.states);
@@ -315,7 +481,7 @@ const Leads = () => {
       if (term) {
         const hay = [m.title, m.location, m.city, m.state, m.category, m.product]
           .filter(Boolean)
-          .join(' ')
+          .join(" ")
           .toLowerCase();
         if (!hay.includes(term)) return false;
       }
@@ -337,20 +503,19 @@ const Leads = () => {
       const aT = aMeta.createdAt?.getTime?.() || 0;
       const bT = bMeta.createdAt?.getTime?.() || 0;
 
-      if (marketFilters.sort === 'relevant') {
+      if (marketFilters.sort === "relevant") {
         const ar = aMeta.isRecommended ? 1 : 0;
         const br = bMeta.isRecommended ? 1 : 0;
         if (br !== ar) return br - ar;
         return bT - aT;
       }
 
-      return bT - aT; // recent
+      return bT - aT;
     });
 
     return rows;
   }, [normalizedLeads, searchTerm, marketFilters]);
 
-  // ✅ My Leads filtered list (date wise + category + location + recent bought)
   const filteredMyLeads = useMemo(() => {
     const selectedCategories = selectedKeys(myFilters.categories);
     const selectedLocations = selectedKeys(myFilters.locations);
@@ -365,7 +530,6 @@ const Leads = () => {
       const m = getLeadMeta(__lead);
       const pDate = safeDate(__purchaseDate);
 
-      // date wise (purchase date)
       if (from && (!pDate || pDate < from)) return false;
       if (to && (!pDate || pDate > to)) return false;
 
@@ -375,7 +539,6 @@ const Leads = () => {
       return true;
     });
 
-    // recent bought leads (purchase_date desc)
     rows = rows.sort((a, b) => {
       const aP = safeDate(a.__purchaseDate)?.getTime?.() || 0;
       const bP = safeDate(b.__purchaseDate)?.getTime?.() || 0;
@@ -391,7 +554,7 @@ const Leads = () => {
     (anySelected(marketFilters.states) ? 1 : 0) +
     (anySelected(marketFilters.categories) ? 1 : 0) +
     (anySelected(marketFilters.products) ? 1 : 0) +
-    (marketFilters.sort !== 'recent' ? 1 : 0) +
+    (marketFilters.sort !== "recent" ? 1 : 0) +
     (searchTerm?.trim() ? 1 : 0);
 
   const myAppliedCount =
@@ -406,7 +569,7 @@ const Leads = () => {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-2">
       {/* Header */}
       <div className="flex justify-between items-center gap-4 flex-wrap">
         <div>
@@ -417,16 +580,16 @@ const Leads = () => {
         {stats && (
           <div className="flex gap-6 text-sm">
             <div className="text-center">
+              <p className="text-gray-500">Direct Leads</p>
+              <p className="text-lg font-bold text-[#003D82]">{stats.direct || 0}</p>
+            </div>
+            <div className="text-center">
               <p className="text-gray-500">Purchased</p>
-              <p className="text-lg font-bold text-[#003D82]">{stats.totalPurchased}</p>
+              <p className="text-lg font-bold text-[#003D82]">{stats.totalPurchased || 0}</p>
             </div>
             <div className="text-center">
               <p className="text-gray-500">Contacted</p>
-              <p className="text-lg font-bold text-[#003D82]">{stats.totalContacted}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-gray-500">Converted</p>
-              <p className="text-lg font-bold text-green-600">{stats.converted}</p>
+              <p className="text-lg font-bold text-[#003D82]">{stats.totalContacted || 0}</p>
             </div>
           </div>
         )}
@@ -438,12 +601,11 @@ const Leads = () => {
           <TabsTrigger value="my_leads">My Leads</TabsTrigger>
         </TabsList>
 
-        {/* ✅ FILTER BAR: Marketplace vs My Leads different */}
-        <Card className="mt-4 border bg-white">
-          <CardContent className="p-4">
-            {activeTab === 'marketplace' ? (
-              <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
-                {/* Search (Marketplace only) */}
+        {/* FILTER BAR */}
+        <Card className="mt-1 border bg-white">
+          <CardContent className="p-2">
+            {activeTab === "marketplace" ? (
+              <div className="flex flex-col lg:flex-row gap-3 lg:items-start">
                 <div className="relative w-full lg:max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <Input
@@ -454,16 +616,17 @@ const Leads = () => {
                   />
                 </div>
 
-                <div className="grid w-full grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {/* Location */}
+                <div className="grid w-full grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                   <div className="rounded-md border bg-gray-50 p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-semibold text-sm text-gray-800">Location</div>
                       <div className="flex items-center gap-2 text-xs text-gray-600">
                         <Filter className="h-3.5 w-3.5" />
-                        {(anySelected(marketFilters.cities) || anySelected(marketFilters.states)) ? (
+                        {anySelected(marketFilters.cities) || anySelected(marketFilters.states) ? (
                           <span className="font-medium text-gray-800">
-                            {selectedKeys(marketFilters.cities).length + selectedKeys(marketFilters.states).length} selected
+                            {selectedKeys(marketFilters.cities).length +
+                              selectedKeys(marketFilters.states).length}{" "}
+                            selected
                           </span>
                         ) : (
                           <span>All</span>
@@ -476,7 +639,9 @@ const Leads = () => {
                         <input
                           type="checkbox"
                           checked={marketFilters.recommendedOnly}
-                          onChange={() => setMarketFilters(p => ({ ...p, recommendedOnly: !p.recommendedOnly }))}
+                          onChange={() =>
+                            setMarketFilters((p) => ({ ...p, recommendedOnly: !p.recommendedOnly }))
+                          }
                         />
                         <span>Recommended</span>
                       </label>
@@ -485,7 +650,9 @@ const Leads = () => {
                         <input
                           type="checkbox"
                           checked={marketFilters.indiaOnly}
-                          onChange={() => setMarketFilters(p => ({ ...p, indiaOnly: !p.indiaOnly }))}
+                          onChange={() =>
+                            setMarketFilters((p) => ({ ...p, indiaOnly: !p.indiaOnly }))
+                          }
                         />
                         <span>India</span>
                       </label>
@@ -497,7 +664,7 @@ const Leads = () => {
                           <input
                             type="checkbox"
                             checked={!!marketFilters.cities[label]}
-                            onChange={() => toggleKey(setMarketFilters, 'cities', label)}
+                            onChange={() => toggleKey(setMarketFilters, "cities", label)}
                           />
                           <span className="truncate">{label}</span>
                           <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -507,14 +674,19 @@ const Leads = () => {
 
                     {!!marketFacets.topStates?.length && (
                       <div className="mt-3 pt-3 border-t">
-                        <div className="text-[11px] font-semibold text-gray-600 mb-2">Nearby / States</div>
+                        <div className="text-[11px] font-semibold text-gray-600 mb-2">
+                          Nearby / States
+                        </div>
                         <div className="grid grid-cols-2 gap-2">
                           {(marketFacets.topStates || []).map(({ label, count }) => (
-                            <label key={label} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <label
+                              key={label}
+                              className="flex items-center gap-2 text-xs cursor-pointer"
+                            >
                               <input
                                 type="checkbox"
                                 checked={!!marketFilters.states[label]}
-                                onChange={() => toggleKey(setMarketFilters, 'states', label)}
+                                onChange={() => toggleKey(setMarketFilters, "states", label)}
                               />
                               <span className="truncate">{label}</span>
                               <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -525,14 +697,15 @@ const Leads = () => {
                     )}
                   </div>
 
-                  {/* Categories / Products */}
                   <div className="rounded-md border bg-gray-50 p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-semibold text-sm text-gray-800">Categories / Product</div>
                       <div className="text-xs text-gray-600">
-                        {(anySelected(marketFilters.categories) || anySelected(marketFilters.products)) ? (
+                        {anySelected(marketFilters.categories) || anySelected(marketFilters.products) ? (
                           <span className="font-medium text-gray-800">
-                            {selectedKeys(marketFilters.categories).length + selectedKeys(marketFilters.products).length} selected
+                            {selectedKeys(marketFilters.categories).length +
+                              selectedKeys(marketFilters.products).length}{" "}
+                            selected
                           </span>
                         ) : (
                           <span>All</span>
@@ -546,7 +719,7 @@ const Leads = () => {
                           <input
                             type="checkbox"
                             checked={!!marketFilters.products[label]}
-                            onChange={() => toggleKey(setMarketFilters, 'products', label)}
+                            onChange={() => toggleKey(setMarketFilters, "products", label)}
                           />
                           <span className="truncate">{label}</span>
                           <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -556,14 +729,19 @@ const Leads = () => {
 
                     {!!marketFacets.topCategories?.length && (
                       <div className="mt-3 pt-3 border-t">
-                        <div className="text-[11px] font-semibold text-gray-600 mb-2">Categories</div>
+                        <div className="text-[11px] font-semibold text-gray-600 mb-2">
+                          Categories
+                        </div>
                         <div className="grid grid-cols-2 gap-2">
                           {(marketFacets.topCategories || []).map(({ label, count }) => (
-                            <label key={label} className="flex items-center gap-2 text-xs cursor-pointer">
+                            <label
+                              key={label}
+                              className="flex items-center gap-2 text-xs cursor-pointer"
+                            >
                               <input
                                 type="checkbox"
                                 checked={!!marketFilters.categories[label]}
-                                onChange={() => toggleKey(setMarketFilters, 'categories', label)}
+                                onChange={() => toggleKey(setMarketFilters, "categories", label)}
                               />
                               <span className="truncate">{label}</span>
                               <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -574,13 +752,12 @@ const Leads = () => {
                     )}
                   </div>
 
-                  {/* Sort + Clear */}
                   <div className="rounded-md border bg-gray-50 p-3">
                     <div className="flex items-center justify-between mb-2">
                       <div className="font-semibold text-sm text-gray-800">Sort</div>
                       {marketAppliedCount > 0 && (
                         <Badge variant="outline" className="text-xs">
-                          {marketAppliedCount} filter{marketAppliedCount > 1 ? 's' : ''}
+                          {marketAppliedCount} filter{marketAppliedCount > 1 ? "s" : ""}
                         </Badge>
                       )}
                     </div>
@@ -590,8 +767,8 @@ const Leads = () => {
                         <input
                           type="radio"
                           name="sort"
-                          checked={marketFilters.sort === 'relevant'}
-                          onChange={() => setMarketFilters(p => ({ ...p, sort: 'relevant' }))}
+                          checked={marketFilters.sort === "relevant"}
+                          onChange={() => setMarketFilters((p) => ({ ...p, sort: "relevant" }))}
                         />
                         <span>Relevant (Recommended first)</span>
                       </label>
@@ -600,8 +777,8 @@ const Leads = () => {
                         <input
                           type="radio"
                           name="sort"
-                          checked={marketFilters.sort === 'recent'}
-                          onChange={() => setMarketFilters(p => ({ ...p, sort: 'recent' }))}
+                          checked={marketFilters.sort === "recent"}
+                          onChange={() => setMarketFilters((p) => ({ ...p, sort: "recent" }))}
                         />
                         <span>Recent</span>
                       </label>
@@ -617,9 +794,7 @@ const Leads = () => {
                 </div>
               </div>
             ) : (
-              // ✅ MY LEADS FILTER BAR (with source filter)
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                {/* Source Filter */}
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-semibold text-sm text-gray-800">Source</div>
@@ -629,8 +804,8 @@ const Leads = () => {
                       <input
                         type="radio"
                         name="source"
-                        checked={myFilters.source === 'all'}
-                        onChange={() => setMyFilters(p => ({ ...p, source: 'all' }))}
+                        checked={myFilters.source === "all"}
+                        onChange={() => setMyFilters((p) => ({ ...p, source: "all" }))}
                       />
                       <span>All</span>
                     </label>
@@ -638,8 +813,8 @@ const Leads = () => {
                       <input
                         type="radio"
                         name="source"
-                        checked={myFilters.source === 'purchased'}
-                        onChange={() => setMyFilters(p => ({ ...p, source: 'purchased' }))}
+                        checked={myFilters.source === "purchased"}
+                        onChange={() => setMyFilters((p) => ({ ...p, source: "purchased" }))}
                       />
                       <span>Purchased</span>
                     </label>
@@ -647,15 +822,14 @@ const Leads = () => {
                       <input
                         type="radio"
                         name="source"
-                        checked={myFilters.source === 'direct'}
-                        onChange={() => setMyFilters(p => ({ ...p, source: 'direct' }))}
+                        checked={myFilters.source === "direct"}
+                        onChange={() => setMyFilters((p) => ({ ...p, source: "direct" }))}
                       />
                       <span>Direct Leads</span>
                     </label>
                   </div>
                 </div>
 
-                {/* Date wise */}
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="font-semibold text-sm text-gray-800 mb-2">Date wise</div>
                   <div className="grid grid-cols-2 gap-2">
@@ -664,7 +838,7 @@ const Leads = () => {
                       <Input
                         type="date"
                         value={myFilters.fromDate}
-                        onChange={(e) => setMyFilters(p => ({ ...p, fromDate: e.target.value }))}
+                        onChange={(e) => setMyFilters((p) => ({ ...p, fromDate: e.target.value }))}
                       />
                     </div>
                     <div>
@@ -672,18 +846,19 @@ const Leads = () => {
                       <Input
                         type="date"
                         value={myFilters.toDate}
-                        onChange={(e) => setMyFilters(p => ({ ...p, toDate: e.target.value }))}
+                        onChange={(e) => setMyFilters((p) => ({ ...p, toDate: e.target.value }))}
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Category */}
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-semibold text-sm text-gray-800">Category</div>
                     <div className="text-xs text-gray-600">
-                      {anySelected(myFilters.categories) ? `${selectedKeys(myFilters.categories).length} selected` : 'All'}
+                      {anySelected(myFilters.categories)
+                        ? `${selectedKeys(myFilters.categories).length} selected`
+                        : "All"}
                     </div>
                   </div>
 
@@ -693,7 +868,7 @@ const Leads = () => {
                         <input
                           type="checkbox"
                           checked={!!myFilters.categories[label]}
-                          onChange={() => toggleKey(setMyFilters, 'categories', label)}
+                          onChange={() => toggleKey(setMyFilters, "categories", label)}
                         />
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -702,12 +877,13 @@ const Leads = () => {
                   </div>
                 </div>
 
-                {/* Location */}
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-semibold text-sm text-gray-800">Location</div>
                     <div className="text-xs text-gray-600">
-                      {anySelected(myFilters.locations) ? `${selectedKeys(myFilters.locations).length} selected` : 'All'}
+                      {anySelected(myFilters.locations)
+                        ? `${selectedKeys(myFilters.locations).length} selected`
+                        : "All"}
                     </div>
                   </div>
 
@@ -717,7 +893,7 @@ const Leads = () => {
                         <input
                           type="checkbox"
                           checked={!!myFilters.locations[label]}
-                          onChange={() => toggleKey(setMyFilters, 'locations', label)}
+                          onChange={() => toggleKey(setMyFilters, "locations", label)}
                         />
                         <span className="truncate">{label}</span>
                         <span className="ml-auto text-[11px] text-gray-500">{count}</span>
@@ -726,20 +902,17 @@ const Leads = () => {
                   </div>
                 </div>
 
-                {/* Sort + Clear */}
                 <div className="rounded-md border bg-gray-50 p-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="font-semibold text-sm text-gray-800">Recent Bought Leads</div>
                     {myAppliedCount > 0 && (
                       <Badge variant="outline" className="text-xs">
-                        {myAppliedCount} filter{myAppliedCount > 1 ? 's' : ''}
+                        {myAppliedCount} filter{myAppliedCount > 1 ? "s" : ""}
                       </Badge>
                     )}
                   </div>
 
-                  <div className="text-xs text-gray-600 mb-3">
-                    Sorted by latest purchase date
-                  </div>
+                  <div className="text-xs text-gray-600 mb-2">Sorted by latest purchase date</div>
 
                   <Button variant="outline" className="w-full" onClick={clearMyFilters}>
                     <X className="h-4 w-4 mr-2" />
@@ -751,8 +924,7 @@ const Leads = () => {
           </CardContent>
         </Card>
 
-        {/* Marketplace */}
-        <TabsContent value="marketplace" className="space-y-4">
+        <TabsContent value="marketplace" className="mt-2 space-y-2">
           {loading ? (
             <div className="p-8 text-center text-gray-500">Loading...</div>
           ) : filteredMarketplaceLeads.length === 0 ? (
@@ -771,31 +943,56 @@ const Leads = () => {
           )}
         </TabsContent>
 
-        {/* My Leads */}
-        <TabsContent value="my_leads" className="">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main content */}
-            <div className="lg:col-span-2 space-y-4">
+        <TabsContent value="my_leads" className="mt-2">
+          {/*
+            ✅ REAL FIX (No extra empty space):
+            - Desktop layout = 2 columns only
+              Left: 1fr
+              Right: 260px (stats card width)
+            - gap between = 4px
+          */}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_260px] gap-[7px] items-start">
+            {/* LEFT */}
+            <div className="min-w-0 space-y-1">
               {loading ? (
                 <div className="p-8 text-center text-gray-500">Loading...</div>
               ) : filteredMyLeads.length === 0 ? (
-                <div className="p-8 text-center border rounded bg-white">You haven't purchased any leads yet.</div>
+                <div className="p-8 text-center border rounded bg-white">
+                  You haven't purchased any leads yet.
+                </div>
               ) : (
                 filteredMyLeads.map(({ __raw, __lead, __purchaseDate }) => (
                   <LeadCard
                     key={__raw?.id || __lead?.id}
                     lead={__lead}
-                    source={__raw?.source || 'Purchased'}
+                    source={__raw?.source || "Purchased"}
                     purchaseDate={__purchaseDate}
                     onView={handleViewDetails}
                   />
                 ))
               )}
             </div>
-            
-            {/* Right sidebar - Stats Panel */}
-            <div className="lg:col-span-1">
-              <LeadStatsPanel stats={stats} loading={loading} />
+
+            {/* RIGHT */}
+            <div
+              ref={statsColRef}
+              className="w-full lg:w-[260px]"
+              style={{ width: undefined }}
+            >
+              {/* mobile */}
+              <div className="lg:hidden">
+                <LeadStatsPanel stats={stats} loading={loading} />
+              </div>
+
+              {/* reserve space so fixed panel doesn't jump */}
+              <div className="hidden lg:block" style={{ height: statsCardH || undefined }} />
+
+              {/* desktop fixed bottom-right */}
+              <div className="hidden lg:block" style={floatingStyle || undefined}>
+                <div ref={statsCardRef} style={{ width: `${STATS_PANEL_W}px` }}>
+                  <LeadStatsPanel stats={stats} loading={loading} />
+                </div>
+              </div>
             </div>
           </div>
         </TabsContent>
@@ -810,28 +1007,65 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
   const displayTitle = meta.title;
   const displayLocation = meta.location;
 
-  const isPurchased = purchased || source === 'Purchased';
-  const isDirect = source === 'Direct';
+  const isPurchased = purchased || (source || "").toString().toLowerCase() === "purchased";
+  const isDirect = (source || "").toString().toLowerCase() === "direct";
 
-  const dateObj = safeDate(isPurchased || isDirect ? purchaseDate : (lead?.created_at || lead?.createdAt)) || meta.createdAt;
-  const displayDate = dateObj ? dateObj.toLocaleDateString() : '—';
+  const dateObj =
+    safeDate(isPurchased || isDirect ? purchaseDate : lead?.created_at || lead?.createdAt) ||
+    meta.createdAt;
 
-  const maskPhone = (phone) => phone ? phoneUtils.maskPhoneWithCode(phone) : 'N/A';
+  const displayDate = dateObj ? dateObj.toLocaleDateString() : "—";
+
+  const maskPhone = (phone) => (phone ? phoneUtils.maskPhoneWithCode(phone) : "N/A");
+
+  // ✅ Buyer details should ONLY be visible after purchase OR if it's a direct lead.
+  // Marketplace may still send buyer fields in payload, but UI must keep them locked.
+  const isBuyerUnlocked = isPurchased || isDirect;
+
+  const buyerNameRaw =
+    lead?.buyer_name ||
+    lead?.buyerName ||
+    lead?.client_name ||
+    lead?.clientName ||
+    lead?.name ||
+    null;
+
+  const buyerPhoneRaw = lead?.buyer_phone || lead?.buyerPhone || lead?.phone || null;
+  const buyerEmailRaw = lead?.buyer_email || lead?.buyerEmail || lead?.email || null;
+
+  const buyerName = isBuyerUnlocked ? buyerNameRaw : null;
+  const buyerPhone = isBuyerUnlocked ? buyerPhoneRaw : null;
+  const buyerEmail = isBuyerUnlocked ? buyerEmailRaw : null;
 
   return (
     <Card
-      className="hover:shadow-md transition-shadow cursor-pointer"
+      className="w-full hover:shadow-md transition-shadow cursor-pointer"
       onClick={() => onView?.(lead?.id)}
     >
-      <CardContent className="p-6">
-        <div className="flex flex-col md:flex-row justify-between gap-4">
-          <div className="space-y-2 flex-1">
+      <CardContent className="p-2.5">
+        {/*
+          ✅ Compact 3-column layout (md+):
+          1) Lead info
+          2) Buyer (locked/unlocked)
+          3) Actions
+        */}
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,280px)_160px] md:items-start">
+          {/* LEFT: Lead Info */}
+          <div className="space-y-2 min-w-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className="font-semibold text-lg text-[#003D82] truncate">{displayTitle}</h3>
                 <div className="mt-1 flex flex-wrap gap-2">
-                  {meta.product ? <Badge variant="outline" className="text-xs">{meta.product}</Badge> : null}
-                  {meta.category ? <Badge variant="outline" className="text-xs">{meta.category}</Badge> : null}
+                  {meta.product ? (
+                    <Badge variant="outline" className="text-xs">
+                      {meta.product}
+                    </Badge>
+                  ) : null}
+                  {meta.category ? (
+                    <Badge variant="outline" className="text-xs">
+                      {meta.category}
+                    </Badge>
+                  ) : null}
                   {meta.isRecommended && !isPurchased && !isDirect ? (
                     <Badge className="text-xs bg-[#fff3c4] text-[#7a5b00] hover:bg-[#ffeaa0] border border-[#ffe08a]">
                       Recommended
@@ -840,45 +1074,89 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
                 </div>
               </div>
 
-              <Badge variant={isPurchased || isDirect ? 'success' : 'outline'}>
-                {isDirect ? 'Direct Lead' : isPurchased ? 'Purchased' : 'Fresh Lead'}
+              <Badge variant={isPurchased || isDirect ? "success" : "outline"}>
+                {isDirect ? "Direct Lead" : isPurchased ? "Purchased" : "Fresh Lead"}
               </Badge>
             </div>
 
-            <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-              <div className="flex items-center gap-1"><MapPin className="h-4 w-4" /> {displayLocation}</div>
-              <div className="flex items-center gap-1"><Calendar className="h-4 w-4" /> {displayDate}</div>
-              {lead?.quantity && (
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-sm text-gray-600">
+              <div className="flex items-center gap-1">
+                <MapPin className="h-4 w-4" /> {displayLocation}
+              </div>
+              <div className="flex items-center gap-1">
+                <Calendar className="h-4 w-4" /> {displayDate}
+              </div>
+              {lead?.quantity ? (
                 <div className="font-medium">
-                  Qty: {lead.quantity} {lead.unit || 'units'}
+                  Qty: {lead.quantity} {lead.unit || "units"}
                 </div>
-              )}
-              {lead?.budget && (
+              ) : null}
+              {lead?.budget ? (
                 <div className="font-medium">
                   Budget: ₹{lead.budget?.toLocaleString?.() || lead.budget}
                 </div>
-              )}
+              ) : null}
+            </div>
+          </div>
+
+          {/* MIDDLE: Buyer Column */}
+          <div
+            className={
+              isBuyerUnlocked
+                ? "rounded-md border bg-green-50 border-green-100 p-2"
+                : "rounded-md border bg-gray-50 p-2"
+            }
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className={isBuyerUnlocked ? "text-xs font-semibold text-green-800" : "text-xs font-semibold text-gray-700"}>
+                Buyer Details
+              </div>
+              {!isBuyerUnlocked ? (
+                <div className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                  <Lock className="h-3 w-3" /> Locked
+                </div>
+              ) : null}
             </div>
 
-            {isPurchased || isDirect || (lead?.buyer_name && lead?.buyer_email) ? (
-              <div className="mt-4 p-3 bg-green-50 border border-green-100 rounded-md space-y-1">
-                <p className="text-sm font-semibold text-green-800">Buyer Details:</p>
-                <div className="flex flex-wrap gap-4 text-sm text-green-700">
-                  <span className="font-medium">{lead?.buyer_name || 'N/A'}</span>
-                  <span className="flex items-center gap-1"><Phone className="h-3 w-3" /> {maskPhone(lead?.buyer_phone)}</span>
-                  {lead?.buyer_email && <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {lead.buyer_email}</span>}
+            {isBuyerUnlocked ? (
+              <div className="mt-2 grid gap-1.5 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-medium text-green-900 truncate">{buyerName || "Buyer"}</span>
+                </div>
+                <div className="flex items-center gap-2 text-green-800">
+                  <Phone className="h-3.5 w-3.5" />
+                  <span className="font-medium">{buyerPhone || "N/A"}</span>
+                </div>
+                <div className="flex items-center gap-2 text-green-800 min-w-0">
+                  <Mail className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium truncate">{buyerEmail || "N/A"}</span>
                 </div>
               </div>
             ) : (
-              <div className="mt-2 flex items-center gap-2 text-sm text-gray-500 bg-gray-50 p-2 rounded w-fit">
-                <Lock className="h-3 w-3" /> Buyer details locked
+              <div className="mt-2 space-y-1 text-sm text-gray-600">
+                <div className="flex items-center gap-2">
+                  <User className="h-3.5 w-3.5" />
+                  <span className="font-medium">Hidden</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="h-3.5 w-3.5" />
+                  <span className="font-medium">{maskPhone(buyerPhoneRaw) || "Hidden"}</span>
+                </div>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Mail className="h-3.5 w-3.5 shrink-0" />
+                  <span className="font-medium truncate">Hidden</span>
+                </div>
+                <div className="pt-1 text-[11px] text-gray-500">
+                  Purchase lead to unlock.
+                </div>
               </div>
             )}
           </div>
 
-          <div className="flex flex-col justify-center items-end gap-2 min-w-[160px]">
-            {!isPurchased && !isDirect && (
-              <>
+          {/* RIGHT: Actions */}
+          <div className="flex flex-col justify-center items-end gap-2">
+            {!isPurchased && !isDirect ? (
+              <div className="w-full">
                 <div className="text-right">
                   <p className="text-xs text-gray-500">Price</p>
                   <p className="text-xl font-bold text-gray-900">₹50</p>
@@ -892,10 +1170,11 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
                   disabled={isPurchasing}
                   className="w-full bg-[#00A699] hover:bg-[#00857A]"
                 >
-                  <ShoppingCart className="w-4 h-4 mr-2" /> {isPurchasing ? 'Buying...' : 'Buy Now'}
+                  <ShoppingCart className="w-4 h-4 mr-2" />
+                  {isPurchasing ? "Buying..." : "Buy Now"}
                 </Button>
-              </>
-            )}
+              </div>
+            ) : null}
 
             <Button
               variant="outline"
@@ -915,3 +1194,5 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
 };
 
 export default Leads;
+
+
