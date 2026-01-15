@@ -68,6 +68,36 @@ async function sendQuotationEmail(to, data, isRegistered) {
   const vendor = data.vendor || {};
   const quotation = data.quotation || {};
 
+  // Optional PDF attachment
+  let attachments = [];
+  try {
+    const name = quotation.attachment_name;
+    const b64 = quotation.attachment_base64;
+    const mime = quotation.attachment_mime;
+    if (b64) {
+      const safeMime = (mime || 'application/pdf').toLowerCase();
+      if (safeMime !== 'application/pdf') {
+        throw new Error('Only PDF attachments are supported');
+      }
+      const buf = Buffer.from(String(b64), 'base64');
+      const maxBytes = 2 * 1024 * 1024; // 2MB (matches UI)
+      if (buf.length > maxBytes) {
+        throw new Error('PDF too large (max 2MB)');
+      }
+      attachments = [
+        {
+          filename: name || 'quotation.pdf',
+          content: buf,
+          contentType: 'application/pdf',
+        },
+      ];
+    }
+  } catch (e) {
+    // Attachment errors should not break the full flow; send without attachment.
+    console.warn('Attachment skipped:', e?.message || e);
+    attachments = [];
+  }
+
   const subject = `Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}`;
 
   const text = `
@@ -132,6 +162,7 @@ ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Regist
     subject,
     text,
     html,
+    ...(attachments.length ? { attachments } : {}),
   });
 }
 
@@ -152,6 +183,11 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
       vendor_company,
       vendor_phone,
       vendor_email,
+
+      // ✅ Optional PDF attachment (base64)
+      attachment_name,
+      attachment_base64,
+      attachment_mime,
 
       // ⚠️ Ignore buyer_id from request (UI was sending lead.id sometimes)
       buyer_id,
@@ -267,6 +303,11 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
             validity_days,
             delivery_days,
             terms_conditions,
+
+            // ✅ attachment
+            attachment_name,
+            attachment_base64,
+            attachment_mime,
           },
         },
         isRegistered

@@ -78,6 +78,10 @@ const Services = () => {
   // ✅ dialog state
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState(null);
+  const [showPaymentHistory, setShowPaymentHistory] = useState(false);
+  const [paymentHistory, setPaymentHistory] = useState([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState(null);
 
   const mostPopularPlanId = useMemo(() => {
     if (!plans?.length) return null;
@@ -240,42 +244,126 @@ const Services = () => {
       toast({ title: 'Error', description: 'Vendor ID not found', variant: 'destructive' });
       return;
     }
-    toast({ title: 'Processing...', description: `Subscribing to ${plan.name}` });
 
-    try {
-      // If already subscribed to a plan, deactivate it first
-      if (currentSub && currentSub.id) {
-        await supabase
-          .from('vendor_plan_subscriptions')
-          .update({ status: 'INACTIVE' })
-          .eq('id', currentSub.id);
+    // Check if plan is free
+    if (!plan.price || Number(plan.price) === 0) {
+      // Free plan - activate directly without payment
+      toast({ title: 'Processing...', description: `Subscribing to ${plan.name}` });
+      try {
+        if (currentSub && currentSub.id) {
+          await supabase
+            .from('vendor_plan_subscriptions')
+            .update({ status: 'INACTIVE' })
+            .eq('id', currentSub.id);
+        }
+
+        const startDate = new Date();
+        const endDate = new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+        
+        await supabase.from('vendor_plan_subscriptions').insert({
+          vendor_id: vendorId,
+          plan_id: plan.id,
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
+          status: 'ACTIVE',
+          plan_duration_days: 365,
+          auto_renewal_enabled: false,
+          renewal_notification_sent: false
+        });
+
+        toast({ title: 'Success!', description: 'Plan activated.' });
+        setDetailsOpen(false);
+        setTimeout(() => loadData(), 500);
+      } catch (e) {
+        console.error('Subscription error:', e);
+        toast({ title: 'Error', description: e.message, variant: 'destructive' });
+        setTimeout(() => loadData(), 500);
       }
+      return;
+    }
 
-      // Now activate the new plan
-      const startDate = new Date();
-      const endDate = new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000);
-      
-      await supabase.from('vendor_plan_subscriptions').insert({
-        vendor_id: vendorId,
-        plan_id: plan.id,
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        status: 'ACTIVE',
-        plan_duration_days: 365,
-        auto_renewal_enabled: false,
-        renewal_notification_sent: false
+    // Paid plan - initiate Razorpay payment
+    initiateRazorpayPayment(plan);
+  };
+
+  const initiateRazorpayPayment = async (plan) => {
+    try {
+      toast({ title: 'Processing...', description: `Initiating payment for ${plan.name}` });
+      setDetailsOpen(false);
+
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/initiate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vendor_id: vendorId,
+          plan_id: plan.id,
+        }),
       });
 
-      toast({ title: 'Success!', description: 'Plan activated.' });
-      setDetailsOpen(false);
-      // Reload immediately to refresh UI and badges
-      setTimeout(() => loadData(), 500);
-    } catch (e) {
-      console.error('Subscription error:', e);
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
-      // Reload anyway to sync state
-      setTimeout(() => loadData(), 500);
+      if (!response.ok) throw new Error('Failed to initiate payment');
+      const data = await response.json();
+      const orderData = data.order;
+
+      // Load Razorpay script dynamically if not loaded
+      if (!window.Razorpay) {
+        const script = document.createElement('script');
+        script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+        script.async = true;
+        script.onload = () => openRazorpayCheckout(orderData, plan);
+        document.body.appendChild(script);
+      } else {
+        openRazorpayCheckout(orderData, plan);
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: 'Failed to initiate payment', variant: 'destructive' });
+      console.error(err);
     }
+  };
+
+  const openRazorpayCheckout = (orderData, plan) => {
+    const options = {
+      key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+      amount: orderData.amount,
+      currency: orderData.currency,
+      name: 'Indian Trade Mart',
+      description: `Subscription: ${plan.name}`,
+      order_id: orderData.id,
+      prefill: {
+        email: orderData.vendor_email,
+      },
+      handler: async (response) => {
+        try {
+          const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              order_id: orderData.id,
+              payment_id: response.razorpay_payment_id,
+              signature: response.razorpay_signature,
+              vendor_id: vendorId,
+              plan_id: plan.id,
+            }),
+          });
+
+          if (!verifyResponse.ok) throw new Error('Payment verification failed');
+          const verifyData = await verifyResponse.json();
+          
+          toast({ title: 'Success!', description: 'Subscription activated! Invoice sent to your email.' });
+          setTimeout(() => loadData(), 500);
+        } catch (err) {
+          toast({ title: 'Error', description: 'Payment verification failed', variant: 'destructive' });
+          console.error(err);
+        }
+      },
+      modal: {
+        ondismiss: () => {
+          toast({ title: 'Payment Cancelled', description: 'Your payment was cancelled.', variant: 'destructive' });
+        },
+      },
+    };
+
+    const rzp = new window.Razorpay(options);
+    rzp.open();
   };
 
   // Check if subscription is active and not expired
@@ -330,6 +418,29 @@ const Services = () => {
   const openPlanDetails = (plan) => {
     setSelectedPlan(plan);
     setDetailsOpen(true);
+  };
+
+  const fetchPaymentHistory = async () => {
+    if (!vendorId) return;
+    try {
+      setLoadingHistory(true);
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/history/${vendorId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setPaymentHistory(data.data || []);
+      }
+    } catch (err) {
+      console.error('Error fetching payment history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleOpenPaymentHistory = async () => {
+    setShowPaymentHistory(true);
+    if (paymentHistory.length === 0) {
+      await fetchPaymentHistory();
+    }
   };
 
   const buildGroups = (plan) => {
@@ -404,6 +515,14 @@ const Services = () => {
             >
               <ShoppingCart className="w-4 h-4 mr-2" />
               Buy Leads
+            </Button>
+
+            <Button
+              variant="outline"
+              onClick={handleOpenPaymentHistory}
+              className="bg-white"
+            >
+              📄 Invoice History
             </Button>
           </div>
         </div>
@@ -691,6 +810,85 @@ const Services = () => {
               </DialogFooterUI>
             </>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment History Dialog */}
+      <Dialog open={showPaymentHistory} onOpenChange={setShowPaymentHistory}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Payment & Invoice History</DialogTitle>
+            <DialogDescription>View your past payments and download invoices</DialogDescription>
+          </DialogHeader>
+
+          <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3">
+            {loadingHistory ? (
+              <div className="flex items-center justify-center py-8">
+                <Zap className="w-6 h-6 animate-spin text-slate-400" />
+              </div>
+            ) : paymentHistory.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">
+                <p>No payment history found</p>
+              </div>
+            ) : (
+              paymentHistory.map((payment) => (
+                <div
+                  key={payment.id}
+                  onClick={() => setSelectedPayment(selectedPayment?.id === payment.id ? null : payment)}
+                  className="rounded-xl border p-4 cursor-pointer hover:bg-slate-50 transition"
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <div className="font-semibold text-slate-900">{payment.description}</div>
+                      <div className="text-sm text-slate-500 mt-1">
+                        {new Date(payment.payment_date).toLocaleDateString('en-IN')}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-bold text-slate-900">₹{payment.amount.toFixed(2)}</div>
+                      <div
+                        className={cx(
+                          'text-[11px] font-semibold mt-1 px-2 py-1 rounded-full',
+                          payment.status === 'COMPLETED'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-yellow-50 text-yellow-700'
+                        )}
+                      >
+                        {payment.status}
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedPayment?.id === payment.id && (
+                    <div className="mt-4 pt-4 border-t space-y-2">
+                      {payment.transaction_id && (
+                        <div className="text-sm">
+                          <span className="text-slate-600">Transaction ID: </span>
+                          <span className="font-mono text-slate-900">{payment.transaction_id}</span>
+                        </div>
+                      )}
+                      {payment.invoice_url && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const link = document.createElement('a');
+                            link.href = payment.invoice_url;
+                            link.download = `invoice-${payment.transaction_id}.pdf`;
+                            link.click();
+                          }}
+                          className="w-full"
+                        >
+                          📄 Download Invoice
+                        </Button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

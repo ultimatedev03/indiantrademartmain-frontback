@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { quotationApi } from '@/modules/vendor/services/quotationApi';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -10,7 +9,20 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, ArrowLeft } from 'lucide-react';
+import { Loader2, ArrowLeft, Paperclip, X } from 'lucide-react';
+
+const MAX_PDF_BYTES = 2 * 1024 * 1024; // 2MB (keep Netlify/SMTP payload safe)
+
+const formatBytes = (bytes = 0) => {
+  try {
+    const b = Number(bytes) || 0;
+    if (b < 1024) return `${b} B`;
+    if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+    return `${(b / (1024 * 1024)).toFixed(2)} MB`;
+  } catch {
+    return '';
+  }
+};
 
 const SendQuotation = () => {
   const navigate = useNavigate();
@@ -22,6 +34,9 @@ const SendQuotation = () => {
   const [buyers, setBuyers] = useState([]);
 
   const prefill = useMemo(() => location?.state?.prefill || null, [location]);
+
+  // ✅ Optional PDF attachment (base64)
+  const [pdfAttachment, setPdfAttachment] = useState(null);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -46,6 +61,7 @@ const SendQuotation = () => {
 
   useEffect(() => {
     loadProductsAndBuyers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ✅ If opened from Lead Detail: try to auto-select a matching product
@@ -116,6 +132,53 @@ const SendQuotation = () => {
     }
   };
 
+  const onPickPdf = (file) => {
+    if (!file) return;
+
+    const isPdf =
+      file.type === 'application/pdf' ||
+      String(file.name || '').toLowerCase().endsWith('.pdf');
+
+    if (!isPdf) {
+      toast({
+        title: 'Only PDF allowed',
+        description: 'Please select a PDF file.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (file.size > MAX_PDF_BYTES) {
+      toast({
+        title: 'PDF too large',
+        description: `Max allowed size is ${formatBytes(MAX_PDF_BYTES)}. Your file is ${formatBytes(file.size)}.`,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const base64 = result.includes(',') ? result.split(',')[1] : '';
+      if (!base64) {
+        toast({ title: 'PDF read failed', description: 'Could not read the PDF file.', variant: 'destructive' });
+        return;
+      }
+      setPdfAttachment({
+        name: file.name || 'quotation.pdf',
+        base64,
+        size: file.size,
+        mime: 'application/pdf'
+      });
+      toast({ title: 'PDF attached', description: file.name });
+    };
+    reader.onerror = () => {
+      toast({ title: 'PDF read failed', description: 'Could not read the PDF file.', variant: 'destructive' });
+    };
+    reader.readAsDataURL(file);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -139,7 +202,14 @@ const SendQuotation = () => {
         delivery_days: formData.delivery_days || null,
         terms_conditions: formData.terms_conditions || '',
         buyer_id: formData.buyer_id || null,
-        buyer_email: formData.buyer_email.toLowerCase().trim()
+        buyer_email: formData.buyer_email.toLowerCase().trim(),
+
+        // ✅ Optional attachment (PDF)
+        attachment: pdfAttachment ? {
+          name: pdfAttachment.name,
+          base64: pdfAttachment.base64,
+          mime: pdfAttachment.mime || 'application/pdf'
+        } : null
       });
 
       toast({
@@ -160,6 +230,7 @@ const SendQuotation = () => {
         delivery_days: '',
         status: 'SENT'
       });
+      setPdfAttachment(null);
 
       setTimeout(() => navigate('/vendor/proposals?tab=sent'), 1000);
     } catch (error) {
@@ -370,6 +441,45 @@ const SendQuotation = () => {
                 onChange={(e) => setFormData(prev => ({ ...prev, terms_conditions: e.target.value }))}
                 placeholder="Payment terms, delivery terms, warranty, etc."
               />
+            </div>
+
+            {/* ✅ PDF Attachment */}
+            <div className="space-y-2">
+              <Label>Attach PDF (Optional)</Label>
+
+              {!pdfAttachment ? (
+                <div className="flex items-center gap-3">
+                  <Input
+                    type="file"
+                    accept="application/pdf,.pdf"
+                    onChange={(e) => onPickPdf(e.target.files?.[0])}
+                  />
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 rounded-md border bg-slate-50 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Paperclip className="h-4 w-4 text-slate-600" />
+                    <div className="min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">{pdfAttachment.name}</div>
+                      <div className="text-xs text-slate-500">{formatBytes(pdfAttachment.size)}</div>
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setPdfAttachment(null)}
+                    title="Remove PDF"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+
+              <p className="text-xs text-slate-500">
+                PDF will be attached in the email (max {formatBytes(MAX_PDF_BYTES)}).
+              </p>
             </div>
 
             {/* Buttons */}

@@ -21,77 +21,111 @@ const Dashboard = () => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      
-      console.log('Fetching support tickets from API...');
-      
+
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      
-      // Fetch stats from API
-      const statsResponse = await fetch(`${API_URL}/api/support/stats`);
-      const statsData = await statsResponse.json();
-      
-      console.log('Stats from API:', statsData);
-      
-      // Fetch all tickets from API
-      const ticketsResponse = await fetch(`${API_URL}/api/support/tickets?pageSize=100`);
+
+      // ✅ Single source of truth: fetch tickets from DB (via API); compute stats client-side
+      const ticketsResponse = await fetch(`${API_URL}/api/support/tickets?pageSize=200`);
       const ticketsData = await ticketsResponse.json();
-      
-      console.log('Tickets from API:', ticketsData);
-      const allTickets = ticketsData.tickets || [];
-      
-      if (!allTickets || allTickets.length === 0) {
-        setStats({
-          open: 0,
-          inProgress: 0,
-          highPriority: 0,
-          resolved: 0,
-          avgTime: '2h 15m'
-        });
+
+      const allTickets = Array.isArray(ticketsData?.tickets) ? ticketsData.tickets : [];
+
+      if (!allTickets.length) {
+        setStats({ open: 0, inProgress: 0, highPriority: 0, resolved: 0, avgTime: '—' });
         setRecentTickets([]);
-        setLoading(false);
         return;
       }
 
-      setStats({
-        open: statsData.stats?.openTickets || 0,
-        inProgress: statsData.stats?.inProgressTickets || 0,
-        highPriority: statsData.stats?.highPriorityTickets || 0,
-        resolved: statsData.stats?.resolvedTickets || 0,
-        avgTime: '2h 15m'
+      const isResolved = (s) => ['RESOLVED', 'CLOSED'].includes((s || '').toString().toUpperCase());
+      const isClosed = (s) => ['CLOSED', 'CANCELLED'].includes((s || '').toString().toUpperCase());
+      const isHigh = (p) => ['HIGH', 'URGENT'].includes((p || '').toString().toUpperCase());
+
+      const openTickets = allTickets.filter((t) => (t.status || '').toString().toUpperCase() === 'OPEN');
+      const inProgressTickets = allTickets.filter((t) => (t.status || '').toString().toUpperCase() === 'IN_PROGRESS');
+      const highPriorityTickets = allTickets.filter((t) => isHigh(t.priority) && !isClosed(t.status));
+
+      // Resolved today (based on resolved_at if exists; fallback to updated_at)
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const resolvedToday = allTickets.filter((t) => {
+        if (!isResolved(t.status)) return false;
+        const dt = t.resolved_at || t.updated_at || t.updatedAt;
+        if (!dt) return false;
+        const d = new Date(dt);
+        if (Number.isNaN(d.getTime())) return false;
+        d.setHours(0, 0, 0, 0);
+        return d.getTime() === today.getTime();
       });
 
-      // Show recent tickets (latest first)
-      setRecentTickets(allTickets || []);
+      // Avg resolution time (resolved/closed where we have resolved_at)
+      const resolvedWithTimes = allTickets
+        .filter((t) => isResolved(t.status) && t.created_at && (t.resolved_at || t.updated_at))
+        .map((t) => {
+          const start = new Date(t.created_at);
+          const end = new Date(t.resolved_at || t.updated_at);
+          if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+          const ms = end.getTime() - start.getTime();
+          return ms > 0 ? ms : null;
+        })
+        .filter(Boolean);
+
+      let avgTime = '—';
+      if (resolvedWithTimes.length) {
+        const avgMs = resolvedWithTimes.reduce((a, b) => a + b, 0) / resolvedWithTimes.length;
+        const minutes = Math.round(avgMs / (1000 * 60));
+        const h = Math.floor(minutes / 60);
+        const m = minutes % 60;
+        avgTime = h > 0 ? `${h}h ${m}m` : `${m}m`;
+      }
+
+      setStats({
+        open: openTickets.length,
+        inProgress: inProgressTickets.length,
+        highPriority: highPriorityTickets.length,
+        resolved: resolvedToday.length,
+        avgTime,
+      });
+
+      // Recent tickets (latest first) - keep UI light
+      setRecentTickets(allTickets.slice(0, 10));
     } catch (error) {
       console.error('Dashboard error:', error);
-      // Fallback to Supabase if API fails
+
+      // Fallback to Supabase direct (still real DB)
       try {
-        const { data: allTickets } = await supabase
+        const { data: allTickets, error: sbError } = await supabase
           .from('support_tickets')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(100);
-        
-        if (allTickets && allTickets.length > 0) {
-          const openTickets = allTickets.filter(t => t.status?.toUpperCase() === 'OPEN');
-          const inProgressTickets = allTickets.filter(t => t.status?.toUpperCase() === 'IN_PROGRESS');
-          const highPriorityTickets = allTickets.filter(t => 
-            (t.priority?.toUpperCase() === 'HIGH' || t.priority?.toUpperCase() === 'URGENT') && 
-            t.status?.toUpperCase() !== 'CLOSED'
-          );
-          
-          setStats({
-            open: openTickets.length,
-            inProgress: inProgressTickets.length,
-            highPriority: highPriorityTickets.length,
-            resolved: 0,
-            avgTime: '2h 15m'
-          });
-          setRecentTickets(allTickets);
-        }
+          .limit(200);
+
+        if (sbError) throw sbError;
+
+        const list = Array.isArray(allTickets) ? allTickets : [];
+        const openTickets = list.filter((t) => (t.status || '').toString().toUpperCase() === 'OPEN');
+        const inProgressTickets = list.filter((t) => (t.status || '').toString().toUpperCase() === 'IN_PROGRESS');
+        const highPriorityTickets = list.filter(
+          (t) =>
+            ['HIGH', 'URGENT'].includes((t.priority || '').toString().toUpperCase()) &&
+            !['CLOSED', 'CANCELLED'].includes((t.status || '').toString().toUpperCase())
+        );
+
+        setStats({
+          open: openTickets.length,
+          inProgress: inProgressTickets.length,
+          highPriority: highPriorityTickets.length,
+          resolved: 0,
+          avgTime: '—',
+        });
+        setRecentTickets(list.slice(0, 10));
       } catch (fallbackError) {
         console.error('Fallback error:', fallbackError);
-        setStats({ open: 0, inProgress: 0, highPriority: 0, resolved: 0, avgTime: '2h 15m' });
+        toast({
+          title: 'Support dashboard load failed',
+          description: fallbackError?.message || 'Unable to fetch tickets from DB',
+          variant: 'destructive',
+        });
+        setStats({ open: 0, inProgress: 0, highPriority: 0, resolved: 0, avgTime: '—' });
         setRecentTickets([]);
       }
     } finally {
@@ -121,7 +155,7 @@ const Dashboard = () => {
           </Button>
         </Link>
       </div>
-       
+
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <Card className="border-l-4 border-l-yellow-500">
@@ -135,7 +169,7 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-blue-500">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
@@ -147,7 +181,7 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-red-500">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
@@ -159,7 +193,7 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-green-500">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
@@ -171,7 +205,7 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
-        
+
         <Card className="border-l-4 border-l-purple-500">
           <CardContent className="p-4">
             <div className="flex justify-between items-center">
@@ -213,9 +247,7 @@ const Dashboard = () => {
               {recentTickets.map(ticket => (
                 <div key={ticket.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                   <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className={`p-2 rounded-full ${
-                      ticket.vendor_id ? 'bg-blue-100' : 'bg-green-100'
-                    }`}>
+                    <div className={`p-2 rounded-full ${ticket.vendor_id ? 'bg-blue-100' : 'bg-green-100'}`}>
                       {ticket.vendor_id ? (
                         <Building2 className="h-4 w-4 text-blue-600" />
                       ) : (
@@ -230,11 +262,11 @@ const Dashboard = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 ml-2">
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={`text-xs ${
-                        ticket.priority === 'HIGH' 
-                          ? 'bg-red-100 text-red-800 border-red-200' 
+                        ticket.priority === 'HIGH'
+                          ? 'bg-red-100 text-red-800 border-red-200'
                           : ticket.priority === 'MEDIUM'
                           ? 'bg-orange-100 text-orange-800 border-orange-200'
                           : 'bg-gray-100 text-gray-800'
@@ -242,11 +274,11 @@ const Dashboard = () => {
                     >
                       {ticket.priority || 'MEDIUM'}
                     </Badge>
-                    <Badge 
-                      variant="outline" 
+                    <Badge
+                      variant="outline"
                       className={`text-xs ${
-                        ticket.status === 'OPEN' 
-                          ? 'bg-yellow-100 text-yellow-800 border-yellow-200' 
+                        ticket.status === 'OPEN'
+                          ? 'bg-yellow-100 text-yellow-800 border-yellow-200'
                           : ticket.status === 'IN_PROGRESS'
                           ? 'bg-blue-100 text-blue-800 border-blue-200'
                           : 'bg-green-100 text-green-800 border-green-200'

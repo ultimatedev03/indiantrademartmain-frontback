@@ -29,7 +29,7 @@ const CategoriesFixed = () => {
   // Meta dialog
   const [selectedMicroCategory, setSelectedMicroCategory] = useState(null);
   const [showMetaDialog, setShowMetaDialog] = useState(false);
-  const [metaData, setMetaData] = useState({ meta_tags: '', description: '' });
+  const [metaData, setMetaData] = useState({ meta_tags: '', description: '', keywords: '' });
 
   // Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -335,11 +335,12 @@ const CategoriesFixed = () => {
     setMetaData({
       meta_tags: meta?.meta_tags || '',
       description: meta?.description || '',
+      keywords: meta?.keywords || '',
     });
     setShowMetaDialog(true);
   };
 
-  // Save meta tags and description
+  // Save meta tags, keywords and description
   const saveMeta = async () => {
     try {
       const existing = microMeta[selectedMicroCategory.id];
@@ -349,6 +350,7 @@ const CategoriesFixed = () => {
           .from('micro_category_meta')
           .update({
             meta_tags: metaData.meta_tags,
+            keywords: metaData.keywords,
             description: metaData.description,
             updated_at: new Date().toISOString(),
           })
@@ -371,6 +373,7 @@ const CategoriesFixed = () => {
           {
             micro_categories: selectedMicroCategory.id,
             meta_tags: metaData.meta_tags,
+            keywords: metaData.keywords,
             description: metaData.description,
             created_at: new Date().toISOString(),
           },
@@ -802,6 +805,18 @@ const CategoriesFixed = () => {
                                         />
                                         <p className="text-xs text-gray-500 mt-1">
                                           Only the base keywords - location will be added automatically
+                                        </p>
+                                      </div>
+
+                                      <div>
+                                        <Label>Keywords (comma separated)</Label>
+                                        <Input
+                                          value={metaData.keywords}
+                                          onChange={(e) => setMetaData((prev) => ({ ...prev, keywords: e.target.value }))}
+                                          placeholder="e.g. buy, sell, cheap, best quality, wholesale"
+                                        />
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          Add search-related keywords for SEO optimization
                                         </p>
                                       </div>
 

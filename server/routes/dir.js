@@ -1,0 +1,313 @@
+import express from 'express';
+import { supabase } from '../lib/supabaseClient.js';
+
+const router = express.Router();
+
+// Plan priority (higher = better)
+const PLAN_TIERS = [
+  { key: 'diamond', label: 'DIAMOND', priority: 700 },
+  { key: 'gold', label: 'GOLD', priority: 600 },
+  { key: 'silver', label: 'SILVER', priority: 500 },
+  { key: 'booster', label: 'BOOSTER', priority: 400 },
+  { key: 'certified', label: 'CERTIFIED', priority: 300 },
+  { key: 'startup', label: 'STARTUP', priority: 200 },
+  { key: 'trial', label: 'TRIAL', priority: 100 },
+];
+
+function normPlanName(name) {
+  return String(name || '').trim().toLowerCase();
+}
+
+function planToTierKey(planName) {
+  const n = normPlanName(planName);
+  if (!n) return 'trial';
+  if (n.includes('diamond')) return 'diamond';
+  if (n.includes('gold')) return 'gold';
+  if (n.includes('silver')) return 'silver';
+  if (n.includes('booster') || n.includes('boost')) return 'booster';
+  if (n.includes('certified') || n.includes('certificate')) return 'certified';
+  if (n.includes('startup')) return 'startup';
+  if (n.includes('trial') || n.includes('free')) return 'trial';
+  // Unknown plan -> treat as trial (last)
+  return 'trial';
+}
+
+function isValidId(v) {
+  if (v === null || v === undefined) return false;
+  const s = String(v).trim();
+  return s.length > 0;
+}
+
+function clampInt(v, def, min, max) {
+  const n = parseInt(String(v ?? ''), 10);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(min, Math.min(max, n));
+}
+
+function safeQ(v) {
+  const s = String(v || '').trim();
+  if (!s) return '';
+  return s.slice(0, 100);
+}
+
+function applySort(q, sort) {
+  if (sort === 'price_asc') return q.order('price', { ascending: true });
+  if (sort === 'price_desc') return q.order('price', { ascending: false });
+  return q.order('created_at', { ascending: false });
+}
+
+async function resolveMicroId(microSlug) {
+  if (!microSlug) return null;
+  const { data: micro, error } = await supabase
+    .from('micro_categories')
+    .select('id')
+    .eq('slug', microSlug)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return micro?.id || null;
+}
+
+async function getActivePlanMaps() {
+  const nowIso = new Date().toISOString();
+
+  // Pull ACTIVE subscriptions (not expired)
+  const { data: subs, error } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('vendor_id, plan_id, status, end_date, start_date, plan:vendor_plans(name)')
+    .eq('status', 'ACTIVE')
+    .or(`end_date.is.null,end_date.gt.${nowIso}`)
+    .order('start_date', { ascending: false });
+
+  if (error) throw error;
+
+  // Keep the latest active subscription per vendor
+  const planNameByVendor = {};
+  const tierKeyByVendor = {};
+
+  for (const s of subs || []) {
+    const vid = s?.vendor_id;
+    if (!isValidId(vid)) continue;
+    if (planNameByVendor[vid]) continue;
+    const planName = s?.plan?.name || '';
+    planNameByVendor[vid] = planName;
+    tierKeyByVendor[vid] = planToTierKey(planName);
+  }
+
+  return { planNameByVendor, tierKeyByVendor };
+}
+
+function buildBaseProductQuery({ microId, q, stateId, cityId }) {
+  let query = supabase
+    .from('products')
+    .select(
+      `
+        *,
+        vendors!inner (
+          id, company_name, city, state, state_id, city_id,
+          seller_rating, kyc_status, verification_badge, trust_score
+        )
+      `,
+      { count: 'exact' }
+    )
+    .eq('status', 'ACTIVE');
+
+  if (microId) query = query.eq('micro_category_id', microId);
+  if (q) query = query.ilike('name', `%${q}%`);
+  if (stateId) query = query.eq('vendors.state_id', stateId);
+  if (cityId) query = query.eq('vendors.city_id', cityId);
+
+  return query;
+}
+
+async function countForVendorFilter({ microId, q, stateId, cityId, vendorFilter }) {
+  let query = buildBaseProductQuery({ microId, q, stateId, cityId });
+
+  if (vendorFilter?.type === 'in') {
+    if (!vendorFilter.ids?.length) return 0;
+    query = query.in('vendor_id', vendorFilter.ids);
+  }
+
+  if (vendorFilter?.type === 'notin') {
+    if (vendorFilter.ids?.length) {
+      const list = `(${vendorFilter.ids.join(',')})`;
+      query = query.not('vendor_id', 'in', list);
+    }
+  }
+
+  // Only count
+  const { count, error } = await query.select('id', { count: 'exact', head: true });
+  if (error) throw error;
+  return Number(count || 0);
+}
+
+async function fetchForVendorFilter({ microId, q, stateId, cityId, vendorFilter, sort, offsetInGroup, limit }) {
+  let query = buildBaseProductQuery({ microId, q, stateId, cityId });
+
+  if (vendorFilter?.type === 'in') {
+    if (!vendorFilter.ids?.length) return [];
+    query = query.in('vendor_id', vendorFilter.ids);
+  }
+
+  if (vendorFilter?.type === 'notin') {
+    if (vendorFilter.ids?.length) {
+      const list = `(${vendorFilter.ids.join(',')})`;
+      query = query.not('vendor_id', 'in', list);
+    }
+  }
+
+  query = applySort(query, sort);
+  const from = offsetInGroup;
+  const to = offsetInGroup + limit - 1;
+  query = query.range(from, to);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+// GET /api/dir/products?q=&microSlug=&stateId=&cityId=&sort=&page=&limit=
+router.get('/products', async (req, res) => {
+  try {
+    const q = safeQ(req.query.q);
+    const microSlug = safeQ(req.query.microSlug);
+    const sort = String(req.query.sort || '').trim();
+    const page = clampInt(req.query.page, 1, 1, 5000);
+    const limit = clampInt(req.query.limit, 20, 1, 50);
+    const stateId = isValidId(req.query.stateId) ? req.query.stateId : null;
+    const cityId = isValidId(req.query.cityId) ? req.query.cityId : null;
+
+    const from = (page - 1) * limit;
+
+    const microId = await resolveMicroId(microSlug);
+
+    const { planNameByVendor, tierKeyByVendor } = await getActivePlanMaps();
+    const activeVendorIds = Object.keys(tierKeyByVendor);
+
+    // Build vendor id buckets in the required order
+    const bucketIds = {};
+    PLAN_TIERS.forEach((t) => (bucketIds[t.key] = []));
+    for (const [vendorId, tierKey] of Object.entries(tierKeyByVendor)) {
+      if (bucketIds[tierKey]) bucketIds[tierKey].push(vendorId);
+    }
+
+    // Pagination across buckets
+    let totalCount = 0;
+    let remainingOffset = from;
+    let remainingLimit = limit;
+    const out = [];
+
+    // 1) Subscribed buckets (diamond..trial)
+    for (const tier of PLAN_TIERS) {
+      const ids = bucketIds[tier.key] || [];
+      if (!ids.length) continue;
+
+      const groupCount = await countForVendorFilter({
+        microId,
+        q,
+        stateId,
+        cityId,
+        vendorFilter: { type: 'in', ids },
+      });
+
+      totalCount += groupCount;
+
+      if (groupCount <= 0) continue;
+
+      // If our offset is beyond this bucket, skip it
+      if (remainingOffset >= groupCount) {
+        remainingOffset -= groupCount;
+        continue;
+      }
+
+      // We need some items from this bucket
+      if (remainingLimit > 0) {
+        const rows = await fetchForVendorFilter({
+          microId,
+          q,
+          stateId,
+          cityId,
+          vendorFilter: { type: 'in', ids },
+          sort,
+          offsetInGroup: remainingOffset,
+          limit: remainingLimit,
+        });
+
+        out.push(...rows);
+        remainingLimit = Math.max(0, remainingLimit - rows.length);
+        remainingOffset = 0;
+      }
+
+      if (remainingLimit <= 0) break;
+    }
+
+    // 2) Vendors with NO active subscription (treated as TRIAL at the bottom)
+    // NOTE: if activeVendorIds becomes huge, URL length could become a problem.
+    // In that case, we simply won't exclude and you'll still get correct ranking
+    // for subscribed vendors at the top.
+    if (remainingLimit > 0) {
+      const excludeIds = activeVendorIds.length <= 1000 ? activeVendorIds : [];
+
+      const groupCount = await countForVendorFilter({
+        microId,
+        q,
+        stateId,
+        cityId,
+        vendorFilter: { type: 'notin', ids: excludeIds },
+      });
+
+      totalCount += groupCount;
+
+      if (groupCount > 0) {
+        if (remainingOffset >= groupCount) {
+          remainingOffset -= groupCount;
+        } else {
+          const rows = await fetchForVendorFilter({
+            microId,
+            q,
+            stateId,
+            cityId,
+            vendorFilter: { type: 'notin', ids: excludeIds },
+            sort,
+            offsetInGroup: remainingOffset,
+            limit: remainingLimit,
+          });
+
+          out.push(...rows);
+          remainingLimit = Math.max(0, remainingLimit - rows.length);
+          remainingOffset = 0;
+        }
+      }
+    }
+
+    // Attach plan info for UI
+    const finalRows = (out || []).map((p) => {
+      const vid = p?.vendor_id;
+      const tierKey = tierKeyByVendor[vid] || 'trial';
+      const planName = planNameByVendor[vid] || 'TRIAL';
+      const tierMeta = PLAN_TIERS.find((x) => x.key === tierKey) || PLAN_TIERS[PLAN_TIERS.length - 1];
+
+      const vendors = p?.vendors ? { ...p.vendors } : null;
+      if (vendors) {
+        vendors.plan_name = planName;
+        vendors.plan_tier = tierMeta.label;
+        vendors.plan_priority = tierMeta.priority;
+      }
+
+      return {
+        ...p,
+        vendors,
+        vendor_plan_name: planName,
+        vendor_plan_tier: tierMeta.label,
+        vendor_plan_priority: tierMeta.priority,
+      };
+    });
+
+    return res.json({ success: true, data: finalRows, count: totalCount });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: 'DIR_PRODUCTS_FAILED', details: e.message });
+  }
+});
+
+export default router;

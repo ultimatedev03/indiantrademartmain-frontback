@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Bell, LogOut, Settings, User as UserIcon } from 'lucide-react';
+import { Menu, Bell, LogOut, Settings, User as UserIcon, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -57,10 +57,25 @@ const VendorHeader = ({ onMenuClick }) => {
       </button>
 
       <div className="flex flex-1 gap-x-4 self-stretch lg:gap-x-6">
-        <div className="flex flex-1"></div>
+        <div className="flex flex-1" />
 
-        <div className="flex items-center gap-x-4 lg:gap-x-6">
-          <button type="button" className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500">
+        <div className="flex items-center gap-x-2 lg:gap-x-3">
+          {/* ✅ Home Button (Public Site) */}
+          <Button
+            type="button"
+            variant="outline"
+            className="hidden sm:inline-flex"
+            onClick={() => navigate('/')}
+            title="Go to Home"
+          >
+            <Home className="mr-2 h-4 w-4" />
+            Home
+          </Button>
+
+          <button
+            type="button"
+            className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500"
+          >
             <span className="sr-only">View notifications</span>
             <Bell className="h-6 w-6" aria-hidden="true" />
           </button>

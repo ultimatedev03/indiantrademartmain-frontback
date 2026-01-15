@@ -10,6 +10,8 @@ import migrationRoutes from './routes/migration.js';
 import supportTicketRoutes from './routes/supportTickets.js';
 import kycRoutes from './routes/kyc.js';
 import adminRoutes from './routes/admin.js';
+import dirRoutes from './routes/dir.js';
+import paymentRoutes from './routes/payment.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 
@@ -27,7 +29,11 @@ app.use(cors(getSubdomainAwareCORS()));
 // Subdomain Redirect Middleware (optional - redirects wrong subdomain access)
 app.use(subdomainRedirectMiddleware);
 
-app.use(express.json());
+// ✅ IMPORTANT: Quotation PDF attachments are sent as base64 in JSON.
+// Default express.json limit (100kb) causes "request entity too large" (413).
+// Keep limit reasonably high for local/proxy usage.
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: process.env.JSON_BODY_LIMIT || '10mb' }));
 
 
 // Input sanitization - prevent NoSQL injection and XSS
@@ -76,6 +82,8 @@ app.use('/api/migration', migrationRoutes);
 app.use('/api/support', supportTicketRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/dir', dirRoutes);
+app.use('/api/payment', paymentRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();

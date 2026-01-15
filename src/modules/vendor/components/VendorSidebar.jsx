@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
+  Home,
   LayoutDashboard, 
   Package, 
   ShoppingCart, 
@@ -15,6 +16,8 @@ import { cn } from '@/lib/utils';
 import Logo from '@/shared/components/Logo';
 
 const navigation = [
+  // ✅ Home (public website)
+  { name: 'Home', href: '/', icon: Home },
   { name: 'Dashboard', href: '/vendor/dashboard', icon: LayoutDashboard },
   { name: 'Products', href: '/vendor/products', icon: Package },
   { name: 'Buy Leads', href: '/vendor/leads', icon: ShoppingCart },
@@ -57,7 +60,11 @@ const VendorSidebar = ({ isOpen, onClose }) => {
         <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-4">
           <nav className="flex-1 space-y-1 mt-6">
             {navigation.map((item) => {
-              const isActive = location.pathname.startsWith(item.href);
+              // Home is a special case because every path starts with '/'
+              const isActive = item.href === '/' 
+                ? location.pathname === '/'
+                : location.pathname.startsWith(item.href);
+
               return (
                 <Link
                   key={item.name}

@@ -1,5 +1,42 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
+// ✅ Local vs Netlify API base (for server-side ranked search)
+const isLocalHost = () => {
+  if (typeof window === 'undefined') return false;
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1';
+};
+
+const getDirBase = () => {
+  const override = import.meta.env.VITE_DIR_API_BASE;
+  if (override && String(override).trim()) return String(override).trim();
+  return isLocalHost() ? '/api/dir' : '/.netlify/functions/dir';
+};
+
+async function safeReadJson(res) {
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return await res.json();
+  const text = await res.text();
+  throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 120)}...`);
+}
+
+async function fetchRankedProducts({ q, microSlug, stateId, cityId, sort = '', page = 1, limit = 20 }) {
+  const sp = new URLSearchParams();
+  if (q) sp.set('q', String(q));
+  if (microSlug) sp.set('microSlug', String(microSlug));
+  if (stateId) sp.set('stateId', String(stateId));
+  if (cityId) sp.set('cityId', String(cityId));
+  if (sort) sp.set('sort', String(sort));
+  sp.set('page', String(page || 1));
+  sp.set('limit', String(limit || 20));
+
+  const url = `${getDirBase()}/products?${sp.toString()}`;
+  const res = await fetch(url, { method: 'GET' });
+  const json = await safeReadJson(res);
+  if (!json?.success) throw new Error(json?.details || json?.error || 'Failed to load products');
+  return { data: json.data || [], count: json.count || 0 };
+}
+
 export const directoryApi = {
   getHeadCategories: async () => {
     const { data, error } = await supabase
@@ -267,76 +304,13 @@ export const directoryApi = {
   },
 
   searchProducts: async ({ q, stateId, cityId, sort = '', page = 1, limit = 20 }) => {
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    let query = supabase
-      .from('products')
-      .select(`
-        *,
-        vendors!inner (
-          id, company_name, city, state, state_id, city_id,
-          seller_rating, kyc_status, verification_badge, trust_score
-        )
-      `, { count: 'exact' })
-      .eq('status', 'ACTIVE');
-
-    if (q) query = query.ilike('name', `%${q}%`);
-    if (stateId) query = query.eq('vendors.state_id', stateId);
-    if (cityId) query = query.eq('vendors.city_id', cityId);
-
-    if (sort === 'price_asc') query = query.order('price', { ascending: true });
-    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
-    else query = query.order('created_at', { ascending: false });
-
-    query = query.range(from, to);
-
-    const { data, count, error } = await query;
-    if (error) throw error;
-
-    return { data: data || [], count };
+    // ✅ Ranked search by vendor plan (DIAMOND > GOLD > SILVER > BOOSTER > CERTIFIED > STARTUP > TRIAL)
+    return fetchRankedProducts({ q, microSlug: '', stateId, cityId, sort, page, limit });
   },
 
   listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, limit = 20 }) => {
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    let query = supabase
-      .from('products')
-      .select(`
-        *,
-        vendors!inner (
-          id, company_name, city, state, state_id, city_id,
-          seller_rating, kyc_status, verification_badge, trust_score
-        )
-      `, { count: 'exact' })
-      .eq('status', 'ACTIVE');
-
-    if (microSlug) {
-      const { data: micro, error: microErr } = await supabase
-        .from('micro_categories')
-        .select('id')
-        .eq('slug', microSlug)
-        .single();
-
-      if (microErr) throw microErr;
-      if (micro) query = query.eq('micro_category_id', micro.id);
-    }
-
-    if (q) query = query.ilike('name', `%${q}%`);
-    if (stateId) query = query.eq('vendors.state_id', stateId);
-    if (cityId) query = query.eq('vendors.city_id', cityId);
-
-    if (sort === 'price_asc') query = query.order('price', { ascending: true });
-    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
-    else query = query.order('created_at', { ascending: false });
-
-    query = query.range(from, to);
-
-    const { data, count, error } = await query;
-    if (error) throw error;
-
-    return { data: data || [], count };
+    // ✅ Ranked search by vendor plan (server-side)
+    return fetchRankedProducts({ q, microSlug, stateId, cityId, sort, page, limit });
   },
 
   getProductDetailBySlug: async (slug) => {
@@ -472,40 +446,8 @@ export const directoryApi = {
 
   getProductsByMicroAndLocation: async ({ microSlug, stateId, cityId, page = 1, limit = 20 }) => {
     try {
-      const from = (page - 1) * limit;
-      const to = from + limit - 1;
-
-      const { data: micro, error: microError } = await supabase
-        .from('micro_categories')
-        .select('id')
-        .eq('slug', microSlug)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (microError || !micro) return { data: [], count: 0 };
-
-      let query = supabase
-        .from('products')
-        .select(`
-          *,
-          vendors!inner (
-            id, company_name, city, state, state_id, city_id,
-            seller_rating, kyc_status, verification_badge, trust_score
-          )
-        `, { count: 'exact' })
-        .eq('micro_category_id', micro.id)
-        .eq('status', 'ACTIVE');
-
-      if (stateId) query = query.eq('vendors.state_id', stateId);
-      if (cityId) query = query.eq('vendors.city_id', cityId);
-
-      query = query.order('created_at', { ascending: false }).range(from, to);
-
-      const { data, count, error } = await query;
-      if (error) throw error;
-
-      return { data: data || [], count };
+      // ✅ Ranked search by vendor plan (server-side)
+      return fetchRankedProducts({ q: '', microSlug, stateId, cityId, sort: '', page, limit });
     } catch (err) {
       console.warn('Error fetching products by micro and location:', err);
       return { data: [], count: 0 };

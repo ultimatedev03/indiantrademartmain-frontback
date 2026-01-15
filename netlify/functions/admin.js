@@ -60,6 +60,213 @@ export async function handler(event) {
     const tail = parseTail(event.path);
 
     // -------------------------
+    // STAFF MANAGEMENT
+    // GET /staff
+    // POST /staff
+    // DELETE /staff/:employeeId
+    // PUT /staff/:employeeId/password
+    // PUT /staff/password (fallback)
+    // -------------------------
+    if (tail[0] === "staff") {
+      // GET /staff
+      if (event.httpMethod === "GET" && tail.length === 1) {
+        const { data, error } = await supabase
+          .from("employees")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (error) return fail("Failed to fetch staff", error.message);
+
+        const employees = (data || []).map((r) => ({
+          ...r,
+          full_name: r.full_name || r.name || r.employee_name || "",
+          email: r.email || "",
+          role: r.role || "",
+          department: r.department || r.dept || "",
+          status: r.status || "ACTIVE",
+          created_at: r.created_at || r.joined || r.createdAt || new Date().toISOString(),
+        }));
+
+        return ok({ success: true, employees });
+      }
+
+      // POST /staff
+      if (event.httpMethod === "POST" && tail.length === 1) {
+        const body = await readBody(event);
+        const full_name = String(body?.full_name || "").trim();
+        const email = String(body?.email || "").trim().toLowerCase();
+        const password = String(body?.password || "").trim();
+        const phone = String(body?.phone || "").trim();
+        const role = String(body?.role || "DATA_ENTRY").trim().toUpperCase();
+        const department = String(body?.department || "Operations").trim();
+
+        if (!full_name || !email || !password) return bad("full_name, email and password are required");
+
+        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: { full_name, role, phone, department },
+        });
+
+        if (authError || !authData?.user) return fail("Failed to create auth user", authError?.message);
+
+        const userId = authData.user.id;
+
+        // best-effort upsert into public.users
+        await supabase.from("users").upsert(
+          [
+            {
+              id: userId,
+              email,
+              full_name,
+              role,
+              phone: phone || null,
+              created_at: new Date().toISOString(),
+            },
+          ],
+          { onConflict: "id" }
+        );
+
+        const empPayload = {
+          user_id: userId,
+          full_name,
+          email,
+          phone: phone || null,
+          role,
+          department,
+          status: "ACTIVE",
+          created_at: new Date().toISOString(),
+        };
+
+        const { data: emp, error: empErr } = await supabase
+          .from("employees")
+          .upsert([empPayload], { onConflict: "user_id" })
+          .select("*")
+          .maybeSingle();
+
+        if (empErr) {
+          try {
+            await supabase.auth.admin.deleteUser(userId);
+          } catch {
+            // ignore
+          }
+          return fail("Failed to create employee", empErr.message);
+        }
+
+        await writeAudit({
+          action: "STAFF_CREATE",
+          entity_type: "employees",
+          entity_id: emp?.id || null,
+          details: { user_id: userId, email, role, department },
+        });
+
+        return ok({ success: true, employee: emp || empPayload });
+      }
+
+      // PUT /staff/:employeeId/password
+      if (event.httpMethod === "PUT" && tail.length === 3 && tail[2] === "password") {
+        const employeeId = tail[1];
+        const body = await readBody(event);
+        const password = String(body?.password || "").trim();
+
+        if (!employeeId) return bad("employeeId missing");
+        if (!password || password.length < 6) return bad("Password must be at least 6 characters");
+
+        const { data: emp, error: empErr } = await supabase
+          .from("employees")
+          .select("id,user_id,email,full_name")
+          .eq("id", employeeId)
+          .maybeSingle();
+
+        if (empErr) return fail("Failed to fetch employee", empErr.message);
+        if (!emp?.user_id) return bad("Employee has no user_id");
+
+        const { error: updErr } = await supabase.auth.admin.updateUserById(emp.user_id, { password });
+        if (updErr) return fail("Failed to update password", updErr.message);
+
+        await writeAudit({
+          action: "STAFF_PASSWORD_CHANGE",
+          entity_type: "employees",
+          entity_id: employeeId,
+          details: { user_id: emp.user_id, email: emp.email },
+        });
+
+        return ok({ success: true });
+      }
+
+      // PUT /staff/password (fallback)
+      if (event.httpMethod === "PUT" && tail.length === 2 && tail[1] === "password") {
+        const body = await readBody(event);
+        const employeeId = String(body?.employeeId || body?.id || "").trim();
+        const password = String(body?.password || "").trim();
+
+        if (!employeeId) return bad("employeeId missing");
+        if (!password || password.length < 6) return bad("Password must be at least 6 characters");
+
+        const { data: emp, error: empErr } = await supabase
+          .from("employees")
+          .select("id,user_id,email,full_name")
+          .eq("id", employeeId)
+          .maybeSingle();
+
+        if (empErr) return fail("Failed to fetch employee", empErr.message);
+        if (!emp?.user_id) return bad("Employee has no user_id");
+
+        const { error: updErr } = await supabase.auth.admin.updateUserById(emp.user_id, { password });
+        if (updErr) return fail("Failed to update password", updErr.message);
+
+        await writeAudit({
+          action: "STAFF_PASSWORD_CHANGE",
+          entity_type: "employees",
+          entity_id: employeeId,
+          details: { user_id: emp.user_id, email: emp.email },
+        });
+
+        return ok({ success: true });
+      }
+
+      // DELETE /staff/:employeeId
+      if (event.httpMethod === "DELETE" && tail.length === 2) {
+        const employeeId = tail[1];
+        if (!employeeId) return bad("employeeId missing");
+
+        const { data: emp, error: empFetchErr } = await supabase
+          .from("employees")
+          .select("*")
+          .eq("id", employeeId)
+          .maybeSingle();
+
+        if (empFetchErr) return fail("Failed to fetch employee", empFetchErr.message);
+
+        const userId = emp?.user_id || null;
+
+        const { error: delEmpErr } = await supabase.from("employees").delete().eq("id", employeeId);
+        if (delEmpErr) return fail("Failed to delete employee", delEmpErr.message);
+
+        if (userId) {
+          await supabase.from("users").delete().eq("id", userId);
+          try {
+            await supabase.auth.admin.deleteUser(userId);
+          } catch {
+            // ignore
+          }
+        }
+
+        await writeAudit({
+          action: "STAFF_DELETE",
+          entity_type: "employees",
+          entity_id: employeeId,
+          details: { user_id: userId || null },
+        });
+
+        return ok({ success: true });
+      }
+
+      return bad("Unsupported staff route");
+    }
+
+// -------------------------
     // GET /vendors  (with product_count + plan)
     // -------------------------
     if (event.httpMethod === "GET" && tail[0] === "vendors" && tail.length === 1) {

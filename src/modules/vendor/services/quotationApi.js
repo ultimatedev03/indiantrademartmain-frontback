@@ -67,6 +67,11 @@ export const quotationApi = {
       vendor_company: vendor.company_name || vendor.companyName || null,
       vendor_phone: vendor.phone || null,
       vendor_email: vendor.email || null,
+
+      // Optional PDF attachment (base64)
+      attachment_name: quotationData?.attachment?.name || null,
+      attachment_base64: quotationData?.attachment?.base64 || null,
+      attachment_mime: quotationData?.attachment?.mime || null,
     };
 
     const url = `${API_BASE}/quotation/send`;

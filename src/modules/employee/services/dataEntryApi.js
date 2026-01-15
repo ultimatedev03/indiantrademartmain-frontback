@@ -39,30 +39,71 @@ const generateRandomString = (length, chars) => {
 export const dataEntryApi = {
   // --- DASHBOARD ---
   getDashboardStats: async (userId) => {
-    // Helper to run query and return count safely
-    const getCount = async (table, queryModifier = (q) => q) => {
-        let query = supabase.from(table).select('*', { count: 'exact', head: true });
-        if (userId) query = queryModifier(query);
-        const { count, error } = await query;
-        if (error) console.error(`Error counting ${table}:`, error);
-        return count || 0;
-    };
+    try {
+      console.log('📊 Dashboard: Fetching stats for userId:', userId);
+      
+      // Count vendors assigned to, created by, or owned by user (checking user_id as well)
+      const { count: totalVendors, error: vendorError } = await supabase
+        .from('vendors')
+        .select('*', { count: 'exact', head: true })
+        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+      
+      if (vendorError) console.error('❌ Error counting vendors:', vendorError);
+      console.log('✅ Total vendors found:', totalVendors);
 
-    const totalVendors = await getCount('vendors', q => q.or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId}`));
-    
-    // Get assigned vendor IDs first to filter products
-    const { data: vIds } = await supabase.from('vendors').select('id').or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId}`);
-    const ids = vIds?.map(v => v.id) || [];
-    
-    let totalProducts = 0;
-    if (ids.length > 0) {
-        totalProducts = await getCount('products', q => q.in('vendor_id', ids));
+      // Get vendor IDs to count products
+      const { data: vendorIds, error: vendorIdError } = await supabase
+        .from('vendors')
+        .select('id')
+        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+      
+      if (vendorIdError) console.error('❌ Error fetching vendor IDs:', vendorIdError);
+      
+      let totalProducts = 0;
+      const ids = vendorIds?.map(v => v.id) || [];
+      console.log('✅ Vendor IDs found:', ids.length);
+      
+      if (ids.length > 0) {
+        const { count: productCount, error: productError } = await supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true })
+          .in('vendor_id', ids);
+        
+        if (productError) console.error('❌ Error counting products:', productError);
+        totalProducts = productCount || 0;
+        console.log('✅ Total products found:', totalProducts);
+      }
+
+      // Count pending KYC vendors
+      const { count: pendingCount, error: pendingError } = await supabase
+        .from('vendors')
+        .select('*', { count: 'exact', head: true })
+        .eq('kyc_status', 'PENDING')
+        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+      
+      if (pendingError) console.error('❌ Error counting pending KYC:', pendingError);
+      console.log('✅ Pending KYC found:', pendingCount);
+
+      // Count approved/verified KYC vendors
+      const { count: verifiedCount, error: verifiedError } = await supabase
+        .from('vendors')
+        .select('*', { count: 'exact', head: true })
+        .or(`kyc_status.eq.approved,kyc_status.eq.APPROVED`)
+        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+      
+      if (verifiedError) console.error('❌ Error counting verified KYC:', verifiedError);
+      console.log('✅ Approved KYC found:', verifiedCount);
+
+      return { 
+        totalVendors: totalVendors || 0, 
+        totalProducts, 
+        pendingKyc: pendingCount || 0, 
+        approvedKyc: verifiedCount || 0 
+      };
+    } catch (error) {
+      console.error('❌ Dashboard stats error:', error);
+      return { totalVendors: 0, totalProducts: 0, pendingKyc: 0, approvedKyc: 0 };
     }
-
-    const pendingKyc = await getCount('vendors', q => q.eq('kyc_status', 'PENDING').or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId}`));
-    const approvedKyc = await getCount('vendors', q => q.eq('kyc_status', 'VERIFIED').or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId}`));
-
-    return { totalVendors, totalProducts, pendingKyc, approvedKyc };
   },
 
   getRecentActivities: async (userId) => {

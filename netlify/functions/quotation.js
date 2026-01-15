@@ -20,6 +20,29 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
   try {
     const { vendor, quotation } = quotationData;
 
+    // ✅ Optional PDF attachment (base64)
+    let attachments = [];
+    try {
+      const name = quotation?.attachment_name;
+      const b64 = quotation?.attachment_base64;
+      const mime = quotation?.attachment_mime;
+      if (b64) {
+        const safeMime = (mime || 'application/pdf').toLowerCase();
+        if (safeMime !== 'application/pdf') throw new Error('Only PDF attachments are supported');
+        const buf = Buffer.from(String(b64), 'base64');
+        const maxBytes = 2 * 1024 * 1024; // 2MB
+        if (buf.length > maxBytes) throw new Error('PDF too large (max 2MB)');
+        attachments = [{
+          filename: name || 'quotation.pdf',
+          content: buf,
+          contentType: 'application/pdf',
+        }];
+      }
+    } catch (e) {
+      console.warn('Attachment skipped:', e?.message || e);
+      attachments = [];
+    }
+
     // Registration link for unregistered buyers
     const registrationLink = isRegistered
       ? ''
@@ -34,6 +57,7 @@ async function sendQuotationEmail(buyerEmail, quotationData, isRegistered) {
       from: `${process.env.APP_NAME || 'IndianTradeMart'} <${process.env.GMAIL_EMAIL}>`,
       to: buyerEmail,
       subject: `Quotation from ${vendor.company_name || vendor.owner_name}`,
+      ...(attachments.length ? { attachments } : {}),
       html: `
         <html>
           <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background: #f5f5f5;">
@@ -201,7 +225,12 @@ export const handler = async (event) => {
         vendor_name,
         vendor_company,
         vendor_phone,
-        vendor_email
+        vendor_email,
+
+        // ✅ Optional PDF attachment
+        attachment_name,
+        attachment_base64,
+        attachment_mime
       } = body;
 
       // Validate required fields
@@ -322,7 +351,12 @@ export const handler = async (event) => {
             quantity: quantity,
             validity_days: validity_days,
             delivery_days: delivery_days,
-            terms_conditions: terms_conditions
+            terms_conditions: terms_conditions,
+
+            // ✅ attachment
+            attachment_name,
+            attachment_base64,
+            attachment_mime,
           }
         }, isRegistered);
         emailSent = true;
