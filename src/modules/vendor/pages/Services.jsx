@@ -83,6 +83,21 @@ const Services = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
 
+  // ✅ API base
+  // - Dev: Vite proxy handles /api -> http://localhost:3001
+  // - Prod: default to same-origin (https://yourdomain.com)
+  // If backend is hosted elsewhere, set VITE_API_URL (no trailing slash) during build.
+  const API_BASE = useMemo(() => {
+    const raw = (import.meta.env.VITE_API_URL || '').trim();
+    if (!raw) return ''; // same-origin relative calls
+    return raw.replace(/\/+$/, '');
+  }, []);
+
+  const apiUrl = (path) => {
+    const p = path.startsWith('/') ? path : `/${path}`;
+    return API_BASE ? `${API_BASE}${p}` : p;
+  };
+
   const mostPopularPlanId = useMemo(() => {
     if (!plans?.length) return null;
     const paid = plans
@@ -259,7 +274,7 @@ const Services = () => {
 
         const startDate = new Date();
         const endDate = new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000);
-        
+
         await supabase.from('vendor_plan_subscriptions').insert({
           vendor_id: vendorId,
           plan_id: plan.id,
@@ -291,7 +306,7 @@ const Services = () => {
       toast({ title: 'Processing...', description: `Initiating payment for ${plan.name}` });
       setDetailsOpen(false);
 
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/initiate`, {
+      const response = await fetch(apiUrl('/api/payment/initiate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -300,29 +315,70 @@ const Services = () => {
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to initiate payment');
+      if (!response.ok) {
+        const ct = response.headers.get('content-type') || '';
+        const txt = await response.text().catch(() => '');
+        const looksHtml = ct.includes('text/html') || /^\s*</.test(txt);
+        throw new Error(
+          looksHtml
+            ? `Payment API error (${response.status})`
+            : (txt || `Payment API error (${response.status})`)
+        );
+      }
       const data = await response.json();
       const orderData = data.order;
+      const keyId = data.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
+
+      if (!keyId) {
+        toast({
+          title: 'Payment Config Missing',
+          description: 'Razorpay Key ID missing. Add VITE_RAZORPAY_KEY_ID in .env.local (frontend) or RAZORPAY_KEY_ID in server .env.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
       // Load Razorpay script dynamically if not loaded
       if (!window.Razorpay) {
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.async = true;
-        script.onload = () => openRazorpayCheckout(orderData, plan);
+        script.onload = () => openRazorpayCheckout(orderData, plan, keyId);
+        script.onerror = () => {
+          toast({ 
+            title: 'Warning', 
+            description: 'Razorpay script failed to load. Retrying...', 
+            variant: 'default' 
+          });
+          // Retry loading script after 2 seconds
+          setTimeout(() => {
+            const retryScript = document.createElement('script');
+            retryScript.src = 'https://checkout.razorpay.com/v1/checkout.js';
+            retryScript.async = true;
+            retryScript.onload = () => openRazorpayCheckout(orderData, plan, keyId);
+            retryScript.onerror = () => {
+              toast({ 
+                title: 'Error', 
+                description: 'Failed to load payment system. Please try again.', 
+                variant: 'destructive' 
+              });
+            };
+            document.body.appendChild(retryScript);
+          }, 2000);
+        };
         document.body.appendChild(script);
       } else {
-        openRazorpayCheckout(orderData, plan);
+        openRazorpayCheckout(orderData, plan, keyId);
       }
     } catch (err) {
-      toast({ title: 'Error', description: 'Failed to initiate payment', variant: 'destructive' });
+      toast({ title: 'Error', description: err?.message || 'Failed to initiate payment', variant: 'destructive' });
       console.error(err);
     }
   };
 
-  const openRazorpayCheckout = (orderData, plan) => {
+  const openRazorpayCheckout = (orderData, plan, keyId) => {
     const options = {
-      key: import.meta.env.VITE_RAZORPAY_KEY_ID,
+      key: keyId,
       amount: orderData.amount,
       currency: orderData.currency,
       name: 'Indian Trade Mart',
@@ -333,7 +389,7 @@ const Services = () => {
       },
       handler: async (response) => {
         try {
-          const verifyResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/verify`, {
+          const verifyResponse = await fetch(apiUrl('/api/payment/verify'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -345,13 +401,22 @@ const Services = () => {
             }),
           });
 
-          if (!verifyResponse.ok) throw new Error('Payment verification failed');
-          const verifyData = await verifyResponse.json();
-          
+          if (!verifyResponse.ok) {
+            const ct = verifyResponse.headers.get('content-type') || '';
+            const txt = await verifyResponse.text().catch(() => '');
+            const looksHtml = ct.includes('text/html') || /^\s*</.test(txt);
+            throw new Error(
+              looksHtml
+                ? `Payment verification failed (${verifyResponse.status})`
+                : (txt || `Payment verification failed (${verifyResponse.status})`)
+            );
+          }
+          await verifyResponse.json();
+
           toast({ title: 'Success!', description: 'Subscription activated! Invoice sent to your email.' });
           setTimeout(() => loadData(), 500);
         } catch (err) {
-          toast({ title: 'Error', description: 'Payment verification failed', variant: 'destructive' });
+          toast({ title: 'Error', description: err?.message || 'Payment verification failed', variant: 'destructive' });
           console.error(err);
         }
       },
@@ -424,7 +489,7 @@ const Services = () => {
     if (!vendorId) return;
     try {
       setLoadingHistory(true);
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/payment/history/${vendorId}`);
+      const response = await fetch(apiUrl(`/api/payment/history/${vendorId}`));
       if (response.ok) {
         const data = await response.json();
         setPaymentHistory(data.data || []);
@@ -646,33 +711,22 @@ const Services = () => {
                   </div>
                 </div>
 
-                {/* Highlights (super short) */}
-                {(meta.highlights || []).length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {meta.highlights.slice(0, 2).map((t, idx) => (
-                      <span key={idx} className="text-[11px] px-2 py-1 rounded-full border bg-white text-slate-700">
-                        {t}
-                      </span>
+                {/* Highlights compact */}
+                <div className="rounded-xl border bg-white p-3">
+                  <div className="text-[11px] font-semibold text-slate-700 mb-2">Top Benefits</div>
+                  <div className="space-y-1.5">
+                    {compactBenefits.map((b, idx) => (
+                      <div key={idx} className="flex items-start gap-2 text-[12px] text-slate-700">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-[1px]" />
+                        <span>{b.text}</span>
+                      </div>
                     ))}
-                    {meta.highlights.length > 2 && (
-                      <span className="text-[11px] px-2 py-1 rounded-full border bg-white text-slate-500">
-                        +{meta.highlights.length - 2} more
-                      </span>
+                    {moreCount > 0 && (
+                      <div className="text-[12px] text-slate-500 pl-6">
+                        +{moreCount} more benefits (tap to view)
+                      </div>
                     )}
                   </div>
-                )}
-
-                {/* Key benefits (only 3 lines) */}
-                <div className="space-y-2">
-                  {compactBenefits.map((b, i) => (
-                    <div key={i} className="flex gap-2 text-sm text-slate-700">
-                      <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-[2px]" />
-                      <span>{b.text}</span>
-                    </div>
-                  ))}
-                  {moreCount > 0 && (
-                    <div className="text-xs text-slate-500 pl-6">+ {moreCount} more benefits</div>
-                  )}
                 </div>
               </CardContent>
 

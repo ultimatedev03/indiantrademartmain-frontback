@@ -1,11 +1,12 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import VendorPortalLayout from '@/modules/vendor/layouts/PortalLayout';
+
 import VendorDashboard from '@/modules/vendor/pages/Dashboard';
 import VendorProducts from '@/modules/vendor/pages/Products';
 import VendorProductForm from '@/modules/vendor/pages/ProductForm';
 import Leads from '@/modules/vendor/pages/Leads';
-import LeadDetail from '@/modules/vendor/pages/LeadDetail'; // ✅ ADD
+import LeadDetail from '@/modules/vendor/pages/LeadDetail';
 import Proposals from '@/modules/vendor/pages/Proposals';
 import SendQuotation from '@/modules/vendor/pages/SendQuotation';
 import VendorProfile from '@/modules/vendor/pages/Profile';
@@ -18,6 +19,7 @@ import VendorLogin from '@/modules/vendor/pages/auth/Login';
 import VendorVerify from '@/modules/vendor/pages/auth/Verify';
 import ForgotPassword from '@/shared/pages/ForgotPassword';
 import VendorAnalytics from '@/modules/vendor/pages/Analytics';
+
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
 
@@ -55,7 +57,7 @@ export const VendorRoutes = () => {
           <Route path="products/:id/edit" element={<VendorProductForm />} />
 
           <Route path="leads" element={<Leads />} />
-          <Route path="leads/:id" element={<LeadDetail />} /> {/* ✅ ADD THIS ROUTE */}
+          <Route path="leads/:id" element={<LeadDetail />} />
 
           <Route path="proposals" element={<Proposals />} />
           <Route path="proposals/send" element={<SendQuotation />} />

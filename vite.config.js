@@ -275,9 +275,15 @@ export default defineConfig({
 	],
 	server: {
 		cors: true,
-		headers: {
-			'Cross-Origin-Embedder-Policy': 'credentialless',
-		},
+		// NOTE:
+		// Razorpay Checkout opens a cross-origin iframe (api.razorpay.com).
+		// If we force COEP in dev, the iframe can get blocked and Chrome shows:
+		// "api.razorpay.com refused to connect".
+		// Keep COEP OFF by default. If you specifically need it for the visual editor,
+		// enable it by setting: VITE_ENABLE_COEP=true
+		headers: process.env.VITE_ENABLE_COEP === 'true'
+			? { 'Cross-Origin-Embedder-Policy': 'credentialless' }
+			: {},
 		allowedHosts: true,
 		proxy: {
 			'/api': {

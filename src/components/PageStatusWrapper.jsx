@@ -8,38 +8,35 @@ import { AlertTriangle, Loader2 } from 'lucide-react';
  * Usage: <PageStatusWrapper pageRoute="/vendor" children={<YourComponent />} />
  */
 const PageStatusWrapper = ({ pageRoute, children }) => {
-  const { getPageStatus, isLoading: contextLoading } = usePageStatusContext();
+  const { getPageStatus } = usePageStatusContext();
   const [localStatus, setLocalStatus] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   // Context status
   const contextPageStatus = useMemo(
     () => getPageStatus(pageRoute),
     [pageRoute, getPageStatus]
   );
-  
+
   // Check directly from DB to override context if needed
   useEffect(() => {
     const checkDirectly = async () => {
       try {
-        console.log('[PageStatusWrapper] Direct DB check for:', pageRoute);
         const { data, error } = await supabase
           .from('page_status')
           .select('*')
           .eq('page_route', pageRoute)
           .maybeSingle();
-        
+
         if (error) {
           console.error('[PageStatusWrapper] Direct check error:', error);
           setLocalStatus(null);
         } else if (data) {
-          console.log('[PageStatusWrapper] Direct check found:', { is_blanked: data.is_blanked });
           setLocalStatus({
             is_blanked: data.is_blanked === true,
             error_message: data.error_message || ''
           });
         } else {
-          console.log('[PageStatusWrapper] Direct check found nothing - page is online');
           setLocalStatus({ is_blanked: false, error_message: '' });
         }
         setIsLoading(false);
@@ -48,20 +45,16 @@ const PageStatusWrapper = ({ pageRoute, children }) => {
         setIsLoading(false);
       }
     };
-    
+
     checkDirectly();
-    // Check again every 3 seconds
     const interval = setInterval(checkDirectly, 3000);
-    
+
     return () => clearInterval(interval);
   }, [pageRoute]);
-  
-  // Use local status if available, otherwise use context
+
   const status = localStatus || contextPageStatus;
-  const isOffline = status.is_blanked === true;
-  const errorMessage = status.error_message || '';
-  
-  console.log('[PageStatusWrapper] Status for', pageRoute, ':', { isOffline, isLoading, source: localStatus ? 'local' : 'context' });
+  const isOffline = status?.is_blanked === true;
+  const errorMessage = status?.error_message || '';
 
   if (isLoading) {
     return (
@@ -80,15 +73,15 @@ const PageStatusWrapper = ({ pageRoute, children }) => {
               <AlertTriangle className="h-8 w-8 text-red-600" />
             </div>
           </div>
-          
+
           <h1 className="text-2xl font-bold text-gray-900 mb-2">
             Service Temporarily Unavailable
           </h1>
-          
+
           <p className="text-gray-600 mb-4">
             {errorMessage || 'This section is currently offline for maintenance. Please try again later.'}
           </p>
-          
+
           <div className="text-sm text-gray-500 bg-gray-50 p-3 rounded">
             <p>If this issue persists, please contact support at:</p>
             <p className="font-mono text-blue-600 mt-1">support@indiantrademart.com</p>

@@ -496,7 +496,7 @@ export const directoryApi = {
 
   /**
    * ✅ FIXED: getTopCities now reads REAL DB count column.
-   * Your DB column: suplier_count (misspelled) ✅ handled
+   * Your DB column: supplier_count ✅
    * UI expects: supplier_count ✅ we map it
    */
   getTopCities: async (limit = 200) => {
@@ -507,25 +507,15 @@ export const directoryApi = {
     }
     if (!Number.isFinite(n) || n <= 0) n = 200;
 
-    // 1) try with suplier_count (your DB)
+    // 1) try with supplier_count (correct column)
     let res = await supabase
       .from('cities')
-      .select('id, name, slug, suplier_count')
-      .order('suplier_count', { ascending: false })
+      .select('id, name, slug, supplier_count')
+      .order('supplier_count', { ascending: false })
       .order('name', { ascending: true })
       .limit(n);
 
-    // 2) fallback: supplier_count (if some env has correct column)
-    if (res?.error) {
-      res = await supabase
-        .from('cities')
-        .select('id, name, slug, supplier_count')
-        .order('supplier_count', { ascending: false })
-        .order('name', { ascending: true })
-        .limit(n);
-    }
-
-    // 3) fallback: no count
+    // 2) fallback: no count (order by name only)
     if (res?.error) {
       res = await supabase
         .from('cities')
@@ -541,12 +531,10 @@ export const directoryApi = {
 
     const data = res?.data || [];
     return (Array.isArray(data) ? data : []).map((c) => {
-      const count = Number(c?.suplier_count ?? c?.supplier_count ?? 0) || 0;
+      const count = Number(c?.supplier_count ?? 0) || 0;
       return {
         ...c,
         slug: c?.slug || slugify(c?.name),
-        // keep both for compatibility
-        suplier_count: c?.suplier_count ?? c?.supplier_count ?? count,
         supplier_count: count,
       };
     });

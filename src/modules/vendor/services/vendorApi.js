@@ -93,14 +93,52 @@ const calculateProfileCompletion = (vendorData) => {
     'primary_business_type',
     'year_of_establishment'
   ];
-  
-  const filledFields = fieldsToCheck.filter(field => 
-    vendorData[field] && 
-    vendorData[field].toString().trim() !== '' && 
+
+  const filledFields = fieldsToCheck.filter(field =>
+    vendorData[field] &&
+    vendorData[field].toString().trim() !== '' &&
     vendorData[field] !== null
   ).length;
-  
+
   return Math.round((filledFields / fieldsToCheck.length) * 100);
+};
+
+// ✅ NEW: Normalize account status fields safely (works even if columns don't exist)
+const normalizeVendorAccountStatus = (vendor) => {
+  // If column doesn't exist, it will be undefined and safely handled.
+  const isVerified = vendor?.is_verified === true;
+  const isActive = vendor?.is_active === true;
+
+  // Suspended/terminated means NOT active (but login can still happen via Supabase auth)
+  const isSuspended = vendor?.is_active === false;
+
+  // Optional columns (if your DB has them)
+  const suspensionMessage =
+    vendor?.suspension_message ||
+    vendor?.suspension_reason ||
+    vendor?.termination_message ||
+    vendor?.termination_reason ||
+    '';
+
+  const terminatedAt = vendor?.terminated_at || null;
+  const suspensionAt = vendor?.suspended_at || null;
+
+  // Status string for UI
+  // Priority: terminated_at -> TERMINATED, else is_active false -> SUSPENDED, else ACTIVE/UNVERIFIED
+  let accountStatus = 'ACTIVE';
+  if (terminatedAt) accountStatus = 'TERMINATED';
+  else if (isSuspended) accountStatus = 'SUSPENDED';
+  else if (!isVerified) accountStatus = 'UNVERIFIED';
+
+  return {
+    isVerified,
+    isActive,
+    isSuspended,
+    accountStatus,
+    suspensionMessage,
+    terminatedAt,
+    suspensionAt
+  };
 };
 
 // ---------------- API ----------------
@@ -347,6 +385,25 @@ export const vendorApi = {
     return data;
   },
 
+  // ✅ NEW: Account status fetch for current vendor (for suspended overlay check)
+  account: {
+    getStatus: async () => {
+      const { data: { user }, error: uErr } = await supabase.auth.getUser();
+      if (uErr) throw uErr;
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: vendor, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      return normalizeVendorAccountStatus(vendor);
+    }
+  },
+
   // --- REGISTRATION & VERIFICATION ---
   registerVendor: async (payload) => {
     const {
@@ -467,6 +524,8 @@ export const vendorApi = {
 
       if (vErr) throw vErr;
 
+      const account = normalizeVendorAccountStatus(vendor);
+
       const transformedVendor = vendor ? {
         ...vendor,
 
@@ -501,6 +560,13 @@ export const vendorApi = {
         iecCode: vendor.iec_code,
         yearOfEstablishment: vendor.year_of_establishment,
         ownerDesignation: vendor.owner_designation,
+
+        // ✅ NEW: account status aliases (safe even if columns missing)
+        accountStatus: account.accountStatus,
+        isSuspended: account.isSuspended,
+        suspensionMessage: account.suspensionMessage,
+        suspendedAt: account.suspensionAt,
+        terminatedAt: account.terminatedAt,
       } : null;
 
       // ✅ Return safe auth + vendor data
@@ -1148,7 +1214,7 @@ export const vendorApi = {
     create: async (productData) => {
       const vendorId = await getVendorId();
       const slug = generateUniqueSlug(productData.name);
-      
+
       const insertData = {
         ...productData,
         vendor_id: vendorId,
@@ -1185,7 +1251,7 @@ export const vendorApi = {
     updateStatus: async (id, status) => {
       const validStatuses = ['ACTIVE', 'DRAFT', 'ARCHIVED'];
       if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-      
+
       const { data, error } = await supabase
         .from('products')
         .update({ status, updated_at: new Date().toISOString() })
@@ -1358,7 +1424,7 @@ export const vendorApi = {
   proposals: {
     list: async (type = 'received') => {
       const vendorId = await getVendorId();
-      
+
       if (type === 'sent') {
         // Get quotations sent by this vendor
         const { data, error } = await supabase
@@ -1457,7 +1523,7 @@ export const vendorApi = {
 
       const purchasedLeads = (purchases || []).map(p => ({ ...p.lead, source: 'Purchased', purchase_date: p.purchase_date }));
       const directLeads = (direct || []).map(l => ({ ...l, source: 'Direct', purchase_date: l.created_at }));
-      const directProposals = (proposals || []).map(p => ({ 
+      const directProposals = (proposals || []).map(p => ({
         id: p.id,
         title: p.title,
         description: p.description,
@@ -1864,7 +1930,7 @@ export const vendorApi = {
         .eq('vendor_id', vendorId)
         .maybeSingle();
       if (error) throw error;
-      
+
       if (!data) {
         return {
           vendor_id: vendorId,
@@ -2359,7 +2425,7 @@ export const vendorApi = {
         const { count } = await supabase
           .from('vendor_preferences')
           .select('*', { count: 'exact', head: true })
-          .or(stateIds.map((id, idx) => `preferred_states.contains.${JSON.stringify([id])}`).join(','));
+          .or(stateIds.map((id) => `preferred_states.contains.${JSON.stringify([id])}`).join(','));
         vendorsInState = count || 0;
       }
 
@@ -2370,7 +2436,7 @@ export const vendorApi = {
         const { count } = await supabase
           .from('vendor_preferences')
           .select('*', { count: 'exact', head: true })
-          .or(cityIds.map((id, idx) => `preferred_cities.contains.${JSON.stringify([id])}`).join(','));
+          .or(cityIds.map((id) => `preferred_cities.contains.${JSON.stringify([id])}`).join(','));
         vendorsInCity = count || 0;
       }
 
@@ -2381,7 +2447,7 @@ export const vendorApi = {
         const { count } = await supabase
           .from('vendor_preferences')
           .select('*', { count: 'exact', head: true })
-          .or(catIds.map((id, idx) => `preferred_micro_categories.contains.${JSON.stringify([id])}`).join(','));
+          .or(catIds.map((id) => `preferred_micro_categories.contains.${JSON.stringify([id])}`).join(','));
         vendorsInCategories = count || 0;
       }
 
@@ -2436,7 +2502,6 @@ export const vendorApi = {
 
     createTicket: async (ticketData) => {
       const vendorId = await getVendorId();
-      const { data: { user } } = await supabase.auth.getUser();
 
       const ticketDisplayId = `TKT-${Date.now()}`;
 
@@ -2595,11 +2660,17 @@ export const vendorApi = {
         .eq('vendor_id', vendorId)
         .eq('status', 'CLOSED');
 
+      const { count: inProgressCount } = await supabase
+        .from('support_tickets')
+        .select('*', { count: 'exact', head: true })
+        .eq('vendor_id', vendorId)
+        .eq('status', 'IN_PROGRESS');
+
       return {
         total: totalCount || 0,
         open: openCount || 0,
         closed: closedCount || 0,
-        unresolved: (openCount || 0) + ((await supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('vendor_id', vendorId).eq('status', 'IN_PROGRESS')).count || 0)
+        unresolved: (openCount || 0) + (inProgressCount || 0)
       };
     },
 

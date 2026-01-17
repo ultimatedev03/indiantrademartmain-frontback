@@ -103,6 +103,7 @@ router.post('/initiate', async (req, res) => {
 
     res.json({
       success: true,
+      key_id: process.env.RAZORPAY_KEY_ID,
       order: {
         id: order.id,
         amount: order.amount,

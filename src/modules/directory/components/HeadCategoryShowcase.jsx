@@ -221,15 +221,19 @@ const HeadCategoryShowcase = ({
 
                       <div className="mt-2 space-y-1">
                         {microList.map((m) => (
-                          <Link
+                          <span
                             key={m.id || m.slug}
-                            to={headSlug && subSlug && m?.slug ? `/directory/${headSlug}/${subSlug}/${m.slug}` : '#'}
-                            className="block text-sm text-slate-700 hover:text-blue-700 line-clamp-1"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (headSlug && subSlug && m?.slug) {
+                                window.location.href = `/directory/${headSlug}/${subSlug}/${m.slug}`;
+                              }
+                            }}
+                            className="block text-sm text-slate-700 hover:text-blue-700 line-clamp-1 cursor-pointer"
                             title={m?.name}
-                            onClick={(e) => e.stopPropagation()}
                           >
                             {m?.name}
-                          </Link>
+                          </span>
                         ))}
 
                         {microLoading && microList.length === 0 && (
@@ -244,13 +248,19 @@ const HeadCategoryShowcase = ({
                         )}
 
                         {hasMoreMicros && (
-                          <Link
-                            to={headSlug && subSlug ? `/directory/${headSlug}/${subSlug}` : '/directory'}
-                            className="block text-xs font-semibold text-blue-700 hover:text-blue-900 pt-1"
-                            onClick={(e) => e.stopPropagation()}
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (headSlug && subSlug) {
+                                window.location.href = `/directory/${headSlug}/${subSlug}`;
+                              } else {
+                                window.location.href = '/directory';
+                              }
+                            }}
+                            className="block text-xs font-semibold text-blue-700 hover:text-blue-900 pt-1 cursor-pointer"
                           >
                             View more →
-                          </Link>
+                          </span>
                         )}
                       </div>
                     </div>
