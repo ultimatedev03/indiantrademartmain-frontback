@@ -456,23 +456,34 @@ export const directoryApi = {
   getCities: async (stateId) => {
     if (!stateId) return [];
 
-    // try misspelled column first
+    // Helper: detect “column does not exist” errors (PostgREST)
+    const isMissingColumnErr = (err) => {
+      const msg = (err?.message || err?.details || '').toString().toLowerCase();
+      return msg.includes('does not exist') || msg.includes('42703');
+    };
+
+    // ✅ IMPORTANT:
+    // Production DB column is `supplier_count`.
+    // Earlier code tried `suplier_count` first which creates a 400 in Network/Console.
+    // So we try the correct column FIRST, and only fallback if truly missing.
+
+    // 1) try correct column
     let res = await supabase
       .from('cities')
-      .select('id, name, slug, suplier_count')
+      .select('id, name, slug, supplier_count')
       .eq('state_id', stateId)
       .order('name');
 
-    // fallback if schema has supplier_count
-    if (res?.error) {
+    // 2) fallback: misspelled column (only if missing)
+    if (res?.error && isMissingColumnErr(res.error)) {
       res = await supabase
         .from('cities')
-        .select('id, name, slug, supplier_count')
+        .select('id, name, slug, suplier_count')
         .eq('state_id', stateId)
         .order('name');
     }
 
-    // final fallback without count
+    // 3) final fallback: no count
     if (res?.error) {
       res = await supabase
         .from('cities')

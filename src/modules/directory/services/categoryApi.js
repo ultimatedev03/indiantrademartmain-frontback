@@ -5,6 +5,88 @@ const isMissingColumnErr = (error, columnName) => {
   return msg.includes('column') && msg.includes(String(columnName).toLowerCase()) && msg.includes('does not exist');
 };
 
+// PostgREST uses GET query strings for `.in(...)`. If the list is huge,
+// Netlify/edge can reject with 400 (URL too long). So we chunk requests.
+const chunkArray = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+// Fetch micro categories for many sub_category_ids safely (chunked + fallback
+// when columns like is_active / sort_order are missing in some DB setups)
+const fetchMicroCategoriesBySubIds = async (subIds) => {
+  if (!Array.isArray(subIds) || subIds.length === 0) return [];
+
+  const chunks = chunkArray(subIds, 60); // 60 keeps URL well under limits
+
+  const runChunk = async (ids) => {
+    // 1) try with is_active + sort_order
+    let q = supabase
+      .from('micro_categories')
+      .select('id, sub_category_id, name, slug')
+      .in('sub_category_id', ids)
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true });
+
+    let res = await q;
+
+    // If is_active column doesn't exist, retry without it
+    if (res.error && isMissingColumnErr(res.error, 'is_active')) {
+      res = await supabase
+        .from('micro_categories')
+        .select('id, sub_category_id, name, slug')
+        .in('sub_category_id', ids)
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+    }
+
+    // If sort_order column doesn't exist, retry without it
+    if (res.error && isMissingColumnErr(res.error, 'sort_order')) {
+      // retry (with is_active if it exists)
+      let q2 = supabase
+        .from('micro_categories')
+        .select('id, sub_category_id, name, slug')
+        .in('sub_category_id', ids)
+        .order('name', { ascending: true });
+
+      // Keep is_active filter only if it's not the missing column
+      if (!isMissingColumnErr(res.error, 'is_active')) {
+        q2 = q2.eq('is_active', true);
+      }
+
+      res = await q2;
+
+      // If is_active also missing, final fallback without it
+      if (res.error && isMissingColumnErr(res.error, 'is_active')) {
+        res = await supabase
+          .from('micro_categories')
+          .select('id, sub_category_id, name, slug')
+          .in('sub_category_id', ids)
+          .order('name', { ascending: true });
+      }
+    }
+
+    if (res.error) {
+      console.error('Error fetching micro categories chunk:', res.error);
+      return [];
+    }
+    return res.data || [];
+  };
+
+  // Run with limited parallelism to avoid rate limits
+  const results = [];
+  const CONCURRENCY = 4;
+  for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+    const batch = chunks.slice(i, i + CONCURRENCY);
+    const batchRes = await Promise.all(batch.map(runChunk));
+    batchRes.forEach((r) => results.push(...r));
+  }
+
+  return results;
+};
+
 export const categoryApi = {
   // ✅ Fetch top-level categories (Head Categories)
   getTopLevelCategories: async () => {
@@ -99,33 +181,8 @@ export const categoryApi = {
       const subs = subRes.data || [];
       const subIds = subs.map((s) => s.id);
 
-      // 3) Micros
-      let micros = [];
-      if (subIds.length > 0) {
-        let microRes = await supabase
-          .from('micro_categories')
-          .select('id, sub_category_id, name, slug')
-          .in('sub_category_id', subIds)
-          .eq('is_active', true)
-          .order('sort_order', { ascending: true })
-          .order('name', { ascending: true });
-
-        if (microRes.error && isMissingColumnErr(microRes.error, 'sort_order')) {
-          microRes = await supabase
-            .from('micro_categories')
-            .select('id, sub_category_id, name, slug')
-            .in('sub_category_id', subIds)
-            .eq('is_active', true)
-            .order('name', { ascending: true });
-        }
-
-        if (microRes.error) {
-          console.error('Error fetching micro categories:', microRes.error);
-          micros = [];
-        } else {
-          micros = microRes.data || [];
-        }
-      }
+      // 3) Micros (chunked to avoid huge URLs / 400 on Netlify)
+      const micros = await fetchMicroCategoriesBySubIds(subIds);
 
       // Group micros by sub
       const microsBySub = micros.reduce((acc, m) => {
