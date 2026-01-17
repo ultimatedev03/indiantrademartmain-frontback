@@ -1,12 +1,3 @@
-#!/usr/bin/env node
-
-/**
- * Generate Dynamic Sitemaps for Products, Vendors, and Categories
- * This ensures search engine bots can discover and index all individual product/service pages
- * 
- * Usage: node tools/generateSitemap.js
- */
-
 import { createClient } from '@supabase/supabase-js';
 import fs from 'fs';
 import path from 'path';
@@ -20,21 +11,20 @@ const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const BASE_URL = 'https://indiantrademart.com';
 
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  console.error('❌ Error: Missing Supabase credentials in .env.local');
+  console.error('Missing Supabase credentials in environment variables');
   process.exit(1);
 }
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-/**
- * XML Header for sitemap
- */
+const isMissingColumnError = (err) => {
+  if (!err) return false;
+  return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
+};
+
 const xmlHeader = '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
 const xmlFooter = '</urlset>';
 
-/**
- * Create URL entry for sitemap
- */
 const createUrlEntry = (location, lastmod, priority = '0.7', changefreq = 'weekly') => {
   return `  <url>
     <loc>${location}</loc>
@@ -44,26 +34,35 @@ const createUrlEntry = (location, lastmod, priority = '0.7', changefreq = 'weekl
   </url>`;
 };
 
-/**
- * Get current date in YYYY-MM-DD format
- */
-const getCurrentDate = () => {
-  const now = new Date();
-  return now.toISOString().split('T')[0];
-};
+const getCurrentDate = () => new Date().toISOString().split('T')[0];
 
-/**
- * Generate Products Sitemap
- */
 const generateProductsSitemap = async () => {
   console.log('📦 Generating products sitemap...');
-  
+
   try {
-    const { data: products, error } = await supabase
+    let products = null;
+    let error = null;
+
+    ({ data: products, error } = await supabase
       .from('products')
       .select('id, slug, updated_at, status')
       .eq('status', 'PUBLISHED')
-      .order('updated_at', { ascending: false });
+      .order('updated_at', { ascending: false }));
+
+    if (error && isMissingColumnError(error)) {
+      ({ data: products, error } = await supabase
+        .from('products')
+        .select('id, slug, created_at, status')
+        .eq('status', 'PUBLISHED')
+        .order('created_at', { ascending: false }));
+    }
+
+    if (error && isMissingColumnError(error)) {
+      ({ data: products, error } = await supabase
+        .from('products')
+        .select('id, slug, created_at')
+        .order('created_at', { ascending: false }));
+    }
 
     if (error) {
       console.error('Error fetching products:', error);
@@ -75,39 +74,46 @@ const generateProductsSitemap = async () => {
       return null;
     }
 
-    const urls = products.map(product => {
-      const lastmod = product.updated_at ? product.updated_at.split('T')[0] : getCurrentDate();
-      return createUrlEntry(
-        `${BASE_URL}/p/${product.slug || product.id}`,
-        lastmod,
-        '0.8',
-        'weekly'
-      );
+    const urls = products.map((p) => {
+      const lastmodRaw = p.updated_at || p.created_at;
+      const lastmod = lastmodRaw ? lastmodRaw.split('T')[0] : getCurrentDate();
+      return createUrlEntry(`${BASE_URL}/products/${p.id}`, lastmod, '0.8', 'weekly');
     });
 
-    const sitemap = `${xmlHeader}
-${urls.join('\n')}
-${xmlFooter}`;
-
-    return sitemap;
+    return `${xmlHeader}\n${urls.join('\n')}\n${xmlFooter}`;
   } catch (err) {
     console.error('Fatal error generating products sitemap:', err);
     return null;
   }
 };
 
-/**
- * Generate Vendors Sitemap
- */
 const generateVendorsSitemap = async () => {
   console.log('🏢 Generating vendors sitemap...');
-  
+
   try {
-    const { data: vendors, error } = await supabase
+    let vendors = null;
+    let error = null;
+
+    ({ data: vendors, error } = await supabase
       .from('vendors')
-      .select('id, company_slug, updated_at, status')
+      .select('id, updated_at, status')
       .eq('status', 'VERIFIED')
-      .order('updated_at', { ascending: false });
+      .order('updated_at', { ascending: false }));
+
+    if (error && isMissingColumnError(error)) {
+      ({ data: vendors, error } = await supabase
+        .from('vendors')
+        .select('id, created_at, status')
+        .eq('status', 'VERIFIED')
+        .order('created_at', { ascending: false }));
+    }
+
+    if (error && isMissingColumnError(error)) {
+      ({ data: vendors, error } = await supabase
+        .from('vendors')
+        .select('id, created_at')
+        .order('created_at', { ascending: false }));
+    }
 
     if (error) {
       console.error('Error fetching vendors:', error);
@@ -119,184 +125,162 @@ const generateVendorsSitemap = async () => {
       return null;
     }
 
-    const urls = vendors.map(vendor => {
-      const lastmod = vendor.updated_at ? vendor.updated_at.split('T')[0] : getCurrentDate();
-      return createUrlEntry(
-        `${BASE_URL}/directory/vendor/${vendor.id}`,
-        lastmod,
-        '0.7',
-        'monthly'
-      );
+    const urls = vendors.map((v) => {
+      const lastmodRaw = v.updated_at || v.created_at;
+      const lastmod = lastmodRaw ? lastmodRaw.split('T')[0] : getCurrentDate();
+      return createUrlEntry(`${BASE_URL}/directory/vendor/${v.id}`, lastmod, '0.8', 'weekly');
     });
 
-    const sitemap = `${xmlHeader}
-${urls.join('\n')}
-${xmlFooter}`;
-
-    return sitemap;
+    return `${xmlHeader}\n${urls.join('\n')}\n${xmlFooter}`;
   } catch (err) {
     console.error('Fatal error generating vendors sitemap:', err);
     return null;
   }
 };
 
-/**
- * Generate Categories Sitemap
- */
 const generateCategoriesSitemap = async () => {
   console.log('📂 Generating categories sitemap...');
-  
+
   try {
-    const urls = [];
-
-    // Fetch head categories
-    const { data: headCats, error: headError } = await supabase
-      .from('head_categories')
-      .select('slug, updated_at')
-      .order('updated_at', { ascending: false });
-
-    if (headError) {
-      console.error('Error fetching head categories:', headError);
-      return null;
-    }
-
-    // Fetch sub categories
-    const { data: subCats, error: subError } = await supabase
-      .from('sub_categories')
-      .select('slug, updated_at')
-      .order('updated_at', { ascending: false });
-
-    if (subError) {
-      console.error('Error fetching sub categories:', subError);
-      return null;
-    }
-
-    // Fetch micro categories
-    const { data: microCats, error: microError } = await supabase
+    const { data: categories, error } = await supabase
       .from('micro_categories')
-      .select('slug, updated_at')
+      .select(`
+        id,
+        slug,
+        name,
+        sub_categories!inner(
+          id,
+          slug,
+          name,
+          head_categories!inner(
+            id,
+            slug,
+            name
+          )
+        ),
+        updated_at
+      `)
+      .eq('is_active', true)
       .order('updated_at', { ascending: false });
 
-    if (microError) {
-      console.error('Error fetching micro categories:', microError);
+    if (error) {
+      console.error('Error fetching categories:', error);
       return null;
     }
 
-    // Add head categories
-    if (headCats) {
-      headCats.forEach(cat => {
-        const lastmod = cat.updated_at ? cat.updated_at.split('T')[0] : getCurrentDate();
-        urls.push(createUrlEntry(
-          `${BASE_URL}/directory/${cat.slug}`,
-          lastmod,
-          '0.8',
-          'weekly'
-        ));
-      });
-    }
-
-    // Add sub categories
-    if (subCats) {
-      subCats.forEach(cat => {
-        const lastmod = cat.updated_at ? cat.updated_at.split('T')[0] : getCurrentDate();
-        urls.push(createUrlEntry(
-          `${BASE_URL}/directory/subcategory/${cat.slug}`,
-          lastmod,
-          '0.75',
-          'weekly'
-        ));
-      });
-    }
-
-    // Add micro categories
-    if (microCats) {
-      microCats.forEach(cat => {
-        const lastmod = cat.updated_at ? cat.updated_at.split('T')[0] : getCurrentDate();
-        urls.push(createUrlEntry(
-          `${BASE_URL}/directory/microcategory/${cat.slug}`,
-          lastmod,
-          '0.7',
-          'weekly'
-        ));
-      });
-    }
-
-    if (urls.length === 0) {
+    if (!categories || categories.length === 0) {
       console.warn('⚠️  No categories found');
       return null;
     }
 
-    const sitemap = `${xmlHeader}
-${urls.join('\n')}
-${xmlFooter}`;
+    // ✅ Cities fetch with fallback for missing state_slug
+    let cities = null;
+    let citiesError = null;
 
-    return sitemap;
+    ({ data: cities, error: citiesError } = await supabase
+      .from('cities')
+      .select('id, slug, name, state_slug')
+      .order('supplier_count', { ascending: false })
+      .limit(50));
+
+    // If state_slug missing -> retry without it and skip location pages
+    if (citiesError && isMissingColumnError(citiesError)) {
+      console.warn('⚠️  cities.state_slug missing. City+state pages will be skipped (build continues).');
+      ({ data: cities, error: citiesError } = await supabase
+        .from('cities')
+        .select('id, slug, name')
+        .order('supplier_count', { ascending: false })
+        .limit(50));
+    }
+
+    if (citiesError) {
+      console.warn('Warning: Could not fetch cities for category pages:', citiesError);
+      cities = null;
+    }
+
+    const urls = [];
+
+    categories.forEach((category) => {
+      const lastmod = category.updated_at ? category.updated_at.split('T')[0] : getCurrentDate();
+
+      // Base category page
+      urls.push(createUrlEntry(`${BASE_URL}/directory/${category.slug}`, lastmod, '0.7', 'monthly'));
+
+      // Location pages only if state_slug available
+      if (cities && cities.length > 0) {
+        cities.forEach((city) => {
+          if (!city.state_slug) return; // skip if missing
+          const locationUrl = `${BASE_URL}/directory/${category.slug}-in-${city.slug}-${city.state_slug}`;
+          urls.push(createUrlEntry(locationUrl, lastmod, '0.6', 'monthly'));
+        });
+      }
+    });
+
+    return `${xmlHeader}\n${urls.join('\n')}\n${xmlFooter}`;
   } catch (err) {
     console.error('Fatal error generating categories sitemap:', err);
     return null;
   }
 };
 
-/**
- * Write sitemap file to public directory
- */
-const writeSitemap = (filename, content) => {
-  if (!content) {
-    console.warn(`⚠️  Skipping empty sitemap: ${filename}`);
-    return false;
-  }
-
+const writeSitemapFile = (filename, content) => {
   const publicDir = path.join(process.cwd(), 'public');
+  if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+
   const filePath = path.join(publicDir, filename);
-
-  try {
-    fs.writeFileSync(filePath, content, 'utf-8');
-    console.log(`✅ Created ${filename}`);
-    return true;
-  } catch (err) {
-    console.error(`❌ Error writing ${filename}:`, err);
-    return false;
-  }
+  fs.writeFileSync(filePath, content);
+  console.log(`✅ Created ${filename}`);
 };
 
-/**
- * Main execution
- */
-const main = async () => {
-  console.log('\n🤖 Starting dynamic sitemap generation...\n');
+const generateSitemapIndex = (sitemaps) => {
+  const header = '<?xml version="1.0" encoding="UTF-8"?>\n<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">';
+  const footer = '</sitemapindex>';
 
-  const startTime = Date.now();
+  const entries = sitemaps.map((s) => {
+    return `  <sitemap>
+    <loc>${BASE_URL}/${s.name}</loc>
+    <lastmod>${getCurrentDate()}</lastmod>
+  </sitemap>`;
+  });
 
-  try {
-    const [productsSitemap, vendorsSitemap, categoriesSitemap] = await Promise.all([
-      generateProductsSitemap(),
-      generateVendorsSitemap(),
-      generateCategoriesSitemap(),
-    ]);
-
-    let successCount = 0;
-
-    if (writeSitemap('sitemap-products.xml', productsSitemap)) successCount++;
-    if (writeSitemap('sitemap-vendors.xml', vendorsSitemap)) successCount++;
-    if (writeSitemap('sitemap-categories.xml', categoriesSitemap)) successCount++;
-
-    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`\n✨ Sitemap generation complete! (${duration}s)`);
-    console.log(`📊 Generated ${successCount}/3 sitemaps\n`);
-
-    console.log('📍 Reference these in robots.txt:');
-    console.log('   Sitemap: https://indiantrademart.com/sitemap-products.xml');
-    console.log('   Sitemap: https://indiantrademart.com/sitemap-vendors.xml');
-    console.log('   Sitemap: https://indiantrademart.com/sitemap-categories.xml\n');
-
-  } catch (err) {
-    console.error('❌ Fatal error:', err);
-    process.exit(1);
-  }
+  return `${header}\n${entries.join('\n')}\n${footer}`;
 };
 
-// Run
-main().catch(err => {
-  console.error('Uncaught error:', err);
-  process.exit(1);
-});
+const generateAllSitemaps = async () => {
+  console.log('🤖 Starting dynamic sitemap generation...');
+
+  const sitemaps = [
+    { name: 'sitemap-products.xml', generator: generateProductsSitemap },
+    { name: 'sitemap-vendors.xml', generator: generateVendorsSitemap },
+    { name: 'sitemap-categories.xml', generator: generateCategoriesSitemap }
+  ];
+
+  const generated = [];
+
+  for (const sitemap of sitemaps) {
+    try {
+      const content = await sitemap.generator();
+      if (content) {
+        writeSitemapFile(sitemap.name, content);
+        generated.push(sitemap);
+      } else {
+        console.warn(`⚠️  Skipping empty sitemap: ${sitemap.name}`);
+      }
+    } catch (err) {
+      console.error(`Error generating ${sitemap.name}:`, err);
+    }
+  }
+
+  // sitemap index
+  if (generated.length > 0) {
+    const sitemapIndex = generateSitemapIndex(generated);
+    writeSitemapFile('sitemap.xml', sitemapIndex);
+    console.log('✅ Created sitemap index file: sitemap.xml');
+  }
+
+  console.log(`✨ Sitemap generation complete! (${generated.length}/${sitemaps.length} sitemaps generated)`);
+  console.log('📍 Reference these in robots.txt:');
+  sitemaps.forEach((s) => console.log(`   Sitemap: ${BASE_URL}/${s.name}`));
+};
+
+generateAllSitemaps().catch(console.error);
