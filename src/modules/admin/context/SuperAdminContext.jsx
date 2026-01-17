@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
@@ -8,6 +7,27 @@ const SuperAdminContext = createContext(null);
 export const SuperAdminProvider = ({ children }) => {
   const [superAdmin, setSuperAdmin] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  const normalizeRole = (role) => {
+    if (!role) return undefined;
+    const r = String(role).trim().toUpperCase();
+    // accept common variants
+    const compact = r.replace(/[^A-Z]/g, '');
+    if (compact === 'SUPERADMIN' || compact === 'SUPERUSER' || compact === 'GODMODE') return 'SUPERADMIN';
+    return r;
+  };
+
+  const normalizeRow = (raw, email) => {
+    const row = Array.isArray(raw) ? raw[0] : raw;
+    if (!row || (typeof row === 'object' && Object.keys(row).length === 0)) return null;
+    // If the RPC is specifically for superadmin login, treat missing role as SUPERADMIN.
+    const role = normalizeRole(row.role || row.user_role || row.userRole || row.type) || 'SUPERADMIN';
+    return {
+      ...row,
+      email: row.email || email,
+      role,
+    };
+  };
 
   useEffect(() => {
     const stored = localStorage.getItem('itm_superadmin_session');
@@ -20,10 +40,11 @@ export const SuperAdminProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       setIsLoading(true);
-      console.log(`[SuperAdminAuth] Attempting login for: ${email}`);
+      const safeEmail = String(email || '').trim();
+      console.log(`[SuperAdminAuth] Attempting login for: ${safeEmail}`);
 
       const { data, error } = await supabase.rpc('login_superadmin', {
-        p_email: email,
+        p_email: safeEmail,
         p_password: password
       });
 
@@ -34,9 +55,10 @@ export const SuperAdminProvider = ({ children }) => {
 
       console.log("[SuperAdminAuth] RPC Response:", data);
 
-      if (data) {
-        setSuperAdmin(data);
-        localStorage.setItem('itm_superadmin_session', JSON.stringify(data));
+      const normalized = normalizeRow(data, safeEmail);
+      if (normalized) {
+        setSuperAdmin(normalized);
+        localStorage.setItem('itm_superadmin_session', JSON.stringify(normalized));
         toast({
           title: "Access Granted",
           description: "Welcome to the Super Admin Console.",
@@ -49,9 +71,15 @@ export const SuperAdminProvider = ({ children }) => {
       }
     } catch (error) {
       console.error("[SuperAdminAuth] Login Exception:", error);
+
+      const msg = String(error?.message || error || 'Login failed');
+      const looksLikeMissingFn = /login_superadmin/i.test(msg) && /(does not exist|not found|function)/i.test(msg);
+
       toast({
         title: "Access Denied",
-        description: "Invalid credentials. Check console for details.",
+        description: looksLikeMissingFn
+          ? "DB me login_superadmin RPC missing hai. Supabase me function create/run karna padega."
+          : "Invalid credentials. Check console for details.",
         variant: "destructive"
       });
       return false;

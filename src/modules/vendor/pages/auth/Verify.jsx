@@ -123,11 +123,11 @@ const Verify = () => {
             <div className="space-y-2">
               <Input
                 type="text"
-                placeholder="Enter 8-digit OTP"
+                placeholder="Enter 6-digit OTP"
                 value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="text-center text-2xl tracking-[0.5em] h-14"
-                maxLength={8}
+                maxLength={6}
                 inputMode="numeric"
                 autoComplete="one-time-code"
               />

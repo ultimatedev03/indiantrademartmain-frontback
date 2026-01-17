@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSuperAdmin } from '@/modules/admin/context/SuperAdminContext';
@@ -18,7 +17,8 @@ const SuperAdminLogin = () => {
     setLoading(true);
     const success = await login(formData.email, formData.password);
     if (success) {
-      navigate('/admin/register/superadmin/dashboard');
+      // ✅ Keep route consistent with /admin/superadmin/*
+      navigate('/admin/superadmin/dashboard');
     }
     setLoading(false);
   };
