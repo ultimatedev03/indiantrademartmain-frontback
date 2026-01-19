@@ -1,41 +1,30 @@
+// ✅ File: src/modules/directory/api/directoryApi.js
 import { supabase } from '@/lib/customSupabaseClient';
 
-// ✅ Local vs Netlify API base (for server-side ranked search)
-const isLocalHost = () => {
-  if (typeof window === 'undefined') return false;
-  const h = window.location.hostname;
-  return h === 'localhost' || h === '127.0.0.1';
+// ✅ helper (only used for getTopCities fallback slug)
+const slugify = (text = '') =>
+  String(text || '')
+    .toLowerCase()
+    .trim()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+// ✅ NEW: safely extract first image url
+const pickFirstImageUrl = (images) => {
+  const imgs = images;
+  let url = null;
+
+  if (Array.isArray(imgs) && imgs.length > 0) {
+    const first = imgs[0];
+    if (typeof first === 'string') url = first;
+    else if (first && typeof first === 'object') url = first.url || first.image_url || first.src || null;
+  }
+
+  if (typeof url === 'string' && url.trim().length > 0) return url.trim();
+  return null;
 };
-
-const getDirBase = () => {
-  const override = import.meta.env.VITE_DIR_API_BASE;
-  if (override && String(override).trim()) return String(override).trim();
-  return isLocalHost() ? '/api/dir' : '/.netlify/functions/dir';
-};
-
-async function safeReadJson(res) {
-  const ct = res.headers.get('content-type') || '';
-  if (ct.includes('application/json')) return await res.json();
-  const text = await res.text();
-  throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 120)}...`);
-}
-
-async function fetchRankedProducts({ q, microSlug, stateId, cityId, sort = '', page = 1, limit = 20 }) {
-  const sp = new URLSearchParams();
-  if (q) sp.set('q', String(q));
-  if (microSlug) sp.set('microSlug', String(microSlug));
-  if (stateId) sp.set('stateId', String(stateId));
-  if (cityId) sp.set('cityId', String(cityId));
-  if (sort) sp.set('sort', String(sort));
-  sp.set('page', String(page || 1));
-  sp.set('limit', String(limit || 20));
-
-  const url = `${getDirBase()}/products?${sp.toString()}`;
-  const res = await fetch(url, { method: 'GET' });
-  const json = await safeReadJson(res);
-  if (!json?.success) throw new Error(json?.details || json?.error || 'Failed to load products');
-  return { data: json.data || [], count: json.count || 0 };
-}
 
 export const directoryApi = {
   getHeadCategories: async () => {
@@ -44,6 +33,7 @@ export const directoryApi = {
       .select('id, name, slug, image_url, description')
       .eq('is_active', true)
       .order('name');
+
     if (error) throw error;
     return data || [];
   },
@@ -105,7 +95,7 @@ export const directoryApi = {
 
     const { data, error } = await supabase
       .from('micro_categories')
-      .select('id, name, slug, sort_order') // ✅ only existing columns
+      .select('id, name, slug, sort_order, image_url')
       .eq('sub_category_id', subId)
       .eq('is_active', true)
       .order('sort_order', { ascending: true })
@@ -115,38 +105,47 @@ export const directoryApi = {
     return data || [];
   },
 
-  // ✅ cover images derived from products
+  // ✅ cover images derived from micro image OR products
+  // ✅ UPDATED: products of suspended vendors should NOT be used for covers
   getMicroCategoryCovers: async (microIds = []) => {
     try {
       const ids = Array.isArray(microIds) ? microIds.filter(Boolean) : [];
       if (ids.length === 0) return {};
 
+      // 1) First prefer explicit micro category images (if configured)
+      const { data: microData, error: microErr } = await supabase
+        .from('micro_categories')
+        .select('id, image_url')
+        .in('id', ids);
+
+      if (microErr) throw microErr;
+
+      const map = {};
+      for (const m of microData || []) {
+        const url = typeof m?.image_url === 'string' ? m.image_url.trim() : '';
+        if (m?.id && url) map[m.id] = url;
+      }
+
+      // 2) Fill missing covers from latest product images (ONLY active vendors)
+      const missing = ids.filter((id) => !map[id]);
+      if (missing.length === 0) return map;
+
       const { data, error } = await supabase
         .from('products')
-        .select('micro_category_id, images, created_at')
-        .in('micro_category_id', ids)
+        .select('micro_category_id, images, created_at, vendors!inner(is_active)')
+        .in('micro_category_id', missing)
         .eq('status', 'ACTIVE')
+        .eq('vendors.is_active', true)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const map = {};
       for (const row of data || []) {
         const mid = row.micro_category_id;
         if (!mid || map[mid]) continue;
 
-        const imgs = row.images;
-        let url = null;
-
-        if (Array.isArray(imgs) && imgs.length > 0) {
-          const first = imgs[0];
-          if (typeof first === 'string') url = first;
-          else if (first && typeof first === 'object') url = first.url || first.image_url || first.src || null;
-        }
-
-        if (typeof url === 'string' && url.trim().length > 0) {
-          map[mid] = url.trim();
-        }
+        const url = pickFirstImageUrl(row.images);
+        if (url) map[mid] = url;
       }
 
       return map;
@@ -158,6 +157,7 @@ export const directoryApi = {
 
   /**
    * ✅ NEW: micro-wise products preview (single query, then group client-side)
+   * ✅ UPDATED: exclude suspended vendors
    * Returns: { [microId]: Product[] }
    */
   getProductsPreviewByMicroIds: async ({ microIds = [], perMicro = 6 }) => {
@@ -170,9 +170,10 @@ export const directoryApi = {
 
       const { data, error } = await supabase
         .from('products')
-        .select('id, name, slug, price, images, micro_category_id, created_at')
+        .select('id, name, slug, price, images, micro_category_id, created_at, vendors!inner(is_active)')
         .in('micro_category_id', ids)
         .eq('status', 'ACTIVE')
+        .eq('vendors.is_active', true)
         .order('created_at', { ascending: false })
         .limit(fetchLimit);
 
@@ -190,7 +191,6 @@ export const directoryApi = {
       return map;
     } catch (e) {
       console.error('Error loading products preview:', e);
-      // ✅ IMPORTANT: never break the page
       return {};
     }
   },
@@ -223,6 +223,7 @@ export const directoryApi = {
       }));
     }
 
+    // (keeping as-is; optional: you can tighten by checking active vendors too)
     if (results.length < 6) {
       const { data: prodData, error: prodError } = await supabase
         .from('products')
@@ -303,33 +304,105 @@ export const directoryApi = {
     return unique.slice(0, 10);
   },
 
+  // ✅ UPDATED: exclude suspended vendors in ALL product lists
   searchProducts: async ({ q, stateId, cityId, sort = '', page = 1, limit = 20 }) => {
-    // ✅ Ranked search by vendor plan (DIAMOND > GOLD > SILVER > BOOSTER > CERTIFIED > STARTUP > TRIAL)
-    return fetchRankedProducts({ q, microSlug: '', stateId, cityId, sort, page, limit });
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from('products')
+      .select(`
+        *,
+        vendors!inner (
+          id, company_name, city, state, state_id, city_id,
+          seller_rating, kyc_status, verification_badge, trust_score,
+          is_active
+        )
+      `, { count: 'exact' })
+      .eq('status', 'ACTIVE')
+      .eq('vendors.is_active', true);
+
+    if (q) query = query.ilike('name', `%${q}%`);
+    if (stateId) query = query.eq('vendors.state_id', stateId);
+    if (cityId) query = query.eq('vendors.city_id', cityId);
+
+    if (sort === 'price_asc') query = query.order('price', { ascending: true });
+    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
+
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+
+    return { data: data || [], count };
   },
 
+  // ✅ UPDATED: exclude suspended vendors
   listProductsByMicro: async ({ microSlug, stateId, cityId, q, sort, page = 1, limit = 20 }) => {
-    // ✅ Ranked search by vendor plan (server-side)
-    return fetchRankedProducts({ q, microSlug, stateId, cityId, sort, page, limit });
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from('products')
+      .select(`
+        *,
+        vendors!inner (
+          id, company_name, city, state, state_id, city_id,
+          seller_rating, kyc_status, verification_badge, trust_score,
+          is_active
+        )
+      `, { count: 'exact' })
+      .eq('status', 'ACTIVE')
+      .eq('vendors.is_active', true);
+
+    if (microSlug) {
+      const { data: micro, error: microErr } = await supabase
+        .from('micro_categories')
+        .select('id')
+        .eq('slug', microSlug)
+        .single();
+
+      if (microErr) throw microErr;
+      if (micro) query = query.eq('micro_category_id', micro.id);
+    }
+
+    if (q) query = query.ilike('name', `%${q}%`);
+    if (stateId) query = query.eq('vendors.state_id', stateId);
+    if (cityId) query = query.eq('vendors.city_id', cityId);
+
+    if (sort === 'price_asc') query = query.order('price', { ascending: true });
+    else if (sort === 'price_desc') query = query.order('price', { ascending: false });
+    else query = query.order('created_at', { ascending: false });
+
+    query = query.range(from, to);
+
+    const { data, count, error } = await query;
+    if (error) throw error;
+
+    return { data: data || [], count };
   },
 
+  // ✅ UPDATED: return null if vendor suspended (hide)
   getProductDetailBySlug: async (slug) => {
     const { data: product, error } = await supabase
       .from('products')
       .select(`
         *,
-        vendors (*)
+        vendors!inner (*)
       `)
       .eq('slug', slug)
-      .single();
+      .eq('vendors.is_active', true)
+      .maybeSingle();
 
     if (error) throw error;
+    if (!product) return null;
 
     if (product && product.micro_category_id) {
       const { data: catData } = await supabase
         .from('micro_categories')
         .select(`
-          id, name, slug,
+          id, name, slug, image_url,
           sub_categories (
             id, name, slug,
             head_categories (id, name, slug)
@@ -401,10 +474,102 @@ export const directoryApi = {
     return data || [];
   },
 
+  // ✅ also returns supplier_count safely (supports suplier_count column)
   getCities: async (stateId) => {
     if (!stateId) return [];
-    const { data } = await supabase.from('cities').select('id, name, slug').eq('state_id', stateId).order('name');
-    return data || [];
+
+    // try misspelled column first
+    let res = await supabase
+      .from('cities')
+      .select('id, name, slug, suplier_count')
+      .eq('state_id', stateId)
+      .order('name');
+
+    // fallback if schema has supplier_count
+    if (res?.error) {
+      res = await supabase
+        .from('cities')
+        .select('id, name, slug, supplier_count')
+        .eq('state_id', stateId)
+        .order('name');
+    }
+
+    // final fallback without count
+    if (res?.error) {
+      res = await supabase
+        .from('cities')
+        .select('id, name, slug')
+        .eq('state_id', stateId)
+        .order('name');
+    }
+
+    const data = res?.data || [];
+    return (Array.isArray(data) ? data : []).map((c) => {
+      const count = Number(c?.suplier_count ?? c?.supplier_count ?? 0) || 0;
+      return {
+        ...c,
+        slug: c?.slug || slugify(c?.name),
+        suplier_count: c?.suplier_count ?? c?.supplier_count ?? count,
+        supplier_count: count,
+      };
+    });
+  },
+
+  /**
+   * ✅ FIXED: getTopCities now reads REAL DB count column.
+   * Your DB column: suplier_count (misspelled) ✅ handled
+   * UI expects: supplier_count ✅ we map it
+   */
+  getTopCities: async (limit = 200) => {
+    let n = 200;
+    if (typeof limit === 'number') n = limit;
+    else if (limit && typeof limit === 'object') {
+      n = Number(limit.limit || limit.pageSize || limit.size || 200);
+    }
+    if (!Number.isFinite(n) || n <= 0) n = 200;
+
+    // 1) try with suplier_count (your DB)
+    let res = await supabase
+      .from('cities')
+      .select('id, name, slug, suplier_count')
+      .order('suplier_count', { ascending: false })
+      .order('name', { ascending: true })
+      .limit(n);
+
+    // 2) fallback: supplier_count
+    if (res?.error) {
+      res = await supabase
+        .from('cities')
+        .select('id, name, slug, supplier_count')
+        .order('supplier_count', { ascending: false })
+        .order('name', { ascending: true })
+        .limit(n);
+    }
+
+    // 3) fallback: no count
+    if (res?.error) {
+      res = await supabase
+        .from('cities')
+        .select('id, name, slug')
+        .order('name', { ascending: true })
+        .limit(n);
+    }
+
+    if (res?.error) {
+      console.error('[directoryApi.getTopCities] error:', res.error);
+      return [];
+    }
+
+    const data = res?.data || [];
+    return (Array.isArray(data) ? data : []).map((c) => {
+      const count = Number(c?.suplier_count ?? c?.supplier_count ?? 0) || 0;
+      return {
+        ...c,
+        slug: c?.slug || slugify(c?.name),
+        suplier_count: c?.suplier_count ?? c?.supplier_count ?? count,
+        supplier_count: count,
+      };
+    });
   },
 
   getMicroCategoryBySlug: async (microSlug) => {
@@ -444,10 +609,45 @@ export const directoryApi = {
     }
   },
 
+  // ✅ UPDATED: exclude suspended vendors
   getProductsByMicroAndLocation: async ({ microSlug, stateId, cityId, page = 1, limit = 20 }) => {
     try {
-      // ✅ Ranked search by vendor plan (server-side)
-      return fetchRankedProducts({ q: '', microSlug, stateId, cityId, sort: '', page, limit });
+      const from = (page - 1) * limit;
+      const to = from + limit - 1;
+
+      const { data: micro, error: microError } = await supabase
+        .from('micro_categories')
+        .select('id')
+        .eq('slug', microSlug)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (microError || !micro) return { data: [], count: 0 };
+
+      let query = supabase
+        .from('products')
+        .select(`
+          *,
+          vendors!inner (
+            id, company_name, city, state, state_id, city_id,
+            seller_rating, kyc_status, verification_badge, trust_score,
+            is_active
+          )
+        `, { count: 'exact' })
+        .eq('micro_category_id', micro.id)
+        .eq('status', 'ACTIVE')
+        .eq('vendors.is_active', true);
+
+      if (stateId) query = query.eq('vendors.state_id', stateId);
+      if (cityId) query = query.eq('vendors.city_id', cityId);
+
+      query = query.order('created_at', { ascending: false }).range(from, to);
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+
+      return { data: data || [], count };
     } catch (err) {
       console.warn('Error fetching products by micro and location:', err);
       return { data: [], count: 0 };

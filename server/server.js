@@ -12,6 +12,7 @@ import kycRoutes from './routes/kyc.js';
 import adminRoutes from './routes/admin.js';
 import dirRoutes from './routes/dir.js';
 import paymentRoutes from './routes/payment.js';
+import chatbotRoutes from './routes/chatbot.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 
@@ -84,6 +85,7 @@ app.use('/api/kyc', kycRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/dir', dirRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/chat', chatbotRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();

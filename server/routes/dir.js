@@ -1,3 +1,4 @@
+// ✅ File: server/routes/dir.js
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -28,7 +29,6 @@ function planToTierKey(planName) {
   if (n.includes('certified') || n.includes('certificate')) return 'certified';
   if (n.includes('startup')) return 'startup';
   if (n.includes('trial') || n.includes('free')) return 'trial';
-  // Unknown plan -> treat as trial (last)
   return 'trial';
 }
 
@@ -58,6 +58,7 @@ function applySort(q, sort) {
 
 async function resolveMicroId(microSlug) {
   if (!microSlug) return null;
+
   const { data: micro, error } = await supabase
     .from('micro_categories')
     .select('id')
@@ -65,6 +66,7 @@ async function resolveMicroId(microSlug) {
     .order('updated_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+
   if (error) throw error;
   return micro?.id || null;
 }
@@ -72,7 +74,6 @@ async function resolveMicroId(microSlug) {
 async function getActivePlanMaps() {
   const nowIso = new Date().toISOString();
 
-  // Pull ACTIVE subscriptions (not expired)
   const { data: subs, error } = await supabase
     .from('vendor_plan_subscriptions')
     .select('vendor_id, plan_id, status, end_date, start_date, plan:vendor_plans(name)')
@@ -82,7 +83,6 @@ async function getActivePlanMaps() {
 
   if (error) throw error;
 
-  // Keep the latest active subscription per vendor
   const planNameByVendor = {};
   const tierKeyByVendor = {};
 
@@ -90,6 +90,7 @@ async function getActivePlanMaps() {
     const vid = s?.vendor_id;
     if (!isValidId(vid)) continue;
     if (planNameByVendor[vid]) continue;
+
     const planName = s?.plan?.name || '';
     planNameByVendor[vid] = planName;
     tierKeyByVendor[vid] = planToTierKey(planName);
@@ -98,6 +99,11 @@ async function getActivePlanMaps() {
   return { planNameByVendor, tierKeyByVendor };
 }
 
+/**
+ * ✅ IMPORTANT:
+ * Hide suspended/terminated vendors' products.
+ * Assuming vendors table has boolean column: is_active
+ */
 function buildBaseProductQuery({ microId, q, stateId, cityId }) {
   let query = supabase
     .from('products')
@@ -106,12 +112,15 @@ function buildBaseProductQuery({ microId, q, stateId, cityId }) {
         *,
         vendors!inner (
           id, company_name, city, state, state_id, city_id,
-          seller_rating, kyc_status, verification_badge, trust_score
+          seller_rating, kyc_status, verification_badge, trust_score,
+          is_active
         )
       `,
       { count: 'exact' }
     )
-    .eq('status', 'ACTIVE');
+    .eq('status', 'ACTIVE')
+    // ✅ hide products of suspended vendors
+    .eq('vendors.is_active', true);
 
   if (microId) query = query.eq('micro_category_id', microId);
   if (q) query = query.ilike('name', `%${q}%`);
@@ -136,7 +145,6 @@ async function countForVendorFilter({ microId, q, stateId, cityId, vendorFilter 
     }
   }
 
-  // Only count
   const { count, error } = await query.select('id', { count: 'exact', head: true });
   if (error) throw error;
   return Number(count || 0);
@@ -158,6 +166,7 @@ async function fetchForVendorFilter({ microId, q, stateId, cityId, vendorFilter,
   }
 
   query = applySort(query, sort);
+
   const from = offsetInGroup;
   const to = offsetInGroup + limit - 1;
   query = query.range(from, to);
@@ -167,16 +176,16 @@ async function fetchForVendorFilter({ microId, q, stateId, cityId, vendorFilter,
   return data || [];
 }
 
-// GET /api/dir/products?q=&microSlug=&stateId=&cityId=&sort=&page=&limit=
-router.get('/products', async (req, res) => {
+async function handleRankedProducts(req, res) {
   try {
-    const q = safeQ(req.query.q);
-    const microSlug = safeQ(req.query.microSlug);
+    // NOTE: search page may send `q` OR `query` OR `term`
+    const q = safeQ(req.query.q || req.query.query || req.query.term);
+    const microSlug = safeQ(req.query.microSlug || req.query.micro || req.query.micro_slug);
     const sort = String(req.query.sort || '').trim();
     const page = clampInt(req.query.page, 1, 1, 5000);
     const limit = clampInt(req.query.limit, 20, 1, 50);
-    const stateId = isValidId(req.query.stateId) ? req.query.stateId : null;
-    const cityId = isValidId(req.query.cityId) ? req.query.cityId : null;
+    const stateId = isValidId(req.query.stateId) ? req.query.stateId : (isValidId(req.query.state_id) ? req.query.state_id : null);
+    const cityId = isValidId(req.query.cityId) ? req.query.cityId : (isValidId(req.query.city_id) ? req.query.city_id : null);
 
     const from = (page - 1) * limit;
 
@@ -185,14 +194,13 @@ router.get('/products', async (req, res) => {
     const { planNameByVendor, tierKeyByVendor } = await getActivePlanMaps();
     const activeVendorIds = Object.keys(tierKeyByVendor);
 
-    // Build vendor id buckets in the required order
     const bucketIds = {};
     PLAN_TIERS.forEach((t) => (bucketIds[t.key] = []));
+
     for (const [vendorId, tierKey] of Object.entries(tierKeyByVendor)) {
       if (bucketIds[tierKey]) bucketIds[tierKey].push(vendorId);
     }
 
-    // Pagination across buckets
     let totalCount = 0;
     let remainingOffset = from;
     let remainingLimit = limit;
@@ -212,16 +220,13 @@ router.get('/products', async (req, res) => {
       });
 
       totalCount += groupCount;
-
       if (groupCount <= 0) continue;
 
-      // If our offset is beyond this bucket, skip it
       if (remainingOffset >= groupCount) {
         remainingOffset -= groupCount;
         continue;
       }
 
-      // We need some items from this bucket
       if (remainingLimit > 0) {
         const rows = await fetchForVendorFilter({
           microId,
@@ -242,10 +247,7 @@ router.get('/products', async (req, res) => {
       if (remainingLimit <= 0) break;
     }
 
-    // 2) Vendors with NO active subscription (treated as TRIAL at the bottom)
-    // NOTE: if activeVendorIds becomes huge, URL length could become a problem.
-    // In that case, we simply won't exclude and you'll still get correct ranking
-    // for subscribed vendors at the top.
+    // 2) Vendors with NO active subscription (bottom)
     if (remainingLimit > 0) {
       const excludeIds = activeVendorIds.length <= 1000 ? activeVendorIds : [];
 
@@ -281,7 +283,6 @@ router.get('/products', async (req, res) => {
       }
     }
 
-    // Attach plan info for UI
     const finalRows = (out || []).map((p) => {
       const vid = p?.vendor_id;
       const tierKey = tierKeyByVendor[vid] || 'trial';
@@ -306,8 +307,18 @@ router.get('/products', async (req, res) => {
 
     return res.json({ success: true, data: finalRows, count: totalCount });
   } catch (e) {
-    return res.status(500).json({ success: false, error: 'DIR_PRODUCTS_FAILED', details: e.message });
+    return res.status(500).json({
+      success: false,
+      error: 'DIR_PRODUCTS_FAILED',
+      details: e.message,
+    });
   }
-});
+}
+
+// ✅ IMPORTANT: your UI search page calls /api/dir/search
+router.get('/search', handleRankedProducts);
+
+// existing endpoint
+router.get('/products', handleRankedProducts);
 
 export default router;

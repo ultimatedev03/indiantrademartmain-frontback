@@ -12,6 +12,7 @@ import { SubdomainProvider, useSubdomain } from '@/contexts/SubdomainContext';
 import { PageStatusProvider } from '@/contexts/PageStatusContext';
 import { locationService } from '@/shared/services/locationService';
 import { supabase } from '@/lib/customSupabaseClient';
+import AIChatWidget from '@/components/AIChatWidget';
 
 import MaintenancePage from '@/shared/components/MaintenancePage';
 
@@ -255,6 +256,7 @@ function App() {
                         {/* ✅ Vendor suspended gate added here */}
                         <VendorSuspensionGate>
                           <AppRoutes />
+                          <AIChatWidget />
                         </VendorSuspensionGate>
                       </SuperAdminProvider>
                     </EmployeeAuthProvider>

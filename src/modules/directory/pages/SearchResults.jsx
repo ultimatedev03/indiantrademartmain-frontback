@@ -1,3 +1,4 @@
+// ✅ File: src/modules/directory/pages/SearchResults.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Helmet } from 'react-helmet';
 import { useSearchParams, useParams, useLocation, useNavigate } from 'react-router-dom';
@@ -384,25 +385,17 @@ const SearchResults = () => {
   };
 
   // ✅ keyword search with safe fallback (prevents 400 due to missing columns)
-  const runKeywordProductsQueryWithFallback = async ({
-    servicePhrase,
-    serviceSlug,
-    selectString,
-  }) => {
-    // attempts in decreasing “risk”
+  // ✅ IMPORTANT: also excludes suspended vendors (vendors.is_active = true)
+  const runKeywordProductsQueryWithFallback = async ({ servicePhrase, serviceSlug, selectString }) => {
     const attempts = [
-      // safest/common columns first
       [
         `category_slug.eq.${serviceSlug}`,
         `name.ilike.%${servicePhrase}%`,
         `category.ilike.%${servicePhrase}%`,
         `description.ilike.%${servicePhrase}%`,
       ],
-      // fewer columns
       [`category_slug.eq.${serviceSlug}`, `name.ilike.%${servicePhrase}%`, `category.ilike.%${servicePhrase}%`],
-      // name only
       [`category_slug.eq.${serviceSlug}`, `name.ilike.%${servicePhrase}%`],
-      // category slug only
       [`category_slug.eq.${serviceSlug}`],
     ];
 
@@ -413,6 +406,8 @@ const SearchResults = () => {
         .from('products')
         .select(selectString)
         .eq('status', 'ACTIVE')
+        // ✅ NEW: hide suspended vendors’ products
+        .eq('vendors.is_active', true)
         .or(orParts.join(','))
         .order('created_at', { ascending: false })
         .limit(300);
@@ -421,12 +416,9 @@ const SearchResults = () => {
       if (!error) return data || [];
 
       lastErr = error;
-
-      // if it's NOT a 400-type filter error, stop early
       if (!isBadRequest400(error)) throw error;
     }
 
-    // all attempts failed
     if (lastErr) throw lastErr;
     return [];
   };
@@ -457,7 +449,6 @@ const SearchResults = () => {
 
         const ctx = await resolveCategoryContext(serviceSlug);
 
-        // ✅ if slug is NOT a real category => try autocorrect first (fixes “land-servery”)
         if (ctx.type === 'text') {
           const corrected = await tryAutoCorrect({
             wrongSlug: serviceSlug,
@@ -466,15 +457,19 @@ const SearchResults = () => {
           });
           if (corrected) {
             setResults([]);
-            return; // redirect already happened
+            return;
           }
         }
 
+        // ✅ IMPORTANT CHANGE:
+        // - vendors!inner => only products that have a vendor
+        // - we will filter vendors.is_active = true in queries below
         const selectString = `
           *,
-          vendors (
+          vendors!inner (
             id, company_name, city, state, state_id, city_id,
-            seller_rating, kyc_status, verification_badge, trust_score
+            seller_rating, kyc_status, verification_badge, trust_score,
+            is_active
           )
         `;
 
@@ -485,9 +480,11 @@ const SearchResults = () => {
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
+            .eq('vendors.is_active', true)
             .eq('micro_category_id', ctx.microId)
             .order('created_at', { ascending: false })
             .limit(300);
+
           if (error) throw error;
           data = d || [];
         } else if (ctx.type === 'sub' && ctx.subId) {
@@ -495,9 +492,11 @@ const SearchResults = () => {
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
+            .eq('vendors.is_active', true)
             .eq('sub_category_id', ctx.subId)
             .order('created_at', { ascending: false })
             .limit(300);
+
           if (error) throw error;
           data = d || [];
         } else if (ctx.type === 'head' && ctx.headId) {
@@ -505,13 +504,14 @@ const SearchResults = () => {
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
+            .eq('vendors.is_active', true)
             .eq('head_category_id', ctx.headId)
             .order('created_at', { ascending: false })
             .limit(300);
+
           if (error) throw error;
           data = d || [];
         } else {
-          // keyword mode (safe fallback avoids 400)
           data = await runKeywordProductsQueryWithFallback({
             servicePhrase,
             serviceSlug,
@@ -531,7 +531,6 @@ const SearchResults = () => {
 
         const locationFiltered = mapped.filter((p) => productMatchesLocation(p, stateId, cityId, stateCityIdSet));
 
-        // ✅ if no results -> try autocorrect (once)
         if (locationFiltered.length === 0) {
           await tryAutoCorrect({
             wrongSlug: serviceSlug,
@@ -555,16 +554,13 @@ const SearchResults = () => {
       } catch (err) {
         console.error('Search failed', err);
 
-        // ✅ even if query throws (e.g. 400), try autocorrect once
         try {
           await tryAutoCorrect({
             wrongSlug: parsedParams.serviceSlug,
             stateSlug: parsedParams.stateSlug,
             citySlug: parsedParams.citySlug,
           });
-        } catch (e) {
-          // ignore autocorrect errors
-        }
+        } catch (e) {}
 
         setResults([]);
       } finally {
@@ -587,7 +583,9 @@ const SearchResults = () => {
   const stateName = formatName(parsedParams.stateSlug);
 
   const pageTitle = serviceName
-    ? `${serviceName} Suppliers & Manufacturers${cityName ? ` in ${cityName}` : ''}${stateName && !cityName ? ` in ${stateName}` : ''}`
+    ? `${serviceName} Suppliers & Manufacturers${cityName ? ` in ${cityName}` : ''}${
+        stateName && !cityName ? ` in ${stateName}` : ''
+      }`
     : 'Search Results';
 
   const canonicalPath =

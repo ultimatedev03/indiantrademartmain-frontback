@@ -9,7 +9,6 @@ import { useBuyerAuth } from '@/modules/buyer/context/AuthContext';
 import { cn } from '@/lib/utils';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import Logo from '@/shared/components/Logo';
-import ChatBotModal from '@/modules/buyer/components/ChatBotModal';
 import { SheetClose } from '@/components/ui/sheet';
 import { supabase } from '@/lib/customSupabaseClient';
 
@@ -18,7 +17,6 @@ const BuyerSidebar = ({ isMobile = false }) => {
   const { logout } = useBuyerAuth(); 
   const navigate = useNavigate();
   const location = useLocation();
-  const [isChatOpen, setIsChatOpen] = useState(false);
   const [profileImage, setProfileImage] = useState(null);
 
   useEffect(() => {
@@ -112,19 +110,13 @@ const BuyerSidebar = ({ isMobile = false }) => {
               <MessageCircle className="h-4 w-4 text-green-600" />
               <span className="font-semibold text-sm text-gray-900">Need Help?</span>
             </div>
-            <Button 
-              onClick={() => setIsChatOpen(true)}
-              className="w-full bg-[#00A699] hover:bg-[#008c81] text-white h-8 text-xs shadow-sm"
-            >
-              Chat With Us
-            </Button>
+            <p className="text-xs text-gray-600">Use the new AI assistant (bottom-right) for quick help.</p>
           </div>
           <button onClick={handleLogout} className="flex items-center w-full px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg font-medium">
             <LogOut className="h-4 w-4 mr-2" /> Sign Out
           </button>
         </div>
       </div>
-      <ChatBotModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
     </>
   );
 };
