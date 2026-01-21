@@ -4,7 +4,6 @@ import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PortalLayout from '@/shared/layouts/PortalLayout';
 import EmployeeLayout from '@/modules/employee/layouts/EmployeeLayout';
 import { useSubdomain } from '@/contexts/SubdomainContext';
-import Buyers from "@/modules/admin/pages/Buyers";
 
 // Admin Pages
 import AdminDashboard from '@/modules/admin/pages/Dashboard';
@@ -14,9 +13,13 @@ import Staff from '@/modules/admin/pages/Staff';
 import AuditLogs from '@/modules/admin/pages/AuditLogs';
 import AdminSettings from '@/modules/admin/pages/Settings';
 import KYCApproval from '@/modules/admin/pages/KYCApproval';
+import AdminFinance from '@/modules/admin/pages/Finance';
+import FinanceDashboard from '@/modules/finance/pages/Dashboard';
 import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
 import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
+
+
 
 // Reuse Employee Support pages for Admin
 import SupportTickets from '@/modules/employee/pages/support/Tickets';
@@ -45,15 +48,17 @@ import PricingRules from '@/modules/employee/pages/sales/PricingRules';
 
 import PortalLogin from '@/shared/pages/PortalLogin';
 import { ShieldCheck, Users } from 'lucide-react';
-
-/* ---------------- LOGIN ROUTER ---------------- */
+import Buyers from '@/modules/admin/pages/Buyers';
 
 const LoginRouter = () => {
   const location = useLocation();
   const { appType } = useSubdomain();
   const p = location.pathname || '';
 
-  if (p.startsWith('/employee')) return <EmployeeLogin />;
+  // ✅ MAIN MODE (localhost) prefixes
+  if (p.startsWith('/employee')) {
+    return <EmployeeLogin />;
+  }
 
   if (p.startsWith('/hr')) {
     return (
@@ -62,6 +67,16 @@ const LoginRouter = () => {
         colorScheme="emerald"
         defaultEmail="harsh@hr.com"
         icon={Users}
+      />
+    );
+  }
+  if (p.startsWith('/finance-portal')) {
+    return (
+      <PortalLogin
+        portalName="Finance Portal"
+        colorScheme="amber"
+        defaultEmail="finance@itm.com"
+        icon={ShieldCheck}
       />
     );
   }
@@ -77,6 +92,7 @@ const LoginRouter = () => {
     );
   }
 
+  // ✅ SUBDOMAIN MODE (admin.company.com / man.company.com)
   if (appType === 'admin' || appType === 'management') {
     return (
       <PortalLogin
@@ -88,50 +104,57 @@ const LoginRouter = () => {
     );
   }
 
+  // fallback
   return <EmployeeLogin />;
 };
-
-/* ---------------- MAIN ROUTES ---------------- */
 
 export const AdminRoutes = () => {
   return (
     <Routes>
-      {/* Login */}
+      {/* ✅ Correct login route for /admin/login, /employee/login, /hr/login */}
       <Route path="login" element={<LoginRouter />} />
 
-      {/* Super Admin */}
+      {/* Superadmin */}
       <Route path="superadmin/login" element={<SuperAdminLogin />} />
       <Route element={<SuperAdminProtectedRoute />}>
         <Route path="superadmin/dashboard" element={<SuperAdminDashboard />} />
       </Route>
 
-      {/* ---------------- ADMIN ---------------- */}
-      <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+      {/* Finance Portal */}
+      <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
+        <Route element={<PortalLayout role="FINANCE" />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<FinanceDashboard />} />
+        </Route>
+      </Route>
+
+      {/* Admin */}
+      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'FINANCE']} />}>
         <Route element={<PortalLayout role="ADMIN" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
 
-          {/* Vendors */}
+          {/* Vendors (business management) */}
           <Route path="vendors" element={<AdminVendors />} />
           <Route path="vendors/:vendorId/products" element={<AdminVendorProducts />} />
 
-          {/* ✅ BUYERS (ADDED & FIXED) */}
-          <Route path="buyers" element={<Buyers />} />
-
-          {/* Tickets */}
           <Route path="tickets" element={<SupportTickets />} />
 
-          {/* KYC */}
-          <Route path="kyc" element={<KYCApproval />} />
+             {/* ✅ BUYERS (ADDED & FIXED) */}
+          <Route path="buyers" element={<Buyers />} />
 
-          {/* Admin Utilities */}
+
+          {/* KYC Approvals (verification) */}
+          <Route path="kyc" element={<KYCApproval />} />
+          <Route path="finance" element={<AdminFinance />} />
+
           <Route path="staff" element={<Staff />} />
           <Route path="audit-logs" element={<AuditLogs />} />
           <Route path="settings" element={<AdminSettings />} />
         </Route>
       </Route>
 
-      {/* ---------------- HR ---------------- */}
+      {/* HR */}
       <Route element={<ProtectedRoute allowedRoles={['HR']} />}>
         <Route element={<PortalLayout role="HR" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
@@ -140,7 +163,7 @@ export const AdminRoutes = () => {
         </Route>
       </Route>
 
-      {/* ---------------- DATA ENTRY ---------------- */}
+      {/* Employees - Data Entry */}
       <Route path="dataentry" element={<EmployeeLayout allowedRole="DATA_ENTRY" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<DataEntryDashboard />} />
@@ -159,14 +182,14 @@ export const AdminRoutes = () => {
         <Route path="kyc" element={<KycApprovals />} />
       </Route>
 
-      {/* ---------------- SUPPORT ---------------- */}
+      {/* Employees - Support */}
       <Route path="support" element={<EmployeeLayout allowedRole="SUPPORT" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<SupportDashboard />} />
         <Route path="tickets" element={<SupportTickets />} />
       </Route>
 
-      {/* ---------------- SALES ---------------- */}
+      {/* Employees - Sales */}
       <Route path="sales" element={<EmployeeLayout allowedRole="SALES" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<SalesDashboard />} />
@@ -174,7 +197,6 @@ export const AdminRoutes = () => {
         <Route path="pricing-rules" element={<PricingRules />} />
       </Route>
 
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="login" replace />} />
     </Routes>
   );
