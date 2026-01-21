@@ -123,9 +123,15 @@ const PortalLayout = ({ role }) => {
           { icon: Package, label: 'Vendors', path: '/admin/vendors' },
           { icon: Ticket, label: 'Support Tickets', path: '/admin/tickets' },
           { icon: UserCheck, label: 'KYC Approvals', path: '/admin/kyc' },
+          { icon: BarChart3, label: 'Finance', path: '/admin/finance' },
           { icon: Users, label: 'Staff', path: '/admin/staff' },
           { icon: FileText, label: 'Audit Logs', path: '/admin/audit-logs' },
           { icon: Settings, label: 'Settings', path: '/admin/settings' },
+        ];
+      case 'FINANCE':
+        return [
+          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/finance-portal/dashboard' },
+          { icon: BarChart3, label: 'Payments', path: '/finance-portal/dashboard#payments' },
         ];
       case 'HR':
         return [

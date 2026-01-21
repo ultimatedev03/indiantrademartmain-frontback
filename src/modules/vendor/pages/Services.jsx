@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
 import {
@@ -74,6 +75,7 @@ const Services = () => {
   const [quota, setQuota] = useState(null);
   const [loading, setLoading] = useState(true);
   const [vendorId, setVendorId] = useState(null);
+  const [couponCode, setCouponCode] = useState('');
 
   // ✅ dialog state
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -328,6 +330,7 @@ const Services = () => {
         body: JSON.stringify({
           vendor_id: vendorId,
           plan_id: plan.id,
+          coupon_code: couponCode?.trim() ? couponCode.trim().toUpperCase() : undefined,
         }),
       });
 
@@ -414,6 +417,7 @@ const Services = () => {
               signature: response.razorpay_signature,
               vendor_id: vendorId,
               plan_id: plan.id,
+              coupon_code: couponCode?.trim() ? couponCode.trim().toUpperCase() : undefined,
             }),
           });
 
@@ -498,6 +502,7 @@ const Services = () => {
 
   const openPlanDetails = (plan) => {
     setSelectedPlan(plan);
+    setCouponCode('');
     setDetailsOpen(true);
   };
 
@@ -597,6 +602,17 @@ const Services = () => {
               <ShoppingCart className="w-4 h-4 mr-2" />
               Buy Leads
             </Button>
+            <div className="flex items-center gap-2 bg-white border rounded-lg px-3 py-2 w-full sm:w-auto">
+              <Input
+                placeholder="Coupon code"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
+                className="w-36"
+              />
+              <Button size="sm" variant="secondary" onClick={() => { if (!couponCode.trim()) toast({title:'Coupon',description:'Enter a code first'}); else toast({title:'Coupon applied',description:couponCode.toUpperCase()}); }}>
+                Apply
+              </Button>
+            </div>
 
             <Button
               variant="outline"
@@ -865,7 +881,14 @@ const Services = () => {
                 </div>
               </div>
 
-              <DialogFooterUI className="mt-4">
+              <DialogFooterUI className="mt-4 flex flex-col gap-3">
+                <div className="w-full">
+                  <Input
+                    placeholder="Coupon code (optional)"
+                    value={couponCode}
+                    onChange={(e) => setCouponCode(e.target.value)}
+                  />
+                </div>
                 <Button
                   className={cx(
                     'w-full rounded-xl h-11 font-semibold',

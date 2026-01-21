@@ -151,8 +151,41 @@ export const handler = async (event) => {
         .single();
 
       if (planError || !plan) return json(404, { error: 'Plan not found' });
+  const baseAmount = Number(plan.price || 0);
+  if (!Number.isFinite(baseAmount) || baseAmount <= 0) return json(400, { error: 'Invalid plan price' });
 
-      const amount = Math.round(Number(plan.price || 0) * 100);
+  // optional coupon
+  const coupon_code = (body?.coupon_code || '').toString().trim().toUpperCase();
+  let discountAmount = 0;
+  let netAmount = baseAmount;
+  let coupon = null;
+
+  if (coupon_code) {
+    const { data: cpn, error: cErr } = await supabase
+      .from('vendor_plan_coupons')
+      .select('*')
+      .eq('code', coupon_code)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (cErr || !cpn) return json(400, { error: 'Coupon not found or inactive' });
+    const now = new Date();
+    if (cpn.expires_at && new Date(cpn.expires_at) < now) return json(400, { error: 'Coupon expired' });
+    if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) return json(400, { error: 'Coupon usage limit reached' });
+    if (cpn.vendor_id && cpn.vendor_id !== vendor_id) return json(400, { error: 'Coupon not valid for this vendor' });
+    if (cpn.plan_id && cpn.plan_id !== plan_id) return json(400, { error: 'Coupon not valid for this plan' });
+
+    if (cpn.discount_type === 'PERCENT') {
+      discountAmount = (baseAmount * Number(cpn.value)) / 100;
+    } else {
+      discountAmount = Number(cpn.value || 0);
+    }
+    discountAmount = Math.max(0, Math.min(discountAmount, baseAmount));
+    netAmount = Math.max(0, baseAmount - discountAmount);
+    coupon = cpn;
+  }
+
+  const amount = Math.max(1, Math.round(netAmount * 100));
       if (!Number.isFinite(amount) || amount <= 0) return json(400, { error: 'Invalid plan price' });
 
       const shortId = `${String(vendor_id).substring(0, 8)}_${Math.random().toString(36).substring(2, 8)}`;
@@ -166,6 +199,7 @@ export const handler = async (event) => {
           plan_id,
           vendor_email: vendor.email,
           vendor_name: vendor.company_name,
+      coupon_code,
         },
       };
 
@@ -181,6 +215,9 @@ export const handler = async (event) => {
           plan_id,
           plan_name: plan.name,
           vendor_email: vendor.email,
+      net_amount: netAmount,
+      discount_amount: discountAmount,
+      coupon_code: coupon_code || null,
         },
       });
     }
@@ -188,6 +225,7 @@ export const handler = async (event) => {
     // POST /api/payment/verify
     if (event.httpMethod === 'POST' && action === 'verify') {
       const { order_id, payment_id, signature, vendor_id, plan_id } = body;
+      const coupon_code = (body?.coupon_code || '').toString().trim().toUpperCase();
 
       if (!order_id || !payment_id || !signature || !vendor_id || !plan_id) {
         return json(400, { error: 'Missing required fields' });
@@ -226,6 +264,36 @@ export const handler = async (event) => {
         .eq('vendor_id', vendor_id)
         .eq('status', 'ACTIVE');
 
+      // re-validate coupon
+      let discountAmount = 0;
+      let netAmount = Number(plan.price || 0);
+      let coupon = null;
+      if (coupon_code) {
+        const { data: cpn } = await supabase
+          .from('vendor_plan_coupons')
+          .select('*')
+          .eq('code', coupon_code)
+          .eq('is_active', true)
+          .maybeSingle();
+        if (cpn) {
+          const now = new Date();
+          const okUsage = !cpn.max_uses || cpn.max_uses === 0 || cpn.used_count < cpn.max_uses;
+          const okExpiry = !cpn.expires_at || new Date(cpn.expires_at) >= now;
+          const okVendor = !cpn.vendor_id || cpn.vendor_id === vendor_id;
+          const okPlan = !cpn.plan_id || cpn.plan_id === plan_id;
+          if (okUsage && okExpiry && okVendor && okPlan) {
+            if (cpn.discount_type === 'PERCENT') {
+              discountAmount = (Number(plan.price || 0) * Number(cpn.value)) / 100;
+            } else {
+              discountAmount = Number(cpn.value || 0);
+            }
+            discountAmount = Math.max(0, Math.min(discountAmount, Number(plan.price || 0)));
+            netAmount = Math.max(0, Number(plan.price || 0) - discountAmount);
+            coupon = cpn;
+          }
+        }
+      }
+
       const invoiceNumber = generateInvoiceNumber();
       const durationDays = Number(plan.duration_days || 365);
       const startDate = new Date();
@@ -260,8 +328,9 @@ export const handler = async (event) => {
         vendor,
         plan,
         amount: price,
+        discount_amount: discountAmount,
         tax: 0,
-        totalAmount: price,
+        totalAmount: netAmount,
         paymentMethod: 'Razorpay',
         transactionId: payment_id,
       };
@@ -276,18 +345,37 @@ export const handler = async (event) => {
             plan_id,
             subscription_id: subscription.id,
             amount: price,
+            discount_amount: discountAmount,
+            net_amount: netAmount,
             description: `Subscription: ${plan.name}`,
             status: 'COMPLETED',
             payment_method: 'Razorpay',
             transaction_id: payment_id,
             payment_date: new Date().toISOString(),
             invoice_url: invoicePdf,
+            coupon_code: coupon_code || null,
           },
         ])
         .select()
         .single();
 
       if (paymentError) console.error('Payment record error:', paymentError);
+      else if (coupon) {
+        await supabase
+          .from('vendor_plan_coupons')
+          .update({ used_count: (coupon.used_count || 0) + 1 })
+          .eq('id', coupon.id);
+        await supabase.from('vendor_coupon_usages').insert([
+          {
+            coupon_id: coupon.id,
+            payment_id: payment?.id || null,
+            vendor_id,
+            plan_id,
+            discount_amount: discountAmount,
+            net_amount: netAmount,
+          },
+        ]);
+      }
 
       try {
         const transporter = createTransporter();

@@ -144,6 +144,22 @@ const normalizeVendorAccountStatus = (vendor) => {
 // ---------------- API ----------------
 
 export const vendorApi = {
+  auth: {
+    me: async () => {
+      const { data: { user }, error: uErr } = await supabase.auth.getUser();
+      if (uErr) throw uErr;
+      if (!user) return null;
+
+      const { data: vendor, error } = await supabase
+        .from('vendors')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      if (error) throw error;
+      if (!vendor) return null;
+      return { ...vendor, role: 'VENDOR', user_id: user.id, email: user.email };
+    },
+  },
   // --- LOCATION API ---
   locations: {
     // --- STATES ---

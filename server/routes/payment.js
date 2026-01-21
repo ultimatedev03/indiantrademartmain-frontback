@@ -43,6 +43,7 @@ const createTransporter = () => {
 router.post('/initiate', async (req, res) => {
   try {
     const { vendor_id, plan_id } = req.body;
+    const coupon_code = (req.body?.coupon_code || '').toString().trim().toUpperCase();
 
     // Check if Razorpay keys are configured
     if (!process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.includes('your_razorpay')) {
@@ -77,11 +78,52 @@ router.post('/initiate', async (req, res) => {
       return res.status(404).json({ error: 'Plan not found' });
     }
 
-    const amount = Math.round(plan.price * 100); // Convert to paise
-
-    if (amount <= 0) {
+    const baseAmount = Number(plan.price || 0);
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
       return res.status(400).json({ error: 'Invalid plan price' });
     }
+
+    let discountAmount = 0;
+    let netAmount = baseAmount;
+    let coupon = null;
+
+    if (coupon_code) {
+      const { data: cpn, error: couponErr } = await supabase
+        .from('vendor_plan_coupons')
+        .select('*')
+        .eq('code', coupon_code)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (couponErr || !cpn) {
+        return res.status(400).json({ error: 'Coupon not found or inactive' });
+      }
+
+      if (cpn.expires_at && new Date(cpn.expires_at) < new Date()) {
+        return res.status(400).json({ error: 'Coupon expired' });
+      }
+      if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) {
+        return res.status(400).json({ error: 'Coupon usage limit reached' });
+      }
+      if (cpn.vendor_id && cpn.vendor_id !== vendor_id) {
+        return res.status(400).json({ error: 'Coupon not valid for this vendor' });
+      }
+      if (cpn.plan_id && cpn.plan_id !== plan_id) {
+        return res.status(400).json({ error: 'Coupon not valid for this plan' });
+      }
+
+      if (cpn.discount_type === 'PERCENT') {
+        discountAmount = (baseAmount * Number(cpn.value)) / 100;
+      } else {
+        discountAmount = Number(cpn.value || 0);
+      }
+      if (!Number.isFinite(discountAmount)) discountAmount = 0;
+      discountAmount = Math.max(0, Math.min(discountAmount, baseAmount));
+      netAmount = Math.max(0, baseAmount - discountAmount);
+      coupon = cpn;
+    }
+
+    const amount = Math.max(1, Math.round(netAmount * 100)); // paise, min 1 to keep Razorpay happy
 
     // Create Razorpay order
     // Receipt must be max 40 characters - use hash of vendor_id + timestamp
@@ -96,6 +138,7 @@ router.post('/initiate', async (req, res) => {
         plan_id,
         vendor_email: vendor.email,
         vendor_name: vendor.company_name,
+        coupon_code,
       },
     };
 
@@ -112,6 +155,9 @@ router.post('/initiate', async (req, res) => {
         plan_id,
         plan_name: plan.name,
         vendor_email: vendor.email,
+        net_amount: netAmount,
+        discount_amount: discountAmount,
+        coupon_code: coupon_code || null,
       },
     });
   } catch (error) {
@@ -127,6 +173,7 @@ router.post('/initiate', async (req, res) => {
 router.post('/verify', async (req, res) => {
   try {
     const { order_id, payment_id, signature, vendor_id, plan_id } = req.body;
+    const coupon_code = (req.body?.coupon_code || '').toString().trim().toUpperCase();
 
     if (!order_id || !payment_id || !signature || !vendor_id || !plan_id) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -160,7 +207,39 @@ router.post('/verify', async (req, res) => {
       return res.status(404).json({ error: 'Vendor or plan not found' });
     }
 
-    // Generate invoice number
+    // Coupon re-validation
+    let discountAmount = 0;
+    let netAmount = Number(plan.price || 0);
+    let coupon = null;
+
+    if (coupon_code) {
+      const { data: cpn } = await supabase
+        .from('vendor_plan_coupons')
+        .select('*')
+        .eq('code', coupon_code)
+        .eq('is_active', true)
+        .maybeSingle();
+
+      if (cpn) {
+        const now = new Date();
+        const okUsage = !cpn.max_uses || cpn.max_uses === 0 || cpn.used_count < cpn.max_uses;
+        const okExpiry = !cpn.expires_at || new Date(cpn.expires_at) >= now;
+        const okVendor = !cpn.vendor_id || cpn.vendor_id === vendor_id;
+        const okPlan = !cpn.plan_id || cpn.plan_id === plan_id;
+
+        if (okUsage && okExpiry && okVendor && okPlan) {
+          if (cpn.discount_type === 'PERCENT') {
+            discountAmount = (Number(plan.price || 0) * Number(cpn.value)) / 100;
+          } else {
+            discountAmount = Number(cpn.value || 0);
+          }
+          discountAmount = Math.max(0, Math.min(discountAmount, Number(plan.price || 0)));
+          netAmount = Math.max(0, Number(plan.price || 0) - discountAmount);
+          coupon = cpn;
+        }
+      }
+    }
+
     const invoiceNumber = generateInvoiceNumber();
 
     // Create subscription
@@ -195,8 +274,9 @@ router.post('/verify', async (req, res) => {
       vendor,
       plan,
       amount: plan.price,
+      discount_amount: discountAmount,
       tax: 0,
-      totalAmount: plan.price,
+      totalAmount: netAmount,
       paymentMethod: 'Razorpay',
       transactionId: payment_id,
     };
@@ -211,12 +291,15 @@ router.post('/verify', async (req, res) => {
           plan_id,
           subscription_id: subscription.id,
           amount: plan.price,
+          discount_amount: discountAmount,
+          net_amount: netAmount,
           description: `Subscription: ${plan.name}`,
           status: 'COMPLETED',
           payment_method: 'Razorpay',
           transaction_id: payment_id,
           payment_date: new Date(),
           invoice_url: invoicePdf,
+          coupon_code: coupon_code || null,
         },
       ])
       .select()
@@ -224,6 +307,21 @@ router.post('/verify', async (req, res) => {
 
     if (paymentError) {
       console.error('Payment record error:', paymentError);
+    } else if (coupon) {
+      await supabase
+        .from('vendor_plan_coupons')
+        .update({ used_count: (coupon.used_count || 0) + 1 })
+        .eq('id', coupon.id);
+      await supabase.from('vendor_coupon_usages').insert([
+        {
+          coupon_id: coupon.id,
+          payment_id: payment?.id || null,
+          vendor_id,
+          plan_id,
+          discount_amount: discountAmount,
+          net_amount: netAmount,
+        },
+      ]);
     }
 
     // Send email with invoice

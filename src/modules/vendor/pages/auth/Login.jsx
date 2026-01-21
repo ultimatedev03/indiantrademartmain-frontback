@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { Button } from '@/components/ui/button';
@@ -12,11 +13,19 @@ import Logo from '@/shared/components/Logo';
 
 const VendorLogin = () => {
   const navigate = useNavigate();
+  const supaAuth = useAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
+
+  // If already authenticated as vendor, send to dashboard
+  React.useEffect(() => {
+    if (supaAuth?.userRole === 'VENDOR') {
+      navigate('/vendor/dashboard', { replace: true });
+    }
+  }, [supaAuth?.userRole, navigate]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -55,8 +64,21 @@ const VendorLogin = () => {
         }
       }
 
-      // 2. Check Vendor Profile Status
-      const vendor = await vendorApi.getVendorProfile(authData.user.id);
+      // 2. Ensure vendor profile is linked to this user_id
+      let vendor = await vendorApi.getVendorProfile(authData.user.id);
+
+      if (!vendor) {
+        // Try to link by email if user_id missing in vendors table
+        const { data: vendorByEmail } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('email', formData.email.toLowerCase())
+          .maybeSingle();
+        if (vendorByEmail) {
+          await supabase.from('vendors').update({ user_id: authData.user.id }).eq('id', vendorByEmail.id);
+          vendor = { ...vendorByEmail, user_id: authData.user.id };
+        }
+      }
 
       if (!vendor) {
         // Auth exists but no profile? Should typically go to registration or profile completion
@@ -71,9 +93,17 @@ const VendorLogin = () => {
         return;
       }
 
-      // 3. Success
+      // 3. Stamp role metadata to help route guards
+      const currentRole = authData.user?.user_metadata?.role;
+      if (currentRole !== 'VENDOR') {
+        await supabase.auth.updateUser({ data: { role: 'VENDOR' } }).catch(() => {});
+      }
+
+      // 4. Success
       toast({ title: "Welcome back!", description: "Logged in successfully." });
-      navigate('/vendor/dashboard');
+      navigate('/vendor/dashboard', { replace: true });
+      // hard redirect as fallback in case router state is stale
+      window.location.href = '/vendor/dashboard';
 
     } catch (error) {
       toast({ 

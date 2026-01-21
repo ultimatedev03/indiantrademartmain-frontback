@@ -65,46 +65,33 @@ export const InternalAuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // ✅ safer hydrate (no hard-coded columns -> avoids PostgREST 400)
   const hydrateStoredUser = async (stored) => {
     try {
       const email = stored?.email;
       if (!email) return stored;
 
-      let role = stored?.role;
-      let name = stored?.name;
-
-      // Try employees table first
-      const { data: emp, error: empErr } = await supabase
+      const { data: emp } = await supabase
         .from('employees')
         .select('*')
         .eq('email', email)
         .maybeSingle();
 
-      if (!empErr && emp) {
-        const normalizedEmp = normalizeInternalUser(emp, email, stored?.role);
-        role = normalizedEmp.role || role;
-        name = normalizedEmp.name || name;
-        return { ...stored, ...normalizedEmp, role, name };
+      if (emp) {
+        return { ...stored, ...normalizeInternalUser(emp, email, stored?.role) };
       }
 
-      // Try users table
-      const { data: usr, error: usrErr } = await supabase
+      const { data: usr } = await supabase
         .from('users')
         .select('*')
         .eq('email', email)
         .maybeSingle();
 
-      if (!usrErr && usr) {
-        const normalizedUsr = normalizeInternalUser(usr, email, stored?.role);
-        role = normalizedUsr.role || role;
-        name = normalizedUsr.name || name;
-        return { ...stored, ...normalizedUsr, role, name };
+      if (usr) {
+        return { ...stored, ...normalizeInternalUser(usr, email, stored?.role) };
       }
 
       return stored;
-    } catch (e) {
-      console.warn('[InternalAuth] hydrateStoredUser failed:', e);
+    } catch {
       return stored;
     }
   };
@@ -119,94 +106,95 @@ export const InternalAuthProvider = ({ children }) => {
           setUser(hydrated);
           setIsAuthenticated(true);
           localStorage.setItem('itm_admin_user', JSON.stringify(hydrated));
-        } catch (e) {
-          console.warn('[InternalAuth] bad stored user, clearing.', e);
+        } catch {
           localStorage.removeItem('itm_admin_user');
         }
       }
       setIsLoading(false);
     };
-
     boot();
   }, []);
 
   /**
-   * ✅ login(email, password, expectedRole)
+   * 🔐 FIXED LOGIN
    */
   const login = async (email, password, expectedRole) => {
     try {
       setIsLoading(true);
 
+      // 🚨 IMPORTANT: kill any cached session
+      await supabase.auth.signOut();
+
+      // ✅ 1. STRICT PASSWORD VALIDATION
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+      if (authError || !authData?.user) {
+        throw new Error('Invalid credentials');
+      }
+
+      // ✅ 2. YOUR EXISTING RPC (ROLE / ACCESS CHECK)
       const { data, error } = await supabase.rpc('login_admin', {
         p_email: email,
-        p_password: password
+        p_password: password,
       });
 
-      if (error) throw error;
-      if (!data) throw new Error('Invalid credentials');
+      if (error || !data) {
+        // rollback auth session
+        await supabase.auth.signOut();
+        throw new Error('Unauthorized');
+      }
 
       let normalized = normalizeInternalUser(data, email, expectedRole);
 
-      // ✅ If role still missing, fetch from employees/users safely
-      if (!normalized.role) {
-        const { data: emp, error: empErr } = await supabase
-          .from('employees')
-          .select('*')
-          .eq('email', email)
-          .maybeSingle();
-
-        if (!empErr && emp) {
-          const nEmp = normalizeInternalUser(emp, email, expectedRole);
-          normalized = { ...normalized, ...nEmp };
-        } else {
-          const { data: usr, error: usrErr } = await supabase
-            .from('users')
-            .select('*')
-            .eq('email', email)
-            .maybeSingle();
-
-          if (!usrErr && usr) {
-            const nUsr = normalizeInternalUser(usr, email, expectedRole);
-            normalized = { ...normalized, ...nUsr };
-          }
-        }
+      if (!normalized.role && expectedRole) {
+        normalized.role = expectedRole;
       }
-
-      if (!normalized.role && expectedRole) normalized.role = expectedRole;
 
       setUser(normalized);
       setIsAuthenticated(true);
       localStorage.setItem('itm_admin_user', JSON.stringify(normalized));
 
       toast({
-        title: "Login Successful",
+        title: 'Login Successful',
         description: `Welcome back, ${normalized.name || 'User'}`,
-        className: "bg-green-50 text-green-900 border-green-200"
+        className: 'bg-green-50 text-green-900 border-green-200',
       });
 
       return normalized;
     } catch (error) {
-      console.error("Login error:", error);
+      await supabase.auth.signOut();
+      setUser(null);
+      setIsAuthenticated(false);
+      localStorage.removeItem('itm_admin_user');
+
       toast({
-        title: "Login Failed",
-        description: "Invalid email or password",
-        variant: "destructive"
+        title: 'Login Failed',
+        description: 'Invalid email or password',
+        variant: 'destructive',
       });
+
       return null;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    await supabase.auth.signOut();
     setUser(null);
     setIsAuthenticated(false);
     localStorage.removeItem('itm_admin_user');
-    toast({ title: "Logged Out", description: "You have been logged out successfully." });
+    toast({ title: 'Logged Out', description: 'You have been logged out successfully.' });
   };
 
   return (
-    <InternalAuthContext.Provider value={{ user, isAuthenticated, isLoading, login, logout }}>
+    <InternalAuthContext.Provider
+      value={{ user, isAuthenticated, isLoading, login, logout }}
+    >
       {children}
     </InternalAuthContext.Provider>
   );
