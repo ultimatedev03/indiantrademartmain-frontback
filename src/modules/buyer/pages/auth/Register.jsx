@@ -207,6 +207,20 @@ const Register = () => {
         await supabase.auth.setSession(authData.session);
       }
 
+      try {
+        await supabase.from('notifications').insert([{
+          user_id: userId,
+          type: 'WELCOME',
+          title: 'Welcome to Indian Trade Mart',
+          message: 'Your buyer account is ready. Start exploring suppliers and proposals.',
+          link: '/buyer/dashboard',
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+      } catch (e) {
+        console.warn('Welcome notification failed:', e);
+      }
+
       setStep(3);
       
       toast({

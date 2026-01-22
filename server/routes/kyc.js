@@ -1,5 +1,6 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { notifyUser } from '../lib/notify.js';
 
 const router = express.Router();
 
@@ -205,6 +206,16 @@ router.post('/vendors/:vendorId/approve', async (req, res) => {
       .maybeSingle();
 
     if (error) return res.status(500).json({ success: false, error: 'Approve failed', details: error.message });
+
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: 'KYC_APPROVED',
+        title: 'KYC Approved',
+        message: 'Your KYC has been approved. Your account is now verified.',
+        link: '/vendor/profile?tab=kyc',
+      });
+    }
     return res.json({ success: true, vendor: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: 'Approve failed', details: e.message });
@@ -229,6 +240,16 @@ router.post('/vendors/:vendorId/reject', async (req, res) => {
       .maybeSingle();
 
     if (error) return res.status(500).json({ success: false, error: 'Reject failed', details: error.message });
+
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: 'KYC_REJECTED',
+        title: 'KYC Rejected',
+        message: (remarks || '').trim() || 'Your KYC was rejected. Please re-upload the correct documents.',
+        link: '/vendor/profile?tab=kyc',
+      });
+    }
     return res.json({ success: true, vendor: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: 'Reject failed', details: e.message });

@@ -48,6 +48,31 @@ const normalizeDoc = (d) => {
   };
 };
 
+const nowIso = () => new Date().toISOString();
+
+async function notifyUser({ user_id, type, title, message, link }) {
+  try {
+    if (!user_id) return null;
+    const { data, error } = await supabase
+      .from("notifications")
+      .insert([{
+        user_id,
+        type: type || "INFO",
+        title: title || "Notification",
+        message: message || "",
+        link: link || null,
+        is_read: false,
+        created_at: nowIso(),
+      }])
+      .select()
+      .maybeSingle();
+    if (error) return null;
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function handler(event) {
   try {
     if (event.httpMethod === "OPTIONS") return ok({ ok: true });
@@ -124,6 +149,16 @@ export async function handler(event) {
 
       if (error) return fail("Approve failed", error.message);
 
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "KYC_APPROVED",
+          title: "KYC Approved",
+          message: "Your KYC has been approved. Your account is now verified.",
+          link: "/vendor/profile?tab=kyc",
+        });
+      }
+
       return ok({ success: true, vendor: data || null });
     }
 
@@ -153,6 +188,16 @@ export async function handler(event) {
         .maybeSingle();
 
       if (error) return fail("Reject failed", error.message);
+
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "KYC_REJECTED",
+          title: "KYC Rejected",
+          message: remarks || "Your KYC was rejected. Please re-upload the correct documents.",
+          link: "/vendor/profile?tab=kyc",
+        });
+      }
 
       return ok({ success: true, vendor: data || null });
     }

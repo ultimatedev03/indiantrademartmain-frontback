@@ -3,13 +3,14 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
-  Menu, X, Bell, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
+  Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
   BarChart, User as UserIcon, Check, Ban
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { useSubdomain } from '@/contexts/SubdomainContext';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 import {
   DropdownMenu,
@@ -26,19 +27,6 @@ const getInitials = (name = '') => {
   const first = parts[0]?.[0] || 'V';
   const second = parts.length > 1 ? parts[1]?.[0] : (parts[0]?.[1] || '');
   return (first + second).toUpperCase();
-};
-
-const timeAgo = (iso) => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const diff = Math.floor((Date.now() - d.getTime()) / 1000);
-  if (diff < 60) return `${diff}s ago`;
-  const m = Math.floor(diff / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const day = Math.floor(h / 24);
-  return `${day}d ago`;
 };
 
 const readBool = (obj, keys, fallback) => {
@@ -84,12 +72,6 @@ const PortalLayout = () => {
   const [statusLoading, setStatusLoading] = useState(true);
   const [vendorActive, setVendorActive] = useState(false); // IMPORTANT: default false until fetched
   const [vendorVerified, setVendorVerified] = useState(true);
-
-  // ✅ Notifications
-  const [notifOpen, setNotifOpen] = useState(false);
-  const [notifLoading, setNotifLoading] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const [unread, setUnread] = useState(0);
 
   const supportPath = resolvePath('support', 'vendor');
   const pathName = location.pathname || '';
@@ -189,45 +171,6 @@ const PortalLayout = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
-  const loadNotifications = async () => {
-    setNotifLoading(true);
-    try {
-      const [list, cnt] = await Promise.all([
-        vendorApi.notifications.list(8),
-        vendorApi.notifications.unreadCount(),
-      ]);
-      setNotifications(list || []);
-      setUnread(cnt || 0);
-    } catch (e) {
-      setNotifications([]);
-      setUnread(0);
-    } finally {
-      setNotifLoading(false);
-    }
-  };
-
-  const markAsRead = async (id) => {
-    try {
-      await vendorApi.notifications.markAsRead(id);
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-      setUnread((u) => Math.max(0, u - 1));
-    } catch (e) {}
-  };
-
-  const markAllRead = async () => {
-    try {
-      await vendorApi.notifications.markAllAsRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnread(0);
-    } catch (e) {}
-  };
-
-  useEffect(() => {
-    loadNotifications();
-    const t = setInterval(loadNotifications, 30000);
-    return () => clearInterval(t);
-  }, []);
-
   // ✅ This is the KEY fix: blur actual UI (not backdrop-filter)
   const blurWrapperClass = showOverlay
     ? 'filter blur-[6px] pointer-events-none select-none'
@@ -318,89 +261,7 @@ const PortalLayout = () => {
             </div>
 
             <div className="flex items-center gap-3 sm:gap-5">
-              {/* Notifications dropdown */}
-              <DropdownMenu open={notifOpen} onOpenChange={async (open) => {
-                setNotifOpen(open);
-                if (open) await loadNotifications();
-              }}>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="relative text-neutral-500 hover:text-[#003D82] hover:bg-blue-50">
-                    <Bell className="h-5 w-5" />
-                    {unread > 0 && (
-                      <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-red-600 text-white text-[11px] rounded-full flex items-center justify-center border-2 border-white">
-                        {unread > 99 ? '99+' : unread}
-                      </span>
-                    )}
-                  </Button>
-                </DropdownMenuTrigger>
-
-                <DropdownMenuContent align="end" className="w-[360px] max-w-[90vw] p-0">
-                  <div className="px-4 py-3 border-b flex items-center justify-between">
-                    <div className="font-semibold text-sm">Notifications</div>
-                    <Button size="sm" variant="outline" onClick={markAllRead} disabled={unread === 0}>
-                      Mark all read
-                    </Button>
-                  </div>
-
-                  <div className="max-h-[340px] overflow-auto">
-                    {notifLoading ? (
-                      <div className="px-4 py-6 text-sm text-neutral-500">Loading...</div>
-                    ) : notifications.length === 0 ? (
-                      <div className="px-4 py-6 text-sm text-neutral-500">No notifications yet.</div>
-                    ) : (
-                      notifications.map((n) => (
-                        <button
-                          key={n.id}
-                          className={`w-full text-left px-4 py-3 border-b last:border-b-0 hover:bg-neutral-50 transition ${
-                            !n.is_read ? 'bg-[#003D82]/[0.03]' : ''
-                          }`}
-                          onClick={async () => {
-                            if (!n.is_read) await markAsRead(n.id);
-                            if (n.link) {
-                              if (String(n.link).startsWith('http')) window.open(n.link, '_blank');
-                              else navigate(n.link);
-                            } else {
-                              navigate(resolvePath('support', 'vendor'));
-                            }
-                            setNotifOpen(false);
-                          }}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <div className="font-semibold text-sm text-neutral-800 truncate">
-                                  {n.title || 'Notification'}
-                                </div>
-                                {!n.is_read && <span className="h-2 w-2 rounded-full bg-[#003D82]" />}
-                              </div>
-                              {n.message ? (
-                                <div className="text-xs text-neutral-600 mt-1 line-clamp-2">
-                                  {n.message}
-                                </div>
-                              ) : null}
-                            </div>
-                            <div className="text-[11px] text-neutral-500 whitespace-nowrap">
-                              {timeAgo(n.created_at)}
-                            </div>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-
-                  <div className="px-4 py-3 border-t flex items-center justify-between">
-                    <Button size="sm" variant="ghost" onClick={() => {
-                      navigate(resolvePath('support', 'vendor'));
-                      setNotifOpen(false);
-                    }}>
-                      View all
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setNotifOpen(false)}>
-                      Close
-                    </Button>
-                  </div>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <NotificationBell />
 
               <div className="h-6 w-px bg-neutral-200 hidden sm:block"></div>
 

@@ -4,10 +4,10 @@ import { Outlet, NavLink, useNavigate, useLocation, Navigate } from 'react-route
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { 
   LayoutDashboard, Settings, FileText, FolderTree, 
-  Users, UserCog, LogOut, Menu, IndianRupee, Bell 
+  Users, UserCog, LogOut, Menu, IndianRupee
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/use-toast';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 const SidebarLink = ({ to, icon: Icon, children }) => (
   <NavLink
@@ -131,9 +131,7 @@ const InternalPortalLayout = ({ allowedRole }) => {
             </h1>
           </div>
           <div className="flex items-center gap-4">
-             <Button variant="ghost" size="icon" onClick={() => toast({ title: "No new notifications" })}>
-               <Bell className="h-5 w-5 text-neutral-500" />
-             </Button>
+            <NotificationBell />
           </div>
         </header>
 

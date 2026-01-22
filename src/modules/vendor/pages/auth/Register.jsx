@@ -237,6 +237,20 @@ const VendorRegister = () => {
         await supabase.auth.setSession(authData.session);
       }
 
+      try {
+        await supabase.from('notifications').insert([{
+          user_id: authData.user.id,
+          type: 'WELCOME',
+          title: 'Welcome to Indian Trade Mart',
+          message: 'Your vendor account is ready. Complete KYC and start receiving leads.',
+          link: '/vendor/dashboard',
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+      } catch (e) {
+        console.warn('Welcome notification failed:', e);
+      }
+
       toast({
         title: 'Registration Successful!',
         description: 'Your account is verified. Redirecting to dashboard...',

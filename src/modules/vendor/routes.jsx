@@ -13,6 +13,7 @@ import VendorProfile from '@/modules/vendor/pages/Profile';
 import VendorSettings from '@/modules/vendor/pages/Settings';
 import VendorServices from '@/modules/vendor/pages/Services';
 import VendorSupport from '@/modules/vendor/pages/Support';
+import VendorSupportTicket from '@/modules/vendor/pages/SupportTicket';
 import PhotosDocs from '@/modules/vendor/pages/PhotosDocs';
 import VendorRegister from '@/modules/vendor/pages/auth/Register';
 import VendorLogin from '@/modules/vendor/pages/auth/Login';
@@ -65,6 +66,7 @@ export const VendorRoutes = () => {
           <Route path="kyc" element={<Navigate to="/vendor/profile?tab=kyc" replace />} />
 
           <Route path="support" element={<VendorSupport />} />
+          <Route path="support/:id" element={<VendorSupportTicket />} />
           <Route path="profile" element={<VendorProfile />} />
           <Route path="settings" element={<VendorSettings />} />
           <Route path="photos-docs" element={<PhotosDocs />} />

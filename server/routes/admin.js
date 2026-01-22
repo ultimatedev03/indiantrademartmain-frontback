@@ -1,5 +1,6 @@
 import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
+import { notifyUser } from "../lib/notify.js";
 
 const router = express.Router();
 
@@ -103,9 +104,7 @@ router.get("/vendors", async (req, res) => {
       .order("created_at", { ascending: false });
 
     if (error)
-      return res
-        .status(500)
-        .json({ success: false, error: error.message });
+      return res.status(500).json({ success: false, error: error.message });
 
     return res.json({ success: true, vendors: vendors || [] });
   } catch (e) {
@@ -136,6 +135,16 @@ router.post("/vendors/:vendorId/terminate", async (req, res) => {
       details: { reason },
     });
 
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: "ACCOUNT_SUSPENDED",
+        title: "Account suspended",
+        message: reason || "Your vendor account has been suspended by admin.",
+        link: "/vendor/support",
+      });
+    }
+
     return res.json({ success: true, vendor: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -163,7 +172,114 @@ router.post("/vendors/:vendorId/activate", async (req, res) => {
       entity_id: vendorId,
     });
 
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: "ACCOUNT_ACTIVATED",
+        title: "Account re-activated",
+        message: "Your vendor account has been activated by admin.",
+        link: "/vendor/dashboard",
+      });
+    }
+
     return res.json({ success: true, vendor: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/**
+ * =========================
+ * BUYERS (NEW – SAME AS VENDORS)
+ * =========================
+ */
+router.get("/buyers", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("buyers")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error)
+      return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, buyers: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post("/buyers/:buyerId/terminate", async (req, res) => {
+  try {
+    const { buyerId } = req.params;
+    const reason = String(req.body?.reason || "").trim();
+
+    const { data, error } = await supabase
+      .from("buyers")
+      .update({ is_active: false })
+      .eq("id", buyerId)
+      .select()
+      .maybeSingle();
+
+    if (error)
+      return res.status(500).json({ success: false, error: error.message });
+
+    await writeAudit({
+      user_id: req.adminUser?.id,
+      action: "BUYER_TERMINATE",
+      entity_type: "buyers",
+      entity_id: buyerId,
+      details: { reason },
+    });
+
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: "ACCOUNT_SUSPENDED",
+        title: "Account suspended",
+        message: reason || "Your buyer account has been suspended by admin.",
+        link: "/buyer/tickets",
+      });
+    }
+
+    return res.json({ success: true, buyer: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post("/buyers/:buyerId/activate", async (req, res) => {
+  try {
+    const { buyerId } = req.params;
+
+    const { data, error } = await supabase
+      .from("buyers")
+      .update({ is_active: true })
+      .eq("id", buyerId)
+      .select()
+      .maybeSingle();
+
+    if (error)
+      return res.status(500).json({ success: false, error: error.message });
+
+    await writeAudit({
+      user_id: req.adminUser?.id,
+      action: "BUYER_ACTIVATE",
+      entity_type: "buyers",
+      entity_id: buyerId,
+    });
+
+    if (data?.user_id) {
+      await notifyUser({
+        user_id: data.user_id,
+        type: "ACCOUNT_ACTIVATED",
+        title: "Account re-activated",
+        message: "Your buyer account has been activated by admin.",
+        link: "/buyer/dashboard",
+      });
+    }
+
+    return res.json({ success: true, buyer: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -227,6 +343,23 @@ router.delete("/products/:productId", async (req, res) => {
  * STAFF
  * =========================
  */
+router.get("/staff", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    return res.json({ success: true, employees: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 router.post("/staff", async (req, res) => {
   try {
     const { full_name, email, password, role } = req.body;
@@ -264,6 +397,16 @@ router.post("/staff", async (req, res) => {
       entity_id: emp.id,
       details: { email, role },
     });
+
+    if (userId) {
+      await notifyUser({
+        user_id: userId,
+        type: "WELCOME",
+        title: "Welcome to the Admin Team",
+        message: "Your staff account has been created. Please log in to continue.",
+        link: "/employee/login",
+      });
+    }
 
     return res.json({ success: true, employee: emp });
   } catch (e) {

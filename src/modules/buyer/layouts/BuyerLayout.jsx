@@ -1,54 +1,65 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
-import { useBuyerAuth } from '@/modules/buyer/context/AuthContext';
-import { useSubdomain } from '@/contexts/SubdomainContext';
+import React, { useEffect, useMemo, useState } from "react";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { useBuyerAuth } from "@/modules/buyer/context/AuthContext";
+import { useSubdomain } from "@/contexts/SubdomainContext";
 import {
-  Home, LayoutDashboard, FileText, PlusCircle, User, LogOut,
-  Menu, Bell, Search, MessageSquare, Ticket, Heart, Lightbulb
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/use-toast';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Input } from '@/components/ui/input';
-import Logo from '@/shared/components/Logo';
-import { supabase } from '@/lib/customSupabaseClient';
-import { urlParser } from '@/shared/utils/urlParser';
+  Home,
+  LayoutDashboard,
+  FileText,
+  PlusCircle,
+  User,
+  LogOut,
+  Menu,
+  Bell,
+  Search,
+  MessageSquare,
+  Ticket,
+  Heart,
+  Lightbulb,
+  Ban,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/use-toast";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Input } from "@/components/ui/input";
+import Logo from "@/shared/components/Logo";
+import { supabase } from "@/lib/customSupabaseClient";
+import { urlParser } from "@/shared/utils/urlParser";
 
 const slugify = (value) => {
-  if (!value) return '';
+  if (!value) return "";
   return String(value)
     .toLowerCase()
     .trim()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 };
 
 // ✅ Resolve free-text location like "Delhi" / "New Delhi" to state/city slugs.
-// Used when user types: "land survey in delhi" (without selecting dropdowns)
 const resolveLocationSlugs = async (locText) => {
-  const clean = (locText || '').trim();
-  if (!clean) return { stateSlug: '', citySlug: '' };
+  const clean = (locText || "").trim();
+  if (!clean) return { stateSlug: "", citySlug: "" };
 
   const locSlug = slugify(clean);
 
   // 1) Try CITY by slug
   try {
     const { data: cityBySlug } = await supabase
-      .from('cities')
-      .select('slug, state_id, name')
-      .eq('slug', locSlug)
+      .from("cities")
+      .select("slug, state_id, name")
+      .eq("slug", locSlug)
       .maybeSingle();
 
     if (cityBySlug?.slug && cityBySlug?.state_id) {
       const { data: st } = await supabase
-        .from('states')
-        .select('slug, name')
-        .eq('id', cityBySlug.state_id)
+        .from("states")
+        .select("slug, name")
+        .eq("id", cityBySlug.state_id)
         .maybeSingle();
 
-      return { stateSlug: st?.slug || '', citySlug: cityBySlug.slug };
+      return { stateSlug: st?.slug || "", citySlug: cityBySlug.slug };
     }
   } catch {
     // ignore
@@ -57,13 +68,13 @@ const resolveLocationSlugs = async (locText) => {
   // 2) Try STATE by slug
   try {
     const { data: stateBySlug } = await supabase
-      .from('states')
-      .select('slug, name')
-      .eq('slug', locSlug)
+      .from("states")
+      .select("slug, name")
+      .eq("slug", locSlug)
       .maybeSingle();
 
     if (stateBySlug?.slug) {
-      return { stateSlug: stateBySlug.slug, citySlug: '' };
+      return { stateSlug: stateBySlug.slug, citySlug: "" };
     }
   } catch {
     // ignore
@@ -72,20 +83,20 @@ const resolveLocationSlugs = async (locText) => {
   // 3) Fallback: name partial match (city first)
   try {
     const { data: cities } = await supabase
-      .from('cities')
-      .select('slug, state_id, name')
-      .ilike('name', `%${clean}%`)
+      .from("cities")
+      .select("slug, state_id, name")
+      .ilike("name", `%${clean}%`)
       .limit(1);
 
     const city = cities?.[0];
     if (city?.slug && city?.state_id) {
       const { data: st } = await supabase
-        .from('states')
-        .select('slug, name')
-        .eq('id', city.state_id)
+        .from("states")
+        .select("slug, name")
+        .eq("id", city.state_id)
         .maybeSingle();
 
-      return { stateSlug: st?.slug || '', citySlug: city.slug };
+      return { stateSlug: st?.slug || "", citySlug: city.slug };
     }
   } catch {
     // ignore
@@ -93,20 +104,20 @@ const resolveLocationSlugs = async (locText) => {
 
   try {
     const { data: states } = await supabase
-      .from('states')
-      .select('slug, name')
-      .ilike('name', `%${clean}%`)
+      .from("states")
+      .select("slug, name")
+      .ilike("name", `%${clean}%`)
       .limit(1);
 
     const st = states?.[0];
     if (st?.slug) {
-      return { stateSlug: st.slug, citySlug: '' };
+      return { stateSlug: st.slug, citySlug: "" };
     }
   } catch {
     // ignore
   }
 
-  return { stateSlug: '', citySlug: '' };
+  return { stateSlug: "", citySlug: "" };
 };
 
 const SidebarLink = ({ to, icon: Icon, children, onClick }) => {
@@ -117,8 +128,8 @@ const SidebarLink = ({ to, icon: Icon, children, onClick }) => {
       className={({ isActive }) =>
         `flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors min-h-[48px] ${
           isActive
-            ? 'bg-[#003D82] text-white'
-            : 'text-neutral-600 hover:bg-neutral-100 hover:text-[#003D82]'
+            ? "bg-[#003D82] text-white"
+            : "text-neutral-600 hover:bg-neutral-100 hover:text-[#003D82]"
         }`
       }
     >
@@ -142,20 +153,26 @@ const SidebarButton = ({ icon: Icon, children, onClick }) => {
 };
 
 const BuyerLayout = () => {
-  const { user, logout } = useBuyerAuth();
+  const {
+    user,
+    logout,
+    isBuyerSuspended,
+    buyerLoading,
+  } = useBuyerAuth();
+
   const navigate = useNavigate();
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { resolvePath, appType } = useSubdomain();
 
   // ✅ Header quick search (no popup)
-  const [searchText, setSearchText] = useState('');
+  const [searchText, setSearchText] = useState("");
   const [searchSubmitting, setSearchSubmitting] = useState(false);
 
   const [buyerProfile, setBuyerProfile] = useState({
-    full_name: '',
-    company_name: '',
-    avatar_url: '',
+    full_name: "",
+    company_name: "",
+    avatar_url: "",
   });
 
   useEffect(() => {
@@ -163,22 +180,21 @@ const BuyerLayout = () => {
       if (!user?.id) return;
       try {
         const { data, error } = await supabase
-          .from('buyers')
-          .select('full_name, company_name, avatar_url')
-          .eq('user_id', user.id)
+          .from("buyers")
+          .select("full_name, company_name, avatar_url")
+          .eq("user_id", user.id)
           .maybeSingle();
 
         if (error) throw error;
         if (data) {
           setBuyerProfile({
-            full_name: data.full_name || '',
-            company_name: data.company_name || '',
-            avatar_url: data.avatar_url || '',
+            full_name: data.full_name || "",
+            company_name: data.company_name || "",
+            avatar_url: data.avatar_url || "",
           });
         }
       } catch (e) {
-        // Non-blocking: layout should still render
-        console.warn('[BuyerLayout] failed to load buyer profile:', e);
+        console.warn("[BuyerLayout] failed to load buyer profile:", e);
       }
     };
 
@@ -191,7 +207,7 @@ const BuyerLayout = () => {
       user?.user_metadata?.full_name ||
       user?.full_name ||
       user?.name ||
-      'Buyer'
+      "Buyer"
     );
   }, [buyerProfile.full_name, user]);
 
@@ -200,7 +216,7 @@ const BuyerLayout = () => {
       buyerProfile.company_name ||
       user?.user_metadata?.company_name ||
       user?.company ||
-      ''
+      ""
     );
   }, [buyerProfile.company_name, user]);
 
@@ -209,30 +225,31 @@ const BuyerLayout = () => {
       buyerProfile.avatar_url ||
       user?.user_metadata?.avatar_url ||
       user?.avatar_url ||
-      ''
+      ""
     );
   }, [buyerProfile.avatar_url, user]);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
+  // ✅ FIXED logout (await + hard redirect)
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      window.location.href = "/buyer/login";
+    }
   };
 
   const goToMainHome = () => {
-    // Local dev (path-based): buyer lives on /buyer, so "/" is the main site home
-    if (appType === 'main') {
-      navigate('/');
+    if (appType === "main") {
+      navigate("/");
       return;
     }
 
-    // Subdomain mode: buyer.domain.com -> domain.com
     const { protocol, hostname, port } = window.location;
-    const knownSubdomains = ['buyer', 'vendor', 'admin', 'man', 'emp', 'dir', 'career'];
-    const parts = hostname.split('.');
-
+    const knownSubdomains = ["buyer", "vendor", "admin", "man", "emp", "dir", "career"];
+    const parts = hostname.split(".");
     const rootHost =
       parts.length >= 2 && knownSubdomains.includes(parts[0])
-        ? parts.slice(1).join('.')
+        ? parts.slice(1).join(".")
         : hostname;
 
     const hostWithPort = port ? `${rootHost}:${port}` : rootHost;
@@ -240,9 +257,9 @@ const BuyerLayout = () => {
   };
 
   const openDirectorySearch = async (term) => {
-    const raw = String(term || '').trim();
+    const raw = String(term || "").trim();
     if (!raw) {
-      toast({ title: 'Type something to search' });
+      toast({ title: "Type something to search" });
       return false;
     }
 
@@ -250,9 +267,8 @@ const BuyerLayout = () => {
     setSearchSubmitting(true);
 
     try {
-      // ✅ Support free text like: "land survey in delhi"
       let serviceText = raw;
-      let freeLocText = '';
+      let freeLocText = "";
       const m = raw.match(/^(.*)\s+in\s+(.+)$/i);
       if (m && m[1] && m[2]) {
         serviceText = String(m[1]).trim();
@@ -261,33 +277,31 @@ const BuyerLayout = () => {
 
       const serviceSlug = slugify(serviceText);
       if (!serviceSlug) {
-        toast({ title: 'Type something to search' });
+        toast({ title: "Type something to search" });
         return false;
       }
 
-      let stateSlug = '';
-      let citySlug = '';
+      let stateSlug = "";
+      let citySlug = "";
       if (freeLocText) {
         const resolved = await resolveLocationSlugs(freeLocText);
-        stateSlug = resolved?.stateSlug || '';
-        citySlug = resolved?.citySlug || '';
+        stateSlug = resolved?.stateSlug || "";
+        citySlug = resolved?.citySlug || "";
       }
 
       const path = urlParser.createStructuredUrl(serviceSlug, stateSlug, citySlug);
 
-      // Local dev / main host: directory routes exist in the same router tree
-      if (appType === 'main') {
+      if (appType === "main") {
         navigate(path);
         return true;
       }
 
-      // Subdomain mode: buyer.domain.com -> domain.com + /directory/search/...
       const { protocol, hostname, port } = window.location;
-      const knownSubdomains = ['buyer', 'vendor', 'admin', 'man', 'emp', 'dir', 'career'];
-      const parts = hostname.split('.');
+      const knownSubdomains = ["buyer", "vendor", "admin", "man", "emp", "dir", "career"];
+      const parts = hostname.split(".");
       const rootHost =
         parts.length >= 2 && knownSubdomains.includes(parts[0])
-          ? parts.slice(1).join('.')
+          ? parts.slice(1).join(".")
           : hostname;
       const hostWithPort = port ? `${rootHost}:${port}` : rootHost;
       window.location.href = `${protocol}//${hostWithPort}${path}`;
@@ -298,132 +312,178 @@ const BuyerLayout = () => {
   };
 
   const getPageTitle = () => {
-    const path = location.pathname.split('/').pop();
-    if (path === 'dashboard') return 'Buyer Dashboard';
-    if (path === 'create') return 'Create Proposal';
+    const path = location.pathname.split("/").pop();
+    if (path === "dashboard") return "Buyer Dashboard";
+    if (path === "create") return "Create Proposal";
     return path.charAt(0).toUpperCase() + path.slice(1);
   };
 
-  const SidebarContent = ({ mobile = false }) => (
-    <div className="flex flex-col h-full">
-      {!mobile && (
-        <div className="h-20 flex items-center justify-center border-b border-neutral-100 px-4">
-          {/* ✅ Clean, compact logo (no tagline) */}
-          <Logo className="h-8" showTagline={false} />
-        </div>
-      )}
+  const SidebarContent = ({ mobile = false }) => {
+    const closeMobile = () => setIsMobileMenuOpen(false);
 
+    // ✅ Suspended buyer sidebar: ONLY 2 links
+    const SuspendedNav = () => (
       <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
-        {/* ✅ NEW: Home button */}
-        <SidebarButton icon={Home} onClick={() => { setIsMobileMenuOpen(false); goToMainHome(); }}>
+        <SidebarLink
+          to={resolvePath("account-suspended", "buyer")}
+          icon={Ban}
+          onClick={closeMobile}
+        >
+          Account Suspended
+        </SidebarLink>
+
+        <SidebarLink
+          to={resolvePath("tickets", "buyer")}
+          icon={Ticket}
+          onClick={closeMobile}
+        >
+          Support Tickets
+        </SidebarLink>
+      </nav>
+    );
+
+    // ✅ Active buyer sidebar: FULL links
+    const ActiveNav = () => (
+      <nav className="p-4 space-y-1 flex-1 overflow-y-auto">
+        <SidebarButton icon={Home} onClick={() => { closeMobile(); goToMainHome(); }}>
           Home
         </SidebarButton>
 
         <SidebarLink
-          to={resolvePath('dashboard', 'buyer')}
+          to={resolvePath("dashboard", "buyer")}
           icon={LayoutDashboard}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Dashboard
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('proposals', 'buyer')}
+          to={resolvePath("proposals", "buyer")}
           icon={FileText}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           My Proposals
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('proposals/new', 'buyer')}
+          to={resolvePath("proposals/new", "buyer")}
           icon={PlusCircle}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           New Proposal
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('messages', 'buyer')}
+          to={resolvePath("messages", "buyer")}
           icon={MessageSquare}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Messages
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('tickets', 'buyer')}
+          to={resolvePath("tickets", "buyer")}
           icon={Ticket}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Support Tickets
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('favorites', 'buyer')}
+          to={resolvePath("favorites", "buyer")}
           icon={Heart}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Favorites
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('suggestions', 'buyer')}
+          to={resolvePath("suggestions", "buyer")}
           icon={Lightbulb}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Suggestions
         </SidebarLink>
 
         <SidebarLink
-          to={resolvePath('profile', 'buyer')}
+          to={resolvePath("profile", "buyer")}
           icon={User}
-          onClick={() => setIsMobileMenuOpen(false)}
+          onClick={closeMobile}
         >
           Profile
         </SidebarLink>
       </nav>
+    );
 
-      <div className="p-4 border-t border-neutral-100 bg-neutral-50/50">
-        {/* ✅ Clickable profile block (avatar + name) */}
-        <button
-          type="button"
-          onClick={() => {
-            setIsMobileMenuOpen(false);
-            navigate(resolvePath('profile', 'buyer'));
-          }}
-          className="w-full flex items-center gap-3 mb-3 px-2 py-2 rounded-lg hover:bg-neutral-100 text-left"
-          title="Open Profile"
-        >
-          <div className="w-10 h-10 rounded-full bg-[#00A699] flex items-center justify-center text-white font-bold text-lg overflow-hidden shrink-0">
-            {displayAvatar ? (
-              <img
-                src={displayAvatar}
-                alt={displayName}
-                className="h-full w-full object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              (displayName?.[0] || 'B').toUpperCase()
-            )}
+    return (
+      <div className="flex flex-col h-full">
+        {!mobile && (
+          <div className="h-20 flex items-center justify-center border-b border-neutral-100 px-4">
+            <Logo className="h-8" showTagline={false} />
           </div>
-          <div className="overflow-hidden">
-            <p className="text-sm font-medium text-neutral-900 truncate">{displayName}</p>
-            <p className="text-xs text-neutral-500 truncate">{displayCompany}</p>
-          </div>
-        </button>
+        )}
 
-        <Button
-          variant="ghost"
-          className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 h-11"
-          onClick={handleLogout}
-        >
-          <LogOut className="h-5 w-5 mr-2" />
-          Logout
-        </Button>
+        {/* ✅ Banner for suspended */}
+        {!buyerLoading && isBuyerSuspended && (
+          <div className="px-4 pt-4">
+            <div className="rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs p-3">
+              Your account is suspended. Only Support Tickets are available.
+            </div>
+          </div>
+        )}
+
+        {/* ✅ Render nav based on suspended */}
+        {buyerLoading ? (
+          <nav className="p-4 flex-1" />
+        ) : isBuyerSuspended ? (
+          <SuspendedNav />
+        ) : (
+          <ActiveNav />
+        )}
+
+        <div className="p-4 border-t border-neutral-100 bg-neutral-50/50">
+          {/* Profile block */}
+          <button
+            type="button"
+            onClick={() => {
+              closeMobile();
+              navigate(resolvePath("profile", "buyer"));
+            }}
+            className="w-full flex items-center gap-3 mb-3 px-2 py-2 rounded-lg hover:bg-neutral-100 text-left"
+            title="Open Profile"
+          >
+            <div className="w-10 h-10 rounded-full bg-[#00A699] flex items-center justify-center text-white font-bold text-lg overflow-hidden shrink-0">
+              {displayAvatar ? (
+                <img
+                  src={displayAvatar}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                (displayName?.[0] || "B").toUpperCase()
+              )}
+            </div>
+            <div className="overflow-hidden">
+              <p className="text-sm font-medium text-neutral-900 truncate">
+                {displayName}
+              </p>
+              <p className="text-xs text-neutral-500 truncate">{displayCompany}</p>
+            </div>
+          </button>
+
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-red-600 hover:text-red-700 hover:bg-red-50 h-11"
+            onClick={handleLogout}
+          >
+            <LogOut className="h-5 w-5 mr-2" />
+            Logout
+          </Button>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen bg-neutral-50 flex">
@@ -455,49 +515,53 @@ const BuyerLayout = () => {
               >
                 <Menu className="h-5 w-5" />
               </Button>
-              <h1 className="text-lg font-semibold text-neutral-900">{getPageTitle()}</h1>
+              <h1 className="text-lg font-semibold text-neutral-900">
+                {getPageTitle()}
+              </h1>
             </div>
 
-            <div className="flex items-center gap-2">
-              {/* ✅ Inline search (no popup) */}
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  const ok = await openDirectorySearch(searchText);
-                  if (ok) setSearchText('');
-                }}
-                className="flex items-center gap-2"
-              >
-                <div className="relative w-[160px] sm:w-[220px] md:w-[320px]">
-                  <div className="absolute left-3 top-2.5 text-neutral-400">
-                    <Search className="h-5 w-5" />
+            {/* ✅ If suspended: hide header search + notifications */}
+            {!buyerLoading && !isBuyerSuspended && (
+              <div className="flex items-center gap-2">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const ok = await openDirectorySearch(searchText);
+                    if (ok) setSearchText("");
+                  }}
+                  className="flex items-center gap-2"
+                >
+                  <div className="relative w-[160px] sm:w-[220px] md:w-[320px]">
+                    <div className="absolute left-3 top-2.5 text-neutral-400">
+                      <Search className="h-5 w-5" />
+                    </div>
+                    <Input
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      placeholder="Search (e.g. land survey in delhi)"
+                      className="pl-10 h-10"
+                    />
                   </div>
-                  <Input
-                    value={searchText}
-                    onChange={(e) => setSearchText(e.target.value)}
-                    placeholder="Search (e.g. land survey in delhi)"
-                    className="pl-10 h-10"
-                  />
-                </div>
+
+                  <Button
+                    type="submit"
+                    className="bg-[#003D82] hover:bg-[#00316a] h-10"
+                    disabled={searchSubmitting}
+                  >
+                    {searchSubmitting ? "Searching..." : "Search"}
+                  </Button>
+                </form>
 
                 <Button
-                  type="submit"
-                  className="bg-[#003D82] hover:bg-[#00316a] h-10"
-                  disabled={searchSubmitting}
+                  variant="ghost"
+                  size="icon"
+                  className="h-10 w-10"
+                  onClick={() => toast({ title: "No new notifications" })}
                 >
-                  {searchSubmitting ? 'Searching...' : 'Search'}
+                  <Bell className="h-5 w-5 text-neutral-500" />
                 </Button>
-              </form>
-
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-10 w-10"
-                onClick={() => toast({ title: 'No new notifications' })}
-              >
-                <Bell className="h-5 w-5 text-neutral-500" />
-              </Button>
-            </div>
+              </div>
+            )}
           </header>
 
           <main className="flex-1 p-4 md:p-8 overflow-y-auto overflow-x-hidden">

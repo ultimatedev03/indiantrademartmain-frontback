@@ -22,17 +22,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
 
-import {
-  User,
-  Eye,
-  Edit,
-  Loader2,
-  Mail,
-  Phone,
-  Search,
-  Building2,
-  MapPin,
-} from "lucide-react";
+import { Eye, Edit, Loader2, Search, Ban, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/customSupabaseClient";
 
 /* ================= VALIDATION HELPERS ================= */
@@ -42,6 +32,23 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 const pincodeRegex = /^\d{6}$/;
+
+/* ================= STATUS HELPERS ================= */
+const isBuyerActive = (b) => {
+  // supports either is_active boolean or status string
+  if (typeof b?.is_active === "boolean") return b.is_active;
+  if (typeof b?.status === "string") return b.status.toUpperCase() === "ACTIVE";
+  // fallback: if terminated_at exists treat as terminated
+  if (b?.terminated_at) return false;
+  return true; // default active
+};
+
+const getStatusLabel = (b) => (isBuyerActive(b) ? "ACTIVE" : "TERMINATED");
+
+const getStatusBadgeVariant = () => {
+  // Use outline + custom classes for consistent look like vendor page
+  return "outline";
+};
 
 export default function Buyers() {
   const { toast } = useToast();
@@ -55,10 +62,19 @@ export default function Buyers() {
   const [showViewModal, setShowViewModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
 
+  const [showTerminateModal, setShowTerminateModal] = useState(false);
+  const [terminateReason, setTerminateReason] = useState("");
+
+  const isTerminateReasonValid = useMemo(
+    () => terminateReason.trim().length > 0,
+    [terminateReason]
+  );
+
   /* ================= LOAD BUYERS ================= */
   const load = async () => {
     setLoading(true);
     try {
+      // NOTE: We select "*" so it will include is_active/status if exists.
       const { data, error } = await supabase
         .from("buyers")
         .select("*")
@@ -89,21 +105,117 @@ export default function Buyers() {
     }
   };
 
+  // initial load
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // re-filter on search without refetch (fast)
+  useEffect(() => {
+    // just reload from db for correct count + latest
+    // if you want pure client filter, remove this useEffect
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm]);
 
   const total = useMemo(() => buyers.length, [buyers]);
 
   /* ================= VIEW / EDIT ================= */
   const openView = (b) => {
-    setSelectedBuyer({ ...b }); // 🔥 IMPORTANT clone
+    setSelectedBuyer({ ...b }); // clone
     setShowViewModal(true);
   };
 
   const openEdit = (b) => {
     setSelectedBuyer({ ...b });
     setShowEditModal(true);
+  };
+
+  /* ================= TERMINATE / ACTIVATE ================= */
+  const openTerminate = (b) => {
+    setSelectedBuyer({ ...b });
+    setTerminateReason("");
+    setShowTerminateModal(true);
+  };
+
+  const updateBuyerStatus = async (buyerId, nextActive, reasonText = "") => {
+    setProcessing(true);
+    try {
+      // First fetch one buyer to detect which columns exist (safe)
+      const { data: current, error: curErr } = await supabase
+        .from("buyers")
+        .select("*")
+        .eq("id", buyerId)
+        .single();
+
+      if (curErr) throw curErr;
+
+      const updates = {
+        updated_at: new Date().toISOString(),
+      };
+
+      // If column exists: is_active
+      if (typeof current?.is_active === "boolean" || "is_active" in current) {
+        updates.is_active = !!nextActive;
+      }
+
+      // If column exists: status
+      if (typeof current?.status === "string" || "status" in current) {
+        updates.status = nextActive ? "ACTIVE" : "TERMINATED";
+      }
+
+      // Optional terminated fields
+      if ("terminated_at" in current) {
+        updates.terminated_at = nextActive ? null : new Date().toISOString();
+      }
+      if ("terminated_reason" in current) {
+        updates.terminated_reason = nextActive ? null : (reasonText || null);
+      }
+
+      const { error } = await supabase.from("buyers").update(updates).eq("id", buyerId);
+      if (error) throw error;
+
+      toast({
+        title: "Success",
+        description: nextActive
+          ? "Buyer activated successfully"
+          : "Buyer terminated successfully",
+      });
+
+      setShowTerminateModal(false);
+      setTerminateReason("");
+      await load();
+    } catch (e) {
+      toast({
+        title: "Error",
+        description: e.message || "Status update failed",
+        variant: "destructive",
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const terminateBuyer = async () => {
+    if (!selectedBuyer?.id) return;
+
+    // ✅ REQUIRED reason for terminate
+    const reason = terminateReason.trim();
+    if (!reason) {
+      toast({
+        title: "Reason required",
+        description: "Please type a reason to terminate this buyer.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    await updateBuyerStatus(selectedBuyer.id, false, reason);
+  };
+
+  const activateBuyer = async (b) => {
+    await updateBuyerStatus(b.id, true, "");
   };
 
   /* ================= SAVE BUYER ================= */
@@ -227,6 +339,7 @@ export default function Buyers() {
                 <TableHead>Company</TableHead>
                 <TableHead>Location</TableHead>
                 <TableHead>Joined</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -234,38 +347,83 @@ export default function Buyers() {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
+                  <TableCell colSpan={7} className="text-center py-8">
                     <Loader2 className="animate-spin mx-auto h-6 w-6" />
                   </TableCell>
                 </TableRow>
               ) : buyers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8 text-gray-500">
+                  <TableCell
+                    colSpan={7}
+                    className="text-center py-8 text-gray-500"
+                  >
                     No buyers found
                   </TableCell>
                 </TableRow>
               ) : (
-                buyers.map((b) => (
-                  <TableRow key={b.id}>
-                    <TableCell className="font-medium">{b.full_name}</TableCell>
-                    <TableCell>{b.email}</TableCell>
-                    <TableCell>{b.company_name || "Individual"}</TableCell>
-                    <TableCell>
-                      {[b.city, b.state].filter(Boolean).join(", ") || "—"}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(b.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell className="text-right space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => openView(b)}>
-                        <Eye className="w-4 h-4" />
-                      </Button>
-                      <Button size="sm" onClick={() => openEdit(b)}>
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
+                buyers.map((b) => {
+                  const active = isBuyerActive(b);
+                  return (
+                    <TableRow key={b.id}>
+                      <TableCell className="font-medium">{b.full_name}</TableCell>
+                      <TableCell>{b.email}</TableCell>
+                      <TableCell>{b.company_name || "Individual"}</TableCell>
+                      <TableCell>
+                        {[b.city, b.state].filter(Boolean).join(", ") || "—"}
+                      </TableCell>
+                      <TableCell>
+                        {b.created_at
+                          ? new Date(b.created_at).toLocaleDateString()
+                          : "—"}
+                      </TableCell>
+
+                      <TableCell>
+                        <Badge
+                          variant={getStatusBadgeVariant(b)}
+                          className={
+                            active
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-red-200 bg-red-50 text-red-700"
+                          }
+                        >
+                          {getStatusLabel(b)}
+                        </Badge>
+                      </TableCell>
+
+                      <TableCell className="text-right space-x-2">
+                        <Button size="sm" variant="outline" onClick={() => openView(b)}>
+                          <Eye className="w-4 h-4" />
+                        </Button>
+
+                        <Button size="sm" variant="outline" onClick={() => openEdit(b)}>
+                          <Edit className="w-4 h-4" />
+                        </Button>
+
+                        {active ? (
+                          <Button
+                            size="sm"
+                            className="bg-red-600 hover:bg-red-700 text-white"
+                            onClick={() => openTerminate(b)}
+                            disabled={processing}
+                            title="Terminate Buyer"
+                          >
+                            <Ban className="w-4 h-4" />
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                            onClick={() => activateBuyer(b)}
+                            disabled={processing}
+                            title="Activate Buyer"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -281,13 +439,36 @@ export default function Buyers() {
 
           {selectedBuyer && (
             <div className="space-y-2 text-sm">
-              <div><b>Name:</b> {selectedBuyer.full_name}</div>
-              <div><b>Email:</b> {selectedBuyer.email}</div>
-              <div><b>Phone:</b> {selectedBuyer.phone || "—"}</div>
-              <div><b>Company:</b> {selectedBuyer.company_name || "Individual"}</div>
-              <div><b>PAN:</b> {selectedBuyer.pan_card || "—"}</div>
-              <div><b>GST:</b> {selectedBuyer.gst_number || "—"}</div>
-              <div><b>Address:</b> {selectedBuyer.address || "—"}</div>
+              <div>
+                <b>Name:</b> {selectedBuyer.full_name}
+              </div>
+              <div>
+                <b>Email:</b> {selectedBuyer.email}
+              </div>
+              <div>
+                <b>Phone:</b> {selectedBuyer.phone || "—"}
+              </div>
+              <div>
+                <b>Company:</b> {selectedBuyer.company_name || "Individual"}
+              </div>
+              <div>
+                <b>Status:</b> {getStatusLabel(selectedBuyer)}
+              </div>
+              <div>
+                <b>PAN:</b> {selectedBuyer.pan_card || "—"}
+              </div>
+              <div>
+                <b>GST:</b> {selectedBuyer.gst_number || "—"}
+              </div>
+              <div>
+                <b>Address:</b> {selectedBuyer.address || "—"}
+              </div>
+              {"terminated_reason" in (selectedBuyer || {}) && (
+                <div>
+                  <b>Termination Reason:</b>{" "}
+                  {selectedBuyer.terminated_reason || "—"}
+                </div>
+              )}
             </div>
           )}
 
@@ -331,7 +512,10 @@ export default function Buyers() {
               <Input
                 value={selectedBuyer.company_name || ""}
                 onChange={(e) =>
-                  setSelectedBuyer({ ...selectedBuyer, company_name: e.target.value })
+                  setSelectedBuyer({
+                    ...selectedBuyer,
+                    company_name: e.target.value,
+                  })
                 }
                 placeholder="Company"
               />
@@ -364,7 +548,10 @@ export default function Buyers() {
               <Textarea
                 value={selectedBuyer.address || ""}
                 onChange={(e) =>
-                  setSelectedBuyer({ ...selectedBuyer, address: e.target.value })
+                  setSelectedBuyer({
+                    ...selectedBuyer,
+                    address: e.target.value,
+                  })
                 }
                 placeholder="Address"
               />
@@ -402,6 +589,56 @@ export default function Buyers() {
             <Button onClick={saveBuyer} disabled={processing}>
               {processing && <Loader2 className="animate-spin h-4 w-4 mr-2" />}
               Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* TERMINATE MODAL */}
+      <Dialog
+        open={showTerminateModal}
+        onOpenChange={(open) => {
+          setShowTerminateModal(open);
+          if (!open) setTerminateReason("");
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Terminate Buyer Account</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600">
+              Are you sure you want to terminate this buyer account?
+            </p>
+
+            <Textarea
+              value={terminateReason}
+              onChange={(e) => setTerminateReason(e.target.value)}
+              placeholder="Reason (required)"
+            />
+            <p className="text-xs text-gray-500">
+              Please type a reason to enable <b>Terminate</b>.
+            </p>
+
+            {selectedBuyer && (
+              <div className="text-sm">
+                <b>Buyer:</b> {selectedBuyer.full_name} ({selectedBuyer.email})
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowTerminateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={terminateBuyer}
+              disabled={processing || !isTerminateReasonValid}
+            >
+              {processing && <Loader2 className="animate-spin h-4 w-4 mr-2" />}
+              Terminate
             </Button>
           </DialogFooter>
         </DialogContent>

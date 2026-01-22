@@ -5,27 +5,60 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { supabase } from '@/lib/customSupabaseClient';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/use-toast';
 
-const NotificationBell = () => {
-  const { user } = useAuth();
+const NotificationBell = ({ userId: userIdProp = null }) => {
+  const [userId, setUserId] = useState(userIdProp);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
+    if (userIdProp) {
+      setUserId(userIdProp);
+      return;
+    }
 
-    fetchNotifications();
+    let mounted = true;
+
+    const load = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (mounted) setUserId(user?.id || null);
+      } catch {
+        if (mounted) setUserId(null);
+      }
+    };
+
+    load();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setUserId(session?.user?.id || null);
+    });
+
+    return () => {
+      mounted = false;
+      subscription?.unsubscribe?.();
+    };
+  }, [userIdProp]);
+
+  useEffect(() => {
+    if (!userId) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+
+    fetchNotifications(userId);
 
     // Real-time subscription
     const channel = supabase
-      .channel('notifications-realtime')
+      .channel(`notifications-realtime:${userId}`)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
         (payload) => {
           setNotifications((prev) => [payload.new, ...prev]);
           setUnreadCount((prev) => prev + 1);
@@ -41,14 +74,14 @@ const NotificationBell = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]);
+  }, [userId]);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = async (id) => {
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', id)
         .order('created_at', { ascending: false })
         .limit(20);
 
@@ -102,7 +135,7 @@ const NotificationBell = () => {
       const { error } = await supabase
         .from('notifications')
         .update({ is_read: true })
-        .eq('user_id', user.id)
+        .eq('user_id', userId)
         .eq('is_read', false);
 
       if (error) throw error;

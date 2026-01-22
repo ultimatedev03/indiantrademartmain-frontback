@@ -95,13 +95,18 @@ const AIChatWidget = () => {
     sendMessage(prompt);
   };
 
+  const handleOpen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsOpen(true);
+    setIsCollapsed(false);
+  };
+
   const widgetButton = (
     <button
-      onClick={() => {
-        setIsOpen(true);
-        setIsCollapsed(false);
-      }}
-      className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-gradient-to-r from-[#fbbf8f] via-[#f57c43] to-[#f57c43] text-white px-3.5 py-2.5 rounded-full shadow-lg hover:translate-y-[-1px] hover:shadow-xl transition-all backdrop-blur"
+      type="button"
+      onClick={handleOpen}
+      className="fixed bottom-5 right-5 z-[9999] pointer-events-auto flex items-center gap-2 bg-gradient-to-r from-[#fbbf8f] via-[#f57c43] to-[#f57c43] text-white px-3.5 py-2.5 rounded-full shadow-lg hover:translate-y-[-1px] hover:shadow-xl transition-all backdrop-blur"
       aria-label="Open AI chat"
     >
       <MessageCircle className="h-4.5 w-4.5" />
@@ -233,7 +238,7 @@ const AIChatWidget = () => {
   const panel = (
     <div
       className={cn(
-        'fixed bottom-5 right-5 z-50 w-full max-w-[360px] bg-white/95 backdrop-blur-xl shadow-xl rounded-2xl border border-gray-100 flex flex-col',
+        'fixed bottom-5 right-5 z-[9999] pointer-events-auto w-full max-w-[360px] bg-white/95 backdrop-blur-xl shadow-xl rounded-2xl border border-gray-100 flex flex-col',
         isCollapsed ? 'h-[200px]' : 'h-[540px]'
       )}
     >

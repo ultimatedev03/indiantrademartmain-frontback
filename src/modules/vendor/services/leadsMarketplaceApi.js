@@ -463,6 +463,23 @@ export const leadsMarketplaceApi = {
         .eq('vendor_id', vendor.id);
     }
 
+    try {
+      const userId = vendor.user_id || (await supabase.auth.getUser()).data?.user?.id;
+      if (userId) {
+        await supabase.from('notifications').insert([{
+          user_id: userId,
+          type: 'LEAD_PURCHASED',
+          title: 'Lead purchased',
+          message: `You purchased a lead${lead?.product_name ? ` for ${lead.product_name}` : ''}. Contact details are now available.`,
+          link: '/vendor/leads',
+          is_read: false,
+          created_at: new Date().toISOString()
+        }]);
+      }
+    } catch (e) {
+      console.warn('Lead purchase notification failed:', e);
+    }
+
     return purchase;
   },
 

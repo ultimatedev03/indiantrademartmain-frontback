@@ -85,6 +85,51 @@ export const adminApi = {
       return data;
   },
 
+  // ✅ Buyers API (NEW)
+  buyers: {
+    list: async () => {
+      const { data, error } = await supabase
+        .from('buyers')
+        .select('*')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+
+    // Try to update using any of these columns if they exist
+    setActive: async (buyerId, isActive, reason = '') => {
+      const { data: current, error: curErr } = await supabase
+        .from('buyers')
+        .select('*')
+        .eq('id', buyerId)
+        .single();
+
+      if (curErr) throw curErr;
+
+      const updates = { updated_at: new Date().toISOString() };
+
+      if (typeof current?.is_active === 'boolean' || ('is_active' in current)) {
+        updates.is_active = !!isActive;
+      }
+      if (typeof current?.status === 'string' || ('status' in current)) {
+        updates.status = isActive ? 'ACTIVE' : 'TERMINATED';
+      }
+      if ('terminated_at' in current) {
+        updates.terminated_at = isActive ? null : new Date().toISOString();
+      }
+      if ('terminated_reason' in current) {
+        updates.terminated_reason = isActive ? null : (reason || null);
+      }
+
+      const { error } = await supabase
+        .from('buyers')
+        .update(updates)
+        .eq('id', buyerId);
+
+      if (error) throw error;
+    }
+  },
+
   // Data Entry API - Products
   products: {
     list: async () => {

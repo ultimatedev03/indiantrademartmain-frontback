@@ -1,7 +1,45 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { notifyRole, notifyUser } from '../lib/notify.js';
 
 const router = express.Router();
+
+const nowIso = () => new Date().toISOString();
+
+const normalizeSenderType = (v) => String(v || '').trim().toUpperCase();
+
+const notifyAdmins = async (payload) => {
+  await notifyRole('ADMIN', payload);
+  await notifyRole('SUPERADMIN', payload);
+  await notifyRole('SUPPORT', payload);
+};
+
+const getTicketUsers = async (ticket) => {
+  const vendorId = ticket?.vendor_id || null;
+  const buyerId = ticket?.buyer_id || null;
+  let vendorUserId = null;
+  let buyerUserId = null;
+
+  if (vendorId) {
+    const { data } = await supabase
+      .from('vendors')
+      .select('user_id')
+      .eq('id', vendorId)
+      .maybeSingle();
+    vendorUserId = data?.user_id || null;
+  }
+
+  if (buyerId) {
+    const { data } = await supabase
+      .from('buyers')
+      .select('user_id')
+      .eq('id', buyerId)
+      .maybeSingle();
+    buyerUserId = data?.user_id || null;
+  }
+
+  return { vendorUserId, buyerUserId };
+};
 
 // GET /api/support/tickets - Fetch all support tickets with filters
 router.get('/tickets', async (req, res) => {
@@ -98,6 +136,107 @@ router.get('/tickets/:id', async (req, res) => {
   }
 });
 
+// GET /api/support/tickets/:id/messages
+router.get('/tickets/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('ticket_messages')
+      .select('*')
+      .eq('ticket_id', id)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch messages', details: error.message });
+    }
+
+    return res.json({ success: true, messages: data || [] });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to fetch messages', details: error.message });
+  }
+});
+
+// POST /api/support/tickets/:id/messages
+router.post('/tickets/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message, sender_type, sender_id } = req.body || {};
+
+    if (!message || !String(message).trim()) {
+      return res.status(400).json({ error: 'Message is required' });
+    }
+
+    const senderType = normalizeSenderType(sender_type) || 'SUPPORT';
+
+    const { data: ticket, error: tErr } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (tErr || !ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    await supabase
+      .from('support_tickets')
+      .update({ last_reply_at: nowIso(), updated_at: nowIso() })
+      .eq('id', id);
+
+    const { data, error } = await supabase
+      .from('ticket_messages')
+      .insert([{
+        ticket_id: id,
+        sender_id: sender_id || null,
+        sender_type: senderType,
+        message: String(message || '').trim(),
+        created_at: nowIso()
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to send message', details: error.message });
+    }
+
+    const { vendorUserId, buyerUserId } = await getTicketUsers(ticket);
+    const title = `Support ticket update: ${ticket.ticket_display_id || ticket.id}`;
+    const linkBase = ticket.vendor_id ? '/vendor/support' : '/buyer/tickets';
+
+    if (['SUPPORT', 'ADMIN', 'STAFF'].includes(senderType)) {
+      if (vendorUserId) {
+        await notifyUser({
+          user_id: vendorUserId,
+          type: 'SUPPORT_MESSAGE',
+          title,
+          message: String(message || '').trim(),
+          link: linkBase,
+        });
+      }
+      if (buyerUserId) {
+        await notifyUser({
+          user_id: buyerUserId,
+          type: 'SUPPORT_MESSAGE',
+          title,
+          message: String(message || '').trim(),
+          link: linkBase,
+        });
+      }
+    } else {
+      await notifyAdmins({
+        type: 'SUPPORT_MESSAGE',
+        title,
+        message: String(message || '').trim(),
+        link: '/admin/tickets',
+      });
+    }
+
+    return res.json({ success: true, message: data });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to send message', details: error.message });
+  }
+});
+
 // POST /api/support/tickets - Create new support ticket
 router.post('/tickets', async (req, res) => {
   try {
@@ -132,7 +271,7 @@ router.post('/tickets', async (req, res) => {
       buyer_id: buyer_id || null,
       ticket_display_id: ticketNumber,
       attachments: JSON.stringify(attachments),
-      created_at: new Date().toISOString()
+      created_at: nowIso()
     };
     
     console.log('📝 Creating support ticket:', ticketNumber);
@@ -152,7 +291,14 @@ router.post('/tickets', async (req, res) => {
     }
     
     console.log('✅ Ticket created:', newTicket.id);
-    
+
+    await notifyAdmins({
+      type: 'SUPPORT_TICKET',
+      title: `New support ticket: ${ticketNumber}`,
+      message: subject.trim(),
+      link: '/admin/tickets',
+    });
+
     res.status(201).json({
       success: true,
       message: 'Ticket created successfully',
@@ -254,7 +400,7 @@ router.put('/tickets/:id/status', async (req, res) => {
     
     // If resolving or closing, set resolved_at timestamp
     if (['RESOLVED', 'CLOSED'].includes(status.toUpperCase())) {
-      updatePayload.resolved_at = new Date().toISOString();
+      updatePayload.resolved_at = nowIso();
     }
     
     const { data: updatedTicket, error } = await supabase
@@ -277,7 +423,19 @@ router.put('/tickets/:id/status', async (req, res) => {
     }
     
     console.log('✅ Ticket status updated:', id);
-    
+
+    if (updatedTicket) {
+      const { vendorUserId, buyerUserId } = await getTicketUsers(updatedTicket);
+      const title = `Ticket status updated: ${updatedTicket.ticket_display_id || updatedTicket.id}`;
+      const message = `Status changed to ${updatePayload.status}`;
+      if (vendorUserId) {
+        await notifyUser({ user_id: vendorUserId, type: 'SUPPORT_STATUS', title, message, link: '/vendor/support' });
+      }
+      if (buyerUserId) {
+        await notifyUser({ user_id: buyerUserId, type: 'SUPPORT_STATUS', title, message, link: '/buyer/tickets' });
+      }
+    }
+
     res.json({
       success: true,
       message: 'Ticket status updated successfully',

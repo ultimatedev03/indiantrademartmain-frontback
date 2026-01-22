@@ -45,6 +45,31 @@ async function writeAudit({ user_id = null, action, entity_type, entity_id = nul
   }
 }
 
+const nowIso = () => new Date().toISOString();
+
+async function notifyUser({ user_id, type, title, message, link }) {
+  try {
+    if (!user_id) return null;
+    const { data, error } = await supabase
+      .from("notifications")
+      .insert([{
+        user_id,
+        type: type || "INFO",
+        title: title || "Notification",
+        message: message || "",
+        link: link || null,
+        is_read: false,
+        created_at: nowIso(),
+      }])
+      .select()
+      .maybeSingle();
+    if (error) return null;
+    return data || null;
+  } catch {
+    return null;
+  }
+}
+
 function isActiveSub(s) {
   const st = String(s?.status || "").toUpperCase();
   if (st !== "ACTIVE") return false;
@@ -159,6 +184,14 @@ export async function handler(event) {
           entity_type: "employees",
           entity_id: emp?.id || null,
           details: { user_id: userId, email, role, department },
+        });
+
+        await notifyUser({
+          user_id: userId,
+          type: "WELCOME",
+          title: "Welcome to the Admin Team",
+          message: "Your staff account has been created. Please log in to continue.",
+          link: "/employee/login",
         });
 
         return ok({ success: true, employee: emp || empPayload });
@@ -354,6 +387,16 @@ export async function handler(event) {
         details: { reason: reason || null },
       });
 
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "ACCOUNT_SUSPENDED",
+          title: "Account suspended",
+          message: reason || "Your vendor account has been suspended by admin.",
+          link: "/vendor/support",
+        });
+      }
+
       return ok({ success: true, vendor: data });
     }
 
@@ -379,6 +422,16 @@ export async function handler(event) {
         entity_id: vendorId,
         details: {},
       });
+
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "ACCOUNT_ACTIVATED",
+          title: "Account re-activated",
+          message: "Your vendor account has been activated by admin.",
+          link: "/vendor/dashboard",
+        });
+      }
 
       return ok({ success: true, vendor: data });
     }

@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { razorpayInstance } from '../lib/razorpayClient.js';
 import { generateInvoiceNumber, generateInvoicePDF, generateInvoiceSummary } from '../lib/invoiceGenerator.js';
+import { sendSubscriptionActivatedNotification } from '../lib/notificationService.js';
 import nodemailer from 'nodemailer';
 
 const router = express.Router();
@@ -353,6 +354,12 @@ router.post('/verify', async (req, res) => {
       }
     } catch (emailError) {
       console.error('Email sending error:', emailError);
+    }
+
+    try {
+      await sendSubscriptionActivatedNotification(vendor_id, plan.name, endDate);
+    } catch (notifError) {
+      console.error('Subscription notification error:', notifError);
     }
 
     res.json({

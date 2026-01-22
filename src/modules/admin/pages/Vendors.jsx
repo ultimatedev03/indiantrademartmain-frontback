@@ -2,16 +2,47 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
 
-import { Building2, Eye, Filter, Loader2, Mail, Phone, Package, Search, UserX, ShieldCheck } from "lucide-react";
+import {
+  Building2,
+  Eye,
+  Filter,
+  Loader2,
+  Mail,
+  Phone,
+  Package,
+  Search,
+  UserX,
+  ShieldCheck,
+} from "lucide-react";
 
 // ✅ Local vs Netlify API base
 const isLocalHost = () => {
@@ -27,7 +58,9 @@ async function safeReadJson(res) {
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return await res.json();
   const text = await res.text();
-  throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 80)}...`);
+  throw new Error(
+    `API returned non-JSON (${res.status}). Got: ${text.slice(0, 80)}...`
+  );
 }
 
 const norm = (v) => String(v || "").toUpperCase();
@@ -62,6 +95,11 @@ export default function Vendors() {
   const [terminationReason, setTerminationReason] = useState("");
   const [processing, setProcessing] = useState(false);
 
+  const isTerminationReasonValid = useMemo(
+    () => terminationReason.trim().length > 0,
+    [terminationReason]
+  );
+
   const load = async () => {
     setLoading(true);
     try {
@@ -73,7 +111,12 @@ export default function Vendors() {
 
       // filters
       if (filterKyc !== "all") {
-        const map = { pending: "PENDING", submitted: "SUBMITTED", approved: "APPROVED", rejected: "REJECTED" };
+        const map = {
+          pending: "PENDING",
+          submitted: "SUBMITTED",
+          approved: "APPROVED",
+          rejected: "REJECTED",
+        };
         const want = map[filterKyc] || filterKyc.toUpperCase();
         list = list.filter((v) => norm(v.kyc_status) === want);
       }
@@ -97,7 +140,11 @@ export default function Vendors() {
       setVendors(list);
     } catch (e) {
       console.error(e);
-      toast({ title: "Error", description: e.message || "Failed to load vendors", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: e.message || "Failed to load vendors",
+        variant: "destructive",
+      });
     } finally {
       setLoading(false);
     }
@@ -128,21 +175,41 @@ export default function Vendors() {
 
   const doTerminate = async () => {
     if (!selectedVendor?.id) return;
+
+    // ✅ REQUIRED reason for terminate
+    const reason = terminationReason.trim();
+    if (!reason) {
+      toast({
+        title: "Reason required",
+        description: "Please type a reason to terminate this vendor.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setProcessing(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/vendors/${selectedVendor.id}/terminate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: terminationReason || "" }),
-      });
+      const res = await fetch(
+        `${ADMIN_API_BASE}/vendors/${selectedVendor.id}/terminate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reason }),
+        }
+      );
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Terminate failed");
       toast({ title: "Success", description: "Vendor terminated" });
       setShowTerminateModal(false);
+      setTerminationReason("");
       await load();
     } catch (e) {
       console.error(e);
-      toast({ title: "Error", description: e.message || "Terminate failed", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: e.message || "Terminate failed",
+        variant: "destructive",
+      });
     } finally {
       setProcessing(false);
     }
@@ -151,14 +218,20 @@ export default function Vendors() {
   const doActivate = async (vendorId) => {
     setProcessing(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/vendors/${vendorId}/activate`, { method: "POST" });
+      const res = await fetch(`${ADMIN_API_BASE}/vendors/${vendorId}/activate`, {
+        method: "POST",
+      });
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Activate failed");
       toast({ title: "Success", description: "Vendor activated" });
       await load();
     } catch (e) {
       console.error(e);
-      toast({ title: "Error", description: e.message || "Activate failed", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: e.message || "Activate failed",
+        variant: "destructive",
+      });
     } finally {
       setProcessing(false);
     }
@@ -168,8 +241,12 @@ export default function Vendors() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-neutral-800">Vendor Management</h1>
-          <p className="text-gray-500">Vendor details, package, products and termination</p>
+          <h1 className="text-2xl font-bold text-neutral-800">
+            Vendor Management
+          </h1>
+          <p className="text-gray-500">
+            Vendor details, package, products and termination
+          </p>
         </div>
         <Badge variant="outline" className="text-sm">
           {total} Total Vendors
@@ -279,7 +356,9 @@ export default function Vendors() {
                       </TableCell>
 
                       <TableCell>
-                        <Badge className={kycBadgeClass(v.kyc_status)}>{norm(v.kyc_status || "PENDING")}</Badge>
+                        <Badge className={kycBadgeClass(v.kyc_status)}>
+                          {norm(v.kyc_status || "PENDING")}
+                        </Badge>
                       </TableCell>
 
                       <TableCell>
@@ -291,7 +370,9 @@ export default function Vendors() {
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Package className="h-4 w-4 text-gray-400" />
-                          <span className="text-sm font-medium text-gray-700">{v.product_count || 0}</span>
+                          <span className="text-sm font-medium text-gray-700">
+                            {v.product_count || 0}
+                          </span>
                         </div>
                       </TableCell>
 
@@ -300,7 +381,13 @@ export default function Vendors() {
                       </TableCell>
 
                       <TableCell>
-                        <Badge className={active ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}>
+                        <Badge
+                          className={
+                            active
+                              ? "bg-emerald-100 text-emerald-800"
+                              : "bg-red-100 text-red-800"
+                          }
+                        >
                           {active ? "ACTIVE" : "TERMINATED"}
                         </Badge>
                       </TableCell>
@@ -360,18 +447,36 @@ export default function Vendors() {
           {selectedVendor ? (
             <div className="space-y-3 text-sm">
               <div className="font-semibold">{selectedVendor.company_name}</div>
-              <div>Owner: <span className="font-medium">{selectedVendor.owner_name || "—"}</span></div>
-              <div>Email: <span className="font-medium">{selectedVendor.email || "—"}</span></div>
-              <div>Phone: <span className="font-medium">{selectedVendor.phone || "—"}</span></div>
+              <div>
+                Owner:{" "}
+                <span className="font-medium">{selectedVendor.owner_name || "—"}</span>
+              </div>
+              <div>
+                Email:{" "}
+                <span className="font-medium">{selectedVendor.email || "—"}</span>
+              </div>
+              <div>
+                Phone:{" "}
+                <span className="font-medium">{selectedVendor.phone || "—"}</span>
+              </div>
               <div>
                 Package:{" "}
                 <Badge variant="outline" className="font-medium">
-                  {selectedVendor.package?.plan_name || "FREE"} {Number(selectedVendor.package?.price || 0) ? `• ₹${selectedVendor.package?.price}` : ""}
+                  {selectedVendor.package?.plan_name || "FREE"}{" "}
+                  {Number(selectedVendor.package?.price || 0)
+                    ? `• ₹${selectedVendor.package?.price}`
+                    : ""}
                 </Badge>
               </div>
               <div>
                 Status:{" "}
-                <Badge className={selectedVendor.is_active !== false ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"}>
+                <Badge
+                  className={
+                    selectedVendor.is_active !== false
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-red-100 text-red-800"
+                  }
+                >
                   {selectedVendor.is_active !== false ? "ACTIVE" : "TERMINATED"}
                 </Badge>
               </div>
@@ -379,29 +484,48 @@ export default function Vendors() {
           ) : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowVendorModal(false)}>Close</Button>
+            <Button variant="outline" onClick={() => setShowVendorModal(false)}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Terminate Modal */}
-      <Dialog open={showTerminateModal} onOpenChange={setShowTerminateModal}>
+      <Dialog
+        open={showTerminateModal}
+        onOpenChange={(open) => {
+          setShowTerminateModal(open);
+          if (!open) setTerminationReason("");
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="text-red-600">Terminate Vendor</DialogTitle>
-            <DialogDescription>Vendor will be deactivated (is_active=false)</DialogDescription>
+            <DialogDescription>
+              Vendor will be deactivated (is_active=false)
+            </DialogDescription>
           </DialogHeader>
 
           <Textarea
-            placeholder="Reason (optional)"
+            placeholder="Reason (required)"
             value={terminationReason}
             onChange={(e) => setTerminationReason(e.target.value)}
             rows={4}
           />
+          <p className="text-xs text-gray-500">
+            Please type a reason to enable <b>Terminate</b>.
+          </p>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowTerminateModal(false)}>Cancel</Button>
-            <Button variant="destructive" onClick={doTerminate} disabled={processing}>
+            <Button variant="outline" onClick={() => setShowTerminateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={doTerminate}
+              disabled={processing || !isTerminationReasonValid}
+            >
               {processing ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : null}
               Terminate
             </Button>
