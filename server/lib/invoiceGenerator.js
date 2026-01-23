@@ -17,6 +17,11 @@ export const generateInvoiceNumber = () => {
  * @param {Object} paymentData - Payment and vendor details
  * @returns {string} Base64 encoded PDF
  */
+const formatMoney = (v) => {
+  const n = Number(v || 0);
+  return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 export const generateInvoicePDF = (paymentData) => {
   const {
     invoiceNumber,
@@ -25,11 +30,20 @@ export const generateInvoicePDF = (paymentData) => {
     vendor,
     plan,
     amount,
+    discount_amount = 0,
+    coupon_code = '',
     tax = 0,
     totalAmount,
     paymentMethod = 'Razorpay',
     transactionId,
   } = paymentData;
+
+  const baseAmount = Number(amount || 0);
+  const discountValue = Number(discount_amount || 0);
+  const netAmount = Number.isFinite(totalAmount) ? Number(totalAmount) : Math.max(0, baseAmount - discountValue);
+  const taxAmount = Number(tax || 0);
+  const payableAmount = netAmount + taxAmount;
+  const couponLabel = (coupon_code || '').toString().trim();
 
   const pdf = new jsPDF({
     orientation: 'portrait',
@@ -39,28 +53,36 @@ export const generateInvoicePDF = (paymentData) => {
 
   const pageWidth = pdf.internal.pageSize.getWidth();
   const pageHeight = pdf.internal.pageSize.getHeight();
-  let yPosition = 20;
+  let yPosition = 18;
 
   // Header - Company Info
-  pdf.setFontSize(20);
+  pdf.setFontSize(19);
   pdf.setTextColor(41, 128, 185);
   pdf.text('INDIAN TRADE MART', pageWidth / 2, yPosition, { align: 'center' });
-  yPosition += 10;
+  yPosition += 8;
 
   pdf.setFontSize(10);
   pdf.setTextColor(100, 100, 100);
   pdf.text('Invoice for Vendor Subscription', pageWidth / 2, yPosition, { align: 'center' });
-  yPosition += 15;
+  yPosition += 10;
+
+  pdf.setDrawColor(220);
+  pdf.line(18, yPosition, pageWidth - 18, yPosition);
+  yPosition += 8;
 
   // Invoice Details
   pdf.setTextColor(0, 0, 0);
   pdf.setFontSize(11);
   pdf.text(`Invoice #: ${invoiceNumber}`, 20, yPosition);
-  yPosition += 8;
-  pdf.text(`Date: ${new Date(invoiceDate).toLocaleDateString('en-IN')}`, 20, yPosition);
-  yPosition += 8;
+  pdf.text(`Date: ${new Date(invoiceDate).toLocaleDateString('en-IN')}`, pageWidth / 2, yPosition);
+  yPosition += 7;
   pdf.text(`Due Date: ${new Date(dueDate).toLocaleDateString('en-IN')}`, 20, yPosition);
-  yPosition += 15;
+  if (couponLabel) {
+    pdf.setTextColor(46, 125, 50);
+    pdf.text(`Coupon: ${couponLabel}`, pageWidth / 2, yPosition);
+    pdf.setTextColor(0, 0, 0);
+  }
+  yPosition += 12;
 
   // Vendor Details
   pdf.setFontSize(10);
@@ -82,6 +104,9 @@ export const generateInvoicePDF = (paymentData) => {
     pdf.text(`GST: ${vendor.gst_number}`, 20, yPosition);
     yPosition += 6;
   }
+  yPosition += 8;
+  pdf.setDrawColor(235);
+  pdf.line(18, yPosition, pageWidth - 18, yPosition);
   yPosition += 8;
 
   // Line items table
@@ -108,8 +133,8 @@ export const generateInvoicePDF = (paymentData) => {
   const itemName = `${plan?.name || 'Subscription'} Plan`;
   pdf.text(itemName, 22, yPosition);
   pdf.text('1', 100 + 8, yPosition, { align: 'center' });
-  pdf.text(`₹${amount.toFixed(2)}`, 135 + 8, yPosition, { align: 'right' });
-  pdf.text(`₹${amount.toFixed(2)}`, 170 + 8, yPosition, { align: 'right' });
+  pdf.text(formatMoney(baseAmount), 135 + 8, yPosition, { align: 'right' });
+  pdf.text(formatMoney(baseAmount), 170 + 8, yPosition, { align: 'right' });
 
   yPosition += 15;
 
@@ -118,19 +143,28 @@ export const generateInvoicePDF = (paymentData) => {
   pdf.setFont(undefined, 'normal');
   pdf.setFontSize(10);
   pdf.text('Subtotal:', totalX, yPosition);
-  pdf.text(`₹${amount.toFixed(2)}`, 170 + 8, yPosition, { align: 'right' });
+  pdf.text(formatMoney(baseAmount), 170 + 8, yPosition, { align: 'right' });
   yPosition += 8;
 
-  if (tax > 0) {
-    pdf.text('Tax (18% GST):', totalX, yPosition);
-    pdf.text(`₹${tax.toFixed(2)}`, 170 + 8, yPosition, { align: 'right' });
+  if (discountValue > 0) {
+    pdf.text(`Discount${couponLabel ? ` (${couponLabel})` : ''}:`, totalX, yPosition);
+    pdf.text(`-${formatMoney(discountValue)}`, 170 + 8, yPosition, { align: 'right' });
+    yPosition += 8;
+    pdf.text('Net after discount:', totalX, yPosition);
+    pdf.text(formatMoney(netAmount), 170 + 8, yPosition, { align: 'right' });
+    yPosition += 8;
+  }
+
+  if (taxAmount > 0) {
+    pdf.text('Tax:', totalX, yPosition);
+    pdf.text(formatMoney(taxAmount), 170 + 8, yPosition, { align: 'right' });
     yPosition += 8;
   }
 
   pdf.setFont(undefined, 'bold');
   pdf.setFontSize(11);
   pdf.text('Total Amount:', totalX, yPosition);
-  pdf.text(`₹${totalAmount.toFixed(2)}`, 170 + 8, yPosition, { align: 'right' });
+  pdf.text(formatMoney(payableAmount), 170 + 8, yPosition, { align: 'right' });
   yPosition += 12;
 
   // Payment Details
@@ -167,12 +201,21 @@ export const generateInvoicePDF = (paymentData) => {
  * Generate invoice summary for email
  */
 export const generateInvoiceSummary = (paymentData) => {
-  const { invoiceNumber, vendor, plan, amount, totalAmount } = paymentData;
+  const { invoiceNumber, vendor, plan, amount, totalAmount, discount_amount = 0, coupon_code = '' } = paymentData;
+  const gross = Number(amount || 0);
+  const discountValue = Number(discount_amount || 0);
+  const net = Number.isFinite(totalAmount) ? Number(totalAmount) : Math.max(0, gross - discountValue);
+  const couponLine =
+    discountValue > 0
+      ? `<p><strong>Coupon:</strong> ${coupon_code || 'N/A'} (₹${discountValue.toFixed(2)} off)</p>`
+      : '';
   return `
     <h3>Invoice: ${invoiceNumber}</h3>
     <p><strong>Vendor:</strong> ${vendor?.company_name || 'N/A'}</p>
     <p><strong>Plan:</strong> ${plan?.name || 'N/A'}</p>
-    <p><strong>Amount:</strong> ₹${totalAmount.toFixed(2)}</p>
+    <p><strong>Gross:</strong> ₹${gross.toFixed(2)}</p>
+    ${couponLine}
+    <p><strong>Paid:</strong> ₹${net.toFixed(2)}</p>
     <p><strong>Status:</strong> Completed</p>
   `;
 };

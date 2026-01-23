@@ -272,7 +272,7 @@ const Services = () => {
     }
   };
 
-  const handleSubscribe = async (plan) => {
+  const handleSubscribe = async (plan, couponOverride = couponCode) => {
     if (!vendorId) {
       toast({ title: 'Error', description: 'Vendor ID not found', variant: 'destructive' });
       return;
@@ -316,13 +316,14 @@ const Services = () => {
     }
 
     // Paid plan - initiate Razorpay payment
-    initiateRazorpayPayment(plan);
+    initiateRazorpayPayment(plan, couponOverride);
   };
 
-  const initiateRazorpayPayment = async (plan) => {
+  const initiateRazorpayPayment = async (plan, couponOverride = couponCode) => {
     try {
       toast({ title: 'Processing...', description: `Initiating payment for ${plan.name}` });
       setDetailsOpen(false);
+      const appliedCoupon = couponOverride?.trim ? couponOverride.trim().toUpperCase() : '';
 
       const response = await fetch(apiUrl('/api/payment/initiate'), {
         method: 'POST',
@@ -330,7 +331,7 @@ const Services = () => {
         body: JSON.stringify({
           vendor_id: vendorId,
           plan_id: plan.id,
-          coupon_code: couponCode?.trim() ? couponCode.trim().toUpperCase() : undefined,
+          coupon_code: appliedCoupon || undefined,
         }),
       });
 
@@ -362,7 +363,7 @@ const Services = () => {
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.async = true;
-        script.onload = () => openRazorpayCheckout(orderData, plan, keyId);
+        script.onload = () => openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
         script.onerror = () => {
           toast({ 
             title: 'Warning', 
@@ -374,7 +375,7 @@ const Services = () => {
             const retryScript = document.createElement('script');
             retryScript.src = 'https://checkout.razorpay.com/v1/checkout.js';
             retryScript.async = true;
-            retryScript.onload = () => openRazorpayCheckout(orderData, plan, keyId);
+            retryScript.onload = () => openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
             retryScript.onerror = () => {
               toast({ 
                 title: 'Error', 
@@ -387,7 +388,7 @@ const Services = () => {
         };
         document.body.appendChild(script);
       } else {
-        openRazorpayCheckout(orderData, plan, keyId);
+        openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
       }
     } catch (err) {
       toast({ title: 'Error', description: err?.message || 'Failed to initiate payment', variant: 'destructive' });
@@ -395,7 +396,7 @@ const Services = () => {
     }
   };
 
-  const openRazorpayCheckout = (orderData, plan, keyId) => {
+  const openRazorpayCheckout = (orderData, plan, keyId, appliedCoupon = couponCode) => {
     const options = {
       key: keyId,
       amount: orderData.amount,
@@ -417,7 +418,7 @@ const Services = () => {
               signature: response.razorpay_signature,
               vendor_id: vendorId,
               plan_id: plan.id,
-              coupon_code: couponCode?.trim() ? couponCode.trim().toUpperCase() : undefined,
+              coupon_code: appliedCoupon?.trim ? appliedCoupon.trim().toUpperCase() : undefined,
             }),
           });
 
@@ -602,16 +603,8 @@ const Services = () => {
               <ShoppingCart className="w-4 h-4 mr-2" />
               Buy Leads
             </Button>
-            <div className="flex items-center gap-2 bg-white border rounded-lg px-3 py-2 w-full sm:w-auto">
-              <Input
-                placeholder="Coupon code"
-                value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value)}
-                className="w-36"
-              />
-              <Button size="sm" variant="secondary" onClick={() => { if (!couponCode.trim()) toast({title:'Coupon',description:'Enter a code first'}); else toast({title:'Coupon applied',description:couponCode.toUpperCase()}); }}>
-                Apply
-              </Button>
+            <div className="bg-slate-50 text-slate-700 text-xs border border-dashed rounded-lg px-3 py-2 w-full sm:w-auto text-center sm:text-left">
+              Coupon? Tap <span className="font-semibold">Upgrade</span> on a plan to add it during checkout.
             </div>
 
             <Button
@@ -773,7 +766,7 @@ const Services = () => {
                   onClick={(e) => {
                     // ✅ button click pe card modal open na ho
                     e.stopPropagation();
-                    if (!isCurrent) handleSubscribe(plan);
+                    if (!isCurrent) openPlanDetails(plan);
                   }}
                 >
                   {isCurrent ? 'Active Plan' : 'Upgrade'}
@@ -786,10 +779,10 @@ const Services = () => {
 
       {/* ✅ Plan Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="w-full sm:w-[86vw] md:w-[76vw] lg:w-[66vw] max-w-2xl md:max-w-[1100px] overflow-hidden p-0 pb-1 mx-auto">
           {!selectedPlan ? null : (
             <>
-              <DialogHeader>
+              <DialogHeader className="pb-1 px-3 pt-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl border bg-slate-50 flex items-center justify-center text-slate-900">
@@ -817,42 +810,62 @@ const Services = () => {
                   </div>
                 </div>
 
-                <div className="mt-4 flex items-end justify-between">
-                  <div className="text-3xl font-extrabold text-slate-900">
-                    ₹{formatINR(selectedPlan.price)}
-                    <span className="text-sm font-medium text-slate-500">/year</span>
+                <div className="mt-2.5">
+                  <div className="rounded-xl border bg-gradient-to-r from-blue-600 via-indigo-600 to-slate-800 text-white px-4 py-2.5 flex items-center justify-between gap-3 shadow-md">
+                    <div>
+                      <div className="text-xs uppercase tracking-[0.15em] text-white/70 font-semibold">
+                        Annual Billing
+                      </div>
+                      <div className="text-3xl font-extrabold leading-tight">
+                        ₹{formatINR(selectedPlan.price)}
+                        <span className="text-sm font-medium text-white/80"> / year</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-sm">
+                        <span className="px-3 py-1 rounded-full border border-white/30 bg-white/10 font-semibold text-xs">
+                          {selectedPlan.duration_days || 365} days
+                        </span>
+                      {selectedIsPopular && (
+                        <span className="px-3 py-1 rounded-full bg-white text-blue-700 font-semibold shadow-sm">
+                          Recommended
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </div>
               </DialogHeader>
 
-              {/* body scroll */}
-              <div className="mt-4 max-h-[60vh] overflow-y-auto pr-2 space-y-4">
+              <div className="mt-2 px-3 pb-1 space-y-1.5">
                 {/* lead limits */}
-                <div className="rounded-xl border bg-slate-50 p-4">
-                  <div className="text-xs font-semibold text-slate-700 mb-2">Lead Limits</div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="rounded-lg bg-white border p-2">
-                      <div className="text-[11px] text-slate-500">Daily</div>
-                      <div className="text-sm font-bold text-slate-900">{selectedPlan.daily_limit}</div>
-                    </div>
-                    <div className="rounded-lg bg-white border p-2">
-                      <div className="text-[11px] text-slate-500">Weekly</div>
-                      <div className="text-sm font-bold text-slate-900">{selectedPlan.weekly_limit}</div>
-                    </div>
-                    <div className="rounded-lg bg-white border p-2">
-                      <div className="text-[11px] text-slate-500">Yearly</div>
-                      <div className="text-sm font-bold text-slate-900">{selectedPlan.yearly_limit}</div>
-                    </div>
+                <div className="rounded-2xl border bg-slate-50 p-2 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-semibold text-slate-700 uppercase tracking-wide">Lead Limits</div>
+                    <div className="text-[11px] text-slate-500">Per subscription year</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 text-center">
+                    {[
+                      { label: 'Daily', value: selectedPlan.daily_limit },
+                      { label: 'Weekly', value: selectedPlan.weekly_limit },
+                      { label: 'Yearly', value: selectedPlan.yearly_limit },
+                    ].map((stat) => (
+                      <div key={stat.label} className="rounded-lg bg-white border shadow-sm px-2 py-2">
+                        <div className="text-[10px] text-slate-500">{stat.label}</div>
+                        <div className="text-base font-extrabold text-slate-900">{stat.value}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
                 {/* highlights full */}
                 {selected?.meta?.highlights?.length > 0 && (
-                  <div className="rounded-xl border p-4">
-                    <div className="text-sm font-semibold text-slate-900 mb-2">Highlights</div>
+                  <div className="rounded-2xl border bg-white p-2 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-900 mb-1.5 flex items-center gap-2">
+                      <Star className="w-4 h-4 text-amber-500" />
+                      Highlights
+                    </div>
                     <div className="flex flex-wrap gap-2">
                       {selected.meta.highlights.map((t, idx) => (
-                        <span key={idx} className="text-[11px] px-2 py-1 rounded-full border bg-white text-slate-700">
+                        <span key={idx} className="text-[11px] px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-100">
                           {t}
                         </span>
                       ))}
@@ -861,9 +874,9 @@ const Services = () => {
                 )}
 
                 {/* groups full */}
-                <div className="space-y-3">
+                <div className="space-y-1.5">
                   {selected?.groups?.map((g) => (
-                    <div key={g.title} className="rounded-xl border p-4">
+                    <div key={g.title} className="rounded-2xl border bg-white p-2 shadow-sm">
                       <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                         <span className="text-slate-600">{g.icon}</span>
                         {g.title}
@@ -881,25 +894,105 @@ const Services = () => {
                 </div>
               </div>
 
-              <DialogFooterUI className="mt-4 flex flex-col gap-3">
-                <div className="w-full">
-                  <Input
-                    placeholder="Coupon code (optional)"
-                    value={couponCode}
-                    onChange={(e) => setCouponCode(e.target.value)}
-                  />
+              <DialogFooterUI className="mt-2 flex flex-col gap-2 px-3 pb-3">
+                <div className="w-full rounded-2xl border bg-gradient-to-br from-slate-50 via-white to-slate-50 p-3 space-y-2.5 shadow-sm">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 items-stretch">
+                    <div className="rounded-2xl bg-white border px-3.5 py-3 shadow-inner space-y-2.5">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-[12px] font-semibold text-slate-800 uppercase tracking-wide">Coupon</div>
+                          <div className="text-sm text-slate-500">Optional • Apply before payment</div>
+                        </div>
+                        {couponCode.trim() && (
+                          <button
+                            type="button"
+                            onClick={() => setCouponCode('')}
+                            className="text-[11px] text-slate-500 hover:text-slate-700 underline"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Enter coupon code"
+                          value={couponCode}
+                          onChange={(e) => setCouponCode(e.target.value)}
+                          className="w-full h-11 text-sm"
+                        />
+                        <Button
+                          variant="secondary"
+                          className="h-11 whitespace-nowrap px-3 text-sm font-semibold"
+                          onClick={() => {
+                            if (!couponCode.trim()) {
+                              toast({ title: 'Coupon', description: 'Enter a code first' });
+                              return;
+                            }
+                            const val = couponCode.trim().toUpperCase();
+                            setCouponCode(val);
+                            toast({ title: 'Coupon noted', description: `${val} will be applied before payment.` });
+                          }}
+                        >
+                          Apply
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-slate-600">
+                        If you don&apos;t have a coupon, leave this blank and continue.
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white border px-3.5 py-3 shadow-[inset_0_1px_10px_rgba(15,23,42,0.05)] space-y-2">
+                      <div className="flex justify-between text-sm text-slate-700 leading-tight">
+                        <span>Plan price</span>
+                        <span className="font-semibold text-slate-800">₹{formatINR(selectedPlan.price)}</span>
+                      </div>
+                      {couponCode.trim() ? (
+                        <div className="flex justify-between text-sm text-amber-700 font-semibold">
+                          <span>Coupon {couponCode.trim().toUpperCase()}</span>
+                          <span>- to be applied</span>
+                        </div>
+                      ) : (
+                        <div className="flex justify-between text-sm text-slate-500">
+                          <span>Coupon</span>
+                          <span>Not applied</span>
+                        </div>
+                      )}
+                      <div className="border-t pt-2.5 flex justify-between text-base font-bold text-slate-900">
+                        <span>Payable now</span>
+                        <span>₹{formatINR(selectedPlan.price)}</span>
+                      </div>
+                      {couponCode.trim() && (
+                        <div className="text-[11px] text-amber-700 text-right">Final amount updates after validation</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <Button
-                  className={cx(
-                    'w-full rounded-xl h-11 font-semibold',
-                    selectedIsCurrent ? 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50' : ''
+                <div className="flex flex-col sm:flex-row gap-2 w-full">
+                  <Button
+                    className={cx(
+                      'w-full rounded-xl h-12 font-semibold text-base',
+                      selectedIsCurrent ? 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50' : ''
+                    )}
+                    variant={selectedIsCurrent ? 'outline' : 'default'}
+                    disabled={selectedIsCurrent}
+                    onClick={() => handleSubscribe(selectedPlan)}
+                  >
+                    {selectedIsCurrent
+                      ? 'Active Plan'
+                      : couponCode.trim()
+                        ? 'Apply & Proceed'
+                        : 'Proceed to Pay'}
+                  </Button>
+                  {!selectedIsCurrent && couponCode.trim() && (
+                    <Button
+                      variant="ghost"
+                      className="w-full h-12 border border-dashed border-slate-200"
+                      onClick={() => handleSubscribe(selectedPlan, '')}
+                    >
+                      Proceed without coupon
+                    </Button>
                   )}
-                  variant={selectedIsCurrent ? 'outline' : 'default'}
-                  disabled={selectedIsCurrent}
-                  onClick={() => handleSubscribe(selectedPlan)}
-                >
-                  {selectedIsCurrent ? 'Active Plan' : 'Upgrade'}
-                </Button>
+                </div>
               </DialogFooterUI>
             </>
           )}
@@ -924,62 +1017,85 @@ const Services = () => {
                 <p>No payment history found</p>
               </div>
             ) : (
-              paymentHistory.map((payment) => (
-                <div
-                  key={payment.id}
-                  onClick={() => setSelectedPayment(selectedPayment?.id === payment.id ? null : payment)}
-                  className="rounded-xl border p-4 cursor-pointer hover:bg-slate-50 transition"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <div className="font-semibold text-slate-900">{payment.description}</div>
-                      <div className="text-sm text-slate-500 mt-1">
-                        {new Date(payment.payment_date).toLocaleDateString('en-IN')}
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="font-bold text-slate-900">₹{payment.amount.toFixed(2)}</div>
-                      <div
-                        className={cx(
-                          'text-[11px] font-semibold mt-1 px-2 py-1 rounded-full',
-                          payment.status === 'COMPLETED'
-                            ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-yellow-50 text-yellow-700'
-                        )}
-                      >
-                        {payment.status}
-                      </div>
-                    </div>
-                  </div>
+              paymentHistory.map((payment) => {
+                const discountValue = Number(payment.discount_amount || 0);
+                const netAmount = Number(payment.net_amount ?? payment.amount ?? 0);
+                const baseAmount = Number(payment.amount ?? 0);
 
-                  {selectedPayment?.id === payment.id && (
-                    <div className="mt-4 pt-4 border-t space-y-2">
-                      {payment.transaction_id && (
-                        <div className="text-sm">
-                          <span className="text-slate-600">Transaction ID: </span>
-                          <span className="font-mono text-slate-900">{payment.transaction_id}</span>
+                return (
+                  <div
+                    key={payment.id}
+                    onClick={() => setSelectedPayment(selectedPayment?.id === payment.id ? null : payment)}
+                    className="rounded-xl border p-4 cursor-pointer hover:bg-slate-50 transition"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <div className="font-semibold text-slate-900">{payment.description}</div>
+                        <div className="text-sm text-slate-500 mt-1">
+                          {new Date(payment.payment_date).toLocaleDateString('en-IN')}
                         </div>
-                      )}
-                      {payment.invoice_url && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const link = document.createElement('a');
-                            link.href = payment.invoice_url;
-                            link.download = `invoice-${payment.transaction_id}.pdf`;
-                            link.click();
-                          }}
-                          className="w-full"
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-slate-900">₹{baseAmount.toFixed(2)}</div>
+                        <div
+                          className={cx(
+                            'text-[11px] font-semibold mt-1 px-2 py-1 rounded-full',
+                            payment.status === 'COMPLETED'
+                              ? 'bg-emerald-50 text-emerald-700'
+                              : 'bg-yellow-50 text-yellow-700'
+                          )}
                         >
-                          📄 Download Invoice
-                        </Button>
-                      )}
+                          {payment.status}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
-              ))
+
+                    {selectedPayment?.id === payment.id && (
+                      <div className="mt-4 pt-4 border-t space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                          <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                            <span className="text-slate-600">Plan price</span>
+                            <span className="font-semibold text-slate-900">₹{baseAmount.toFixed(2)}</span>
+                          </div>
+                          {(discountValue > 0 || payment.coupon_code) && (
+                            <div className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 text-amber-800 font-semibold">
+                              <span>Coupon {payment.coupon_code || ''}</span>
+                              <span>-₹{discountValue.toFixed(2)}</span>
+                            </div>
+                          )}
+                          <div className="flex items-center justify-between rounded-lg bg-emerald-50 px-3 py-2 sm:col-span-2">
+                            <span className="text-emerald-800 font-semibold">Paid (net)</span>
+                            <span className="font-bold text-emerald-900">₹{netAmount.toFixed(2)}</span>
+                          </div>
+                        </div>
+
+                        {payment.transaction_id && (
+                          <div className="text-sm">
+                            <span className="text-slate-600">Transaction ID: </span>
+                            <span className="font-mono text-slate-900">{payment.transaction_id}</span>
+                          </div>
+                        )}
+                        {payment.invoice_url && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const link = document.createElement('a');
+                              link.href = payment.invoice_url;
+                              link.download = `invoice-${payment.transaction_id}.pdf`;
+                              link.click();
+                            }}
+                            className="w-full"
+                          >
+                            📄 Download Invoice
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
           </div>
         </DialogContent>

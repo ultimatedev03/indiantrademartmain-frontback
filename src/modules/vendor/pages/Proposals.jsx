@@ -5,13 +5,16 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Loader2, Calendar, User, FileText, Plus } from 'lucide-react';
+import { Loader2, Calendar, User, FileText, Plus, Trash2 } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 
 const Proposals = () => {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('received');
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     loadProposals();
@@ -26,6 +29,29 @@ const Proposals = () => {
        console.error(e);
     } finally {
        setLoading(false);
+    }
+  };
+
+  const openDetail = async (id) => {
+    try {
+      const data = await vendorApi.proposals.get(id);
+      setSelected(data);
+      setDetailOpen(true);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDelete = async (id) => {
+    const ok = window.confirm('Delete this quotation?');
+    if (!ok) return;
+    try {
+      await vendorApi.proposals.delete(id);
+      setDetailOpen(false);
+      setSelected(null);
+      loadProposals();
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -64,7 +90,13 @@ const Proposals = () => {
                                 {prop.budget && <Badge variant="outline">Budget: ₹{prop.budget}</Badge>}
                              </div>
                           </div>
-                          <Button>View Details</Button>
+                          <div className="flex gap-2">
+                            <Button onClick={() => openDetail(prop.id)}>View Details</Button>
+                            <Button variant="outline" className="text-red-600 border-red-200" onClick={() => handleDelete(prop.id)}>
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
                        </div>
                     </CardContent>
                  </Card>
@@ -89,14 +121,98 @@ const Proposals = () => {
                                 {prop.quotation_amount && <Badge variant="outline">₹{prop.quotation_amount}</Badge>}
                              </div>
                           </div>
-                          <Button>View Details</Button>
+                          <div className="flex gap-2">
+                            <Button onClick={() => openDetail(prop.id)}>View Details</Button>
+                            <Button variant="outline" className="text-red-600 border-red-200" onClick={() => handleDelete(prop.id)}>
+                              <Trash2 className="h-4 w-4 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
                        </div>
                     </CardContent>
                  </Card>
                ))
              }
           </TabsContent>
-       </Tabs>
+      </Tabs>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{selected?.title || 'Proposal Details'}</DialogTitle>
+            <DialogDescription>
+              Sent on {selected?.created_at ? new Date(selected.created_at).toLocaleString() : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="flex items-start gap-2 text-neutral-700">
+                <User className="h-4 w-4 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="font-semibold text-neutral-900">{selected?.buyers?.full_name || 'Customer'}</div>
+                  {selected?.buyers?.company_name && (
+                    <div className="text-xs text-neutral-500">{selected.buyers.company_name}</div>
+                  )}
+                  {selected?.buyers?.email || selected?.buyer_email ? (
+                    <div className="text-xs text-neutral-600">Email: {selected?.buyers?.email || selected?.buyer_email}</div>
+                  ) : null}
+                  {selected?.buyers?.phone ? (
+                    <div className="text-xs text-neutral-600">Phone: {selected.buyers.phone}</div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1 text-neutral-700">
+                <div className="flex gap-2 items-center">
+                  <Badge variant="secondary">{selected?.status || 'PENDING'}</Badge>
+                  {selected?.quotation_amount && (
+                    <Badge variant="outline">₹{selected.quotation_amount}</Badge>
+                  )}
+                </div>
+                {selected?.product_name && (
+                  <div className="text-xs text-neutral-600">Product: {selected.product_name}</div>
+                )}
+                {selected?.quantity && (
+                  <div className="text-xs text-neutral-600">Quantity: {selected.quantity}</div>
+                )}
+                {selected?.required_by_date && (
+                  <div className="text-xs text-neutral-600">
+                    Required by: {new Date(selected.required_by_date).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {selected?.description && (
+              <div className="border rounded-lg p-3 text-neutral-700 bg-neutral-50">
+                {selected.description}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-between items-center gap-2">
+            <div className="flex gap-2">
+              {(selected?.buyers?.email || selected?.buyer_email) && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const email = selected?.buyers?.email || selected?.buyer_email;
+                    const subject = encodeURIComponent(`Regarding proposal: ${selected?.title || ''}`);
+                    const body = encodeURIComponent(selected?.description || '');
+                    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+                  }}
+                >
+                  Share via Email
+                </Button>
+              )}
+            </div>
+            <Button variant="outline" onClick={() => setDetailOpen(false)}>Close</Button>
+            <Button variant="destructive" onClick={() => handleDelete(selected?.id)}>
+              <Trash2 className="h-4 w-4 mr-1" />
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { leadApi } from '@/modules/lead/services/leadApi';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { leadsMarketplaceApi } from '@/modules/vendor/services/leadsMarketplaceApi';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -159,6 +160,7 @@ const LeadDetail = () => {
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
   const [isPurchased, setIsPurchased] = useState(false);
+  const [contactStats, setContactStats] = useState({ total: 0, calls: 0, emails: 0, whatsapp: 0 });
 
   const loadLead = async () => {
     setLoading(true);
@@ -235,6 +237,17 @@ const LeadDetail = () => {
         __productCover,
       });
       setIsPurchased(isPurchasedFlag);
+
+      // contact stats
+      try {
+        const contacts = await leadsMarketplaceApi.getContactHistory(id);
+        const calls = contacts.filter((c) => c.contact_type === 'CALL').length;
+        const emails = contacts.filter((c) => c.contact_type === 'EMAIL').length;
+        const whatsapp = contacts.filter((c) => c.contact_type === 'WHATSAPP').length;
+        setContactStats({ total: contacts.length, calls, emails, whatsapp });
+      } catch (e) {
+        console.error('contact history load failed', e);
+      }
     } catch (err) {
       console.error(err);
       toast({
@@ -315,7 +328,33 @@ const LeadDetail = () => {
   const price = lead?.price ?? 50;
   const isDirect = String(lead?.__source || '').toLowerCase() === 'direct';
 
-  const handleSendEmail = () => {
+  const logContactSafe = async (type) => {
+    try {
+      await leadsMarketplaceApi.logContact(lead.id, type);
+      try {
+        const contacts = await leadsMarketplaceApi.getContactHistory(lead.id);
+        const calls = contacts.filter((c) => c.contact_type === 'CALL').length;
+        const emails = contacts.filter((c) => c.contact_type === 'EMAIL').length;
+        const whatsapp = contacts.filter((c) => c.contact_type === 'WHATSAPP').length;
+        setContactStats({ total: contacts.length, calls, emails, whatsapp });
+      } catch (e) {
+        console.error('contact history refresh failed', e);
+      }
+      return true;
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: 'Contact limit',
+        description: err?.message || 'Unable to log contact. Please try later.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+  };
+
+  const handleSendEmail = async () => {
+    const ok = await logContactSafe('EMAIL');
+    if (!ok) return;
     // Open vendor quotation/proposal page with prefilled fields
     const prefill = {
       // This is the selected "buyer" item on SendQuotation page (it is actually lead id)
@@ -348,6 +387,14 @@ const LeadDetail = () => {
     }
 
     navigate('/vendor/proposals/send', { state: { prefill } });
+  };
+
+  const handleCallNow = async () => {
+    const ok = await logContactSafe('CALL');
+    if (!ok) return;
+    if (meta?.buyer?.phone) {
+      window.location.href = `tel:${meta.buyer.phone}`;
+    }
   };
 
   return (
@@ -524,7 +571,7 @@ const LeadDetail = () => {
                   <Button
                     size="sm"
                     className="bg-green-600 hover:bg-green-700"
-                    onClick={() => (window.location.href = `tel:${meta.buyer.phone}`)}
+                    onClick={handleCallNow}
                   >
                     Call Now
                   </Button>
@@ -538,6 +585,15 @@ const LeadDetail = () => {
                 >
                   Send Email
                 </Button>
+
+                {contactStats.total > 0 && (
+                  <div className="text-xs text-green-700 font-semibold ml-auto flex items-center gap-1">
+                    Contacted: {contactStats.total}
+                    <span className="text-[11px] text-green-600">
+                      (📞 {contactStats.calls} • ✉️ {contactStats.emails} • 🟢 {contactStats.whatsapp})
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ) : (

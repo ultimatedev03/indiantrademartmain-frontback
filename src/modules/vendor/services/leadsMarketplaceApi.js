@@ -414,20 +414,18 @@ export const leadsMarketplaceApi = {
     }
 
     // Check quota against plan limits (only if limit > 0, meaning it's enforced)
+    let withinIncludedQuota = true;
     if (quota) {
-      if (dailyLimit > 0 && quota.daily_used >= dailyLimit) {
-        throw new Error(`Daily lead limit (${dailyLimit}) reached`);
-      }
-      if (weeklyLimit > 0 && quota.weekly_used >= weeklyLimit) {
-        throw new Error(`Weekly lead limit (${weeklyLimit}) reached`);
-      }
-      if (yearlyLimit > 0 && quota.yearly_used >= yearlyLimit) {
-        throw new Error(`Yearly lead limit (${yearlyLimit}) reached`);
-      }
+      const dailyRem = dailyLimit > 0 ? dailyLimit - (quota.daily_used || 0) : Infinity;
+      const weeklyRem = weeklyLimit > 0 ? weeklyLimit - (quota.weekly_used || 0) : Infinity;
+      const yearlyRem = yearlyLimit > 0 ? yearlyLimit - (quota.yearly_used || 0) : Infinity;
+      const minRem = Math.min(dailyRem, weeklyRem, yearlyRem);
+      withinIncludedQuota = minRem > 0;
     }
 
-    // Calculate lead price (placeholder - adjust based on your pricing model)
-    const leadPrice = 50; // ₹50 per lead (default)
+    // Calculate lead price
+    // If within included quota => free; else pay-per-lead using lead.price or default ₹50
+    const leadPrice = withinIncludedQuota ? 0 : (lead?.price ?? 50);
 
     // Create purchase record
     const { data: purchase, error: purchaseError } = await supabase
@@ -450,14 +448,14 @@ export const leadsMarketplaceApi = {
       .update({ status: 'PURCHASED' })
       .eq('id', leadId);
 
-    // Update quota
+    // Update quota (track usage even for paid extra leads)
     if (quota) {
       await supabase
         .from('vendor_lead_quota')
         .update({
-          daily_used: quota.daily_used + 1,
-          weekly_used: quota.weekly_used + 1,
-          yearly_used: quota.yearly_used + 1,
+          daily_used: (quota.daily_used || 0) + 1,
+          weekly_used: (quota.weekly_used || 0) + 1,
+          yearly_used: (quota.yearly_used || 0) + 1,
           updated_at: new Date().toISOString()
         })
         .eq('vendor_id', vendor.id);
@@ -538,7 +536,15 @@ export const leadsMarketplaceApi = {
     const vendor = await vendorApi.auth.me();
     if (!vendor?.id) throw new Error('Vendor not found');
 
-    // Verify purchase
+    // Allow contact if vendor owns the lead OR has purchased it
+    const { data: leadRow } = await supabase
+      .from('leads')
+      .select('vendor_id')
+      .eq('id', leadId)
+      .maybeSingle();
+
+    const isOwner = leadRow?.vendor_id === vendor.id;
+
     const { data: purchase } = await supabase
       .from('lead_purchases')
       .select('id')
@@ -546,7 +552,35 @@ export const leadsMarketplaceApi = {
       .eq('lead_id', leadId)
       .maybeSingle();
 
-    if (!purchase) throw new Error('You have not purchased this lead');
+    if (!isOwner && !purchase) throw new Error('You have not purchased this lead');
+
+    // Reset and load quota
+    let { data: quota } = await supabase
+      .from('vendor_lead_quota')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .maybeSingle();
+
+    if (quota) {
+      quota = await resetQuota(vendor.id, quota);
+      const limits = {
+        daily: quota.daily_limit || 0,
+        weekly: quota.weekly_limit || 0,
+        yearly: quota.yearly_limit || 0,
+      };
+
+      // Even if limits are hit, allow logging (paid extra contacts) but don't block
+      const { error: quotaErr } = await supabase
+        .from('vendor_lead_quota')
+        .update({
+          daily_used: (quota.daily_used || 0) + 1,
+          weekly_used: (quota.weekly_used || 0) + 1,
+          yearly_used: (quota.yearly_used || 0) + 1,
+          updated_at: new Date().toISOString()
+        })
+        .eq('vendor_id', vendor.id);
+      if (quotaErr) throw quotaErr;
+    }
 
     // Create contact record
     const { data, error } = await supabase
@@ -564,6 +598,16 @@ export const leadsMarketplaceApi = {
       .single();
 
     if (error) throw error;
+
+    // Notify UI to increment contacted counters
+    try {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('itm:lead_contacted', { detail: { leadId, contactType } }));
+      }
+    } catch (e) {
+      console.error('contact event dispatch failed', e);
+    }
+
     return data;
   },
 

@@ -276,6 +276,7 @@ router.post('/verify', async (req, res) => {
       plan,
       amount: plan.price,
       discount_amount: discountAmount,
+      coupon_code: coupon_code || null,
       tax: 0,
       totalAmount: netAmount,
       paymentMethod: 'Razorpay',
@@ -406,10 +407,12 @@ router.get('/history/:vendor_id', async (req, res) => {
 /**
  * GET /api/payment/invoice/:payment_id
  * Download invoice PDF
+ * If `refresh=true` query param is provided, regenerate the invoice using latest template/data.
  */
 router.get('/invoice/:payment_id', async (req, res) => {
   try {
     const { payment_id } = req.params;
+    const refresh = (req.query.refresh || '').toString().toLowerCase() === 'true';
 
     if (!payment_id) {
       return res.status(400).json({ error: 'Missing payment_id' });
@@ -425,17 +428,114 @@ router.get('/invoice/:payment_id', async (req, res) => {
       return res.status(404).json({ error: 'Payment not found' });
     }
 
-    if (!payment.invoice_url) {
-      return res.status(404).json({ error: 'Invoice not available' });
+    // If refresh requested or invoice missing, regenerate with latest template
+    if (refresh || !payment.invoice_url) {
+      const [{ data: vendor }, { data: plan }] = await Promise.all([
+        supabase.from('vendors').select('*').eq('id', payment.vendor_id).single(),
+        supabase.from('vendor_plans').select('*').eq('id', payment.plan_id).single(),
+      ]);
+
+      const invoicePdfData = {
+        invoiceNumber: payment.invoice_number || generateInvoiceNumber(),
+        invoiceDate: payment.payment_date || new Date(),
+        dueDate: payment.payment_date || new Date(),
+        vendor,
+        plan,
+        amount: payment.amount,
+        discount_amount: payment.discount_amount || 0,
+        coupon_code: payment.coupon_code || '',
+        tax: payment.tax_amount || 0,
+        totalAmount: payment.net_amount || payment.amount,
+        paymentMethod: payment.payment_method || 'Razorpay',
+        transactionId: payment.transaction_id,
+      };
+
+      const newPdf = generateInvoicePDF(invoicePdfData);
+
+      await supabase
+        .from('vendor_payments')
+        .update({
+          invoice_url: newPdf,
+          invoice_number: invoicePdfData.invoiceNumber,
+        })
+        .eq('id', payment_id);
+
+      payment.invoice_url = newPdf;
     }
 
-    // Return invoice as data URL
     res.json({
       success: true,
       invoice: payment.invoice_url,
     });
   } catch (error) {
     console.error('Invoice retrieval error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /api/payment/invoice/by-tx/:transaction_id
+ * Regenerate or fetch invoice using Razorpay transaction/payment_id
+ */
+router.get('/invoice/by-tx/:transaction_id', async (req, res) => {
+  try {
+    const { transaction_id } = req.params;
+    const refresh = (req.query.refresh || '').toString().toLowerCase() === 'true';
+
+    if (!transaction_id) {
+      return res.status(400).json({ error: 'Missing transaction_id' });
+    }
+
+    const { data: payment, error } = await supabase
+      .from('vendor_payments')
+      .select('*')
+      .eq('transaction_id', transaction_id)
+      .maybeSingle();
+
+    if (error || !payment) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    if (refresh || !payment.invoice_url) {
+      const [{ data: vendor }, { data: plan }] = await Promise.all([
+        supabase.from('vendors').select('*').eq('id', payment.vendor_id).single(),
+        supabase.from('vendor_plans').select('*').eq('id', payment.plan_id).single(),
+      ]);
+
+      const invoicePdfData = {
+        invoiceNumber: payment.invoice_number || generateInvoiceNumber(),
+        invoiceDate: payment.payment_date || new Date(),
+        dueDate: payment.payment_date || new Date(),
+        vendor,
+        plan,
+        amount: payment.amount,
+        discount_amount: payment.discount_amount || 0,
+        coupon_code: payment.coupon_code || '',
+        tax: payment.tax_amount || 0,
+        totalAmount: payment.net_amount || payment.amount,
+        paymentMethod: payment.payment_method || 'Razorpay',
+        transactionId: payment.transaction_id,
+      };
+
+      const newPdf = generateInvoicePDF(invoicePdfData);
+
+      await supabase
+        .from('vendor_payments')
+        .update({
+          invoice_url: newPdf,
+          invoice_number: invoicePdfData.invoiceNumber,
+        })
+        .eq('id', payment.id);
+
+      payment.invoice_url = newPdf;
+    }
+
+    res.json({
+      success: true,
+      invoice: payment.invoice_url,
+    });
+  } catch (error) {
+    console.error('Invoice by transaction retrieval error:', error);
     res.status(500).json({ error: error.message });
   }
 });

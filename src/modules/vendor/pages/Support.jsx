@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusCircle, MessageCircle, Loader2 } from 'lucide-react';
+import { PlusCircle, MessageCircle, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ const Support = () => {
   const [open, setOpen] = useState(false);
   const [newTicket, setNewTicket] = useState({ subject: '', category: '', description: '', priority: 'Medium' });
   const [creating, setCreating] = useState(false);
+  const [viewFilter, setViewFilter] = useState('OPEN'); // OPEN | CLOSED | ALL
 
   useEffect(() => {
     loadTickets();
@@ -31,6 +32,20 @@ const Support = () => {
       console.error(error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async (ticketId) => {
+    if (!ticketId) return;
+    const ok = window.confirm('Delete this ticket permanently?');
+    if (!ok) return;
+    try {
+      await vendorApi.support.deleteTicket(ticketId);
+      setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+      toast({ title: 'Ticket deleted' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Delete failed', description: error.message || 'Unable to delete ticket', variant: 'destructive' });
     }
   };
 
@@ -52,6 +67,14 @@ const Support = () => {
       setCreating(false);
     }
   };
+
+  const filteredTickets = tickets.filter((t) => {
+    const status = String(t.status || '').toUpperCase();
+    if (viewFilter === 'ALL') return true;
+    if (viewFilter === 'OPEN') return status !== 'CLOSED';
+    if (viewFilter === 'CLOSED') return status === 'CLOSED';
+    return true;
+  });
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -97,32 +120,44 @@ const Support = () => {
         </Dialog>
       </div>
 
+      <div className="flex items-center gap-2">
+        {['OPEN', 'CLOSED', 'ALL'].map((f) => (
+          <Button
+            key={f}
+            variant={viewFilter === f ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setViewFilter(f)}
+          >
+            {f === 'ALL' ? 'All Tickets' : f === 'OPEN' ? 'Open' : 'Closed'}
+          </Button>
+        ))}
+      </div>
+
       <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center"><Loader2 className="animate-spin mx-auto h-8 w-8 text-gray-400" /></div>
-        ) : tickets.length === 0 ? (
+        ) : filteredTickets.length === 0 ? (
           <div className="p-8 text-center text-gray-500">No tickets found.</div>
         ) : (
           <div className="divide-y divide-neutral-100">
-            {tickets.map(ticket => (
-              <Link key={ticket.id} to={`/vendor/support/${ticket.id}`} className="block hover:bg-neutral-50 p-4 transition-colors">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-blue-100 p-2 rounded-full text-blue-600">
-                      <MessageCircle className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h3 className="font-medium text-neutral-900">{ticket.subject}</h3>
-                      <p className="text-xs text-neutral-500">ID: #{ticket.ticket_display_id || ticket.id.slice(0,8)} • {new Date(ticket.created_at).toLocaleDateString()}</p>
-                    </div>
+            {filteredTickets.map(ticket => (
+              <div key={ticket.id} className="flex items-center gap-3 hover:bg-neutral-50 px-4 py-3 transition-colors">
+                <Link to={`/vendor/support/${ticket.id}`} className="flex-1 min-w-0 flex items-center gap-3">
+                  <div className="bg-blue-100 p-2 rounded-full text-blue-600">
+                    <MessageCircle className="h-5 w-5" />
                   </div>
-                  <div className="flex items-center gap-4">
-                    <Badge variant={ticket.status === 'OPEN' ? 'warning' : ticket.status === 'CLOSED' ? 'secondary' : 'default'}>
-                      {ticket.status}
-                    </Badge>
+                  <div className="min-w-0">
+                    <h3 className="font-medium text-neutral-900 truncate">{ticket.subject}</h3>
+                    <p className="text-xs text-neutral-500 truncate">ID: #{ticket.ticket_display_id || ticket.id.slice(0,8)} • {new Date(ticket.created_at).toLocaleDateString()}</p>
                   </div>
-                </div>
-              </Link>
+                </Link>
+                <Badge variant={ticket.status === 'OPEN' ? 'warning' : ticket.status === 'CLOSED' ? 'secondary' : 'default'}>
+                  {ticket.status}
+                </Badge>
+                <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => handleDelete(ticket.id)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
             ))}
           </div>
         )}

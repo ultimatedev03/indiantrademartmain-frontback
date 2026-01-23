@@ -106,12 +106,10 @@ const AIChatWidget = () => {
     <button
       type="button"
       onClick={handleOpen}
-      className="fixed bottom-5 right-5 z-[9999] pointer-events-auto flex items-center gap-2 bg-gradient-to-r from-[#fbbf8f] via-[#f57c43] to-[#f57c43] text-white px-3.5 py-2.5 rounded-full shadow-lg hover:translate-y-[-1px] hover:shadow-xl transition-all backdrop-blur"
+      className="fixed bottom-4 right-4 z-[9999] pointer-events-auto h-14 w-14 rounded-full bg-gradient-to-r from-[#fbbf8f] via-[#f57c43] to-[#f57c43] text-white shadow-lg hover:translate-y-[-1px] hover:shadow-xl transition-all backdrop-blur flex items-center justify-center"
       aria-label="Open AI chat"
     >
-      <MessageCircle className="h-4.5 w-4.5" />
-      <span className="text-[13px] font-semibold">Chat with Khushi</span>
-      <Sparkles className="h-4 w-4 text-amber-200" />
+      <MessageCircle className="h-6 w-6" />
     </button>
   );
 

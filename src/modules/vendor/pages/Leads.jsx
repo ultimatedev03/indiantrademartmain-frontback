@@ -22,6 +22,7 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import { phoneUtils } from "@/shared/utils/phoneUtils";
 import LeadStatsPanel from "@/modules/vendor/components/LeadStatsPanel";
+import { supabase } from "@/lib/customSupabaseClient";
 
 const CONTACTED_STORAGE_KEY = "itm_vendor_contacted_lead_ids";
 
@@ -269,6 +270,14 @@ const Leads = () => {
         // ignore
       }
 
+      let vendorId = null;
+      try {
+        const me = await vendorApi.auth.me();
+        vendorId = me?.id || null;
+      } catch (e) {
+        console.error("Failed to get vendor id for stats:", e);
+      }
+
       const myLeads = await leadApi.marketplace.getMyLeads();
       const rows = myLeads || [];
 
@@ -307,16 +316,58 @@ const Leads = () => {
         if (d >= yearStart) yearly += 1;
       });
 
-      const contactedIds = readContactedIds();
-      const totalContacted = contactedIds.length;
+      let totalContacted = 0;
+      try {
+        if (vendorId) {
+          const { data: contacts, error: contactErr } = await supabase
+            .from("lead_contacts")
+            .select("lead_id")
+            .eq("vendor_id", vendorId);
+          if (contactErr) throw contactErr;
+          totalContacted = contacts ? new Set(contacts.map((c) => c.lead_id)).size : 0;
+        } else {
+          const contactedIds = readContactedIds();
+          totalContacted = contactedIds.length;
+        }
+      } catch (err) {
+        console.error("Failed to load contacted count:", err);
+        const contactedIds = readContactedIds();
+        totalContacted = contactedIds.length;
+      }
+
+      // fetch quota (limits + used)
+      let quota = null;
+      let planLimits = { daily_limit: 0, weekly_limit: 0, yearly_limit: 0 };
+      try {
+        const sub = await vendorApi.subscriptions.getCurrent();
+        if (sub?.plan) {
+          planLimits = {
+            daily_limit: sub.plan.daily_limit || 0,
+            weekly_limit: sub.plan.weekly_limit || 0,
+            yearly_limit: sub.plan.yearly_limit || 0,
+          };
+        }
+        quota = await vendorApi.leadQuota.get();
+        if (!quota || !quota.plan_id) {
+          if (sub?.plan_id) {
+            await vendorApi.leadQuota.initialize(sub.plan_id);
+            quota = await vendorApi.leadQuota.get();
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load quota:", err);
+      }
 
       setStats({
         direct: directCount,
         totalPurchased: purchasedCount,
         totalContacted,
-        daily,
-        weekly,
-        yearly,
+        dailyUsed: quota?.daily_used ?? daily,
+        dailyLimit: quota?.daily_limit ?? planLimits.daily_limit ?? 0,
+        weeklyUsed: quota?.weekly_used ?? weekly,
+        weeklyLimit: quota?.weekly_limit ?? planLimits.weekly_limit ?? 0,
+        yearlyUsed: quota?.yearly_used ?? yearly,
+        yearlyLimit: quota?.yearly_limit ?? planLimits.yearly_limit ?? 0,
       });
     } catch (error) {
       console.error("Failed to load stats:", error);
@@ -938,6 +989,7 @@ const Leads = () => {
                 onBuy={handlePurchaseLead}
                 isPurchasing={purchasing[__lead.id]}
                 onView={handleViewDetails}
+                stats={stats}
               />
             ))
           )}
@@ -968,6 +1020,7 @@ const Leads = () => {
                     source={__raw?.source || "Purchased"}
                     purchaseDate={__purchaseDate}
                     onView={handleViewDetails}
+                    stats={stats}
                   />
                 ))
               )}
@@ -1001,7 +1054,16 @@ const Leads = () => {
   );
 };
 
-const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, onView }) => {
+const LeadCard = ({
+  lead,
+  purchased,
+  source,
+  onBuy,
+  isPurchasing,
+  purchaseDate,
+  onView,
+  stats,
+}) => {
   const meta = getLeadMeta(lead);
 
   const displayTitle = meta.title;
@@ -1157,10 +1219,12 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
           <div className="flex flex-col justify-center items-end gap-2">
             {!isPurchased && !isDirect ? (
               <div className="w-full">
-                <div className="text-right">
-                  <p className="text-xs text-gray-500">Price</p>
-                  <p className="text-xl font-bold text-gray-900">₹50</p>
-                </div>
+                {!(stats?.dailyLimit > 0 && (stats?.dailyUsed || 0) < (stats?.dailyLimit || 0)) && (
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Price</p>
+                    <p className="text-xl font-bold text-gray-900">₹50</p>
+                  </div>
+                )}
 
                 <Button
                   onClick={(e) => {
@@ -1194,5 +1258,3 @@ const LeadCard = ({ lead, purchased, source, onBuy, isPurchasing, purchaseDate, 
 };
 
 export default Leads;
-
-

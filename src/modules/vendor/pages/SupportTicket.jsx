@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Send, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Loader2, Send, MessageSquare, Trash2 } from 'lucide-react';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -75,6 +75,20 @@ const SupportTicket = () => {
     return styles[upper] || 'bg-gray-100 text-gray-800 border-gray-200';
   };
 
+  const handleDelete = async () => {
+    if (!ticket) return;
+    const ok = window.confirm('Delete this ticket permanently?');
+    if (!ok) return;
+    try {
+      await vendorApi.support.deleteTicket(ticket.id);
+      toast({ title: 'Ticket deleted' });
+      navigate('/vendor/support');
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Delete failed', description: error.message || 'Unable to delete ticket', variant: 'destructive' });
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -105,6 +119,10 @@ const SupportTicket = () => {
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to tickets
         </Button>
         <div className="flex items-center gap-2">
+          <Button variant="destructive" size="sm" className="flex items-center gap-1" onClick={handleDelete}>
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </Button>
           <Badge variant="outline" className={getPriorityBadge(ticket.priority)}>
             {String(ticket.priority || 'MEDIUM').toUpperCase()}
           </Badge>

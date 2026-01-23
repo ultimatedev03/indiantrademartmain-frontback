@@ -1483,6 +1483,29 @@ export const vendorApi = {
 
       if (error) throw error;
       return data;
+    },
+
+    get: async (id) => {
+      const vendorId = await getVendorId();
+      const { data, error } = await supabase
+        .from('proposals')
+        .select('*, buyers(full_name, email, phone, company_name)')
+        .eq('vendor_id', vendorId)
+        .eq('id', id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+
+    delete: async (id) => {
+      const vendorId = await getVendorId();
+      const { error } = await supabase
+        .from('proposals')
+        .delete()
+        .eq('id', id)
+        .eq('vendor_id', vendorId);
+      if (error) throw error;
+      return true;
     }
   },
 
@@ -2547,6 +2570,18 @@ export const vendorApi = {
         .single();
       if (error) throw error;
       return data;
+    },
+
+    deleteTicket: async (id) => {
+      // Vendors can only delete their own tickets
+      const vendorId = await getVendorId();
+      const { error } = await supabase
+        .from('support_tickets')
+        .delete()
+        .eq('id', id)
+        .eq('vendor_id', vendorId);
+      if (error) throw error;
+      return true;
     },
 
     getTicketDetail: async (id) => {

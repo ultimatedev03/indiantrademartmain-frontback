@@ -2,7 +2,10 @@ import React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrendingUp } from "lucide-react";
 
-const StatRow = ({ label, value }) => {
+const StatRow = ({ label, used, limit }) => {
+  const showLimit = Number(limit) > 0;
+  const safeUsed = showLimit ? Math.min(Number(used) || 0, Number(limit) || 0) : used;
+  const display = showLimit ? `${safeUsed}/${limit}` : safeUsed;
   return (
     <div
       className="
@@ -12,7 +15,7 @@ const StatRow = ({ label, value }) => {
         transition-all
         hover:bg-gray-50 hover:shadow-sm hover:border-gray-300
       "
-      title={`${label}: ${value}`}
+      title={`${label}: ${display}`}
     >
       <span className="text-[11px] font-semibold text-gray-700">{label}</span>
 
@@ -24,7 +27,7 @@ const StatRow = ({ label, value }) => {
           text-[11px] font-bold text-gray-900
         "
       >
-        {value}
+        {display}
       </span>
     </div>
   );
@@ -47,9 +50,9 @@ const LeadStatsPanel = ({ stats }) => {
         </CardHeader>
 
         <CardContent className="p-4 pt-0 space-y-2">
-          <StatRow label="Today" value={stats.daily || 0} />
-          <StatRow label="This Week" value={stats.weekly || 0} />
-          <StatRow label="This Year" value={stats.yearly || 0} />
+          <StatRow label="Today" used={stats.dailyUsed || 0} limit={stats.dailyLimit || 0} />
+          <StatRow label="This Week" used={stats.weeklyUsed || 0} limit={stats.weeklyLimit || 0} />
+          <StatRow label="This Year" used={stats.yearlyUsed || 0} limit={stats.yearlyLimit || 0} />
         </CardContent>
       </Card>
     </div>
