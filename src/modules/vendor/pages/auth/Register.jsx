@@ -139,6 +139,19 @@ const VendorRegister = () => {
       return;
     }
 
+    const gst = (formData.gstNumber || '').toUpperCase().trim();
+    if (!/^[0-9A-Z]{15}$/.test(gst)) {
+      toast({
+        title: 'Invalid GST',
+        description: 'GST number must be exactly 15 characters (0-9, A-Z).',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (gst.length !== formData.gstNumber.length || gst !== formData.gstNumber) {
+      setFormData((prev) => ({ ...prev, gstNumber: gst }));
+    }
+
     // ✅ State/City Step-1 me hi required
     if (!formData.stateId || !formData.cityId) {
       toast({
@@ -155,6 +168,16 @@ const VendorRegister = () => {
   // --- STEP 2 HANDLER (Initiate Registration) ---
   const handleStep2 = async (e) => {
     e.preventDefault();
+
+    const cleanOwner = (formData.ownerName || '').trim();
+    if (!/^[A-Za-z ]+$/.test(cleanOwner) || cleanOwner.length < 3) {
+      toast({
+        title: 'Invalid Owner Name',
+        description: 'Owner name should contain letters and spaces only (min 3 chars).',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     if (formData.password !== formData.confirmPassword) {
       toast({ title: 'Password Mismatch', description: 'Passwords do not match', variant: 'destructive' });
@@ -401,7 +424,16 @@ const VendorRegister = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Owner Name *</Label>
-                  <Input required value={formData.ownerName} onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })} />
+                  <Input
+                    required
+                    value={formData.ownerName}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        ownerName: e.target.value.replace(/[^A-Za-z ]/g, ''),
+                      })
+                    }
+                  />
                 </div>
 
                 <div className="space-y-2">

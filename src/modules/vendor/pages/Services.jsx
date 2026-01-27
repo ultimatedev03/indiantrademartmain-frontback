@@ -74,8 +74,11 @@ const Services = () => {
   const [currentSub, setCurrentSub] = useState(null);
   const [quota, setQuota] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [fatalError, setFatalError] = useState(null);
   const [vendorId, setVendorId] = useState(null);
   const [couponCode, setCouponCode] = useState('');
+  const TRIAL_PLAN_ID = '7fee24d0-de18-44d3-a357-be7b40492a1a'; // Trial plan UUID
+  const TRIAL_DURATION_DAYS = 30;
 
   // ✅ dialog state
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -207,7 +210,10 @@ const Services = () => {
         const {
           data: { user: authUser },
         } = await supabase.auth.getUser();
-        if (!authUser) return;
+        if (!authUser) {
+          setLoading(false);
+          return;
+        }
 
         const { data: vendor, error } = await supabase
           .from('vendors')
@@ -217,8 +223,10 @@ const Services = () => {
 
         if (error) throw error;
         setVendorId(vendor?.id || null);
+        if (!vendor?.id) setLoading(false);
       } catch (e) {
         console.error('Error fetching vendor ID:', e);
+        setLoading(false);
       }
     };
 
@@ -229,6 +237,43 @@ const Services = () => {
     if (vendorId) loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vendorId]);
+
+  const ensureTrialActive = async () => {
+    try {
+      const { data: active, error: actErr } = await supabase
+        .from('vendor_plan_subscriptions')
+        .select('*')
+        .eq('vendor_id', vendorId)
+        .eq('status', 'ACTIVE')
+        .maybeSingle();
+      if (!actErr && active) return active;
+
+      // Activate trial automatically
+      const start = new Date();
+      const end = new Date(start.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000);
+      const { data: trial, error: trialErr } = await supabase
+        .from('vendor_plan_subscriptions')
+        .insert([{
+          vendor_id: vendorId,
+          plan_id: TRIAL_PLAN_ID,
+          start_date: start.toISOString(),
+          end_date: end.toISOString(),
+          status: 'ACTIVE',
+          plan_duration_days: TRIAL_DURATION_DAYS,
+          auto_renewal_enabled: false,
+          renewal_notification_sent: false
+        }])
+        .select()
+        .single();
+      if (trialErr) throw trialErr;
+      toast({ title: 'Trial Activated', description: 'Free trial plan started automatically.' });
+      return trial;
+    } catch (e) {
+      console.error('Trial activation failed', e);
+      setFatalError(e?.message || 'Trial activation failed');
+      return null;
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -246,7 +291,7 @@ const Services = () => {
       // Query for ACTIVE subscription - this will get the latest one
       const { data: subs, error: subsErr } = await supabase
         .from('vendor_plan_subscriptions')
-        .select('*, plan:vendor_plans(id,name,price)')
+        .select('*, plan:vendor_plans(*)')
         .eq('vendor_id', vendorId)
         .eq('status', 'ACTIVE')
         .order('created_at', { ascending: false })
@@ -254,7 +299,10 @@ const Services = () => {
 
       if (subsErr) throw subsErr;
       // Get the first (most recent) active subscription
-      const currentActive = subs && subs.length > 0 ? subs[0] : null;
+      let currentActive = subs && subs.length > 0 ? subs[0] : null;
+      if (!currentActive) {
+        currentActive = await ensureTrialActive();
+      }
       setCurrentSub(currentActive);
 
       const { data: q, error: qErr } = await supabase
@@ -267,6 +315,7 @@ const Services = () => {
       setQuota(q);
     } catch (e) {
       console.error('Error loading subscription data:', e);
+      setFatalError(e?.message || 'Failed to load subscription data');
     } finally {
       setLoading(false);
     }
@@ -306,7 +355,9 @@ const Services = () => {
 
         toast({ title: 'Success!', description: 'Plan activated.' });
         setDetailsOpen(false);
-        setTimeout(() => loadData(), 500);
+        setTimeout(() => {
+          loadData();
+        }, 500);
       } catch (e) {
         console.error('Subscription error:', e);
         toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -318,7 +369,6 @@ const Services = () => {
     // Paid plan - initiate Razorpay payment
     initiateRazorpayPayment(plan, couponOverride);
   };
-
   const initiateRazorpayPayment = async (plan, couponOverride = couponCode) => {
     try {
       toast({ title: 'Processing...', description: `Initiating payment for ${plan.name}` });
@@ -435,7 +485,9 @@ const Services = () => {
           await verifyResponse.json();
 
           toast({ title: 'Success!', description: 'Subscription activated! Invoice sent to your email.' });
-          setTimeout(() => loadData(), 500);
+          setTimeout(() => {
+            loadData();
+          }, 500);
         } catch (err) {
           toast({ title: 'Error', description: err?.message || 'Payment verification failed', variant: 'destructive' });
           console.error(err);
@@ -547,12 +599,45 @@ const Services = () => {
     return { meta, groups, keyBenefits };
   };
 
+  useEffect(() => {
+    const handler = (event) => {
+      setFatalError(event?.error?.message || event?.message || 'Unexpected error');
+      setLoading(false);
+    };
+    window.addEventListener('error', handler);
+    return () => window.removeEventListener('error', handler);
+  }, []);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[420px]">
         <div className="text-center">
           <Zap className="w-12 h-12 text-slate-300 mx-auto mb-2 animate-pulse" />
           <p className="text-slate-500">Loading subscription plans...</p>
+          {fatalError && <p className="text-red-600 text-sm mt-2">{fatalError}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (!vendorId) {
+    return (
+      <div className="flex items-center justify-center min-h-[420px]">
+        <div className="text-center text-slate-600">
+          <p className="text-lg font-semibold">Vendor profile not found</p>
+          <p className="text-sm text-slate-500 mt-1">Please log in as a vendor to view subscriptions.</p>
+          {fatalError && <p className="text-red-600 text-sm mt-2">{fatalError}</p>}
+        </div>
+      </div>
+    );
+  }
+
+  if (fatalError) {
+    return (
+      <div className="flex items-center justify-center min-h-[420px]">
+        <div className="text-center text-red-600">
+          <p className="text-lg font-semibold">Error loading subscriptions</p>
+          <p className="text-sm mt-1">{fatalError}</p>
         </div>
       </div>
     );
@@ -561,6 +646,18 @@ const Services = () => {
   const selected = selectedPlan ? buildGroups(selectedPlan) : null;
   const selectedIsCurrent = selectedPlan && currentSub?.plan_id === selectedPlan.id;
   const selectedIsPopular = selectedPlan && selectedPlan.id === mostPopularPlanId;
+
+  if (!plans.length && !loading && !fatalError) {
+    return (
+      <div className="flex items-center justify-center min-h-[420px]">
+        <div className="text-center text-slate-600">
+          <p className="text-lg font-semibold">No subscription plans loaded</p>
+          <p className="text-sm text-slate-500 mt-1">vendorId: {vendorId || 'N/A'} | currentSub: {currentSub?.plan_id || 'none'}</p>
+          <p className="text-xs text-slate-400 mt-2">This is a debug fallback; if you see this, plans fetch returned empty.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">

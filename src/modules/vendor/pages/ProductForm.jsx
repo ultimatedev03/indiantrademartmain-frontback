@@ -249,17 +249,26 @@ const ProductForm = () => {
     try {
       const data = await vendorApi.products.get(id);
       if (data) {
+        const safeImages = Array.isArray(data.images) ? data.images : [];
+        const safeSpecs = Array.isArray(data.specifications) && data.specifications.length
+          ? data.specifications
+          : [{ key: '', value: '' }];
+        const safeTargets = {
+          pan_india: !!data?.target_locations?.pan_india,
+          states: data?.target_locations?.states || [],
+          cities: data?.target_locations?.cities || [],
+        };
+
         setFormData((p) => ({
           ...p,
           ...data,
           price_unit: data.price_unit || '',
           min_order_qty: data.min_order_qty || '',
           extra_micro_categories: data.extra_micro_categories || [],
-          target_locations: {
-            pan_india: data?.target_locations?.pan_india || false,
-            states: data?.target_locations?.states || [],
-            cities: data?.target_locations?.cities || [],
-          },
+          specifications: safeSpecs,
+          images: safeImages,
+          target_locations: safeTargets,
+          status: data.status || 'ACTIVE',
         }));
 
         const lastState = data?.target_locations?.states?.slice(-1)?.[0];
@@ -273,6 +282,11 @@ const ProductForm = () => {
       }
     } catch (e) {
       console.error(e);
+      toast({
+        title: 'Unable to load product',
+        description: e?.message || 'Product data not found',
+        variant: 'destructive',
+      });
     } finally {
       setLoading(false);
     }

@@ -71,6 +71,42 @@ async function resolveMicroId(microSlug) {
   return micro?.id || null;
 }
 
+async function fetchRankedProductsViaRpc({ microId, cityId, stateId, q, sort, from, limit }) {
+  const { data, error } = await supabase.rpc('dir_ranked_products', {
+    p_micro_id: microId,
+    p_city_id: cityId,
+    p_state_id: stateId,
+    p_q: q || null,
+    p_sort: sort || null,
+    p_limit: limit,
+    p_offset: from,
+  });
+
+  if (error) throw error;
+
+  const rows = data || [];
+  let totalCount = rows.length > 0 ? Number(rows[0].total_count || 0) : 0;
+
+  // If we paged past the end, probe once to recover total_count.
+  if (rows.length === 0 && from > 0) {
+    const { data: probeRows, error: probeErr } = await supabase.rpc('dir_ranked_products', {
+      p_micro_id: microId,
+      p_city_id: cityId,
+      p_state_id: stateId,
+      p_q: q || null,
+      p_sort: sort || null,
+      p_limit: 1,
+      p_offset: 0,
+    });
+    if (!probeErr && probeRows?.length) {
+      totalCount = Number(probeRows[0].total_count || 0);
+    }
+  }
+
+  const cleanedRows = rows.map(({ total_count, ...rest }) => rest);
+  return { rows: cleanedRows, totalCount };
+}
+
 async function getActivePlanMaps() {
   const nowIso = new Date().toISOString();
 
@@ -145,7 +181,12 @@ async function countForVendorFilter({ microId, q, stateId, cityId, vendorFilter 
     }
   }
 
-  const { count, error } = await query.select('id', { count: 'exact', head: true });
+  // NOTE: keep vendors embedded in the head-count query, otherwise
+  // PostgREST throws: "'vendors' is not an embedded resource in this request".
+  const { count, error } = await query.select('id, vendors!inner(id)', {
+    count: 'exact',
+    head: true,
+  });
   if (error) throw error;
   return Number(count || 0);
 }
@@ -190,6 +231,25 @@ async function handleRankedProducts(req, res) {
     const from = (page - 1) * limit;
 
     const microId = await resolveMicroId(microSlug);
+
+    // ✅ Preferred path: slot-aware ranking via DB RPC (capacity-based seats).
+    // If the migration isn't applied yet, we fall back to legacy tier buckets.
+    try {
+      const { rows, totalCount } = await fetchRankedProductsViaRpc({
+        microId,
+        cityId,
+        stateId,
+        q,
+        sort,
+        from,
+        limit,
+      });
+
+      return res.json({ success: true, data: rows, count: totalCount });
+    } catch (rpcErr) {
+      // Continue to legacy logic below.
+      console.warn('[dir] dir_ranked_products RPC failed, using legacy ranking:', rpcErr?.message);
+    }
 
     const { planNameByVendor, tierKeyByVendor } = await getActivePlanMaps();
     const activeVendorIds = Object.keys(tierKeyByVendor);

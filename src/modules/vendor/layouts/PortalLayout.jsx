@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart, User as UserIcon, Check, Ban
+  BarChart, User as UserIcon, Check, Ban, MapPin, FolderKanban
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -118,6 +118,8 @@ const PortalLayout = () => {
     { icon: FileText, label: 'Proposals', path: 'proposals' },
     { icon: BarChart, label: 'Analytics', path: 'analytics' },
     { icon: Boxes, label: 'Subscriptions', path: 'subscriptions' },
+    { icon: MapPin, label: 'Plan Business Preferences', path: 'coverage' },
+    { icon: FolderKanban, label: 'Collections', path: 'collections' },
     { icon: HelpCircle, label: 'Support', path: 'support' },
     { icon: Settings, label: 'Settings', path: 'settings' },
   ];

@@ -41,6 +41,9 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
     category_path: '',   // "Head > Sub > Micro"
     category_text: '',   // typed category fallback
     category_slug: '',   // micro slug
+    micro_category_id: '',
+    sub_category_id: '',
+    head_category_id: '',
   });
 
   // ✅ close dropdown on outside click
@@ -87,6 +90,8 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
             micro_id: m.id,
             micro_name: m.name,
             micro_slug: m.slug,
+            sub_id: sub?.id,
+            head_id: head?.id,
             path: `${head?.name || '—'} > ${sub?.name || '—'} > ${m?.name || '—'}`,
           };
         });
@@ -110,6 +115,9 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
       category_path: it.path,
       category_text: it.micro_name,
       category_slug: it.micro_slug || '',
+      micro_category_id: it.micro_id || '',
+      sub_category_id: it.sub_id || '',
+      head_category_id: it.head_id || '',
     }));
     setCategoryQuery(it.micro_name);
     setShowCatDropdown(false);
@@ -121,6 +129,9 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
       category_path: '',
       category_text: '',
       category_slug: '',
+      micro_category_id: '',
+      sub_category_id: '',
+      head_category_id: '',
     }));
     setCategoryQuery('');
     setCatSuggestions([]);
@@ -184,9 +195,14 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
         product_name: safe(formData.category_text) || cat,
         category: cat,
         category_slug: safe(formData.category_slug) || null,
+        micro_category_id: safe(formData.micro_category_id) || null,
+        sub_category_id: safe(formData.sub_category_id) || null,
+        head_category_id: safe(formData.head_category_id) || null,
         quantity: safe(formData.quantity) || null,
         budget: safe(formData.budget) || null,
         location: safe(locationText) || null,
+        state_id: safe(formData.state_id) || null,
+        city_id: safe(formData.city_id) || null,
 
         product_interest: safe(formData.category_text) || cat,
 
@@ -221,6 +237,9 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
         category_path: '',
         category_text: '',
         category_slug: '',
+        micro_category_id: '',
+        sub_category_id: '',
+        head_category_id: '',
       });
       setCategoryQuery('');
       setCatSuggestions([]);

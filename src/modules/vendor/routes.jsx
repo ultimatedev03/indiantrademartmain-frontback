@@ -20,6 +20,8 @@ import VendorLogin from '@/modules/vendor/pages/auth/Login';
 import VendorVerify from '@/modules/vendor/pages/auth/Verify';
 import ForgotPassword from '@/shared/pages/ForgotPassword';
 import VendorAnalytics from '@/modules/vendor/pages/Analytics';
+import CoverageSettings from '@/modules/vendor/pages/CoverageSettings';
+import Collections from '@/modules/vendor/pages/Collections';
 
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
@@ -72,6 +74,8 @@ export const VendorRoutes = () => {
           <Route path="photos-docs" element={<PhotosDocs />} />
           <Route path="analytics" element={<VendorAnalytics />} />
           <Route path="subscriptions" element={<VendorServices />} />
+          <Route path="coverage" element={<CoverageSettings />} />
+          <Route path="collections" element={<Collections />} />
         </Route>
       </Route>
 

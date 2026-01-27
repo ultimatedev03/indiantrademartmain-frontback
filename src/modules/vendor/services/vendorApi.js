@@ -1213,17 +1213,14 @@ export const vendorApi = {
     },
 
     get: async (id) => {
+      // Avoid broken relationships in cache: select plain columns only
       const { data, error } = await supabase
         .from('products')
-        .select(`
-          *,
-          micro_category:micro_categories(id, name, slug),
-          sub_category:sub_categories(id, name, slug),
-          head_category:head_categories(id, name, slug)
-        `)
+        .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
       if (error) throw error;
+      if (!data) throw new Error('Product not found');
       return data;
     },
 

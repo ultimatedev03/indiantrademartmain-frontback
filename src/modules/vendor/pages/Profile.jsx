@@ -3,6 +3,7 @@ import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -68,6 +69,7 @@ const Profile = () => {
         websiteUrl: p.websiteUrl || p.website_url,
         primaryBusinessType: p.primaryBusinessType || p.primary_business_type,
         annualTurnover: p.annualTurnover || p.annual_turnover,
+        businessDescription: p.businessDescription || p.business_description || p.description,
         cinNumber: p.cinNumber || p.cin_number,
         llpinNumber: p.llpinNumber || p.llpin_number,
         iecCode: p.iecCode || p.iec_code,
@@ -140,13 +142,25 @@ const Profile = () => {
         factors,
         role,
 
+        description,
+        businessDescription,
+        business_description,
+
         ...cleanDraft
       } = draft;
 
-      await vendorApi.auth.updateProfile(cleanDraft);
+      const updates = { ...cleanDraft };
 
-      setProfile(prev => ({ ...prev, ...cleanDraft }));
-      setDraft(prev => ({ ...prev, ...cleanDraft }));
+      // map description -> business_description only
+      const descValue = businessDescription || business_description || description;
+      if (descValue !== undefined) {
+        updates.business_description = descValue;
+      }
+
+      await vendorApi.auth.updateProfile(updates);
+
+      setProfile(prev => ({ ...prev, ...cleanDraft, business_description: descValue, businessDescription: descValue }));
+      setDraft(prev => ({ ...prev, ...cleanDraft, business_description: descValue, businessDescription: descValue }));
       setEditingSection(null);
 
       window.dispatchEvent(new Event('vendor_profile_updated'));
@@ -607,6 +621,22 @@ const Profile = () => {
                       className="h-9"
                     />
                   </div>
+
+                  <div className="space-y-1 md:col-span-2">
+                    <Label className="text-xs text-slate-500">Business Description</Label>
+                    <Textarea
+                      disabled={editingSection !== 'additional'}
+                      rows={4}
+                      placeholder="Describe your products/services, experience, and specialties"
+                      value={draft.businessDescription || draft.business_description || ''}
+                      onChange={e => setDraft({
+                        ...draft,
+                        businessDescription: e.target.value,
+                        business_description: e.target.value
+                      })}
+                      className="resize-none"
+                    />
+                  </div>
                 </div>
               </TabsContent>
 
@@ -693,8 +723,12 @@ const BankingSection = ({ banks, onRefresh }) => {
   const [adding, setAdding] = useState(false);
 
   const handleUpdateBank = (index, field, value) => {
+    let nextVal = value;
+    if (field === 'account_number') {
+      nextVal = (value || '').replace(/\D/g, '').slice(0, 30);
+    }
     const updated = [...newBanks];
-    updated[index] = { ...updated[index], [field]: value };
+    updated[index] = { ...updated[index], [field]: nextVal };
     setNewBanks(updated);
   };
 

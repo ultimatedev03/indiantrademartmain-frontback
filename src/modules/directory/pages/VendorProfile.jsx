@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { BadgeCheck, MapPin, Send, Star, Phone, Globe, Building2, User, MessageSquare } from 'lucide-react';
+import { BadgeCheck, MapPin, Send, Star, Phone, Globe, Building2, User, MessageSquare, Wrench } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import Card from '@/shared/components/Card';
 import { Badge } from '@/shared/components/Badge';
@@ -22,6 +22,8 @@ const FALLBACK_VENDORS = [
     reviews: 124,
     verified: true,
     description: "Leading supplier of industrial construction materials with over 20 years of experience. We specialize in steel, cement, and safety equipment.",
+    primary_business_type: "Manufacturer, Supplier",
+    annual_turnover: "₹5-10 Cr",
     phone: "+91-9876543210",
     email: "contact@aggarwal.com",
     address: "Plot 45, Okhla Industrial Area, Phase III",
@@ -30,11 +32,14 @@ const FALLBACK_VENDORS = [
   {
      id: '2',
      company_name: "Tech Solutions Pvt Ltd",
-     city: "Mumbai",
-     state: "Maharashtra",
-     verified: true,
-     rating: 4.8,
-     reviews: 89
+    city: "Mumbai",
+    state: "Maharashtra",
+    verified: true,
+    rating: 4.8,
+    reviews: 89,
+    primary_business_type: "IT Services",
+    description: "Technology solutions company offering cloud services, custom software, and IT consulting.",
+    annual_turnover: "₹1-5 Cr"
   }
 ];
 
@@ -44,6 +49,8 @@ const FALLBACK_PRODUCTS = [
   { id: 103, name: "Steel TMT Bars", price: "₹45,000/ton", category: "Raw Material", image: "https://images.unsplash.com/photo-1535813547-99c456a41d4a?auto=format&fit=crop&w=300&q=80" },
   { id: 104, name: "Safety Helmets", price: "₹120", category: "Safety Gear", image: "https://images.unsplash.com/photo-1595166661134-8c8a164b1d6f?auto=format&fit=crop&w=300&q=80" },
 ];
+
+const FALLBACK_SERVICE_IMAGE = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80";
 
 // Mask phone number to show only first 2 and last 2 digits
 const maskPhoneNumber = (phone) => {
@@ -66,9 +73,12 @@ const VendorProfile = () => {
 
   const [vendor, setVendor] = useState(null);
   const [products, setProducts] = useState([]);
+  const [services, setServices] = useState([]);
+  const [serviceCategories, setServiceCategories] = useState([]);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'products');
+  const [showAllProducts, setShowAllProducts] = useState(false);
 
   useEffect(() => {
     // Fetch vendor data from Supabase
@@ -96,49 +106,108 @@ const VendorProfile = () => {
             rating: vendorData.seller_rating || 4.0,
             reviews: 0,
             verified: vendorData.verification_badge || vendorData.is_verified || false,
-            description: vendorData.primary_business_type || "Established business",
+            primary_business_type: vendorData.primary_business_type,
+            description: vendorData.description || vendorData.business_description || vendorData.primary_business_type || "Established business",
             phone: vendorData.phone || "+91-XXXXXXXXXX",
             address: vendorData.registered_address || vendorData.address || "Address available on request",
             established: vendorData.year_of_establishment || "2020",
             gst: vendorData.gst_number,
             email: vendorData.email,
             website: vendorData.website_url,
-            profile_image: vendorData.profile_image
+            profile_image: vendorData.profile_image,
+            annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover
           });
 
-          // Fetch products from this vendor
+          // Fetch products from this vendor (all active, newest first)
           const { data: productsData, error: productsError } = await supabase
             .from('products')
             .select('id, name, price, price_unit, images, category_other')
             .eq('vendor_id', vendorData.id)
             .eq('status', 'ACTIVE')
-            .limit(8);
+            .order('created_at', { ascending: false });
 
           if (productsError) {
             console.error('Error fetching products:', productsError);
           }
 
           if (productsData && productsData.length > 0) {
-            setProducts(productsData.map(p => ({
+            const mappedProducts = productsData.map(p => ({
               id: p.id,
               name: p.name,
               price: `₹${p.price}${p.price_unit ? ' / ' + p.price_unit : ''}`,
               category: p.category_other || 'General',
               image: (p.images && Array.isArray(p.images) && p.images[0]) || (p.images && typeof p.images === 'string' ? p.images : 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80')
-            })));
+            }));
+            setProducts(mappedProducts);
+            setShowAllProducts(false);
           } else {
             setProducts([]);
+            setShowAllProducts(false);
           }
+
+          // Fetch services offered by vendor (best-effort)
+          let mappedServices = [];
+          let mappedServiceCategories = [];
+          try {
+            const { data: servicesData, error: servicesError } = await supabase
+              .from('vendor_services')
+              .select('*')
+              .eq('vendor_id', vendorData.id);
+
+            if (servicesError && servicesError.code !== 'PGRST116') {
+              console.warn('Error fetching services:', servicesError);
+            } else if (servicesData && servicesData.length > 0) {
+              mappedServices = servicesData.map(service => ({
+                id: service.id,
+                name: service.name || service.service_name || service.title || 'Service',
+                category: service.category || service.service_type || 'Service',
+                description: service.description || service.details || service.short_description || 'Service details coming soon.',
+                price: service.price
+                  ? `₹${service.price}${service.price_unit ? ' / ' + service.price_unit : ''}`
+                  : service.rate
+                    ? `₹${service.rate}`
+                    : 'Price on request',
+                image: (service.image || service.cover_image || (Array.isArray(service.images) ? service.images[0] : null) || FALLBACK_SERVICE_IMAGE)
+              }));
+            }
+            // Also fetch service categories from vendor_preferences (head categories)
+            const { data: prefs, error: prefsError } = await supabase
+              .from('vendor_preferences')
+              .select('preferred_micro_categories')
+              .eq('vendor_id', vendorData.id)
+              .maybeSingle();
+
+            if (!prefsError && prefs?.preferred_micro_categories?.length) {
+              const { data: headCats, error: headErr } = await supabase
+                .from('head_categories')
+                .select('id, name')
+                .in('id', prefs.preferred_micro_categories);
+
+              if (!headErr && headCats?.length) {
+                mappedServiceCategories = headCats.map(h => ({ id: h.id, name: h.name }));
+              }
+            }
+          } catch (serviceErr) {
+            console.warn('Service fetch failed', serviceErr);
+          }
+          setServices(mappedServices);
+          setServiceCategories(mappedServiceCategories);
         } else {
           // Fallback if vendor not found
           setVendor(FALLBACK_VENDORS[0]);
           setProducts([]);
+          setServices([]);
+          setServiceCategories([]);
+          setShowAllProducts(false);
         }
       } catch (e) {
         console.error("Vendor fetch failed", e);
         // Use fallback vendor data on error
         setVendor(FALLBACK_VENDORS[0]);
         setProducts([]);
+        setServices([]);
+        setServiceCategories([]);
+        setShowAllProducts(false);
       } finally {
         setLoading(false);
       }
@@ -272,6 +341,8 @@ const VendorProfile = () => {
   // Always use fallback if no vendor, but not for products
   const displayVendor = vendor || FALLBACK_VENDORS[0];
   const displayProducts = products;
+  const displayServices = services;
+  const visibleProducts = showAllProducts ? displayProducts : displayProducts.slice(0, 6);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl font-sans">
@@ -344,6 +415,7 @@ const VendorProfile = () => {
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="w-full justify-start border-b rounded-none p-0 h-auto bg-transparent gap-6">
               <TabsTrigger value="products" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#00A699] data-[state=active]:shadow-none px-4 py-3 text-base">Products</TabsTrigger>
+              <TabsTrigger value="services" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#00A699] data-[state=active]:shadow-none px-4 py-3 text-base">Services</TabsTrigger>
               <TabsTrigger value="about" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#00A699] data-[state=active]:shadow-none px-4 py-3 text-base">About Company</TabsTrigger>
               {isBuyer && <TabsTrigger value="my-leads" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#00A699] data-[state=active]:shadow-none px-4 py-3 text-base"><MessageSquare className="w-4 h-4 mr-2" />My Leads</TabsTrigger>}
               <TabsTrigger value="reviews" className="rounded-none border-b-2 border-transparent data-[state=active]:border-[#00A699] data-[state=active]:shadow-none px-4 py-3 text-base">Reviews</TabsTrigger>
@@ -351,23 +423,41 @@ const VendorProfile = () => {
 
             <TabsContent value="products" className="pt-6">
               {displayProducts && displayProducts.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  {displayProducts.map(product => (
-                    <Card key={product.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
-                      <div className="h-48 bg-gray-100 relative overflow-hidden">
-                        <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                      </div>
-                      <Card.Content className="p-4">
-                        <Badge variant="outline" className="mb-2">{product.category}</Badge>
-                        <h3 className="font-semibold text-lg text-gray-900 mb-1">{product.name}</h3>
-                        <div className="flex justify-between items-center mt-2">
-                          <span className="font-bold text-[#003D82] text-lg">{product.price}</span>
-                          <Button size="sm" variant="secondary" className="h-8">Enquire</Button>
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {visibleProducts.map(product => (
+                      <Card key={product.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
+                        <div className="h-48 bg-gray-100 relative overflow-hidden">
+                          <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
                         </div>
-                      </Card.Content>
-                    </Card>
-                  ))}
-                </div>
+                        <Card.Content className="p-4">
+                          <Badge variant="outline" className="mb-2">{product.category}</Badge>
+                          <h3 className="font-semibold text-lg text-gray-900 mb-1">{product.name}</h3>
+                          <div className="flex justify-between items-center mt-2">
+                            <span className="font-bold text-[#003D82] text-lg">{product.price}</span>
+                            <Button size="sm" variant="secondary" className="h-8">Enquire</Button>
+                          </div>
+                        </Card.Content>
+                      </Card>
+                    ))}
+                  </div>
+
+                  {displayProducts.length > 6 && !showAllProducts && (
+                    <div className="flex justify-center mt-6">
+                      <Button variant="outline" onClick={() => setShowAllProducts(true)}>
+                        View all products ({displayProducts.length})
+                      </Button>
+                    </div>
+                  )}
+
+                  {showAllProducts && displayProducts.length > 6 && (
+                    <div className="flex justify-center mt-3">
+                      <Button variant="ghost" onClick={() => setShowAllProducts(false)}>
+                        Show fewer products
+                      </Button>
+                    </div>
+                  )}
+                </>
               ) : (
                 <Card>
                   <Card.Content className="p-6 text-center text-gray-500">
@@ -380,13 +470,67 @@ const VendorProfile = () => {
               )}
             </TabsContent>
 
+            <TabsContent value="services" className="pt-6">
+              {displayServices && displayServices.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {displayServices.map(service => (
+                    <Card key={service.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
+                      <div className="h-44 bg-gray-100 relative overflow-hidden">
+                        <img
+                          src={service.image || FALLBACK_SERVICE_IMAGE}
+                          alt={service.name}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      </div>
+                      <Card.Content className="p-4">
+                        <Badge variant="outline" className="mb-2">{service.category || 'Service'}</Badge>
+                        <h3 className="font-semibold text-lg text-gray-900 mb-1">{service.name}</h3>
+                        <p className="text-sm text-gray-600 line-clamp-2">{service.description || 'Service details coming soon.'}</p>
+                        <div className="flex justify-between items-center mt-3">
+                          <span className="font-bold text-[#003D82] text-base">
+                            {service.price || 'Price on request'}
+                          </span>
+                          <Button size="sm" variant="secondary" className="h-8">Enquire</Button>
+                        </div>
+                      </Card.Content>
+                    </Card>
+                  ))}
+                </div>
+              ) : serviceCategories && serviceCategories.length > 0 ? (
+                <Card>
+                  <Card.Content className="p-6">
+                    <h4 className="font-semibold text-gray-900 mb-3">Service Categories</h4>
+                    <div className="flex flex-wrap gap-2">
+                      {serviceCategories.map((cat) => (
+                        <Badge key={cat.id} variant="secondary" className="px-3 py-1">
+                          {cat.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  </Card.Content>
+                </Card>
+              ) : (
+                <Card>
+                  <Card.Content className="p-6 text-center text-gray-500">
+                    <div className="flex flex-col items-center gap-3">
+                      <Wrench className="h-12 w-12 text-gray-300" />
+                      <p>No services added yet</p>
+                    </div>
+                  </Card.Content>
+                </Card>
+              )}
+            </TabsContent>
+
             <TabsContent value="about" className="pt-6">
               <Card>
                 <Card.Content className="p-6">
                   <h3 className="text-xl font-bold mb-4">About {displayVendor.company_name}</h3>
-                  <p className="text-gray-600 leading-relaxed mb-6">
-                    {displayVendor.description}
-                  </p>
+                  <div className="mb-6 space-y-2">
+                    <p className="text-sm text-gray-500 font-medium">Business Description</p>
+                    <p className="text-gray-600 leading-relaxed">
+                      {displayVendor.description || 'Description not provided'}
+                    </p>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-6">
                     <div>
@@ -402,8 +546,8 @@ const VendorProfile = () => {
                       <p className="font-medium">{displayVendor.gst || 'N/A'}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-gray-500 mb-1">Website</p>
-                      <p className="font-medium text-blue-600 truncate">{displayVendor.website ? <a href={displayVendor.website} target="_blank" rel="noopener noreferrer">Visit</a> : 'N/A'}</p>
+                      <p className="text-sm text-gray-500 mb-1">Annual Turnover</p>
+                      <p className="font-medium">{displayVendor.annual_turnover || 'Not provided'}</p>
                     </div>
                   </div>
                 </Card.Content>
