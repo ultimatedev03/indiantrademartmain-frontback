@@ -195,6 +195,68 @@ const MaintenanceGate = ({ children }) => {
   return children;
 };
 
+const publicNoticeClass = (variant) => {
+  const v = String(variant || 'info').toLowerCase();
+  if (v === 'critical') return 'bg-red-600 text-white border-red-500';
+  if (v === 'warning') return 'bg-amber-500 text-black border-amber-400';
+  return 'bg-blue-600 text-white border-blue-500';
+};
+
+const PublicNoticeGate = ({ children }) => {
+  const { appType } = useSubdomain();
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState({ enabled: false, message: '', variant: 'info', maintenance: false });
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('system_config')
+          .select('maintenance_mode, public_notice_enabled, public_notice_message, public_notice_variant')
+          .eq('config_key', MAINTENANCE_KEY)
+          .maybeSingle();
+        if (error) throw error;
+
+        setNotice({
+          maintenance: data?.maintenance_mode === true,
+          enabled: data?.public_notice_enabled === true,
+          message: data?.public_notice_message || '',
+          variant: data?.public_notice_variant || 'info',
+        });
+      } catch (e) {
+        console.error('[PublicNoticeGate] fetch failed:', e);
+        setNotice({ maintenance: false, enabled: false, message: '', variant: 'info' });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    run();
+  }, []);
+
+  if (loading) return children;
+
+  // Do not show notice in admin areas or during maintenance.
+  if (notice.maintenance) return children;
+  if (appType === 'admin' || appType === 'management') return children;
+
+  const path = typeof window !== 'undefined' ? window.location.pathname || '' : '';
+  if (path.startsWith('/admin') || path.startsWith('/management') || path.startsWith('/migration-tools')) {
+    return children;
+  }
+
+  if (!notice.enabled || !notice.message) return children;
+
+  return (
+    <>
+      <div className={`border-b px-4 py-2 text-sm font-medium text-center ${publicNoticeClass(notice.variant)}`}>
+        {notice.message}
+      </div>
+      {children}
+    </>
+  );
+};
+
 // This component switches route trees based on subdomain/appType
 const AppRoutes = () => {
   const { appType } = useSubdomain();
@@ -253,11 +315,13 @@ function App() {
                   <VendorAuthProvider>
                     <EmployeeAuthProvider>
                       <SuperAdminProvider>
-                        {/* ✅ Vendor suspended gate added here */}
-                        <VendorSuspensionGate>
-                          <AppRoutes />
-                          <AIChatWidget />
-                        </VendorSuspensionGate>
+                        <PublicNoticeGate>
+                          {/* ✅ Vendor suspended gate added here */}
+                          <VendorSuspensionGate>
+                            <AppRoutes />
+                            <AIChatWidget />
+                          </VendorSuspensionGate>
+                        </PublicNoticeGate>
                       </SuperAdminProvider>
                     </EmployeeAuthProvider>
                   </VendorAuthProvider>

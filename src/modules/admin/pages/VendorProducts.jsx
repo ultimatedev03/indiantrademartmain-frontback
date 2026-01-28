@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/components/ui/use-toast";
 
 import { Loader2, ArrowLeft, Image as ImageIcon, Eye, Pencil, Trash2 } from "lucide-react";
+import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
 
 const isLocalHost = () => {
   const h = window.location.hostname;
@@ -91,7 +92,7 @@ export default function VendorProducts() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/vendors/${vendorId}/products`);
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/vendors/${vendorId}/products`);
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
       setVendor(data.vendor || null);
@@ -133,9 +134,8 @@ export default function VendorProducts() {
     if (!editProduct?.id) return;
     setSaving(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/products/${editProduct.id}`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/products/${editProduct.id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editProduct.name,
           description: editProduct.description,
@@ -167,7 +167,7 @@ export default function VendorProducts() {
 
     setSaving(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/products/${p.id}`, { method: "DELETE" });
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/products/${p.id}`, { method: "DELETE" });
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Delete failed");
       toast({ title: "Success", description: "Product deleted" });

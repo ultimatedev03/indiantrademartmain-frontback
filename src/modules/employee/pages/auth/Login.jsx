@@ -36,6 +36,8 @@ const Login = () => {
           navigate('/admin/dashboard');
         } else if (user.role === 'HR') {
           navigate('/hr/dashboard');
+        } else if (user.role === 'FINANCE') {
+          navigate('/admin/finance-portal/dashboard');
         } else if (user.role === 'DATA_ENTRY' || user.role === 'DATAENTRY') {
           navigate('/employee/dataentry/dashboard');
         } else if (user.role === 'SUPPORT') {

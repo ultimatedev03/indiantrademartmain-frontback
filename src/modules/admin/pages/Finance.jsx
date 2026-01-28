@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
 import { IndianRupee, Percent } from 'lucide-react';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const number = (v) => Number(v || 0);
 const fmt = (d) => {
@@ -36,9 +37,9 @@ const AdminFinance = () => {
     setLoading(true);
     try {
       const [payRes, cpnRes, planRes] = await Promise.all([
-        fetch('/api/finance/payments'),
-        fetch('/api/finance/coupons'),
-        fetch('/api/payment/plans'),
+        fetchWithCsrf('/api/finance/payments'),
+        fetchWithCsrf('/api/finance/coupons'),
+        fetchWithCsrf('/api/payment/plans'),
       ]);
       const payJson = await payRes.json();
       const cpnJson = await cpnRes.json();
@@ -57,7 +58,7 @@ const AdminFinance = () => {
     if (!id) return;
     if (!window.confirm('Delete this coupon?')) return;
     try {
-      const res = await fetch(`/api/finance/coupons/${id}`, { method: 'DELETE' });
+      const res = await fetchWithCsrf(`/api/finance/coupons/${id}`, { method: 'DELETE' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed');
       toast({ title: 'Deleted', description: 'Coupon removed' });
@@ -92,9 +93,8 @@ const AdminFinance = () => {
         vendor_id: form.vendor_id || null,
         expires_at: form.expires_at || null,
       };
-      const res = await fetch('/api/finance/coupons', {
+      const res = await fetchWithCsrf('/api/finance/coupons', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
       const json = await res.json();

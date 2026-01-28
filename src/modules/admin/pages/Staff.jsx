@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
 import { Plus, Search, Trash2, Loader2, KeyRound } from "lucide-react";
 import { Label } from "@/components/ui/label";
+import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
 
 // ✅ Local vs Netlify API base (same pattern as Vendors.jsx)
 const isLocalHost = () => {
@@ -89,7 +90,7 @@ const Staff = () => {
   const loadEmployees = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/staff`);
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff`);
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(buildApiError(data, "Failed to fetch staff"));
       setEmployees(data.employees || []);
@@ -128,9 +129,8 @@ const Staff = () => {
 
     setSaving(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/staff`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           full_name: formData.full_name,
           email: formData.email,
@@ -173,7 +173,7 @@ const Staff = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this employee? This cannot be undone.")) return;
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/staff/${id}`, { method: "DELETE" });
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff/${id}`, { method: "DELETE" });
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(buildApiError(data, "Delete failed"));
       setEmployees((prev) => (prev || []).filter((e) => e.id !== id));
@@ -214,9 +214,8 @@ const Staff = () => {
 
     setPwSaving(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/staff/${pwEmployee.id}/password`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff/${pwEmployee.id}/password`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: pwForm.password }),
       });
 

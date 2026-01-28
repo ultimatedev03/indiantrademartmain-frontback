@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { apiUrl } from '@/lib/apiBase';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 export const supportApi = {
   getAllTickets: async (filters = {}) => {
@@ -10,7 +11,7 @@ export const supportApi = {
       if (filters.search) params.append('search', filters.search);
       params.append('pageSize', '200');
 
-      const response = await fetch(apiUrl(`/api/support/tickets?${params.toString()}`));
+      const response = await fetchWithCsrf(apiUrl(`/api/support/tickets?${params.toString()}`));
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const { tickets } = await response.json();
@@ -35,7 +36,7 @@ export const supportApi = {
   // ✅ Messages via API (RLS safe)
   getMessages: async (ticketId) => {
     try {
-      const res = await fetch(apiUrl(`/api/support/tickets/${ticketId}/messages`));
+      const res = await fetchWithCsrf(apiUrl(`/api/support/tickets/${ticketId}/messages`));
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to fetch messages');
       return data.messages || [];
@@ -53,7 +54,7 @@ export const supportApi = {
 
   sendMessage: async (ticketId, message) => {
     try {
-      const res = await fetch(apiUrl(`/api/support/tickets/${ticketId}/messages`), {
+      const res = await fetchWithCsrf(apiUrl(`/api/support/tickets/${ticketId}/messages`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, sender_type: 'SUPPORT' })
@@ -78,7 +79,7 @@ export const supportApi = {
 
   getStats: async () => {
     try {
-      const response = await fetch(apiUrl(`/api/support/stats`));
+      const response = await fetchWithCsrf(apiUrl(`/api/support/stats`));
       if (!response.ok) throw new Error(`API error: ${response.status}`);
 
       const { stats } = await response.json();

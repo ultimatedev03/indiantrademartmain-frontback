@@ -1,36 +1,13 @@
 import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { notifyUser } from "../lib/notify.js";
+import { writeAuditLog } from "../lib/audit.js";
+import { requireEmployeeRoles } from "../middleware/requireEmployeeRoles.js";
 
 const router = express.Router();
 
-/**
- * =========================
- * AUDIT LOG HELPER
- * =========================
- */
-async function writeAudit({
-  user_id = null,
-  action,
-  entity_type,
-  entity_id = null,
-  details = {},
-}) {
-  try {
-    await supabase.from("audit_logs").insert([
-      {
-        user_id,
-        action,
-        entity_type,
-        entity_id,
-        details,
-        created_at: new Date().toISOString(),
-      },
-    ]);
-  } catch (e) {
-    console.error("Audit log failed:", e.message);
-  }
-}
+// All admin routes require a valid ADMIN employee session.
+router.use(requireEmployeeRoles(["ADMIN"]));
 
 /**
  * =========================
@@ -54,19 +31,9 @@ router.get("/audit-logs", async (req, res) => {
   try {
     const { data, error } = await supabase
       .from("audit_logs")
-      .select(
-        `
-        id,
-        action,
-        entity_type,
-        entity_id,
-        details,
-        created_at,
-        user:users(email)
-      `
-      )
+      .select("id, user_id, action, entity_type, entity_id, details, ip_address, created_at")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(500);
 
     if (error) {
       return res.status(500).json({ success: false, error: error.message });
@@ -75,13 +42,19 @@ router.get("/audit-logs", async (req, res) => {
     return res.json({
       success: true,
       logs: (data || []).map((l) => ({
-        timestamp: l.created_at,
-        user: l.user?.email || "System",
+        id: l.id,
+        created_at: l.created_at,
         action: l.action,
-        resource: l.entity_type,
-        resource_id: l.entity_id,
-        status: "SUCCESS",
+        entity_type: l.entity_type,
+        entity_id: l.entity_id,
+        ip_address: l.ip_address || null,
         details: l.details || {},
+        actor: {
+          id: l?.details?.actor_id || l.user_id || null,
+          type: l?.details?.actor_type || null,
+          role: l?.details?.actor_role || null,
+          email: l?.details?.actor_email || null,
+        },
       })),
     });
   } catch (e) {
@@ -127,11 +100,12 @@ router.post("/vendors/:vendorId/terminate", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "VENDOR_TERMINATE",
-      entity_type: "vendors",
-      entity_id: vendorId,
+      entityType: "vendors",
+      entityId: vendorId,
       details: { reason },
     });
 
@@ -165,11 +139,12 @@ router.post("/vendors/:vendorId/activate", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "VENDOR_ACTIVATE",
-      entity_type: "vendors",
-      entity_id: vendorId,
+      entityType: "vendors",
+      entityId: vendorId,
     });
 
     if (data?.user_id) {
@@ -224,11 +199,12 @@ router.post("/buyers/:buyerId/terminate", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "BUYER_TERMINATE",
-      entity_type: "buyers",
-      entity_id: buyerId,
+      entityType: "buyers",
+      entityId: buyerId,
       details: { reason },
     });
 
@@ -262,11 +238,12 @@ router.post("/buyers/:buyerId/activate", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "BUYER_ACTIVATE",
-      entity_type: "buyers",
-      entity_id: buyerId,
+      entityType: "buyers",
+      entityId: buyerId,
     });
 
     if (data?.user_id) {
@@ -304,11 +281,12 @@ router.put("/products/:productId", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "PRODUCT_UPDATE",
-      entity_type: "products",
-      entity_id: productId,
+      entityType: "products",
+      entityId: productId,
       details: { payload: req.body },
     });
 
@@ -325,11 +303,12 @@ router.delete("/products/:productId", async (req, res) => {
     await supabase.from("product_images").delete().eq("product_id", productId);
     await supabase.from("products").delete().eq("id", productId);
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "PRODUCT_DELETE",
-      entity_type: "products",
-      entity_id: productId,
+      entityType: "products",
+      entityId: productId,
     });
 
     return res.json({ success: true });
@@ -390,12 +369,13 @@ router.post("/staff", async (req, res) => {
       .select()
       .single();
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "STAFF_CREATE",
-      entity_type: "employees",
-      entity_id: emp.id,
-      details: { email, role },
+      entityType: "employees",
+      entityId: emp.id,
+      details: { email, role, user_id: userId },
     });
 
     if (userId) {
@@ -427,11 +407,13 @@ router.delete("/staff/:employeeId", async (req, res) => {
     await supabase.from("employees").delete().eq("id", employeeId);
     await supabase.auth.admin.deleteUser(emp.user_id);
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "STAFF_DELETE",
-      entity_type: "employees",
-      entity_id: employeeId,
+      entityType: "employees",
+      entityId: employeeId,
+      details: { user_id: emp?.user_id || null, email: emp?.email || null },
     });
 
     return res.json({ success: true });
@@ -453,11 +435,13 @@ router.put("/staff/:employeeId/password", async (req, res) => {
 
     await supabase.auth.admin.updateUserById(emp.user_id, { password });
 
-    await writeAudit({
-      user_id: req.adminUser?.id,
+    await writeAuditLog({
+      req,
+      actor: req.actor,
       action: "STAFF_PASSWORD_CHANGE",
-      entity_type: "employees",
-      entity_id: employeeId,
+      entityType: "employees",
+      entityId: employeeId,
+      details: { user_id: emp?.user_id || null },
     });
 
     return res.json({ success: true });

@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
+import {
+  SUPERADMIN_KEYS,
+  clearSuperAdminSession,
+  getSuperAdminToken,
+  setSuperAdminToken,
+} from '@/lib/superAdminApiClient';
+import { superAdminServerApi } from '@/modules/admin/services/superAdminServerApi';
 
 const SuperAdminContext = createContext(null);
 
@@ -30,11 +36,39 @@ export const SuperAdminProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    const stored = localStorage.getItem('itm_superadmin_session');
-    if (stored) {
-      setSuperAdmin(JSON.parse(stored));
+    const stored = localStorage.getItem(SUPERADMIN_KEYS.session);
+    const token = getSuperAdminToken();
+
+    if (!stored || !token) {
+      setIsLoading(false);
+      return;
     }
-    setIsLoading(false);
+
+    try {
+      const parsed = JSON.parse(stored);
+      setSuperAdmin(parsed);
+    } catch {
+      clearSuperAdminSession();
+      setIsLoading(false);
+      return;
+    }
+
+    // Validate token in background so stale sessions get cleaned up.
+    (async () => {
+      try {
+        const { superadmin } = await superAdminServerApi.auth.me();
+        if (superadmin) {
+          setSuperAdmin(superadmin);
+          localStorage.setItem(SUPERADMIN_KEYS.session, JSON.stringify(superadmin));
+        }
+      } catch (error) {
+        console.warn('[SuperAdminAuth] Session validation failed:', error?.message || error);
+        clearSuperAdminSession();
+        setSuperAdmin(null);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
   }, []);
 
   const login = async (email, password) => {
@@ -43,22 +77,12 @@ export const SuperAdminProvider = ({ children }) => {
       const safeEmail = String(email || '').trim();
       console.log(`[SuperAdminAuth] Attempting login for: ${safeEmail}`);
 
-      const { data, error } = await supabase.rpc('login_superadmin', {
-        p_email: safeEmail,
-        p_password: password
-      });
-
-      if (error) {
-        console.error("[SuperAdminAuth] RPC Error:", error);
-        throw error;
-      }
-
-      console.log("[SuperAdminAuth] RPC Response:", data);
-
-      const normalized = normalizeRow(data, safeEmail);
+      const data = await superAdminServerApi.auth.login(safeEmail, password);
+      const normalized = normalizeRow(data?.superadmin, safeEmail);
       if (normalized) {
         setSuperAdmin(normalized);
-        localStorage.setItem('itm_superadmin_session', JSON.stringify(normalized));
+        localStorage.setItem(SUPERADMIN_KEYS.session, JSON.stringify(normalized));
+        setSuperAdminToken(data.token);
         toast({
           title: "Access Granted",
           description: "Welcome to the Super Admin Console.",
@@ -72,14 +96,9 @@ export const SuperAdminProvider = ({ children }) => {
     } catch (error) {
       console.error("[SuperAdminAuth] Login Exception:", error);
 
-      const msg = String(error?.message || error || 'Login failed');
-      const looksLikeMissingFn = /login_superadmin/i.test(msg) && /(does not exist|not found|function)/i.test(msg);
-
       toast({
         title: "Access Denied",
-        description: looksLikeMissingFn
-          ? "DB me login_superadmin RPC missing hai. Supabase me function create/run karna padega."
-          : "Invalid credentials. Check console for details.",
+        description: error?.message || "Invalid credentials. Check console for details.",
         variant: "destructive"
       });
       return false;
@@ -90,25 +109,23 @@ export const SuperAdminProvider = ({ children }) => {
 
   const logout = () => {
     setSuperAdmin(null);
-    localStorage.removeItem('itm_superadmin_session');
+    clearSuperAdminSession();
     toast({ title: "Session Ended", description: "Secure logout successful." });
   };
 
-  const changePassword = async (newPassword) => {
+  const changePassword = async (currentPassword, newPassword) => {
     if (!superAdmin) return false;
     try {
-      const { data, error } = await supabase.rpc('change_superadmin_password', {
-        p_id: superAdmin.id,
-        p_new_password: newPassword
-      });
-      
-      if (error) throw error;
-      
+      await superAdminServerApi.auth.changePassword(currentPassword, newPassword);
       toast({ title: "Success", description: "Password updated successfully." });
       return true;
     } catch (error) {
       console.error("Password update failed:", error);
-      toast({ title: "Error", description: "Could not update password.", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: error?.message || "Could not update password.",
+        variant: "destructive",
+      });
       return false;
     }
   };

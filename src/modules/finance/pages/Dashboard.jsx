@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { format } from 'date-fns';
 import { IndianRupee } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const number = (v) => Number(v || 0);
 
@@ -14,7 +15,10 @@ const FinanceDashboard = () => {
 
   const load = async () => {
     try {
-      const [s, p] = await Promise.all([fetch('/api/finance/summary'), fetch('/api/finance/payments')]);
+      const [s, p] = await Promise.all([
+        fetchWithCsrf('/api/finance/summary'),
+        fetchWithCsrf('/api/finance/payments'),
+      ]);
       const sj = await s.json();
       const pj = await p.json();
       if (sj.success) setSummary(sj.data);

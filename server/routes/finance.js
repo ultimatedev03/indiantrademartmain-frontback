@@ -1,7 +1,12 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { writeAuditLog } from '../lib/audit.js';
+import { requireEmployeeRoles } from '../middleware/requireEmployeeRoles.js';
 
 const router = express.Router();
+
+// Finance APIs require FINANCE or ADMIN employees.
+router.use(requireEmployeeRoles(['FINANCE', 'ADMIN']));
 
 // GET /api/finance/payments
 // Optional query params: vendor_id, plan_id, from, to, limit
@@ -21,6 +26,22 @@ router.get('/payments', async (req, res) => {
 
     const { data, error } = await query;
     if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'FINANCE_PAYMENTS_VIEWED',
+      entityType: 'vendor_payments',
+      details: {
+        filters: {
+          vendor_id: vendor_id || null,
+          plan_id: plan_id || null,
+          from: from || null,
+          to: to || null,
+        },
+        count: data?.length || 0,
+      },
+    });
 
     return res.json({ success: true, data: data || [] });
   } catch (e) {
@@ -48,6 +69,14 @@ router.get('/summary', async (_req, res) => {
       totalGross += gross;
       totalNet += net;
       if (p.payment_date && new Date(p.payment_date) >= thirtyAgo) last30 += net;
+    });
+
+    await writeAuditLog({
+      req: _req,
+      actor: _req.actor,
+      action: 'FINANCE_SUMMARY_VIEWED',
+      entityType: 'vendor_payments',
+      details: { totalGross, totalNet, last30 },
     });
 
     return res.json({
@@ -112,6 +141,22 @@ router.post('/coupons', async (req, res) => {
     const { data, error } = await supabase.from('vendor_plan_coupons').insert([payload]).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
 
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'COUPON_CREATED',
+      entityType: 'vendor_plan_coupons',
+      entityId: data?.id || null,
+      details: {
+        code: payload.code,
+        discount_type: payload.discount_type,
+        value: payload.value,
+        plan_id: payload.plan_id,
+        vendor_id: payload.vendor_id,
+        expires_at: payload.expires_at,
+      },
+    });
+
     return res.json({ success: true, data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -129,6 +174,16 @@ router.post('/coupons/:code/deactivate', async (req, res) => {
       .select()
       .single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'COUPON_DEACTIVATED',
+      entityType: 'vendor_plan_coupons',
+      entityId: data?.id || null,
+      details: { code: code.toUpperCase() },
+    });
+
     return res.json({ success: true, data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -148,6 +203,16 @@ router.delete('/coupons/:id', async (req, res) => {
       .select()
       .single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'COUPON_DELETED',
+      entityType: 'vendor_plan_coupons',
+      entityId: id,
+      details: { code: data?.code || null },
+    });
+
     return res.json({ success: true, data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });

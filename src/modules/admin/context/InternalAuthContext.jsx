@@ -4,6 +4,17 @@ import { toast } from '@/components/ui/use-toast';
 
 const InternalAuthContext = createContext(null);
 
+const INTERNAL_ROLES = new Set([
+  'ADMIN',
+  'HR',
+  'FINANCE',
+  'DATA_ENTRY',
+  'DATAENTRY',
+  'SUPPORT',
+  'SALES',
+  'SUPERADMIN',
+]);
+
 const pickFirst = (...vals) => {
   for (const v of vals) {
     if (v !== undefined && v !== null && String(v).trim() !== '') return v;
@@ -11,18 +22,29 @@ const pickFirst = (...vals) => {
   return undefined;
 };
 
+const normalizeRoleValue = (value, fallback) => {
+  const raw = pickFirst(value, fallback);
+  if (!raw) return undefined;
+  return String(raw).trim().toUpperCase();
+};
+
+const isInternalRole = (role) => INTERNAL_ROLES.has(String(role || '').trim().toUpperCase());
+
 const normalizeInternalUser = (raw, email, expectedRole) => {
   const row = Array.isArray(raw) ? raw[0] : raw;
 
-  const role = pickFirst(
-    row?.role,
-    row?.user_role,
-    row?.userRole,
-    row?.role_name,
-    row?.roleName,
-    row?.employee_role,
-    row?.employeeRole,
-    row?.type
+  const role = normalizeRoleValue(
+    pickFirst(
+      row?.role,
+      row?.user_role,
+      row?.userRole,
+      row?.role_name,
+      row?.roleName,
+      row?.employee_role,
+      row?.employeeRole,
+      row?.type
+    ),
+    expectedRole
   );
 
   const name = pickFirst(
@@ -40,7 +62,7 @@ const normalizeInternalUser = (raw, email, expectedRole) => {
     row?.status,
     row?.account_status,
     row?.accountStatus
-  ) || 'ACTIVE';
+  );
 
   const id = pickFirst(
     row?.id,
@@ -55,8 +77,8 @@ const normalizeInternalUser = (raw, email, expectedRole) => {
     id,
     email: pickFirst(row?.email, email),
     name: name || (email ? email.split('@')[0] : 'User'),
-    role: role || expectedRole,
-    status,
+    role: role || normalizeRoleValue(expectedRole, 'ADMIN'),
+    status: String(status || 'ACTIVE').toUpperCase(),
   };
 };
 
@@ -96,23 +118,128 @@ export const InternalAuthProvider = ({ children }) => {
     }
   };
 
-  useEffect(() => {
-    const boot = async () => {
-      const storedUser = localStorage.getItem('itm_admin_user');
-      if (storedUser) {
-        try {
-          const parsed = JSON.parse(storedUser);
-          const hydrated = await hydrateStoredUser(parsed);
-          setUser(hydrated);
-          setIsAuthenticated(true);
-          localStorage.setItem('itm_admin_user', JSON.stringify(hydrated));
-        } catch {
-          localStorage.removeItem('itm_admin_user');
+  const fetchInternalUserFromSession = async (authUser) => {
+    try {
+      if (!authUser?.id) return null;
+
+      // 1) Employees table by user_id (primary)
+      const { data: empById } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('user_id', authUser.id)
+        .maybeSingle();
+
+      if (empById && isInternalRole(empById.role)) {
+        return normalizeInternalUser(empById, authUser.email, empById.role);
+      }
+
+      // 2) Employees table by email (fallback when user_id not wired yet)
+      if (authUser.email) {
+        const { data: empByEmail } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('email', authUser.email)
+          .maybeSingle();
+
+        if (empByEmail && isInternalRole(empByEmail.role)) {
+          return normalizeInternalUser(empByEmail, authUser.email, empByEmail.role);
         }
       }
-      setIsLoading(false);
+
+      // 3) Legacy users table
+      const { data: usr } = await supabase
+        .from('users')
+        .select('*')
+        .eq('email', authUser.email)
+        .maybeSingle();
+
+      if (usr && isInternalRole(usr.role)) {
+        return normalizeInternalUser(usr, authUser.email, usr.role);
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    const boot = async () => {
+      try {
+        let resolvedUser = null;
+
+        // 1) Try stored internal user
+        const storedUser = localStorage.getItem('itm_admin_user');
+        if (storedUser) {
+          try {
+            const parsed = JSON.parse(storedUser);
+            const hydrated = await hydrateStoredUser(parsed);
+            if (hydrated && isInternalRole(hydrated.role)) {
+              resolvedUser = hydrated;
+              localStorage.setItem('itm_admin_user', JSON.stringify(hydrated));
+            } else {
+              localStorage.removeItem('itm_admin_user');
+            }
+          } catch {
+            localStorage.removeItem('itm_admin_user');
+          }
+        }
+
+        // 2) Sync from active Supabase session (authoritative)
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (session?.user) {
+          const sessionUser = await fetchInternalUserFromSession(session.user);
+          if (sessionUser) {
+            resolvedUser = sessionUser;
+            localStorage.setItem('itm_admin_user', JSON.stringify(sessionUser));
+          } else if (!resolvedUser) {
+            localStorage.removeItem('itm_admin_user');
+          }
+        }
+
+        setUser(resolvedUser);
+        setIsAuthenticated(!!resolvedUser);
+      } finally {
+        setIsLoading(false);
+      }
     };
     boot();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      try {
+        if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setIsAuthenticated(false);
+          localStorage.removeItem('itm_admin_user');
+          return;
+        }
+
+        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+          const internalUser = session?.user
+            ? await fetchInternalUserFromSession(session.user)
+            : null;
+
+          if (internalUser) {
+            setUser(internalUser);
+            setIsAuthenticated(true);
+            localStorage.setItem('itm_admin_user', JSON.stringify(internalUser));
+          } else {
+            setUser(null);
+            setIsAuthenticated(false);
+            localStorage.removeItem('itm_admin_user');
+          }
+        }
+      } catch {
+        // keep current state on transient auth errors
+      }
+    });
+
+    return () => {
+      sub?.subscription?.unsubscribe?.();
+    };
   }, []);
 
   /**
@@ -148,10 +275,47 @@ export const InternalAuthProvider = ({ children }) => {
         throw new Error('Unauthorized');
       }
 
-      let normalized = normalizeInternalUser(data, email, expectedRole);
+      // Prefer the employees/users tables as source-of-truth for role + profile
+      let normalized = null;
 
-      if (!normalized.role && expectedRole) {
-        normalized.role = expectedRole;
+      const { data: empById } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('user_id', authData.user.id)
+        .maybeSingle();
+
+      if (empById) {
+        normalized = normalizeInternalUser(empById, email, empById.role);
+      } else {
+        const { data: empByEmail } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
+
+        if (empByEmail) {
+          normalized = normalizeInternalUser(empByEmail, email, empByEmail.role);
+        }
+      }
+
+      if (!normalized) {
+        const { data: usr } = await supabase
+          .from('users')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
+
+        if (usr) {
+          normalized = normalizeInternalUser(usr, email, usr.role);
+        }
+      }
+
+      if (!normalized) {
+        normalized = normalizeInternalUser(data, email, expectedRole);
+      }
+
+      if (!isInternalRole(normalized.role) && expectedRole) {
+        normalized.role = normalizeRoleValue(expectedRole, normalized.role);
       }
 
       setUser(normalized);

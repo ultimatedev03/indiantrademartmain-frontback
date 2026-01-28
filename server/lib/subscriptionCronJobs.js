@@ -17,7 +17,13 @@ if (!supabaseUrl || !supabaseServiceKey) {
   );
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
 
 /**
  * Check subscriptions expiring in 7 days and send renewal reminders

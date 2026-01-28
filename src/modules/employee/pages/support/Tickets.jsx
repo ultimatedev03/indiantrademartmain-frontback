@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import {
   Dialog,
   DialogContent,
@@ -107,7 +108,7 @@ const Tickets = () => {
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-      const response = await fetch(`${API_URL}/api/support/tickets/${selectedTicket.id}/status`, {
+      const response = await fetchWithCsrf(`${API_URL}/api/support/tickets/${selectedTicket.id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })

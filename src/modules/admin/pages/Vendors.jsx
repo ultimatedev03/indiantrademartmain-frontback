@@ -43,6 +43,7 @@ import {
   UserX,
   ShieldCheck,
 } from "lucide-react";
+import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
 
 // ✅ Local vs Netlify API base
 const isLocalHost = () => {
@@ -103,7 +104,7 @@ export default function Vendors() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/vendors`);
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/vendors`);
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
 
@@ -189,11 +190,10 @@ export default function Vendors() {
 
     setProcessing(true);
     try {
-      const res = await fetch(
+      const res = await fetchWithCsrf(
         `${ADMIN_API_BASE}/vendors/${selectedVendor.id}/terminate`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ reason }),
         }
       );
@@ -218,7 +218,7 @@ export default function Vendors() {
   const doActivate = async (vendorId) => {
     setProcessing(true);
     try {
-      const res = await fetch(`${ADMIN_API_BASE}/vendors/${vendorId}/activate`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/vendors/${vendorId}/activate`, {
         method: "POST",
       });
       const data = await safeReadJson(res);

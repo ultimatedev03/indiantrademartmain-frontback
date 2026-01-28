@@ -1,5 +1,6 @@
 
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const getUser = async () => {
   const { data: { user } } = await supabase.auth.getUser();
@@ -426,7 +427,7 @@ export const dataEntryApi = {
   approveVendorKyc: async (vendorId) => {
       try {
           const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
+          const response = await fetchWithCsrf(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({})
@@ -443,7 +444,7 @@ export const dataEntryApi = {
   approveVendor: async (vendorId) => {
       try {
           const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
+          const response = await fetchWithCsrf(`${API_URL}/api/kyc/vendors/${vendorId}/approve`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({})
@@ -460,7 +461,7 @@ export const dataEntryApi = {
   rejectVendorKyc: async (vendorId, remarks) => {
       try {
           const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
+          const response = await fetchWithCsrf(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ remarks })
@@ -477,7 +478,7 @@ export const dataEntryApi = {
   rejectVendor: async (vendorId, remarks) => {
       try {
           const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-          const response = await fetch(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
+          const response = await fetchWithCsrf(`${API_URL}/api/kyc/vendors/${vendorId}/reject`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ remarks })

@@ -26,7 +26,12 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
 
   const activeColor = getColorClass().split(' ')[0];
 
-  const expectedRole = (portalName || '').toLowerCase().includes('hr') ? 'HR' : 'ADMIN';
+  const portalKey = (portalName || '').toLowerCase();
+  const expectedRole = portalKey.includes('hr')
+    ? 'HR'
+    : portalKey.includes('finance')
+      ? 'FINANCE'
+      : 'ADMIN';
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -47,6 +52,9 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
         switch (user.role) {
           case 'ADMIN':
             navigate('/admin/dashboard');
+            break;
+          case 'FINANCE':
+            navigate('/admin/finance-portal/dashboard');
             break;
           case 'HR':
             navigate('/hr/dashboard');

@@ -5,6 +5,7 @@ import { razorpayInstance } from '../lib/razorpayClient.js';
 import { generateInvoiceNumber, generateInvoicePDF, generateInvoiceSummary } from '../lib/invoiceGenerator.js';
 import { sendSubscriptionActivatedNotification } from '../lib/notificationService.js';
 import nodemailer from 'nodemailer';
+import { writeAuditLog } from '../lib/audit.js';
 
 const router = express.Router();
 
@@ -326,6 +327,33 @@ router.post('/verify', async (req, res) => {
       ]);
     }
 
+    if (!paymentError && payment) {
+      const vendorActor = {
+        id: vendor.user_id || vendor_id,
+        type: 'VENDOR',
+        role: 'VENDOR',
+        email: vendor.email || null,
+      };
+
+      await writeAuditLog({
+        req,
+        actor: vendorActor,
+        action: 'PAYMENT_COMPLETED',
+        entityType: 'vendor_payments',
+        entityId: payment.id,
+        details: {
+          vendor_id,
+          plan_id,
+          subscription_id: subscription.id,
+          transaction_id: payment_id,
+          amount: plan.price,
+          discount_amount: discountAmount,
+          net_amount: netAmount,
+          coupon_code: coupon_code || null,
+        },
+      });
+    }
+
     // Send email with invoice
     try {
       const transporter = createTransporter();
@@ -397,6 +425,14 @@ router.get('/history/:vendor_id', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
+    await writeAuditLog({
+      req,
+      actor: { id: vendor_id, type: 'VENDOR', role: 'VENDOR', email: null },
+      action: 'PAYMENT_HISTORY_VIEWED',
+      entityType: 'vendor_payments',
+      details: { vendor_id, count: payments?.length || 0 },
+    });
+
     res.json({ success: true, data: payments || [] });
   } catch (error) {
     console.error('Payment history error:', error);
@@ -462,6 +498,15 @@ router.get('/invoice/:payment_id', async (req, res) => {
 
       payment.invoice_url = newPdf;
     }
+
+    await writeAuditLog({
+      req,
+      actor: { id: payment.vendor_id || null, type: 'VENDOR', role: 'VENDOR', email: null },
+      action: refresh ? 'INVOICE_REFRESHED' : 'INVOICE_VIEWED',
+      entityType: 'vendor_payments',
+      entityId: payment_id,
+      details: { refresh, vendor_id: payment.vendor_id },
+    });
 
     res.json({
       success: true,

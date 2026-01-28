@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { MessageSquare, CheckCircle, Clock, Loader2, AlertCircle, ArrowUpRight, TrendingUp, Users, Building2, User } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import StatsCard from '@/shared/components/StatsCard';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const Dashboard = () => {
   const [stats, setStats] = useState({ open: 0, resolved: 0, avgTime: 0, inProgress: 0, highPriority: 0 });
@@ -25,7 +26,7 @@ const Dashboard = () => {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
       // ✅ Single source of truth: fetch tickets from DB (via API); compute stats client-side
-      const ticketsResponse = await fetch(`${API_URL}/api/support/tickets?pageSize=200`);
+      const ticketsResponse = await fetchWithCsrf(`${API_URL}/api/support/tickets?pageSize=200`);
       const ticketsData = await ticketsResponse.json();
 
       const allTickets = Array.isArray(ticketsData?.tickets) ? ticketsData.tickets : [];
