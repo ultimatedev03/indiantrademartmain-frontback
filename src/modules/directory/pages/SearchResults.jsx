@@ -22,7 +22,6 @@ const normalizeText = (t) =>
     .replace(/\s+/g, ' ')
     .trim();
 
-// light stemming
 const stemWord = (w = '') => {
   const s = String(w || '');
   if (s.length <= 3) return s;
@@ -56,7 +55,6 @@ const safeJsonParse = (s) => {
   }
 };
 
-// ✅ Levenshtein distance
 const levenshtein = (a = '', b = '') => {
   a = String(a);
   b = String(b);
@@ -149,19 +147,16 @@ const resolveCategoryContext = async (slug) => {
   const s = String(slug || '').trim();
   if (!s) return { type: 'text' };
 
-  // micro
   {
     const { data } = await supabase.from('micro_categories').select('id, sub_category_id').eq('slug', s).maybeSingle();
     if (data?.id) return { type: 'micro', microId: data.id, subId: data.sub_category_id || null };
   }
 
-  // sub
   {
     const { data } = await supabase.from('sub_categories').select('id, head_category_id').eq('slug', s).maybeSingle();
     if (data?.id) return { type: 'sub', subId: data.id, headId: data.head_category_id || null };
   }
 
-  // head
   {
     const { data } = await supabase.from('head_categories').select('id').eq('slug', s).maybeSingle();
     if (data?.id) return { type: 'head', headId: data.id };
@@ -170,7 +165,6 @@ const resolveCategoryContext = async (slug) => {
   return { type: 'text' };
 };
 
-// ✅ helper: detect bad request (400) coming from invalid filter / missing column
 const isBadRequest400 = (err) => {
   const status = err?.status ?? err?.code;
   const msg = String(err?.message || '').toLowerCase();
@@ -183,6 +177,20 @@ const isBadRequest400 = (err) => {
     msg.includes('unknown') ||
     msg.includes('unexpected')
   );
+};
+
+// ✅ Plan priority for sorting (Diamond top -> Gold -> Silver -> Certified -> Booster -> Startup -> others)
+const getPlanPriority = (planName) => {
+  const p = String(planName || '').toLowerCase().trim();
+  if (!p) return 0;
+  if (p.includes('diamond') || p.includes('dimond')) return 600;
+  if (p.includes('gold')) return 500;
+  if (p.includes('silver')) return 400;
+  if (p.includes('certified')) return 300;
+  if (p.includes('booster')) return 200;
+  if (p.includes('startup')) return 100;
+  if (p.includes('trial')) return 0;
+  return 10;
 };
 
 const SearchResults = () => {
@@ -217,7 +225,6 @@ const SearchResults = () => {
     return u;
   };
 
-  // Parse URL
   useEffect(() => {
     let service = '';
     let state = '';
@@ -243,7 +250,6 @@ const SearchResults = () => {
     autoCorrectedRef.current = false;
   }, [params, location.pathname, location.search]);
 
-  // ✅ Auto-correct (includes PRODUCTS table candidates)
   const tryAutoCorrect = async ({ wrongSlug, stateSlug, citySlug }) => {
     if (!wrongSlug) return null;
     if (autoCorrectedRef.current) return null;
@@ -258,15 +264,12 @@ const SearchResults = () => {
       .filter((x) => x.length >= 3)
       .slice(0, 4);
 
-    // candidate: { slug, name }
     const candidateMap = new Map();
-
     const addCandidate = (slug, name) => {
       if (!slug) return;
       const key = String(slug);
       if (!candidateMap.has(key)) candidateMap.set(key, { slug: key, name: name || slug });
     };
-
     const addRows = (rows = []) => {
       (rows || []).forEach((r) => {
         if (!r) return;
@@ -301,48 +304,11 @@ const SearchResults = () => {
       }
     };
 
-    // 1) token based
     for (const tok of tokens) {
       await fetchFromTable('micro_categories', tok);
       await fetchFromTable('sub_categories', tok);
       await fetchFromTable('head_categories', tok);
       await fetchFromProducts(tok);
-    }
-
-    // 2) fallback
-    if (candidateMap.size === 0) {
-      const { data: microAll } = await supabase
-        .from('micro_categories')
-        .select('id, name, slug')
-        .order('slug', { ascending: true })
-        .limit(8000);
-      addRows(microAll);
-
-      const { data: subAll } = await supabase
-        .from('sub_categories')
-        .select('id, name, slug')
-        .order('slug', { ascending: true })
-        .limit(8000);
-      addRows(subAll);
-
-      const { data: headAll } = await supabase
-        .from('head_categories')
-        .select('id, name, slug')
-        .order('slug', { ascending: true })
-        .limit(8000);
-      addRows(headAll);
-
-      const { data: prodCats } = await supabase
-        .from('products')
-        .select('category, category_slug')
-        .eq('status', 'ACTIVE')
-        .limit(9000);
-
-      (prodCats || []).forEach((p) => {
-        const s = p?.category_slug || slugify(p?.category) || '';
-        const nm = p?.category || p?.category_slug || s;
-        if (s) addCandidate(s, nm);
-      });
     }
 
     const candidates = Array.from(candidateMap.values());
@@ -368,7 +334,6 @@ const SearchResults = () => {
 
     const allowed = Math.max(2, Math.min(6, Math.ceil(wrong.length * 0.3)));
     if (!best || bestDist > allowed) return null;
-
     if (String(best.slug) === String(wrongSlug)) return null;
 
     autoCorrectedRef.current = true;
@@ -384,8 +349,6 @@ const SearchResults = () => {
     return best;
   };
 
-  // ✅ keyword search with safe fallback (prevents 400 due to missing columns)
-  // ✅ IMPORTANT: also excludes suspended vendors (vendors.is_active = true)
   const runKeywordProductsQueryWithFallback = async ({ servicePhrase, serviceSlug, selectString }) => {
     const attempts = [
       [
@@ -406,7 +369,6 @@ const SearchResults = () => {
         .from('products')
         .select(selectString)
         .eq('status', 'ACTIVE')
-        // ✅ NEW: hide suspended vendors’ products
         .eq('vendors.is_active', true)
         .or(orParts.join(','))
         .order('created_at', { ascending: false })
@@ -423,7 +385,42 @@ const SearchResults = () => {
     return [];
   };
 
-  // Fetch products
+  // ✅ reads plan from correct table name (vendor_plan_subscriptions OR vendor_plan_subcriptions)
+  const buildVendorPlanMap = async (vendorIds) => {
+    const ids = (vendorIds || []).filter(Boolean);
+    if (ids.length === 0) return new Map();
+
+    const trySubsTable = async (tableName) => {
+      const { data, error } = await supabase.from(tableName).select('vendor_id, plan_id').in('vendor_id', ids);
+      if (error) return { data: null, error };
+      return { data: data || [], error: null };
+    };
+
+    let subsResult = await trySubsTable('vendor_plan_subscriptions');
+    if (subsResult.error) subsResult = await trySubsTable('vendor_plan_subcriptions');
+
+    if (subsResult.error || !Array.isArray(subsResult.data)) {
+      return new Map();
+    }
+
+    const subs = subsResult.data;
+    const planIds = Array.from(new Set((subs || []).map((s) => s.plan_id).filter(Boolean)));
+    if (planIds.length === 0) return new Map();
+
+    const { data: plans, error: plansErr } = await supabase.from('vendor_plans').select('id, name').in('id', planIds);
+    if (plansErr || !Array.isArray(plans)) return new Map();
+
+    const planIdToName = new Map((plans || []).map((p) => [p.id, p.name]));
+    const vendorIdToPlanName = new Map();
+
+    (subs || []).forEach((s) => {
+      const nm = planIdToName.get(s.plan_id);
+      if (nm) vendorIdToPlanName.set(s.vendor_id, nm);
+    });
+
+    return vendorIdToPlanName;
+  };
+
   useEffect(() => {
     const fetchResults = async () => {
       if (!parsedParams.serviceSlug) {
@@ -461,14 +458,13 @@ const SearchResults = () => {
           }
         }
 
-        // ✅ IMPORTANT CHANGE:
-        // - vendors!inner => only products that have a vendor
-        // - we will filter vendors.is_active = true in queries below
+        // ✅ IMPORTANT: include vendor meta columns from DB
         const selectString = `
           *,
           vendors!inner (
             id, company_name, city, state, state_id, city_id,
             seller_rating, kyc_status, verification_badge, trust_score,
+            gst_verified, year_of_establishment, years_in_business, response_rate,
             is_active
           )
         `;
@@ -519,15 +515,49 @@ const SearchResults = () => {
           });
         }
 
-        const mapped = (data || []).map((p) => ({
-          ...p,
-          vendorName: p.vendors?.company_name,
-          vendorId: p.vendors?.id,
-          vendorCity: p.vendors?.city,
-          vendorState: p.vendors?.state,
-          vendorRating: p.vendors?.seller_rating || 4.5,
-          vendorVerified: p.vendors?.kyc_status === 'VERIFIED' || !!p.vendors?.verification_badge,
-        }));
+        const vendorIds = Array.from(
+          new Set(
+            (data || [])
+              .map((p) => {
+                const v = p?.vendors;
+                if (Array.isArray(v)) return v[0]?.id;
+                return v?.id;
+              })
+              .filter(Boolean)
+          )
+        );
+
+        const vendorIdToPlanName = await buildVendorPlanMap(vendorIds);
+
+        const mapped = (data || []).map((p) => {
+          const v = p?.vendors;
+          const vendorObj = Array.isArray(v) ? v[0] : v;
+          const vendorId = vendorObj?.id || null;
+
+          const planName = vendorId ? vendorIdToPlanName.get(vendorId) || '' : '';
+          const planPriority = getPlanPriority(planName);
+
+          return {
+            ...p,
+            vendors: vendorObj,
+            vendorName: vendorObj?.company_name,
+            vendorId,
+            vendorCity: vendorObj?.city,
+            vendorState: vendorObj?.state,
+            vendorRating: vendorObj?.seller_rating || 4.5,
+            vendorVerified: vendorObj?.kyc_status === 'VERIFIED' || !!vendorObj?.verification_badge,
+
+            // ✅ vendor meta fields (DB-driven)
+            vendorGstVerified: vendorObj?.gst_verified === true || vendorObj?.gst_verified === 1,
+            vendorEstablishedYear: vendorObj?.year_of_establishment ?? null, // kept for compatibility
+            vendorYearOfEstablishment: vendorObj?.year_of_establishment ?? null, // preferred
+            vendorYearsInBusiness: vendorObj?.years_in_business ?? null,
+            vendorResponseRate: vendorObj?.response_rate ?? null,
+
+            vendorPlanName: planName,
+            __planPriority: planPriority,
+          };
+        });
 
         const locationFiltered = mapped.filter((p) => productMatchesLocation(p, stateId, cityId, stateCityIdSet));
 
@@ -541,6 +571,11 @@ const SearchResults = () => {
           return;
         }
 
+        // ✅ SORT:
+        // 1) Plan priority (Diamond first, then Gold...)
+        // 2) Keyword relevance
+        // 3) Rating
+        // 4) Latest
         const sorted = locationFiltered
           .map((p) => {
             const nm = normalizeText(p?.name);
@@ -548,7 +583,23 @@ const SearchResults = () => {
             const contains = nm.includes(servicePhrase) ? 200 : 0;
             return { ...p, __sortScore: exact + contains };
           })
-          .sort((a, b) => (b.__sortScore || 0) - (a.__sortScore || 0));
+          .sort((a, b) => {
+            const ap = a.__planPriority || 0;
+            const bp = b.__planPriority || 0;
+            if (bp !== ap) return bp - ap;
+
+            const as = a.__sortScore || 0;
+            const bs = b.__sortScore || 0;
+            if (bs !== as) return bs - as;
+
+            const ar = Number(a.vendorRating || 0);
+            const br = Number(b.vendorRating || 0);
+            if (br !== ar) return br - ar;
+
+            const at = a?.created_at ? new Date(a.created_at).getTime() : 0;
+            const bt = b?.created_at ? new Date(b.created_at).getTime() : 0;
+            return bt - at;
+          });
 
         setResults(sorted);
       } catch (err) {
