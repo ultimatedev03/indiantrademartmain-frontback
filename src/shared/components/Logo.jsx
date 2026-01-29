@@ -29,7 +29,7 @@ const Logo = ({
       {/* Logo image always follows wrapper height */}
       <div className="h-full flex-shrink-0">
         <img
-          src="https://eimager.com/images/itm.png"
+          src="/itm-logo.png"
           alt="IndianTradeMART Logo"
           className="h-full w-auto object-contain"
           loading="lazy"

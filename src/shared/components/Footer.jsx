@@ -32,7 +32,7 @@ const Footer = () => {
               {/* ✅ Logo + Brand name side-by-side + ONE LINE heading */}
               <Link to="/" className="inline-flex items-center gap-3" aria-label="Indian Trade Mart">
                 <img
-                  src="https://eimager.com/images/itm.png"
+                  src="/itm-logo.png"
                   alt="IndianTradeMART Logo"
                   className="h-16 w-17 sm:h-9 sm:w-9 object-contain flex-shrink-0"
                   loading="lazy"

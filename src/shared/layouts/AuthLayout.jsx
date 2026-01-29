@@ -9,7 +9,7 @@ const AuthLayout = () => {
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
         <Link to="/">
           <img
-            src="https://horizons-cdn.hostinger.com/f872dc8f-3c19-4e7d-8677-e9f5922486ba/fdb3954cae9a5b8889e2ea4e9a3885ae.png"
+            src="/itm-logo.png"
             alt="IndianTradeMart"
             className="h-12 w-auto mx-auto mb-4"
           />
