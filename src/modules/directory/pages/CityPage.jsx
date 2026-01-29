@@ -11,6 +11,7 @@ import Card from '@/shared/components/Card';
 const CityPage = () => {
   const navigate = useNavigate();
   const { citySlug } = useParams();
+  const normalizedCitySlug = String(citySlug || '').toLowerCase();
 
   const [loading, setLoading] = useState(true);
   const [city, setCity] = useState(null);
@@ -25,7 +26,7 @@ const CityPage = () => {
         const { data: cityData, error: cityErr } = await supabase
           .from('cities')
           .select('id, name, slug, supplier_count, state_id')
-          .eq('slug', citySlug)
+          .eq('slug', normalizedCitySlug)
           .single();
 
         if (cityErr || !cityData) {
@@ -55,15 +56,19 @@ const CityPage = () => {
       }
     };
 
-    if (citySlug) load();
-  }, [citySlug]);
+    if (normalizedCitySlug) load();
+  }, [normalizedCitySlug]);
 
   useEffect(() => {
     const loadVendors = async () => {
-      if (!citySlug) return;
+      if (!normalizedCitySlug) return;
       setVendorsLoading(true);
       try {
-        const data = await vendorService.getVendorsByCity({ citySlug, limit: 24, page: 1 });
+        const data = await vendorService.getVendorsByCity({
+          citySlug: normalizedCitySlug,
+          limit: 24,
+          page: 1,
+        });
         setVendors(Array.isArray(data) ? data : []);
       } catch (e) {
         console.error('Failed to load city vendors', e);
@@ -74,7 +79,7 @@ const CityPage = () => {
     };
 
     loadVendors();
-  }, [citySlug]);
+  }, [normalizedCitySlug]);
 
   const VendorImage = ({ src, name }) => {
     const [failed, setFailed] = useState(false);

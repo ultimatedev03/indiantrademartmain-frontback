@@ -52,6 +52,8 @@ export const DirectoryRoutes = () => {
         {/* Cities */}
         <Route path="directory/cities" element={<CitiesPage />} />
         <Route path="directory/city/:citySlug" element={<CityPage />} />
+        {/* Alias: /city/:citySlug */}
+        <Route path="city/:citySlug" element={<CityPage />} />
 
         {/* Vendor */}
         <Route path="directory/vendor" element={<VendorListing />} />
@@ -62,6 +64,8 @@ export const DirectoryRoutes = () => {
         <Route path="directory/search/:service/:state" element={<SearchResults />} />
         <Route path="directory/search/:service" element={<SearchResults />} />
         <Route path="directory/search" element={<Navigate to="/directory" replace />} />
+        {/* Alias: /search-suppliers */}
+        <Route path="search-suppliers" element={<SearchResults />} />
 
         {/* Category Hierarchy */}
         {/* ✅ Product listing supports optional state/city slugs for auto-filter */}
