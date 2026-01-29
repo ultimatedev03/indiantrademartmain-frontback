@@ -56,10 +56,15 @@ export const handler = async (event) => {
     if (event.httpMethod === 'GET' && action === 'summary') {
       const { data: payments, error } = await supabase.from('vendor_payments').select('amount, net_amount, payment_date');
       if (error) return json(500, { success: false, error: error.message });
+      const { data: leads, error: leadErr } = await supabase.from('lead_purchases').select('amount, purchase_date, created_at');
+      if (leadErr) {
+        console.warn('[finance/summary] lead_purchases error:', leadErr.message);
+      }
       const now = new Date();
       const thirtyAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       let totalGross = 0;
       let totalNet = 0;
+      let totalLead = 0;
       let last30 = 0;
       (payments || []).forEach((p) => {
         const gross = Number(p.amount || 0);
@@ -68,7 +73,14 @@ export const handler = async (event) => {
         totalNet += net;
         if (p.payment_date && new Date(p.payment_date) >= thirtyAgo) last30 += net;
       });
-      return json(200, { success: true, data: { totalGross, totalNet, last30 } });
+      (leads || []).forEach((l) => {
+        const amt = Number(l.amount || 0);
+        totalLead += amt;
+        const d = l.purchase_date || l.created_at;
+        if (d && new Date(d) >= thirtyAgo) last30 += amt;
+      });
+      const totalRevenue = totalNet + totalLead;
+      return json(200, { success: true, data: { totalGross, totalNet, totalLead, totalRevenue, last30 } });
     }
 
     // GET /api/finance/coupons

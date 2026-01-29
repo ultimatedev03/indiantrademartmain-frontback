@@ -57,11 +57,20 @@ router.get('/summary', async (_req, res) => {
       .select('amount, net_amount, payment_date');
     if (error) return res.status(500).json({ success: false, error: error.message });
 
+    const { data: leads, error: leadErr } = await supabase
+      .from('lead_purchases')
+      .select('amount, purchase_date, created_at');
+    if (leadErr) {
+      // Do not fail summary if lead_purchases is missing/blocked.
+      console.warn('[finance/summary] lead_purchases error:', leadErr.message);
+    }
+
     const now = new Date();
     const thirtyAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
     let totalGross = 0;
     let totalNet = 0;
+    let totalLead = 0;
     let last30 = 0;
     (payments || []).forEach((p) => {
       const gross = Number(p.amount || 0);
@@ -71,12 +80,21 @@ router.get('/summary', async (_req, res) => {
       if (p.payment_date && new Date(p.payment_date) >= thirtyAgo) last30 += net;
     });
 
+    (leads || []).forEach((l) => {
+      const amt = Number(l.amount || 0);
+      totalLead += amt;
+      const d = l.purchase_date || l.created_at;
+      if (d && new Date(d) >= thirtyAgo) last30 += amt;
+    });
+
+    const totalRevenue = totalNet + totalLead;
+
     await writeAuditLog({
       req: _req,
       actor: _req.actor,
       action: 'FINANCE_SUMMARY_VIEWED',
       entityType: 'vendor_payments',
-      details: { totalGross, totalNet, last30 },
+      details: { totalGross, totalNet, totalLead, totalRevenue, last30 },
     });
 
     return res.json({
@@ -84,6 +102,8 @@ router.get('/summary', async (_req, res) => {
       data: {
         totalGross,
         totalNet,
+        totalLead,
+        totalRevenue,
         last30,
       },
     });

@@ -11,13 +11,16 @@ export async function fetchWithCsrf(url, options = {}) {
   const token = session?.access_token;
 
   // 2. Set default headers including Authorization
+  const hasAuthHeader = Object.keys(options.headers || {}).some(
+    (key) => key.toLowerCase() === 'authorization'
+  );
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     ...options.headers,
   };
 
-  if (token) {
+  if (token && !hasAuthHeader) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 

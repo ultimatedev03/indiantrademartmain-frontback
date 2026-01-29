@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 
 const InternalAuthContext = createContext(null);
@@ -22,13 +24,33 @@ const pickFirst = (...vals) => {
   return undefined;
 };
 
+const canonicalizeRole = (value) => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return undefined;
+  if (raw === 'DATAENTRY') return 'DATA_ENTRY';
+  if (raw === 'FINACE') return 'FINANCE';
+  return raw;
+};
+
 const normalizeRoleValue = (value, fallback) => {
   const raw = pickFirst(value, fallback);
-  if (!raw) return undefined;
-  return String(raw).trim().toUpperCase();
+  return canonicalizeRole(raw);
 };
 
 const isInternalRole = (role) => INTERNAL_ROLES.has(String(role || '').trim().toUpperCase());
+
+const resolveEmployeeFromApi = async (accessToken) => {
+  try {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/me'), accessToken ? {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    } : undefined);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.employee || null;
+  } catch {
+    return null;
+  }
+};
 
 const normalizeInternalUser = (raw, email, expectedRole) => {
   const row = Array.isArray(raw) ? raw[0] : raw;
@@ -118,7 +140,7 @@ export const InternalAuthProvider = ({ children }) => {
     }
   };
 
-  const fetchInternalUserFromSession = async (authUser) => {
+  const fetchInternalUserFromSession = async (authUser, accessToken) => {
     try {
       if (!authUser?.id) return null;
 
@@ -157,6 +179,12 @@ export const InternalAuthProvider = ({ children }) => {
         return normalizeInternalUser(usr, authUser.email, usr.role);
       }
 
+      // 4) Fallback to server-side resolver (bypasses RLS, syncs user_id)
+      const resolved = await resolveEmployeeFromApi(accessToken);
+      if (resolved && isInternalRole(resolved.role)) {
+        return normalizeInternalUser(resolved, authUser.email, resolved.role);
+      }
+
       return null;
     } catch {
       return null;
@@ -191,7 +219,7 @@ export const InternalAuthProvider = ({ children }) => {
         } = await supabase.auth.getSession();
 
         if (session?.user) {
-          const sessionUser = await fetchInternalUserFromSession(session.user);
+          const sessionUser = await fetchInternalUserFromSession(session.user, session?.access_token);
           if (sessionUser) {
             resolvedUser = sessionUser;
             localStorage.setItem('itm_admin_user', JSON.stringify(sessionUser));
@@ -219,7 +247,7 @@ export const InternalAuthProvider = ({ children }) => {
 
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           const internalUser = session?.user
-            ? await fetchInternalUserFromSession(session.user)
+            ? await fetchInternalUserFromSession(session.user, session?.access_token)
             : null;
 
           if (internalUser) {
@@ -277,6 +305,12 @@ export const InternalAuthProvider = ({ children }) => {
 
       // Prefer the employees/users tables as source-of-truth for role + profile
       let normalized = null;
+
+      // ✅ Resolve via server (ensures employee.user_id sync)
+      const resolved = await resolveEmployeeFromApi(authData?.session?.access_token);
+      if (resolved && isInternalRole(resolved.role)) {
+        normalized = normalizeInternalUser(resolved, email, resolved.role);
+      }
 
       const { data: empById } = await supabase
         .from('employees')

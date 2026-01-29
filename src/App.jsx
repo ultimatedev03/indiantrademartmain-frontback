@@ -28,6 +28,7 @@ import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
 import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
 import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
 import MigrationTools from '@/shared/pages/MigrationTools';
+import Unauthorized from '@/shared/pages/Unauthorized';
 
 const MAINTENANCE_KEY = 'maintenance_mode';
 
@@ -280,6 +281,7 @@ const AppRoutes = () => {
 
       {/* MIGRATION TOOLS */}
       <Route path="/migration-tools" element={<MigrationTools />} />
+      <Route path="/unauthorized" element={<Unauthorized />} />
 
       {/* SUB-APP MOUNT POINTS */}
       <Route path="/vendor/*" element={<VendorRoutes />} />

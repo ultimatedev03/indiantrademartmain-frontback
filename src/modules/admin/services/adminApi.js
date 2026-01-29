@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 export const adminApi = {
   getStats: async () => {
@@ -8,11 +10,24 @@ export const adminApi = {
       supabase.from('lead_purchases').select('*', { count: 'exact', head: true })
     ]);
 
-    const { data: revenueData } = await supabase.from('lead_purchases').select('amount');
-    const { data: subData } = await supabase.from('vendor_payments').select('amount');
-    
-    const totalRevenue = (revenueData?.reduce((a, b) => a + (b.amount || 0), 0) || 0) + 
-                        (subData?.reduce((a, b) => a + (b.amount || 0), 0) || 0);
+    let totalRevenue = 0;
+    try {
+      const res = await fetchWithCsrf(apiUrl('/api/finance/summary'));
+      if (res.ok) {
+        const data = await res.json();
+        const d = data?.data || {};
+        totalRevenue =
+          Number(d.totalRevenue ?? d.totalNet ?? d.totalGross ?? 0) || 0;
+      } else {
+        throw new Error(`Finance summary failed: ${res.status}`);
+      }
+    } catch (e) {
+      const { data: revenueData } = await supabase.from('lead_purchases').select('amount');
+      const { data: subData } = await supabase.from('vendor_payments').select('amount');
+      
+      totalRevenue = (revenueData?.reduce((a, b) => a + (b.amount || 0), 0) || 0) + 
+                          (subData?.reduce((a, b) => a + (b.amount || 0), 0) || 0);
+    }
 
     return {
       totalUsers: users.count || 0,

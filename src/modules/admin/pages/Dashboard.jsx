@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 const AdminDashboard = () => {
   const [stats, setStats] = useState({ 
@@ -39,19 +41,40 @@ const AdminDashboard = () => {
         const s = await adminApi.getStats();
         
         // Get additional stats
-        const [buyersRes, productsRes, pendingKycRes, openTicketsRes] = await Promise.all([
+        const [buyersRes, productsRes, pendingKycRes] = await Promise.all([
           supabase.from('buyers').select('*', { count: 'exact', head: true }),
           supabase.from('products').select('*', { count: 'exact', head: true }),
-          supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('kyc_status', 'SUBMITTED'),
-          supabase.from('support_tickets').select('*', { count: 'exact', head: true }).in('status', ['OPEN', 'IN_PROGRESS'])
+          supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('kyc_status', 'SUBMITTED')
         ]);
+
+        let openTicketsCount = 0;
+        try {
+          const res = await fetchWithCsrf(apiUrl('/api/support/stats'));
+          if (res.ok) {
+            const data = await res.json();
+            const stats = data?.stats || {};
+            openTicketsCount = (stats.openTickets || 0) + (stats.inProgressTickets || 0);
+          } else {
+            throw new Error(`Support stats failed: ${res.status}`);
+          }
+        } catch (e) {
+          try {
+            const { count } = await supabase
+              .from('support_tickets')
+              .select('*', { count: 'exact', head: true })
+              .in('status', ['OPEN', 'IN_PROGRESS']);
+            openTicketsCount = count || 0;
+          } catch {
+            openTicketsCount = 0;
+          }
+        }
         
         setStats({
           ...s,
           totalBuyers: buyersRes.count || 0,
           totalProducts: productsRes.count || 0,
           pendingKyc: pendingKycRes.count || 0,
-          openTickets: openTicketsRes.count || 0
+          openTickets: openTicketsCount
         });
         
         const o = await adminApi.getRecentOrders();
@@ -61,12 +84,24 @@ const AdminDashboard = () => {
         setDataEntryPerf(p || []);
         
         // Get recent tickets
-        const { data: tickets } = await supabase
-          .from('support_tickets')
-          .select('*, vendors(company_name), buyers(full_name)')
-          .order('created_at', { ascending: false })
-          .limit(5);
-        setRecentTickets(tickets || []);
+        let tickets = [];
+        try {
+          const res = await fetchWithCsrf(apiUrl('/api/support/tickets?pageSize=5'));
+          if (res.ok) {
+            const data = await res.json();
+            tickets = data?.tickets || [];
+          } else {
+            throw new Error(`Support tickets failed: ${res.status}`);
+          }
+        } catch (e) {
+          const { data } = await supabase
+            .from('support_tickets')
+            .select('*, vendors(company_name), buyers(full_name)')
+            .order('created_at', { ascending: false })
+            .limit(5);
+          tickets = data || [];
+        }
+        setRecentTickets(tickets);
         
         // Get recent vendors
         const { data: vendors } = await supabase

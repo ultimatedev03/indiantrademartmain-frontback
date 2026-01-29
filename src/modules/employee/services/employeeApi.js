@@ -1,4 +1,14 @@
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
+
+const canonicalizeRole = (value) => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (!raw) return undefined;
+  if (raw === 'DATAENTRY') return 'DATA_ENTRY';
+  if (raw === 'FINACE') return 'FINANCE';
+  return raw;
+};
 
 const buildEmployeeUser = (authUser, empRow) => {
   const name = empRow?.full_name || empRow?.name || authUser?.user_metadata?.full_name || authUser?.email || 'Employee';
@@ -10,7 +20,7 @@ const buildEmployeeUser = (authUser, empRow) => {
     name,
     email: empRow?.email || authUser?.email,
     phone: empRow?.phone || null,
-    role: empRow?.role || 'UNKNOWN',
+    role: canonicalizeRole(empRow?.role) || 'UNKNOWN',
     department: empRow?.department || null,
     status: empRow?.status || null,
     avatar: firstLetter
@@ -32,6 +42,19 @@ const fetchEmployeeRow = async (authUserId) => {
   return data || null;
 };
 
+const resolveEmployeeViaApi = async (accessToken) => {
+  try {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/me'), accessToken ? {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    } : undefined);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.employee || null;
+  } catch {
+    return null;
+  }
+};
+
 export const employeeApi = {
   auth: {
     /**
@@ -47,7 +70,7 @@ export const employeeApi = {
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error('Login failed: user not returned');
 
-      const empRow = await fetchEmployeeRow(data.user.id);
+      const empRow = (await resolveEmployeeViaApi(data?.session?.access_token)) || (await fetchEmployeeRow(data.user.id));
       if (!empRow) {
         // If you want to allow auth-only login, you can remove this throw.
         throw new Error('No employee profile found. Please ask admin to create your employee account.');
@@ -75,7 +98,7 @@ export const employeeApi = {
       const authUser = sessionData?.session?.user;
       if (!authUser?.id) return null;
 
-      const empRow = await fetchEmployeeRow(authUser.id);
+      const empRow = (await resolveEmployeeViaApi(sessionData?.session?.access_token)) || (await fetchEmployeeRow(authUser.id));
       if (!empRow) return null;
 
       return buildEmployeeUser(authUser, empRow);

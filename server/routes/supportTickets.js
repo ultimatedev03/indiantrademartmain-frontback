@@ -50,7 +50,7 @@ router.get('/tickets', async (req, res) => {
     
     let query = supabase
       .from('support_tickets')
-      .select('*', { count: 'exact' })
+      .select('*, vendors(company_name), buyers(full_name)', { count: 'exact' })
       .order('created_at', { ascending: false });
     
     // Apply status filter

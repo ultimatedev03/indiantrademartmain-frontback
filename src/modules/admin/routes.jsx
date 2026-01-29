@@ -49,6 +49,7 @@ import PricingRules from '@/modules/employee/pages/sales/PricingRules';
 import PortalLogin from '@/shared/pages/PortalLogin';
 import { ShieldCheck, Users } from 'lucide-react';
 import Buyers from '@/modules/admin/pages/Buyers';
+import Unauthorized from '@/shared/pages/Unauthorized';
 
 const LoginRouter = () => {
   const location = useLocation();
@@ -119,6 +120,8 @@ export const AdminRoutes = () => {
       <Route element={<SuperAdminProtectedRoute />}>
         <Route path="superadmin/dashboard" element={<SuperAdminDashboard />} />
       </Route>
+
+      <Route path="unauthorized" element={<Unauthorized />} />
 
       {/* Finance Portal */}
       <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>

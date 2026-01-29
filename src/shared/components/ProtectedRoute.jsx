@@ -21,6 +21,28 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   const user = wantsInternal ? internal?.user : supa?.user;
   const role = wantsInternal ? (internal?.user?.role) : (supa?.userRole || supa?.user?.role);
   const isAuthenticated = wantsInternal ? !!internal?.isAuthenticated : !!supa?.user;
+  const normalizedRole = String(role || '').trim().toUpperCase();
+  const allowedSet = new Set((allowedRoles || []).map((r) => String(r || '').trim().toUpperCase()));
+
+  const internalHome = (r) => {
+    switch (r) {
+      case 'ADMIN':
+        return '/admin/dashboard';
+      case 'FINANCE':
+        return '/admin/finance-portal/dashboard';
+      case 'HR':
+        return '/hr/dashboard';
+      case 'DATA_ENTRY':
+      case 'DATAENTRY':
+        return '/employee/dataentry/dashboard';
+      case 'SUPPORT':
+        return '/employee/support/dashboard';
+      case 'SALES':
+        return '/employee/sales/dashboard';
+      default:
+        return null;
+    }
+  };
 
   const getDefaultRedirect = () => {
     const host =
@@ -60,8 +82,14 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   }
 
   if (allowedRoles.length > 0) {
-    const hasRole = role ? allowedRoles.includes(role) : false;
-    if (!hasRole) return <Navigate to="/unauthorized" replace />;
+    const hasRole = normalizedRole ? allowedSet.has(normalizedRole) : false;
+    if (!hasRole) {
+      const fallback = internalHome(normalizedRole);
+      if (fallback && location.pathname !== fallback) {
+        return <Navigate to={fallback} replace />;
+      }
+      return <Navigate to="/unauthorized" replace />;
+    }
   }
 
   return children ? children : <Outlet />;

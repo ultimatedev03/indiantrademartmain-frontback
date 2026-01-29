@@ -78,6 +78,107 @@ function isActiveSub(s) {
   return end > Date.now();
 }
 
+async function findAuthUserByEmail(email) {
+  const target = String(email || "").trim().toLowerCase();
+  if (!target) return null;
+
+  if (supabase?.auth?.admin?.getUserByEmail) {
+    const { data, error } = await supabase.auth.admin.getUserByEmail(target);
+    if (error) return null;
+    return data?.user || null;
+  }
+
+  const perPage = 100;
+  const maxPages = 50;
+  for (let page = 1; page <= maxPages; page += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) return null;
+    const users = data?.users || [];
+    const match = users.find(
+      (u) => String(u?.email || "").trim().toLowerCase() === target
+    );
+    if (match) return match;
+    if (users.length < perPage) break;
+  }
+  return null;
+}
+
+async function getAuthUserById(userId) {
+  if (!userId) return null;
+  if (!supabase?.auth?.admin?.getUserById) return null;
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error) return null;
+  return data?.user || null;
+}
+
+async function resolveEmployeeAuthUser(employee) {
+  if (!employee) return null;
+  const email = String(employee?.email || "").trim().toLowerCase();
+  let authUser = null;
+
+  if (employee.user_id) {
+    authUser = await getAuthUserById(employee.user_id);
+  }
+
+  if (authUser && email) {
+    const authEmail = String(authUser?.email || "").trim().toLowerCase();
+    if (authEmail && authEmail !== email) {
+      authUser = null;
+    }
+  }
+
+  if (!authUser && email) {
+    authUser = await findAuthUserByEmail(email);
+  }
+
+  if (authUser && authUser.id && authUser.id !== employee.user_id) {
+    await supabase
+      .from("employees")
+      .update({ user_id: authUser.id })
+      .eq("id", employee.id);
+  }
+
+  return authUser;
+}
+
+async function ensureEmployeeAuthUser(employee, password) {
+  if (!employee) return null;
+  const email = String(employee?.email || "").trim().toLowerCase();
+  if (!email) return null;
+
+  let authUser = await resolveEmployeeAuthUser(employee);
+
+  if (!authUser) {
+    const fullName = String(employee?.full_name || "").trim();
+    const role = String(employee?.role || "DATA_ENTRY").trim().toUpperCase();
+    const department = String(employee?.department || "").trim() || "Operations";
+    const phone = String(employee?.phone || "").trim() || null;
+
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, role, phone, department },
+      app_metadata: { role },
+    });
+
+    if (error || !data?.user) {
+      const err = new Error(error?.message || "Failed to create employee auth user");
+      err.statusCode = 500;
+      throw err;
+    }
+
+    authUser = data.user;
+  }
+
+  if (authUser?.id && authUser.id !== employee.user_id) {
+    await supabase.from("employees").update({ user_id: authUser.id }).eq("id", employee.id);
+  }
+
+  return authUser;
+}
+
 export async function handler(event) {
   try {
     if (event.httpMethod === "OPTIONS") return ok({ ok: true });
@@ -213,16 +314,24 @@ export async function handler(event) {
           .maybeSingle();
 
         if (empErr) return fail("Failed to fetch employee", empErr.message);
-        if (!emp?.user_id) return bad("Employee has no user_id");
+        let authUser = await resolveEmployeeAuthUser(emp);
+        if (!authUser?.id) {
+          try {
+            authUser = await ensureEmployeeAuthUser(emp, password);
+          } catch (err) {
+            const statusCode = err?.statusCode || 500;
+            return json(statusCode, { success: false, error: err?.message || "Auth user create failed" });
+          }
+        }
 
-        const { error: updErr } = await supabase.auth.admin.updateUserById(emp.user_id, { password });
+        const { error: updErr } = await supabase.auth.admin.updateUserById(authUser.id, { password });
         if (updErr) return fail("Failed to update password", updErr.message);
 
         await writeAudit({
           action: "STAFF_PASSWORD_CHANGE",
           entity_type: "employees",
           entity_id: employeeId,
-          details: { user_id: emp.user_id, email: emp.email },
+          details: { user_id: authUser.id, email: emp.email },
         });
 
         return ok({ success: true });
@@ -244,16 +353,24 @@ export async function handler(event) {
           .maybeSingle();
 
         if (empErr) return fail("Failed to fetch employee", empErr.message);
-        if (!emp?.user_id) return bad("Employee has no user_id");
+        let authUser = await resolveEmployeeAuthUser(emp);
+        if (!authUser?.id) {
+          try {
+            authUser = await ensureEmployeeAuthUser(emp, password);
+          } catch (err) {
+            const statusCode = err?.statusCode || 500;
+            return json(statusCode, { success: false, error: err?.message || "Auth user create failed" });
+          }
+        }
 
-        const { error: updErr } = await supabase.auth.admin.updateUserById(emp.user_id, { password });
+        const { error: updErr } = await supabase.auth.admin.updateUserById(authUser.id, { password });
         if (updErr) return fail("Failed to update password", updErr.message);
 
         await writeAudit({
           action: "STAFF_PASSWORD_CHANGE",
           entity_type: "employees",
           entity_id: employeeId,
-          details: { user_id: emp.user_id, email: emp.email },
+          details: { user_id: authUser.id, email: emp.email },
         });
 
         return ok({ success: true });
@@ -500,6 +617,15 @@ export async function handler(event) {
         "price_unit",
         "min_order_qty",
         "qty_unit",
+        "category_path",
+        "category_other",
+        "head_category_id",
+        "sub_category_id",
+        "micro_category_id",
+        "extra_micro_categories",
+        "target_locations",
+        "specifications",
+        "images",
       ];
 
       const payload = {};

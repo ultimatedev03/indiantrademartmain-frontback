@@ -22,6 +22,108 @@ function isActiveSub(s) {
   return end > Date.now();
 }
 
+async function findAuthUserByEmail(email) {
+  const target = String(email || "").trim().toLowerCase();
+  if (!target) return null;
+
+  if (supabase?.auth?.admin?.getUserByEmail) {
+    const { data, error } = await supabase.auth.admin.getUserByEmail(target);
+    if (error) return null;
+    return data?.user || null;
+  }
+
+  // Fallback: list users and match by email (bounded).
+  const perPage = 100;
+  const maxPages = 50;
+  for (let page = 1; page <= maxPages; page += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) return null;
+    const users = data?.users || [];
+    const match = users.find(
+      (u) => String(u?.email || "").trim().toLowerCase() === target
+    );
+    if (match) return match;
+    if (users.length < perPage) break;
+  }
+  return null;
+}
+
+async function getAuthUserById(userId) {
+  if (!userId) return null;
+  if (!supabase?.auth?.admin?.getUserById) return null;
+  const { data, error } = await supabase.auth.admin.getUserById(userId);
+  if (error) return null;
+  return data?.user || null;
+}
+
+async function resolveEmployeeAuthUser(employee) {
+  if (!employee) return null;
+  const email = String(employee?.email || "").trim().toLowerCase();
+  let authUser = null;
+
+  if (employee.user_id) {
+    authUser = await getAuthUserById(employee.user_id);
+  }
+
+  if (authUser && email) {
+    const authEmail = String(authUser?.email || "").trim().toLowerCase();
+    if (authEmail && authEmail !== email) {
+      authUser = null;
+    }
+  }
+
+  if (!authUser && email) {
+    authUser = await findAuthUserByEmail(email);
+  }
+
+  if (authUser && authUser.id && authUser.id !== employee.user_id) {
+    await supabase
+      .from("employees")
+      .update({ user_id: authUser.id })
+      .eq("id", employee.id);
+  }
+
+  return authUser;
+}
+
+async function ensureEmployeeAuthUser(employee, password) {
+  if (!employee) return null;
+  const email = String(employee?.email || "").trim().toLowerCase();
+  if (!email) return null;
+
+  let authUser = await resolveEmployeeAuthUser(employee);
+
+  if (!authUser) {
+    const fullName = String(employee?.full_name || "").trim();
+    const role = String(employee?.role || "DATA_ENTRY").trim().toUpperCase();
+    const department = String(employee?.department || "").trim() || "Operations";
+    const phone = String(employee?.phone || "").trim() || null;
+
+    const { data, error } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { full_name: fullName, role, phone, department },
+      app_metadata: { role },
+    });
+
+    if (error || !data?.user) {
+      const err = new Error(error?.message || "Failed to create employee auth user");
+      err.statusCode = 500;
+      throw err;
+    }
+
+    authUser = data.user;
+  }
+
+  if (authUser?.id && authUser.id !== employee.user_id) {
+    await supabase.from("employees").update({ user_id: authUser.id }).eq("id", employee.id);
+  }
+
+  return authUser;
+}
+
 /**
  * =========================
  * AUDIT LOGS (READ)
@@ -79,7 +181,135 @@ router.get("/vendors", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    return res.json({ success: true, vendors: vendors || [] });
+    // product counts
+    const { data: pRows, error: pErr } = await supabase
+      .from("products")
+      .select("vendor_id");
+
+    if (pErr)
+      return res.status(500).json({ success: false, error: pErr.message });
+
+    const countMap = {};
+    (pRows || []).forEach((r) => {
+      if (!r.vendor_id) return;
+      countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
+    });
+
+    // subscriptions + plans
+    const { data: subs, error: sErr } = await supabase
+      .from("vendor_plan_subscriptions")
+      .select("vendor_id, plan_id, status, start_date, end_date")
+      .order("start_date", { ascending: false });
+
+    if (sErr)
+      return res.status(500).json({ success: false, error: sErr.message });
+
+    const activeSubByVendor = {};
+    (subs || []).forEach((s) => {
+      if (!s.vendor_id) return;
+      if (activeSubByVendor[s.vendor_id]) return;
+      if (isActiveSub(s)) activeSubByVendor[s.vendor_id] = s;
+    });
+
+    const planIds = Array.from(
+      new Set(Object.values(activeSubByVendor).map((x) => x.plan_id).filter(Boolean))
+    );
+
+    let planMap = {};
+    if (planIds.length) {
+      const { data: plans, error: pErr2 } = await supabase
+        .from("vendor_plans")
+        .select("id, name, price")
+        .in("id", planIds);
+
+      if (pErr2)
+        return res.status(500).json({ success: false, error: pErr2.message });
+
+      (plans || []).forEach((p) => {
+        planMap[p.id] = p;
+      });
+    }
+
+    const result = (vendors || []).map((v) => {
+      const sub = activeSubByVendor[v.id] || null;
+      const plan = sub?.plan_id ? planMap[sub.plan_id] : null;
+      return {
+        ...v,
+        product_count: countMap[v.id] || 0,
+        package: plan
+          ? { plan_id: plan.id, plan_name: plan.name, price: plan.price, end_date: sub?.end_date || null }
+          : { plan_id: null, plan_name: "FREE", price: 0, end_date: null },
+      };
+    });
+
+    return res.json({ success: true, vendors: result });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get("/vendors/:vendorId/products", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!vendorId) {
+      return res.status(400).json({ success: false, error: "vendorId missing" });
+    }
+
+    const { data: vendor, error: vErr } = await supabase
+      .from("vendors")
+      .select("id, vendor_id, company_name, owner_name, email, phone, kyc_status, is_active")
+      .eq("id", vendorId)
+      .maybeSingle();
+
+    if (vErr) {
+      return res.status(500).json({ success: false, error: vErr.message });
+    }
+    if (!vendor) {
+      return res.status(404).json({ success: false, error: "Vendor not found" });
+    }
+
+    let query = supabase
+      .from("products")
+      .select("*")
+      .eq("vendor_id", vendorId)
+      .order("created_at", { ascending: false });
+
+    const limit = Number(req.query?.limit);
+    const offset = Number(req.query?.offset);
+    if (Number.isFinite(limit) && limit > 0) {
+      const safeLimit = Math.min(limit, 2000);
+      const start = Number.isFinite(offset) && offset >= 0 ? offset : 0;
+      query = query.range(start, start + safeLimit - 1);
+    }
+
+    const { data: products, error: pErr } = await query;
+    if (pErr) {
+      return res.status(500).json({ success: false, error: pErr.message });
+    }
+
+    const ids = (products || []).map((p) => p.id);
+    let imagesByProduct = {};
+    if (ids.length) {
+      const { data: imgs, error: imgErr } = await supabase
+        .from("product_images")
+        .select("*")
+        .in("product_id", ids);
+      if (imgErr) {
+        return res.status(500).json({ success: false, error: imgErr.message });
+      }
+
+      (imgs || []).forEach((img) => {
+        imagesByProduct[img.product_id] = imagesByProduct[img.product_id] || [];
+        imagesByProduct[img.product_id].push(img);
+      });
+    }
+
+    const out = (products || []).map((p) => ({
+      ...p,
+      product_images: imagesByProduct[p.id] || [],
+    }));
+
+    return res.json({ success: true, vendor, products: out });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -429,11 +659,24 @@ router.put("/staff/:employeeId/password", async (req, res) => {
 
     const { data: emp } = await supabase
       .from("employees")
-      .select("user_id")
+      .select("id, user_id, email")
       .eq("id", employeeId)
       .single();
 
-    await supabase.auth.admin.updateUserById(emp.user_id, { password });
+    let authUser = await resolveEmployeeAuthUser(emp);
+    if (!authUser?.id) {
+      try {
+        authUser = await ensureEmployeeAuthUser(emp, password);
+      } catch (err) {
+        const statusCode = err?.statusCode || 500;
+        return res.status(statusCode).json({ success: false, error: err?.message || "Auth user create failed" });
+      }
+    }
+
+    const { error: updErr } = await supabase.auth.admin.updateUserById(authUser.id, { password });
+    if (updErr) {
+      return res.status(500).json({ success: false, error: updErr.message });
+    }
 
     await writeAuditLog({
       req,
@@ -441,7 +684,7 @@ router.put("/staff/:employeeId/password", async (req, res) => {
       action: "STAFF_PASSWORD_CHANGE",
       entityType: "employees",
       entityId: employeeId,
-      details: { user_id: emp?.user_id || null },
+      details: { user_id: authUser.id || null, email: emp?.email || null },
     });
 
     return res.json({ success: true });
