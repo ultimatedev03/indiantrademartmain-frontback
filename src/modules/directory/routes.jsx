@@ -64,8 +64,8 @@ export const DirectoryRoutes = () => {
         <Route path="directory/search/:service/:state" element={<SearchResults />} />
         <Route path="directory/search/:service" element={<SearchResults />} />
         <Route path="directory/search" element={<Navigate to="/directory" replace />} />
-        {/* Alias: /search-suppliers */}
-        <Route path="search-suppliers" element={<SearchResults />} />
+        {/* Alias: /search-suppliers -> /directory/vendor */}
+        <Route path="search-suppliers" element={<Navigate to="/directory/vendor" replace />} />
 
         {/* Category Hierarchy */}
         {/* ✅ Product listing supports optional state/city slugs for auto-filter */}
