@@ -168,21 +168,34 @@ const MicroCategoryPage = () => {
   const [previews, setPreviews] = useState({});
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [subMeta, setSubMeta] = useState(null);
 
   // ✅ SEO (so home title/desc doesn't stick)
   const seoTitle = useMemo(() => {
+    const metaTitle = safeStr(subMeta?.meta_tags);
+    if (metaTitle) return metaTitle;
     const head = humanTitle(headSlug) || 'Directory';
     const sub = humanTitle(subSlug) || 'Category';
     return `${sub} | ${head} - IndianTradeMart`;
-  }, [headSlug, subSlug]);
+  }, [subMeta, headSlug, subSlug]);
 
   const seoDescription = useMemo(() => {
+    const metaDesc = safeStr(subMeta?.description);
+    if (metaDesc) return truncate(metaDesc);
     const head = humanTitle(headSlug) || 'Directory';
     const sub = humanTitle(subSlug) || 'Category';
     return truncate(
       `Browse micro-categories and products in ${sub} under ${head}. Find suppliers, compare prices, and get quotations on IndianTradeMart.`
     );
-  }, [headSlug, subSlug]);
+  }, [subMeta, headSlug, subSlug]);
+
+  const seoKeywords = useMemo(() => {
+    const metaKw = safeStr(subMeta?.keywords);
+    if (metaKw) return metaKw;
+    const head = humanTitle(headSlug) || 'Directory';
+    const sub = humanTitle(subSlug) || 'Category';
+    return `${sub}, ${head}, suppliers, products, IndianTradeMart`;
+  }, [subMeta, headSlug, subSlug]);
 
   const canonicalUrl = useMemo(() => {
     try {
@@ -243,6 +256,25 @@ const MicroCategoryPage = () => {
     };
   }, [subSlug, headSlug]);
 
+  useEffect(() => {
+    let alive = true;
+    const loadMeta = async () => {
+      try {
+        if (!subSlug) return;
+        const meta = await directoryApi.getSubCategoryBySlug(subSlug, headSlug);
+        if (!alive) return;
+        setSubMeta(meta || null);
+      } catch (e) {
+        if (!alive) return;
+        setSubMeta(null);
+      }
+    };
+    loadMeta();
+    return () => {
+      alive = false;
+    };
+  }, [subSlug, headSlug]);
+
   const title = useMemo(() => humanTitle(subSlug), [subSlug]);
 
   return (
@@ -250,7 +282,7 @@ const MicroCategoryPage = () => {
       <Helmet>
         <title>{seoTitle}</title>
         <meta name="description" content={seoDescription} />
-        <meta name="keywords" content={`${title}, ${humanTitle(headSlug)}, suppliers, products, IndianTradeMart`} />
+        <meta name="keywords" content={seoKeywords} />
         {canonicalUrl ? <link rel="canonical" href={canonicalUrl} /> : null}
       </Helmet>
 

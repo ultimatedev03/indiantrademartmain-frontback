@@ -114,6 +114,11 @@ const DynamicCategory = () => {
   const locationName = city?.name || state?.name;
   const pageTitle = `${category.meta_tags || category.name}${locationName ? ' in ' + locationName : ''}`;
   const pageDescription = category.meta_description || category.name;
+  const pageKeywords =
+    category.keywords ||
+    category.meta_keywords ||
+    category.meta_tags ||
+    `${category.name}, suppliers, manufacturers, IndianTradeMart`;
 
   const hasChildren = children && children.length > 0;
 
@@ -122,6 +127,7 @@ const DynamicCategory = () => {
       <Helmet>
         <title>{pageTitle} | IndianTradeMart</title>
         <meta name="description" content={pageDescription} />
+        <meta name="keywords" content={pageKeywords} />
       </Helmet>
 
       <div className="min-h-screen bg-gray-50">

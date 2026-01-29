@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Helmet } from 'react-helmet';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
+import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { ChevronRight, Home, Loader2 } from 'lucide-react';
 
 const toTitle = (slug) => (slug || '').replace(/-/g, ' ').trim();
@@ -19,6 +21,24 @@ const SubCategoryPage = () => {
     [headCategory, headSlug]
   );
 
+  const seoTitle = useMemo(() => {
+    const metaTitle = headCategory?.meta_tags;
+    if (metaTitle) return metaTitle;
+    return `${pageTitle} | IndianTradeMart`;
+  }, [headCategory, pageTitle]);
+
+  const seoDescription = useMemo(() => {
+    const metaDesc = headCategory?.description;
+    if (metaDesc) return metaDesc;
+    return `Browse ${pageTitle} categories and find suppliers on IndianTradeMart.`;
+  }, [headCategory, pageTitle]);
+
+  const seoKeywords = useMemo(() => {
+    const metaKw = headCategory?.keywords;
+    if (metaKw) return metaKw;
+    return `${pageTitle}, suppliers, manufacturers, business directory, IndianTradeMart`;
+  }, [headCategory, pageTitle]);
+
   useEffect(() => {
     let alive = true;
 
@@ -30,15 +50,13 @@ const SubCategoryPage = () => {
 
       try {
         // 1) Try HEAD category
-        const { data: headRows, error: headErr } = await supabase
-          .from('head_categories')
-          .select('id, name, slug')
-          .eq('slug', headSlug)
-          .limit(1);
+        let head = null;
+        try {
+          head = await directoryApi.getHeadCategoryBySlug(headSlug);
+        } catch (headErr) {
+          console.error('[SubCategoryPage] head lookup failed', headErr);
+        }
 
-        if (headErr) console.error('[SubCategoryPage] head lookup failed', headErr);
-
-        const head = headRows && headRows.length ? headRows[0] : null;
         if (head) {
           if (!alive) return;
           setHeadCategory(head);
@@ -110,6 +128,12 @@ const SubCategoryPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
+      <Helmet>
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDescription} />
+        <meta name="keywords" content={seoKeywords} />
+      </Helmet>
+
       <div className="bg-white border-b py-4">
         <div className="container mx-auto px-4">
           <nav className="flex text-sm text-gray-500 mb-4 items-center">

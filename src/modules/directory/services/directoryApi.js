@@ -10,6 +10,11 @@ const slugify = (text = '') =>
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 
+const isMissingColumnError = (err) => {
+  if (!err) return false;
+  return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
+};
+
 export const directoryApi = {
   getHeadCategories: async () => {
     const { data, error } = await supabase
@@ -551,6 +556,75 @@ export const directoryApi = {
     });
   },
 
+  getHeadCategoryBySlug: async (headSlug) => {
+    if (!headSlug) return null;
+    let res = await supabase
+      .from('head_categories')
+      .select('id, name, slug, description, meta_tags, keywords')
+      .eq('slug', headSlug)
+      .limit(1);
+
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('head_categories')
+        .select('id, name, slug, description')
+        .eq('slug', headSlug)
+        .limit(1);
+    }
+
+    if (res.error) throw res.error;
+    return (res.data && res.data.length ? res.data[0] : null);
+  },
+
+  getSubCategoryBySlug: async (subSlug, headSlug = null) => {
+    if (!subSlug) return null;
+
+    let headId = null;
+    if (headSlug) {
+      const { data: head } = await supabase
+        .from('head_categories')
+        .select('id')
+        .eq('slug', headSlug)
+        .limit(1);
+      headId = head?.[0]?.id || null;
+    }
+
+    let res = await supabase
+      .from('sub_categories')
+      .select('id, name, slug, description, meta_tags, keywords, head_category_id')
+      .eq('slug', subSlug)
+      .limit(1);
+
+    if (headId) {
+      res = await supabase
+        .from('sub_categories')
+        .select('id, name, slug, description, meta_tags, keywords, head_category_id')
+        .eq('slug', subSlug)
+        .eq('head_category_id', headId)
+        .limit(1);
+    }
+
+    if (res.error && isMissingColumnError(res.error)) {
+      res = await supabase
+        .from('sub_categories')
+        .select('id, name, slug, description, head_category_id')
+        .eq('slug', subSlug)
+        .limit(1);
+
+      if (headId) {
+        res = await supabase
+          .from('sub_categories')
+          .select('id, name, slug, description, head_category_id')
+          .eq('slug', subSlug)
+          .eq('head_category_id', headId)
+          .limit(1);
+      }
+    }
+
+    if (res.error) throw res.error;
+    return (res.data && res.data.length ? res.data[0] : null);
+  },
+
   getMicroCategoryBySlug: async (microSlug) => {
     try {
       const { data: micro, error } = await supabase
@@ -569,18 +643,29 @@ export const directoryApi = {
 
       if (error || !micro) return null;
 
-      const { data: metaData } = await supabase
+      let metaRes = await supabase
         .from('micro_category_meta')
-        .select('meta_tags, description')
+        .select('meta_tags, description, keywords')
         .eq('micro_categories', micro.id)
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
+      if (metaRes.error && isMissingColumnError(metaRes.error)) {
+        metaRes = await supabase
+          .from('micro_category_meta')
+          .select('meta_tags, description')
+          .eq('micro_categories', micro.id)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+      }
+
       return {
         ...micro,
-        meta_tags: metaData?.meta_tags,
-        meta_description: metaData?.description
+        meta_tags: metaRes?.data?.meta_tags,
+        meta_description: metaRes?.data?.description,
+        meta_keywords: metaRes?.data?.keywords
       };
     } catch (err) {
       console.warn('Error fetching micro category by slug:', err);

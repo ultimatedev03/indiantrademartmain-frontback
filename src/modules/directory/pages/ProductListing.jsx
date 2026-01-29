@@ -24,6 +24,28 @@ const toTitleCase = (slug) =>
     .replace(/-/g, ' ')
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
+const buildKeywords = (...items) => {
+  const seen = new Set();
+  const out = [];
+  items
+    .flat()
+    .filter(Boolean)
+    .forEach((item) => {
+      String(item)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .forEach((s) => {
+          const key = s.toLowerCase();
+          if (!seen.has(key)) {
+            seen.add(key);
+            out.push(s);
+          }
+        });
+    });
+  return out.join(', ');
+};
+
 const numOrNull = (v) => {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
@@ -96,6 +118,20 @@ const ProductListing = () => {
     if (metaDesc) return truncate(metaDesc);
     return truncate(`Browse ${microName} products and suppliers in this micro-category on IndianTradeMart.`);
   }, [microInfo, microName]);
+
+  const pageKeywords = useMemo(() => {
+    const metaKw = safeStr(microInfo?.meta_keywords);
+    if (metaKw) return metaKw;
+    return buildKeywords(
+      microInfo?.meta_tags,
+      microName,
+      subName,
+      headName,
+      'suppliers',
+      'manufacturers',
+      'IndianTradeMart'
+    );
+  }, [microInfo, microName, subName, headName]);
 
   const canonicalUrl = useMemo(() => {
     try {
@@ -240,6 +276,7 @@ const ProductListing = () => {
       <Helmet>
         <title>{pageTitle}</title>
         <meta name="description" content={pageDescription} />
+        <meta name="keywords" content={pageKeywords} />
         {canonicalUrl ? <link rel="canonical" href={canonicalUrl} /> : null}
       </Helmet>
 

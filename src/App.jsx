@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
+import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { Toaster } from '@/components/ui/toaster';
 import { AuthProvider } from '@/contexts/SupabaseAuthContext';
@@ -258,6 +258,53 @@ const PublicNoticeGate = ({ children }) => {
   );
 };
 
+const ScrollToTop = () => {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if ('scrollRestoration' in window.history) {
+      window.history.scrollRestoration = 'manual';
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const scrollNow = () => {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+
+      const mainEl = document.querySelector('main');
+      if (mainEl && typeof mainEl.scrollTo === 'function') {
+        mainEl.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      }
+
+      const containers = document.querySelectorAll('[data-scroll-container]');
+      containers.forEach((el) => {
+        if (typeof el.scrollTo === 'function') {
+          el.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+        } else {
+          el.scrollTop = 0;
+          el.scrollLeft = 0;
+        }
+      });
+    };
+
+    scrollNow();
+    const raf = window.requestAnimationFrame(scrollNow);
+    const timeout = window.setTimeout(scrollNow, 120);
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.clearTimeout(timeout);
+    };
+  }, [location.pathname, location.search, location.hash]);
+
+  return null;
+};
+
 // This component switches route trees based on subdomain/appType
 const AppRoutes = () => {
   const { appType } = useSubdomain();
@@ -310,6 +357,7 @@ function App() {
 
       <PageStatusProvider>
         <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <ScrollToTop />
           <SubdomainProvider>
             <MaintenanceGate>
               <AuthProvider>
