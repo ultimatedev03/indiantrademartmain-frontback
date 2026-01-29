@@ -190,8 +190,8 @@ const SearchResultsList = ({ products, query, city, category }) => {
     const years = getVendorYears(product);
     const rr = getResponseRate(product);
 
-    if (gstOk) items.push({ type: 'ok', text: 'GST' });
-    if (trustOk) items.push({ type: 'ok', text: 'TrustSEAL Verified' });
+    if (gstOk) items.push({ type: 'ok', text: 'GST ✓' });
+    if (trustOk) items.push({ type: 'ok', text: 'Certified Supplier ✓' });
     if (years !== null) items.push({ type: 'info', text: `${years} yrs` });
     if (rr !== null) items.push({ type: 'info', text: `${rr}% Response Rate` });
 
