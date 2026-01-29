@@ -146,6 +146,12 @@ const QuotePopup = () => {
     try {
        // Extract phone number (remove +91 prefix if any)
        const phoneNum = formData.phone.replace(/^\+91\s*/, '');
+
+       const stateName = states.find((s) => s.id === formData.stateId)?.name || '';
+       const cityName = cities.find((c) => c.id === formData.cityId)?.name || '';
+       const locationText = cityName && stateName
+         ? `${cityName}, ${stateName}`
+         : (stateName || cityName || 'India');
        
        const { error } = await supabase.from('leads').insert([{
            product_name: formData.productName,
@@ -154,7 +160,9 @@ const QuotePopup = () => {
            buyer_email: formData.email,
            buyer_phone: phoneNum,
            message: formData.description,
-           location: `${formData.stateId || ''} ${formData.cityId || ''}`.trim(),
+           location: locationText,
+           state_id: formData.stateId || null,
+           city_id: formData.cityId || null,
            status: 'AVAILABLE',
            category: 'General',
            created_at: new Date().toISOString()

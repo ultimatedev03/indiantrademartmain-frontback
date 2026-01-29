@@ -57,6 +57,9 @@ const extractLocation = (lead = {}) => {
 const buildLeadTokens = (lead = {}) =>
   dedupe([
     lead.category,
+    lead.category_slug,
+    lead.product_interest,
+    lead.description,
     lead.category_name,
     lead.head_category,
     lead.sub_category,
@@ -88,14 +91,21 @@ const loadVendorLeadContext = async (vendorId) => {
     categorySet: new Set(),
     productSet: new Set(),
     microIdSet: new Set(),
+    headIdSet: new Set(),
+    subIdSet: new Set(),
     stateSet: new Set(),
     citySet: new Set(),
+    stateIdSet: new Set(),
+    cityIdSet: new Set(),
+    autoLeadFilter: true,
+    minBudget: null,
+    maxBudget: null,
   };
 
   try {
     const { data: prefs } = await supabase
       .from('vendor_preferences')
-      .select('preferred_micro_categories, preferred_states, preferred_cities')
+      .select('preferred_micro_categories, preferred_states, preferred_cities, auto_lead_filter, min_budget, max_budget')
       .eq('vendor_id', vendorId)
       .maybeSingle();
 
@@ -103,29 +113,45 @@ const loadVendorLeadContext = async (vendorId) => {
     const preferredStateIds = prefs?.preferred_states || [];
     const preferredCityIds = prefs?.preferred_cities || [];
 
+    ctx.autoLeadFilter = prefs?.auto_lead_filter !== false;
+    const minBudgetNum = Number(prefs?.min_budget);
+    const maxBudgetNum = Number(prefs?.max_budget);
+    ctx.minBudget = Number.isFinite(minBudgetNum) ? minBudgetNum : null;
+    ctx.maxBudget = Number.isFinite(maxBudgetNum) ? maxBudgetNum : null;
+
+    preferredStateIds.forEach((id) => ctx.stateIdSet.add(id));
+    preferredCityIds.forEach((id) => ctx.cityIdSet.add(id));
+
     if (preferredCategoryIds.length) {
-      const { data: microRows } = await supabase
+      const { data: prefMicroRows } = await supabase
         .from('micro_categories')
-        .select('id, name, sub_categories(head_categories(name))')
+        .select('id, name, sub_categories(id, name, head_categories(id, name))')
         .in('id', preferredCategoryIds);
-      microRows?.forEach((row) => {
-        ctx.microIdSet.add(row.id);
+      prefMicroRows?.forEach((row) => {
+        if (row?.id) ctx.microIdSet.add(row.id);
         if (row?.name) ctx.categorySet.add(normalizeText(row.name));
-        const headName = row?.sub_categories?.head_categories?.name;
-        if (headName) ctx.categorySet.add(normalizeText(headName));
+        const sub = row?.sub_categories;
+        if (sub?.id) ctx.subIdSet.add(sub.id);
+        if (sub?.name) ctx.categorySet.add(normalizeText(sub.name));
+        const head = sub?.head_categories;
+        if (head?.id) ctx.headIdSet.add(head.id);
+        if (head?.name) ctx.categorySet.add(normalizeText(head.name));
       });
 
       const { data: headCats } = await supabase
         .from('head_categories')
         .select('id, name')
         .in('id', preferredCategoryIds);
-      headCats?.forEach((row) => row?.name && ctx.categorySet.add(normalizeText(row.name)));
+      headCats?.forEach((row) => {
+        if (row?.id) ctx.headIdSet.add(row.id);
+        if (row?.name) ctx.categorySet.add(normalizeText(row.name));
+      });
     }
 
     // Vendor products -> micro category names + product names
     const { data: products } = await supabase
       .from('products')
-      .select('name, micro_category_id')
+      .select('name, micro_category_id, head_category_id, sub_category_id')
       .eq('vendor_id', vendorId)
       .eq('status', 'ACTIVE');
 
@@ -134,16 +160,24 @@ const loadVendorLeadContext = async (vendorId) => {
 
     const microIds = dedupe(products?.map((p) => p?.micro_category_id).filter(Boolean) || []);
     microIds.forEach((id) => ctx.microIdSet.add(id));
+    const headIds = dedupe(products?.map((p) => p?.head_category_id).filter(Boolean) || []);
+    headIds.forEach((id) => ctx.headIdSet.add(id));
+    const subIds = dedupe(products?.map((p) => p?.sub_category_id).filter(Boolean) || []);
+    subIds.forEach((id) => ctx.subIdSet.add(id));
     if (microIds.length) {
-      const { data: microRows } = await supabase
+      const { data: productMicroRows } = await supabase
         .from('micro_categories')
-        .select('id, name, sub_categories(head_categories(name))')
+        .select('id, name, sub_categories(id, name, head_categories(id, name))')
         .in('id', microIds);
 
-      microRows?.forEach((row) => {
+      productMicroRows?.forEach((row) => {
         if (row?.name) ctx.categorySet.add(normalizeText(row.name));
-        const headName = row?.sub_categories?.head_categories?.name;
-        if (headName) ctx.categorySet.add(normalizeText(headName));
+        const sub = row?.sub_categories;
+        if (sub?.id) ctx.subIdSet.add(sub.id);
+        if (sub?.name) ctx.categorySet.add(normalizeText(sub.name));
+        const head = sub?.head_categories;
+        if (head?.id) ctx.headIdSet.add(head.id);
+        if (head?.name) ctx.categorySet.add(normalizeText(head.name));
       });
     }
 
@@ -152,7 +186,10 @@ const loadVendorLeadContext = async (vendorId) => {
         .from('states')
         .select('id, name')
         .in('id', preferredStateIds);
-      stateRows?.forEach((row) => row?.name && ctx.stateSet.add(normalizeText(row.name)));
+      stateRows?.forEach((row) => {
+        if (row?.id) ctx.stateIdSet.add(row.id);
+        if (row?.name) ctx.stateSet.add(normalizeText(row.name));
+      });
     }
 
     if (preferredCityIds.length) {
@@ -160,7 +197,10 @@ const loadVendorLeadContext = async (vendorId) => {
         .from('cities')
         .select('id, name')
         .in('id', preferredCityIds);
-      cityRows?.forEach((row) => row?.name && ctx.citySet.add(normalizeText(row.name)));
+      cityRows?.forEach((row) => {
+        if (row?.id) ctx.cityIdSet.add(row.id);
+        if (row?.name) ctx.citySet.add(normalizeText(row.name));
+      });
     }
   } catch (e) {
     console.error('[leadApi] Failed to load vendor lead context:', e);
@@ -462,8 +502,24 @@ export const leadApi = {
     listAvailable: async () => {
       const vendorId = await getVendorId();
       const ctx = await loadVendorLeadContext(vendorId);
-      const shouldFilterCategory = ctx.categorySet.size > 0 || ctx.productSet.size > 0;
-      const shouldFilterLocation = ctx.stateSet.size > 0 || ctx.citySet.size > 0;
+      const autoFilter = ctx.autoLeadFilter !== false;
+      const shouldFilterCategory = autoFilter && (
+        ctx.categorySet.size > 0 ||
+        ctx.productSet.size > 0 ||
+        ctx.microIdSet.size > 0 ||
+        ctx.headIdSet.size > 0 ||
+        ctx.subIdSet.size > 0
+      );
+      const shouldFilterLocation = autoFilter && (
+        ctx.stateSet.size > 0 ||
+        ctx.citySet.size > 0 ||
+        ctx.stateIdSet.size > 0 ||
+        ctx.cityIdSet.size > 0
+      );
+      const shouldFilterBudget = autoFilter && (
+        Number.isFinite(ctx.minBudget) ||
+        Number.isFinite(ctx.maxBudget)
+      );
       
       // Get all marketplace leads (where vendor_id is null)
       const { data: available, error: availError } = await supabase
@@ -493,16 +549,55 @@ export const leadApi = {
         const categoryHit = matchesAny(tokens, ctx.categorySet);
         const productHit = matchesAny(tokens, ctx.productSet);
         const microHit = lead?.micro_category_id && ctx.microIdSet.has(lead.micro_category_id);
+        const headHit = lead?.head_category_id && ctx.headIdSet.has(lead.head_category_id);
+        const subHit = lead?.sub_category_id && ctx.subIdSet.has(lead.sub_category_id);
+        const categoryMatch = microHit || headHit || subHit || categoryHit || productHit;
 
-        if (shouldFilterCategory && !(microHit || categoryHit || productHit)) return false;
+        if (shouldFilterCategory && !categoryMatch) return false;
 
         if (shouldFilterLocation) {
+          const locText = normalizeText(lead?.location);
+          const leadCityId = lead?.city_id || lead?.cityId || null;
+          const leadStateId = lead?.state_id || lead?.stateId || null;
+
           const { city, state } = extractLocation(lead);
           const nCity = normalizeText(city);
           const nState = normalizeText(state);
 
-          if (ctx.citySet.size && (!nCity || !matchesAny([nCity], ctx.citySet))) return false;
-          if (ctx.stateSet.size && (!nState || !matchesAny([nState], ctx.stateSet))) return false;
+          const cityIdMatch = ctx.cityIdSet.size
+            ? (leadCityId && ctx.cityIdSet.has(leadCityId)) ||
+              (locText && [...ctx.cityIdSet].some((id) => locText.includes(normalizeText(id))))
+            : true;
+          const stateIdMatch = ctx.stateIdSet.size
+            ? (leadStateId && ctx.stateIdSet.has(leadStateId)) ||
+              (locText && [...ctx.stateIdSet].some((id) => locText.includes(normalizeText(id))))
+            : true;
+
+          const cityNameMatch = ctx.citySet.size
+            ? (nCity && matchesAny([nCity], ctx.citySet))
+            : true;
+          const stateNameMatch = ctx.stateSet.size
+            ? (nState && matchesAny([nState], ctx.stateSet))
+            : true;
+
+          const cityMatch = (ctx.cityIdSet.size || ctx.citySet.size)
+            ? (cityIdMatch || cityNameMatch)
+            : true;
+          const stateMatch = (ctx.stateIdSet.size || ctx.stateSet.size)
+            ? (stateIdMatch || stateNameMatch)
+            : true;
+
+          if (!cityMatch || !stateMatch) return false;
+        }
+
+        if (shouldFilterBudget) {
+          const budgetVal = Number.parseFloat(lead?.budget);
+          if (Number.isFinite(ctx.minBudget) && Number.isFinite(budgetVal) && budgetVal < ctx.minBudget) {
+            return false;
+          }
+          if (Number.isFinite(ctx.maxBudget) && Number.isFinite(budgetVal) && budgetVal > ctx.maxBudget) {
+            return false;
+          }
         }
 
         return true;
@@ -510,7 +605,7 @@ export const leadApi = {
 
       // If vendor set prefs/products/coverage, return filtered list.
       // If not, return all unpurchased leads (keeps marketplace visible for new vendors).
-      if (shouldFilterCategory || shouldFilterLocation) return filtered;
+      if (shouldFilterCategory || shouldFilterLocation || shouldFilterBudget) return filtered;
 
       return (available || []).filter((lead) => !purchasedIds.has(lead.id));
     },
