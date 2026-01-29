@@ -416,6 +416,81 @@ export async function handler(event) {
       return bad("Unsupported staff route");
     }
 
+    // -------------------------
+    // DASHBOARD DATA (ADMIN)
+    // GET /dashboard/recent-lead-purchases
+    // GET /dashboard/data-entry-performance
+    // -------------------------
+    if (tail[0] === "dashboard") {
+      if (event.httpMethod === "GET" && tail[1] === "recent-lead-purchases") {
+        const limit = Math.min(Number(event.queryStringParameters?.limit || 10), 50);
+        const { data, error } = await supabase
+          .from("lead_purchases")
+          .select("id, vendor_id, amount, payment_status, purchase_date, created_at, vendor:vendors(company_name)")
+          .order("purchase_date", { ascending: false })
+          .limit(limit);
+
+        if (error) return fail("Failed to fetch lead purchases", error.message);
+        return ok({ success: true, orders: data || [] });
+      }
+
+      if (event.httpMethod === "GET" && tail[1] === "data-entry-performance") {
+        const { data: employees, error } = await supabase
+          .from("employees")
+          .select("id, full_name, email, user_id, role")
+          .in("role", ["DATA_ENTRY", "DATAENTRY"]);
+
+        if (error) return fail("Failed to fetch employees", error.message);
+
+        const performance = await Promise.all(
+          (employees || []).map(async (emp) => {
+            const userId = emp.user_id;
+            const displayName = emp.full_name || emp.email || "Data Entry";
+
+            if (!userId) {
+              return {
+                id: emp.id,
+                name: displayName,
+                vendorsCreated: 0,
+                productsListed: 0,
+                hasUserId: false,
+              };
+            }
+
+            const { count: vendorCount } = await supabase
+              .from("vendors")
+              .select("*", { count: "exact", head: true })
+              .or(`created_by_user_id.eq.${userId},assigned_to.eq.${userId}`);
+
+            const { data: vendors } = await supabase
+              .from("vendors")
+              .select("id")
+              .or(`created_by_user_id.eq.${userId},assigned_to.eq.${userId}`);
+
+            let productCount = 0;
+            if (vendors && vendors.length > 0) {
+              const vendorIds = vendors.map((v) => v.id);
+              const { count: pCount } = await supabase
+                .from("products")
+                .select("*", { count: "exact", head: true })
+                .in("vendor_id", vendorIds);
+              productCount = pCount || 0;
+            }
+
+            return {
+              id: userId,
+              name: displayName,
+              vendorsCreated: vendorCount || 0,
+              productsListed: productCount,
+              hasUserId: true,
+            };
+          })
+        );
+
+        return ok({ success: true, performance });
+      }
+    }
+
 // -------------------------
     // GET /vendors  (with product_count + plan)
     // -------------------------

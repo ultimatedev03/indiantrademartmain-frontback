@@ -12,14 +12,12 @@ import {
   Tag, 
   LogOut, 
   Menu, 
-  Bell, 
   Upload,
   FileSpreadsheet,
-  Package,
   FileText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/use-toast';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 const SidebarLink = ({ to, icon: Icon, children }) => (
   <NavLink
@@ -164,9 +162,7 @@ const EmployeeLayout = ({ allowedRole }) => {
               {getPageTitle()}
             </h1>
           </div>
-          <Button variant="ghost" size="icon" onClick={() => toast({ title: "Notifications", description: "No new alerts." })}>
-             <Bell className="h-5 w-5 text-neutral-500" />
-          </Button>
+          <NotificationBell />
         </header>
 
         <main className="flex-1 p-4 lg:p-8 overflow-y-auto">

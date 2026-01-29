@@ -1,4 +1,4 @@
-import { Facebook, Instagram, Linkedin, Mail, Twitter } from 'lucide-react';
+import { Facebook, Instagram, Linkedin, Mail, Twitter, Youtube } from 'lucide-react';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import PostRequirementModal from './modals/PostRequirementModal';
@@ -99,6 +99,16 @@ const Footer = () => {
                   className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300"
                 >
                   <Instagram className="w-5 h-5" />
+                </a>
+
+                <a
+                  href="https://www.youtube.com/@itm-Indian-Trade-Mart"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="YouTube"
+                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-red-600 hover:text-white transition-all duration-300"
+                >
+                  <Youtube className="w-5 h-5" />
                 </a>
               </div>
             </div>

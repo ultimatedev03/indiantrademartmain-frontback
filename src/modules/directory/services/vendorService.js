@@ -1,5 +1,33 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
+const mapVendorRow = (v) => {
+  const companyName =
+    v.company_name ||
+    `${v.first_name || ''} ${v.last_name || ''}`.trim() ||
+    v.owner_name ||
+    'Supplier';
+
+  const cityName = v?.city_ref?.name || v.city || '';
+  const stateName = v?.state_ref?.name || v.state || '';
+
+  const kyc = String(v.kyc_status || '').toUpperCase();
+  const verified =
+    Boolean(v.is_verified) || Boolean(v.verification_badge) || kyc === 'APPROVED';
+
+  return {
+    ...v,
+    name: companyName,
+    image: v.profile_image || v.image_url || v.avatar_url || '',
+    city: cityName,
+    state: stateName,
+    verified,
+    // best-effort fields used by older UI blocks
+    rating: v.seller_rating ?? null,
+    reviews: null,
+    description: v.primary_business_type || v.secondary_business || '',
+  };
+};
+
 export const vendorService = {
   /**
    * Returns vendors from DB but also adds UI-friendly fields:
@@ -33,34 +61,7 @@ export const vendorService = {
     }
 
     const rows = Array.isArray(data) ? data : [];
-
-    return rows.map((v) => {
-      const companyName =
-        v.company_name ||
-        `${v.first_name || ''} ${v.last_name || ''}`.trim() ||
-        v.owner_name ||
-        'Supplier';
-
-      const cityName = v?.city_ref?.name || v.city || '';
-      const stateName = v?.state_ref?.name || v.state || '';
-
-      const kyc = String(v.kyc_status || '').toUpperCase();
-      const verified =
-        Boolean(v.is_verified) || Boolean(v.verification_badge) || kyc === 'APPROVED';
-
-      return {
-        ...v,
-        name: companyName,
-        image: v.profile_image || v.image_url || v.avatar_url || '',
-        city: cityName,
-        state: stateName,
-        verified,
-        // best-effort fields used by older UI blocks
-        rating: v.seller_rating ?? null,
-        reviews: null,
-        description: v.primary_business_type || v.secondary_business || ''
-      };
-    });
+    return rows.map(mapVendorRow);
   },
 
   getVendorById: async (vendorId) => {
@@ -157,5 +158,64 @@ export const vendorService = {
       console.error('Search error:', error);
       return [];
     }
-  }
+  },
+
+  getVendorsByCity: async ({ citySlug, limit = 24, page = 1 }) => {
+    if (!citySlug) return [];
+
+    let cityId = null;
+    let cityName = '';
+
+    try {
+      const { data: cityData } = await supabase
+        .from('cities')
+        .select('id, name')
+        .eq('slug', citySlug)
+        .maybeSingle();
+
+      if (cityData?.id) cityId = cityData.id;
+      if (cityData?.name) cityName = cityData.name;
+    } catch (e) {
+      // ignore; fallback below
+    }
+
+    if (!cityName) {
+      cityName = String(citySlug || '').replace(/-/g, ' ').trim();
+    }
+
+    const from = Math.max(0, (Number(page) - 1) * Number(limit));
+    const to = from + Number(limit) - 1;
+
+    let dbQuery = supabase
+      .from('vendors')
+      .select(
+        `
+          *,
+          city_ref:city_id (name, slug),
+          state_ref:state_id (name, slug)
+        `
+      )
+      .eq('is_active', true)
+      .order('is_verified', { ascending: false })
+      .order('verification_badge', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (cityId && cityName) {
+      dbQuery = dbQuery.or(`city_id.eq.${cityId},city.ilike.%${cityName}%`);
+    } else if (cityId) {
+      dbQuery = dbQuery.eq('city_id', cityId);
+    } else if (cityName) {
+      dbQuery = dbQuery.ilike('city', `%${cityName}%`);
+    }
+
+    const { data, error } = await dbQuery;
+    if (error) {
+      console.error('Error fetching city vendors:', error);
+      return [];
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+    return rows.map(mapVendorRow);
+  },
 };

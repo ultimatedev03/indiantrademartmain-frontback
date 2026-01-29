@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Check, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -13,6 +13,7 @@ const NotificationBell = ({ userId: userIdProp = null }) => {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isOpen, setIsOpen] = useState(false);
+  const pollingRef = useRef(null);
 
   useEffect(() => {
     if (userIdProp) {
@@ -71,8 +72,15 @@ const NotificationBell = ({ userId: userIdProp = null }) => {
       )
       .subscribe();
 
+    // Polling fallback (in case realtime is disabled)
+    if (pollingRef.current) clearInterval(pollingRef.current);
+    pollingRef.current = setInterval(() => {
+      fetchNotifications(userId);
+    }, 10000);
+
     return () => {
       supabase.removeChannel(channel);
+      if (pollingRef.current) clearInterval(pollingRef.current);
     };
   }, [userId]);
 

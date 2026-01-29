@@ -2,6 +2,17 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 
+const isLocalHost = () => {
+  const h = window.location.hostname;
+  return h === "localhost" || h === "127.0.0.1";
+};
+
+const getAdminBase = () => {
+  const override = import.meta.env.VITE_ADMIN_API_BASE;
+  if (override && String(override).trim()) return String(override).trim();
+  return isLocalHost() ? "/api/admin" : "/.netlify/functions/admin";
+};
+
 export const adminApi = {
   getStats: async () => {
     const [users, vendors, orders] = await Promise.all([
@@ -38,6 +49,17 @@ export const adminApi = {
   },
 
   getRecentOrders: async () => {
+    const ADMIN_API_BASE = getAdminBase();
+    try {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/dashboard/recent-lead-purchases?limit=10`);
+      if (res.ok) {
+        const data = await res.json();
+        return data?.orders || [];
+      }
+    } catch {
+      // fallback below
+    }
+
     const { data, error } = await supabase
       .from('lead_purchases')
       .select('*, vendor:vendors(company_name)')
@@ -48,26 +70,46 @@ export const adminApi = {
   },
 
   getDataEntryPerformance: async () => {
+    const ADMIN_API_BASE = getAdminBase();
+    try {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/dashboard/data-entry-performance`);
+      if (res.ok) {
+        const data = await res.json();
+        return data?.performance || [];
+      }
+    } catch {
+      // fallback below
+    }
+
     // Get all Data Entry employees
     const { data: employees } = await supabase
       .from('employees')
-      .select('user_id, full_name')
-      .eq('role', 'DATA_ENTRY');
+      .select('id, user_id, full_name, email')
+      .in('role', ['DATA_ENTRY', 'DATAENTRY']);
 
     if (!employees) return [];
 
     // For each, count vendors created
     const performance = await Promise.all(employees.map(async (emp) => {
+      if (!emp.user_id) {
+        return {
+          id: emp.id,
+          name: emp.full_name || emp.email || 'Data Entry',
+          vendorsCreated: 0,
+          productsListed: 0,
+          kycVerified: 0
+        };
+      }
       const { count } = await supabase
         .from('vendors')
         .select('*', { count: 'exact', head: true })
-        .eq('created_by_user_id', emp.user_id);
+        .or(`created_by_user_id.eq.${emp.user_id},assigned_to.eq.${emp.user_id}`);
       
       // Count products for those vendors
       const { data: vendors } = await supabase
         .from('vendors')
         .select('id')
-        .eq('created_by_user_id', emp.user_id);
+        .or(`created_by_user_id.eq.${emp.user_id},assigned_to.eq.${emp.user_id}`);
         
       let productCount = 0;
       if (vendors && vendors.length > 0) {
@@ -95,7 +137,7 @@ export const adminApi = {
       const { data, error } = await supabase
         .from('vendors')
         .select('*, products(*)')
-        .eq('created_by_user_id', creatorId);
+        .or(`created_by_user_id.eq.${creatorId},assigned_to.eq.${creatorId}`);
       if (error) throw error;
       return data;
   },

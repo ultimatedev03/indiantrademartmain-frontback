@@ -4,7 +4,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, Package, Users, FileText, Settings, LogOut, 
-  Menu, X, Bell, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
+  Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
   BarChart3, UserCheck, Ticket, Database
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import { useAuth as useVendorAuth } from '@/modules/vendor/context/AuthContext';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import MaintenancePage from '@/shared/components/MaintenancePage';
 import { Loader2 } from 'lucide-react';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 const SidebarItem = ({ icon: Icon, label, path, active, collapsed }) => (
   <Link to={path}>
@@ -238,10 +239,7 @@ const PortalLayout = ({ role }) => {
           </div>
           
           <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" className="relative text-neutral-500">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-2 right-2 h-2 w-2 bg-red-500 rounded-full border-2 border-white"></span>
-            </Button>
+            <NotificationBell />
             <div className="flex items-center gap-3 pl-4 border-l border-neutral-200">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-medium text-neutral-900">{user?.name || user?.email}</p>
