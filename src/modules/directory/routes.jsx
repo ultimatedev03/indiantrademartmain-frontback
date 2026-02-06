@@ -17,6 +17,7 @@ import AboutUs from '@/modules/directory/pages/AboutUs';
 import BecomeVendor from '@/modules/directory/pages/BecomeVendor';
 import Pricing from '@/modules/directory/pages/Pricing';
 import Login from '@/modules/directory/pages/Login';
+import Logistics from '@/modules/directory/pages/Logistics';
 
 import VendorListing from '@/modules/directory/pages/VendorListing';
 import VendorProfilePublic from '@/modules/directory/pages/VendorProfile';
@@ -90,6 +91,7 @@ export const DirectoryRoutes = () => {
         <Route path="about-us" element={<AboutUs />} />
         <Route path="become-a-vendor" element={<BecomeVendor />} />
         <Route path="pricing" element={<Pricing />} />
+        <Route path="logistics" element={<Logistics />} />
 
         {/* Footer Info */}
         <Route path="press" element={<Press />} />
