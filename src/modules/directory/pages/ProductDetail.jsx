@@ -46,7 +46,7 @@ import { useAuth } from '@/contexts/SupabaseAuthContext';
 const ProductDetail = () => {
   const { productSlug } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, userRole, vendorId: currentVendorId } = useAuth();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -290,77 +290,96 @@ const ProductDetail = () => {
     }
   };
 
+  const hydrateProduct = async (product) => {
+    if (!product) return null;
+    if (product.micro_category_id) {
+      const { data: catData } = await supabase
+        .from('micro_categories')
+        .select(
+          `
+          id, name, slug,
+          sub_categories (
+            id, name, slug,
+            head_categories (id, name, slug)
+          )
+        `
+        )
+        .eq('id', product.micro_category_id)
+        .single();
+      if (catData) {
+        product.micro_categories = catData;
+
+        let metaRes = await supabase
+          .from('micro_category_meta')
+          .select('meta_tags, description')
+          .eq('micro_categories', product.micro_category_id)
+          .maybeSingle();
+        if (metaRes.error && (metaRes.error.code === '42703' || /column .* does not exist/i.test(metaRes.error.message || ''))) {
+          metaRes = await supabase
+            .from('micro_category_meta')
+            .select('meta_tags, description')
+            .eq('micro_category_id', product.micro_category_id)
+            .maybeSingle();
+        }
+        if (metaRes.data) {
+          product.meta_tags = metaRes.data.meta_tags;
+          product.meta_description = metaRes.data.description;
+        }
+      }
+    }
+    return product;
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
-        // First try to load by slug
-        const res = await directoryApi.getProductDetailBySlug(productSlug);
-        setData(res);
-        if (res?.status === 'DRAFT') {
-          setIsDraft(true);
-        }
-      } catch (slugError) {
-        console.warn('Slug lookup failed, trying ID:', slugError);
-        // Fallback: try loading by ID (in case slug is actually an ID)
+        let product = null;
+
         try {
-          const { data: product, error } = await supabase
-            .from('products')
-            .select(
-              `
-              *,
-              vendors (*)
-            `
-            )
-            .eq('id', productSlug)
-            .single();
-
-          if (!error && product) {
-            // Get category and meta separately if needed
-            if (product.micro_category_id) {
-              const { data: catData } = await supabase
-                .from('micro_categories')
-                .select(
-                  `
-                  id, name, slug,
-                  sub_categories (
-                    id, name, slug,
-                    head_categories (id, name, slug)
-                  )
-                `
-                )
-                .eq('id', product.micro_category_id)
-                .single();
-              if (catData) {
-                product.micro_categories = catData;
-
-                // Fetch meta tags from micro_category_meta table
-                const { data: metaData } = await supabase
-                  .from('micro_category_meta')
-                  .select('meta_tags, description')
-                  .eq('micro_categories', product.micro_category_id)
-                  .single();
-                if (metaData) {
-                  product.meta_tags = metaData.meta_tags;
-                  product.meta_description = metaData.description;
-                }
-              }
-            }
-            setData(product);
-            if (product?.status === 'DRAFT') {
-              setIsDraft(true);
-            }
-          } else {
-            console.error('Product not found by ID or slug');
-          }
-        } catch (idError) {
-          console.error('ID lookup also failed:', idError);
+          product = await directoryApi.getProductDetailBySlug(productSlug);
+        } catch (slugError) {
+          console.warn('Slug lookup failed:', slugError);
         }
+
+        // If not found (often due to vendor inactive), allow vendor owner to view
+        if (!product && userRole === 'VENDOR' && currentVendorId) {
+          const { data: raw } = await supabase
+            .from('products')
+            .select('*, vendors(*)')
+            .eq('slug', productSlug)
+            .maybeSingle();
+
+          if (raw && raw.vendor_id === currentVendorId) {
+            product = await hydrateProduct(raw);
+          }
+        }
+
+        // Fallback: try loading by ID (in case slug is actually an ID)
+        if (!product) {
+          const { data: rawById } = await supabase
+            .from('products')
+            .select('*, vendors(*)')
+            .eq('id', productSlug)
+            .maybeSingle();
+          product = await hydrateProduct(rawById);
+        }
+
+        if (product) {
+          setData(product);
+          if (product?.status === 'DRAFT') {
+            setIsDraft(true);
+          }
+        } else {
+          console.error('Product not found by slug or ID');
+        }
+      } catch (e) {
+        console.error('Product load failed:', e);
       } finally {
         setLoading(false);
       }
     };
     if (productSlug) load();
-  }, [productSlug]);
+  }, [productSlug, userRole, currentVendorId]);
 
   if (loading)
     return (
@@ -372,6 +391,21 @@ const ProductDetail = () => {
 
   const { vendors: vendor, micro_categories: cat } = data;
   const images = data.images || [];
+  const categoryPathParts = (() => {
+    if (cat?.sub_categories || cat?.name) {
+      const headName = cat?.sub_categories?.head_categories?.name || '';
+      const subName = cat?.sub_categories?.name || '';
+      const microName = cat?.name || '';
+      return [headName, subName, microName].filter(Boolean);
+    }
+    const rawPath = data.category_path || data.category_other || data.category || '';
+    return rawPath
+      .split('>')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  })();
+  const categoryLabel =
+    categoryPathParts.length > 0 ? categoryPathParts.join(' › ') : 'Uncategorized';
 
   // Build SEO meta tags
   let seoMetaTags = null;
@@ -388,7 +422,11 @@ const ProductDetail = () => {
     const extraCatNames = extraCategories?.map((c) => c?.name).filter(Boolean).join(', ') || '';
     const extraMetaTags = extraCategories?.map((c) => c?.meta_tags).filter(Boolean) || [];
     const extraDescriptions = extraCategories?.map((c) => c?.description).filter(Boolean) || [];
-    const categoryPath = [cat?.name, cat?.sub_categories?.name].filter(Boolean).join(' - ');
+    const categoryPath =
+      [cat?.sub_categories?.head_categories?.name, cat?.sub_categories?.name, cat?.name]
+        .filter(Boolean)
+        .join(' - ') ||
+      (data.category_path || data.category_other || data.category || '');
 
     // Priority: primary micro category meta_tags > custom meta_tags > generated title
     const seoTitle =
@@ -550,8 +588,16 @@ const ProductDetail = () => {
           <Link to="/directory">Directory</Link> {' › '}
           {cat ? (
             <>
-              <span>{cat.sub_categories?.head_categories?.name}</span> {' › '}
-              <span>{cat.sub_categories?.name}</span> {' › '}
+              {cat.sub_categories?.head_categories?.name && (
+                <>
+                  <span>{cat.sub_categories?.head_categories?.name}</span> {' › '}
+                </>
+              )}
+              {cat.sub_categories?.name && (
+                <>
+                  <span>{cat.sub_categories?.name}</span> {' › '}
+                </>
+              )}
               <Link
                 to={`/directory/${cat.sub_categories?.head_categories?.slug}/${cat.sub_categories?.slug}/${cat.slug}`}
                 className="text-blue-600 font-medium"
@@ -560,7 +606,7 @@ const ProductDetail = () => {
               </Link>
             </>
           ) : (
-            <span>{data.category_other || 'Uncategorized'}</span>
+            <span>{categoryLabel}</span>
           )}
         </div>
       </div>
@@ -661,7 +707,7 @@ const ProductDetail = () => {
           </div>
 
           <div
-            className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border"
+            className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border break-words whitespace-pre-wrap overflow-hidden"
             dangerouslySetInnerHTML={{ __html: data.description || 'No description available.' }}
           />
 
@@ -671,9 +717,9 @@ const ProductDetail = () => {
               <h3 className="font-bold mb-3 text-sm uppercase text-gray-500 border-b pb-2">Product Specifications</h3>
               <div className="space-y-2 text-sm">
                 {data.specifications.map((s, i) => (
-                  <div key={i} className="flex justify-between pb-1">
-                    <span className="text-slate-500">{s.key}</span>
-                    <span className="font-medium text-slate-900">{s.value}</span>
+                  <div key={i} className="flex justify-between pb-1 gap-2">
+                    <span className="text-slate-500 break-words">{s.key}</span>
+                    <span className="font-medium text-slate-900 break-words text-right">{s.value}</span>
                   </div>
                 ))}
               </div>

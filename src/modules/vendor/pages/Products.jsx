@@ -102,117 +102,138 @@ const Products = () => {
         ) : (
           filteredProducts.map((p) => {
             const mainImage = p.images?.[0];
+            const priceLabel = p.price ? `₹ ${p.price}${p.price_unit ? ` / ${p.price_unit}` : ''}` : 'Price on request';
+            const categoryLabel = p.category_path ? p.category_path : (p.category_other || 'Uncategorized');
+
             return (
-              <Card key={p.id} className="overflow-hidden hover:shadow-lg transition-all border-0 shadow-md">
-                 <div className="flex flex-col lg:flex-row">
-                    {/* LEFT: Images */}
-                    <div className="w-full lg:w-56 h-56 bg-slate-100 flex-shrink-0 relative border-r flex items-center justify-center">
-                        {mainImage ? (
-                            <img src={mainImage} className="w-full h-full object-contain p-2" alt={p.name} />
-                        ) : (
-                            <div className="flex items-center justify-center h-full text-slate-400"><Eye className="w-8 h-8"/></div>
-                        )}
-                        <div className="absolute bottom-3 right-3">
-                           <Badge variant={p.status === 'ACTIVE' ? 'default' : 'secondary'} className={`text-xs py-0.5 px-2 ${p.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : ''}`}>{p.status || 'DRAFT'}</Badge>
+              <Card key={p.id} className="overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+                <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_220px]">
+                  {/* LEFT: Image */}
+                  <div className="relative bg-slate-50 h-52 lg:h-full border-b lg:border-b-0 lg:border-r flex items-center justify-center">
+                    {mainImage ? (
+                      <img src={mainImage} className="w-full h-full object-cover" alt={p.name} />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center text-slate-400 gap-2">
+                        <Eye className="w-8 h-8" />
+                        <span className="text-xs">No image</span>
+                      </div>
+                    )}
+                    <Badge
+                      variant={p.status === 'ACTIVE' ? 'default' : 'secondary'}
+                      className={`absolute top-3 left-3 text-xs ${p.status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : ''}`}
+                    >
+                      {p.status || 'DRAFT'}
+                    </Badge>
+                  </div>
+
+                  {/* CENTER: Product Info */}
+                  <div className="p-5 flex flex-col justify-between gap-3 min-w-0">
+                    <div className="space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <h3 className="text-lg font-semibold text-slate-900 line-clamp-2 break-words">{p.name}</h3>
+                      </div>
+                      <div className="text-base font-semibold text-[#003D82]">{priceLabel}</div>
+
+                      <div className="text-xs text-slate-600 break-all">
+                        {categoryLabel.split('>').map((cat, idx, arr) => (
+                          <React.Fragment key={idx}>
+                            <span>{cat.trim()}</span>
+                            {idx < arr.length - 1 && <span className="mx-1 text-slate-400">›</span>}
+                          </React.Fragment>
+                        ))}
+                      </div>
+
+                      {p.extra_micro_categories && p.extra_micro_categories.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {p.extra_micro_categories.map((cat, idx) => (
+                            <Badge key={idx} variant="secondary" className="text-[11px] bg-blue-50 text-blue-700 border-blue-200">
+                              {cat.name || cat}
+                            </Badge>
+                          ))}
                         </div>
+                      )}
+
+                      {p.description && (
+                        <p className="text-sm text-slate-600 line-clamp-2 break-all whitespace-pre-wrap">
+                          {p.description.replace(/<[^>]*>/g, '')}
+                        </p>
+                      )}
                     </div>
 
-                    {/* CENTER: Product Info */}
-                    <div className="flex-1 p-6 flex flex-col justify-between">
+                    <div className="flex flex-wrap gap-3 text-xs text-slate-600 pt-2 border-t">
+                      {p.min_order_qty && (
                         <div>
-                            <h3 className="text-xl font-bold text-slate-900 mb-2">{p.name}</h3>
-                            <div className="text-lg font-semibold text-[#003D82] mb-2">
-                               ₹ {p.price} / {p.price_unit}
-                            </div>
-                            <div className="text-sm text-gray-600 mb-4">
-                               {p.category_path ? (
-                                  <span>
-                                    {p.category_path.split('>').map((cat, idx, arr) => (
-                                      <React.Fragment key={idx}>
-                                        <span>{cat.trim()}</span>
-                                        {idx < arr.length - 1 && <span className="mx-1">›</span>}
-                                      </React.Fragment>
-                                    ))}
-                                  </span>
-                               ) : (p.category_other || 'Uncategorized')}
-                            </div>
-                            {p.extra_micro_categories && p.extra_micro_categories.length > 0 && (
-                              <div className="flex flex-wrap gap-2 mb-3">
-                                {p.extra_micro_categories.map((cat, idx) => (
-                                  <Badge key={idx} variant="secondary" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
-                                    {cat.name || cat}
-                                  </Badge>
-                                ))}
-                              </div>
-                            )}
-                            {p.description && (
-                               <p className="text-sm text-gray-600 line-clamp-2 mb-3">{p.description.replace(/<[^>]*>/g, '')}</p>
-                            )}
+                          Min Order: <span className="font-medium">{p.min_order_qty} {p.qty_unit}</span>
                         </div>
-                        <div className="flex flex-wrap gap-2 text-sm text-slate-600 pt-3 border-t">
-                             {p.min_order_qty && <div>Min Order: <span className="font-medium">{p.min_order_qty} {p.qty_unit}</span></div>}
-                             {p.target_locations?.states?.length > 0 && (
-                                <div className="flex items-center gap-1">
-                                   <MapPin className="w-3 h-3"/> 
-                                   {p.target_locations.states.length} States, {p.target_locations.cities.length} Cities
-                                </div>
-                             )}
+                      )}
+                      {p.target_locations?.states?.length > 0 && (
+                        <div className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {p.target_locations.states.length} States, {p.target_locations.cities.length} Cities
                         </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* RIGHT: Specs + Actions */}
+                  <div className="bg-slate-50 p-4 border-t lg:border-t-0 lg:border-l flex flex-col justify-between gap-4 min-w-0">
+                    <div>
+                      <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wide mb-2">Specifications</h4>
+                      {p.specifications && p.specifications.length > 0 ? (
+                        <div className="space-y-1 text-xs">
+                          {p.specifications.slice(0, 3).map((spec, idx) => (
+                            <div key={idx} className="flex justify-between gap-2">
+                              <span className="text-slate-600 line-clamp-1">{spec.key}</span>
+                              <span className="font-medium text-slate-900 line-clamp-1">{spec.value}</span>
+                            </div>
+                          ))}
+                          {p.specifications.length > 3 && (
+                            <div className="text-[11px] text-blue-600">+{p.specifications.length - 3} more</div>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-slate-500">No specs added</div>
+                      )}
                     </div>
 
-                    {/* RIGHT: Specifications & Actions */}
-                    <div className="w-full lg:w-72 bg-slate-50 p-6 border-l flex flex-col justify-between">
-                        {/* Specs */}
-                        {p.specifications && p.specifications.length > 0 && (
-                           <div className="mb-4">
-                              <h4 className="font-bold text-sm text-gray-700 mb-3 uppercase">Specifications</h4>
-                              <div className="space-y-2 text-sm">
-                                 {p.specifications.slice(0, 3).map((spec, idx) => (
-                                    <div key={idx} className="flex justify-between">
-                                       <span className="text-gray-600">{spec.key}</span>
-                                       <span className="font-medium text-gray-900">{spec.value}</span>
-                                    </div>
-                                 ))}
-                                 {p.specifications.length > 3 && <p className="text-xs text-blue-600 cursor-pointer">+{p.specifications.length - 3} more</p>}
-                              </div>
-                           </div>
+                    <div className="flex flex-col gap-2">
+                      <Button size="sm" variant="outline" asChild className="justify-start">
+                        <Link to={`/p/${p.slug || p.id}`} target="_blank">
+                          <Eye className="w-4 h-4 mr-2" /> View Product
+                        </Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleCopyProductLink(p.slug || p.id)}
+                        className="justify-start"
+                      >
+                        {copiedId === (p.slug || p.id) ? (
+                          <>
+                            <CheckCircle className="w-4 h-4 mr-2 text-emerald-600" /> Copied
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-4 h-4 mr-2" /> Copy Link
+                          </>
                         )}
-
-                        {/* Action Buttons */}
-                        <div className="flex flex-col gap-2">
-                           <Button size="sm" variant="ghost" asChild className="justify-start" title="View product">
-                              <Link to={`/p/${p.slug || p.id}`} target="_blank" className="text-blue-600 hover:text-blue-800">
-                                 <Eye className="w-4 h-4 mr-2" /> View Product
-                              </Link>
-                           </Button>
-                           <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              onClick={() => handleCopyProductLink(p.slug || p.id)}
-                              className="justify-start"
-                              title="Copy shareable link"
-                           >
-                              {copiedId === (p.slug || p.id) ? 
-                                 <><CheckCircle className="w-4 h-4 mr-2 text-green-600" /> Copied</> :
-                                 <><Copy className="w-4 h-4 mr-2" /> Copy Link</>
-                              }
-                           </Button>
-                           <Button size="sm" variant="outline" asChild className="justify-start">
-                              <Link to={`/vendor/products/${p.id}/edit`}>
-                                 <Edit className="w-4 h-4 mr-2" /> Edit
-                              </Link>
-                           </Button>
-                           <Button 
-                              size="sm" 
-                              variant="ghost" 
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50 justify-start"
-                              onClick={() => handleDelete(p.id)}
-                           >
-                              <Trash2 className="w-4 h-4 mr-2" /> Delete
-                           </Button>
-                        </div>
+                      </Button>
+                      <Button size="sm" variant="ghost" asChild className="justify-start">
+                        <Link to={`/vendor/products/${p.id}/edit`}>
+                          <Edit className="w-4 h-4 mr-2" /> Edit
+                        </Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 justify-start"
+                        onClick={() => handleDelete(p.id)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" /> Delete
+                      </Button>
                     </div>
-                 </div>
+                  </div>
+                </div>
               </Card>
             );
           })

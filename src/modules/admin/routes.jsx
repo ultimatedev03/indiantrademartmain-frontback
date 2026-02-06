@@ -55,6 +55,9 @@ const LoginRouter = () => {
   const location = useLocation();
   const { appType } = useSubdomain();
   const p = location.pathname || '';
+  const search = location.search || '';
+  const params = new URLSearchParams(search);
+  const portalParam = String(params.get('portal') || '').toLowerCase();
 
   // ✅ MAIN MODE (localhost) prefixes
   if (p.startsWith('/employee')) {
@@ -83,6 +86,16 @@ const LoginRouter = () => {
   }
 
   if (p.startsWith('/admin')) {
+    if (portalParam === 'finance') {
+      return (
+        <PortalLogin
+          portalName="Finance Portal"
+          colorScheme="amber"
+          defaultEmail="finance@itm.com"
+          icon={ShieldCheck}
+        />
+      );
+    }
     return (
       <PortalLogin
         portalName="Admin Portal"
@@ -95,6 +108,16 @@ const LoginRouter = () => {
 
   // ✅ SUBDOMAIN MODE (admin.company.com / man.company.com)
   if (appType === 'admin' || appType === 'management') {
+    if (portalParam === 'finance') {
+      return (
+        <PortalLogin
+          portalName="Finance Portal"
+          colorScheme="amber"
+          defaultEmail="finance@itm.com"
+          icon={ShieldCheck}
+        />
+      );
+    }
     return (
       <PortalLogin
         portalName="Admin Portal"

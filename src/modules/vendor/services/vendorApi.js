@@ -1371,13 +1371,24 @@ export const vendorApi = {
     matchCategory: async (name) => {
       if (!name || name.length < 3) return null;
 
+      const cleanName = String(name || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const { extractKeywords, findBestMatchingCategory, isStrongMatch } = await import('@/shared/utils/categoryMatcher');
+      const keywords = extractKeywords(cleanName);
+      const primaryPhrase = keywords.slice(0, 3).join(' ');
+      const searchPhrase = primaryPhrase || cleanName;
+
       const { data: exactMatch, error: e1 } = await supabase
         .from('micro_categories')
         .select(`
           id, name, slug,
           sub_categories(id, name, slug, head_categories(id, name, slug))
         `)
-        .ilike('name', `${name}%`)
+        .ilike('name', `${searchPhrase}%`)
         .limit(1)
         .maybeSingle();
 
@@ -1396,35 +1407,118 @@ export const vendorApi = {
         };
       }
 
-      const { data: allCategories, error } = await supabase
-        .from('micro_categories')
-        .select(`
-          id, name, slug, description,
-          sub_categories(id, name, slug, head_categories(id, name, slug))
-        `)
-        .eq('is_active', true)
-        .limit(200);
-
-      if (error || !allCategories) return null;
-
       try {
-        const { findBestMatchingCategory, isStrongMatch } = await import('@/shared/utils/categoryMatcher');
-        const match = findBestMatchingCategory(name, allCategories);
-        if (!match) return null;
+        let candidates = [];
 
-        const category = match.category;
-        const score = match.score;
+        if (searchPhrase) {
+          const { data: phraseMatch } = await supabase
+            .from('micro_categories')
+            .select(`
+              id, name, slug,
+              sub_categories(id, name, slug, head_categories(id, name, slug))
+            `)
+            .eq('is_active', true)
+            .ilike('name', `%${searchPhrase}%`)
+            .limit(10);
+          candidates = phraseMatch || [];
+        }
 
+        if (!candidates.length && keywords.length) {
+          const orFilter = keywords.slice(0, 4).map((k) => `name.ilike.%${k}%`).join(',');
+          const { data: keywordHits } = await supabase
+            .from('micro_categories')
+            .select(`
+              id, name, slug,
+              sub_categories(id, name, slug, head_categories(id, name, slug))
+            `)
+            .eq('is_active', true)
+            .or(orFilter)
+            .limit(120);
+          candidates = keywordHits || [];
+        }
+
+        if (!candidates.length) {
+          const { data: allCategories } = await supabase
+            .from('micro_categories')
+            .select(`
+              id, name, slug,
+              sub_categories(id, name, slug, head_categories(id, name, slug))
+            `)
+            .eq('is_active', true)
+            .limit(1200);
+          candidates = allCategories || [];
+        }
+
+        if (candidates.length) {
+          const match = findBestMatchingCategory(cleanName, candidates);
+          if (match) {
+            const category = match.category;
+            const score = match.score;
+            return {
+              confidence: Math.round(score * 100),
+              micro_category_id: category.id,
+              name: category.name,
+              slug: category.slug,
+              sub_category_id: category.sub_categories?.id,
+              head_category_id: category.sub_categories?.head_categories?.id,
+              path: `${category.sub_categories?.head_categories?.name} > ${category.sub_categories?.name} > ${category.name}`,
+              matchScore: Math.round(score * 100),
+              isStrong: isStrongMatch(score),
+              matchType: 'micro',
+            };
+          }
+        }
+
+        // Sub-category fallback (if micro not found)
+        let subCandidates = [];
+        if (searchPhrase) {
+          const { data: subPhrase } = await supabase
+            .from('sub_categories')
+            .select('id, name, slug, head_categories(id, name, slug)')
+            .eq('is_active', true)
+            .ilike('name', `%${searchPhrase}%`)
+            .limit(10);
+          subCandidates = subPhrase || [];
+        }
+
+        if (!subCandidates.length && keywords.length) {
+          const orFilter = keywords.slice(0, 4).map((k) => `name.ilike.%${k}%`).join(',');
+          const { data: subKeywordHits } = await supabase
+            .from('sub_categories')
+            .select('id, name, slug, head_categories(id, name, slug)')
+            .eq('is_active', true)
+            .or(orFilter)
+            .limit(120);
+          subCandidates = subKeywordHits || [];
+        }
+
+        if (!subCandidates.length) {
+          const { data: allSubs } = await supabase
+            .from('sub_categories')
+            .select('id, name, slug, head_categories(id, name, slug)')
+            .eq('is_active', true)
+            .limit(800);
+          subCandidates = allSubs || [];
+        }
+
+        if (!subCandidates.length) return null;
+
+        const subMatch = findBestMatchingCategory(cleanName, subCandidates);
+        if (!subMatch) return null;
+
+        const subCategory = subMatch.category;
+        const subScore = subMatch.score;
         return {
-          confidence: Math.round(score * 100),
-          micro_category_id: category.id,
-          name: category.name,
-          slug: category.slug,
-          sub_category_id: category.sub_categories?.id,
-          head_category_id: category.sub_categories?.head_categories?.id,
-          path: `${category.sub_categories?.head_categories?.name} > ${category.sub_categories?.name} > ${category.name}`,
-          matchScore: Math.round(score * 100),
-          isStrong: isStrongMatch(score)
+          confidence: Math.round(subScore * 100),
+          micro_category_id: null,
+          name: subCategory.name,
+          slug: subCategory.slug,
+          sub_category_id: subCategory.id,
+          head_category_id: subCategory.head_categories?.id,
+          path: `${subCategory.head_categories?.name} > ${subCategory.name}`,
+          matchScore: Math.round(subScore * 100),
+          isStrong: isStrongMatch(subScore),
+          matchType: 'sub',
         };
       } catch (e) {
         console.error('Category match error:', e);

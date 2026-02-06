@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { BadgeCheck, MapPin, Send, Star, Phone, Globe, Building2, User, MessageSquare, Wrench } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Card from '@/shared/components/Card';
 import { Badge } from '@/shared/components/Badge';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -52,15 +53,57 @@ const FALLBACK_PRODUCTS = [
 
 const FALLBACK_SERVICE_IMAGE = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80";
 
+class VendorProfileErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error('[VendorProfile] render error:', error, info);
+    if (typeof window !== 'undefined') {
+      window.__vendorProfileError = { error, info };
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="container mx-auto px-4 py-8 max-w-4xl">
+          <Card>
+            <Card.Content className="p-6 text-center text-gray-600 space-y-3">
+              <div className="text-lg font-semibold text-gray-900">Something went wrong</div>
+              <p>Vendor profile could not load. Please refresh the page.</p>
+              {this.state.error && (
+                <pre className="text-xs text-gray-500 break-all whitespace-pre-wrap text-left bg-gray-50 border rounded p-3">
+                  {String(this.state.error?.message || this.state.error)}
+                </pre>
+              )}
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                Reload
+              </Button>
+            </Card.Content>
+          </Card>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Mask phone number to show only first 2 and last 2 digits
 const maskPhoneNumber = (phone) => {
   if (!phone) return '+91-XXXXXXXXXX';
-  const cleaned = phone.replace(/\D/g, '');
+  const cleaned = String(phone).replace(/\D/g, '');
   if (cleaned.length < 4) return '+91-XXXXXXXXXX';
   return '+91' + cleaned.slice(0, 2) + 'XXXXXXXX' + cleaned.slice(-2);
 };
 
-const VendorProfile = () => {
+const VendorProfileContent = () => {
   const { vendorId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -79,6 +122,8 @@ const VendorProfile = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'products');
   const [showAllProducts, setShowAllProducts] = useState(false);
+  const [selectedCollectionKey, setSelectedCollectionKey] = useState('');
+  const [showAllServiceCollections, setShowAllServiceCollections] = useState(false);
 
   useEffect(() => {
     // Fetch vendor data from Supabase
@@ -121,7 +166,7 @@ const VendorProfile = () => {
           // Fetch products from this vendor (all active, newest first)
           const { data: productsData, error: productsError } = await supabase
             .from('products')
-            .select('id, name, price, price_unit, images, category_other')
+            .select('id, name, price, price_unit, images, category_other, micro_category_id, sub_category_id, head_category_id')
             .eq('vendor_id', vendorData.id)
             .eq('status', 'ACTIVE')
             .order('created_at', { ascending: false });
@@ -131,13 +176,82 @@ const VendorProfile = () => {
           }
 
           if (productsData && productsData.length > 0) {
-            const mappedProducts = productsData.map(p => ({
-              id: p.id,
-              name: p.name,
-              price: `₹${p.price}${p.price_unit ? ' / ' + p.price_unit : ''}`,
-              category: p.category_other || 'General',
-              image: (p.images && Array.isArray(p.images) && p.images[0]) || (p.images && typeof p.images === 'string' ? p.images : 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80')
-            }));
+            const microIds = Array.from(new Set(productsData.map(p => p.micro_category_id).filter(Boolean)));
+            const subIds = Array.from(new Set(productsData.map(p => p.sub_category_id).filter(Boolean)));
+            const headIds = Array.from(new Set(productsData.map(p => p.head_category_id).filter(Boolean)));
+
+            const [microRes, subRes, headRes] = await Promise.all([
+              microIds.length
+                ? supabase
+                  .from('micro_categories')
+                  .select('id, name, sub_categories(id, name, head_categories(id, name))')
+                  .in('id', microIds)
+                : Promise.resolve({ data: [] }),
+              subIds.length
+                ? supabase
+                  .from('sub_categories')
+                  .select('id, name, head_categories(id, name)')
+                  .in('id', subIds)
+                : Promise.resolve({ data: [] }),
+              headIds.length
+                ? supabase
+                  .from('head_categories')
+                  .select('id, name')
+                  .in('id', headIds)
+                : Promise.resolve({ data: [] }),
+            ]);
+
+            const microLookup = {};
+            (microRes?.data || []).forEach((m) => {
+              microLookup[m.id] = {
+                microName: m.name,
+                subId: m.sub_categories?.id || null,
+                subName: m.sub_categories?.name || null,
+                headId: m.sub_categories?.head_categories?.id || null,
+                headName: m.sub_categories?.head_categories?.name || null,
+              };
+            });
+
+            const subLookup = {};
+            (subRes?.data || []).forEach((s) => {
+              subLookup[s.id] = {
+                subName: s.name,
+                headId: s.head_categories?.id || null,
+                headName: s.head_categories?.name || null,
+              };
+            });
+
+            const headLookup = {};
+            (headRes?.data || []).forEach((h) => {
+              headLookup[h.id] = h.name;
+            });
+
+            const mappedProducts = productsData.map(p => {
+              const microInfo = microLookup[p.micro_category_id] || {};
+              const subInfo = subLookup[p.sub_category_id] || {};
+              const headName =
+                microInfo.headName ||
+                subInfo.headName ||
+                headLookup[p.head_category_id] ||
+                'Other Category';
+              const subName =
+                microInfo.subName ||
+                subInfo.subName ||
+                p.category_other ||
+                'Other Subcategory';
+
+              return {
+                id: p.id,
+                name: p.name,
+                price: `₹${p.price}${p.price_unit ? ' / ' + p.price_unit : ''}`,
+                category: p.category_other || microInfo.microName || subName || 'General',
+                head_category_name: headName,
+                sub_category_name: subName,
+                micro_category_name: microInfo.microName || null,
+                image: (p.images && Array.isArray(p.images) && p.images[0]) || (p.images && typeof p.images === 'string' ? p.images : 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80')
+              };
+            });
+
             setProducts(mappedProducts);
             setShowAllProducts(false);
           } else {
@@ -324,6 +438,57 @@ const VendorProfile = () => {
     loadLeads();
   }, [vendorId, isBuyer, user]);
 
+  // Always use fallback if no vendor, but not for products
+  const displayVendor = vendor || FALLBACK_VENDORS[0];
+  const displayProducts = Array.isArray(products) ? products : [];
+  const displayServices = Array.isArray(services) ? services : [];
+  const visibleProducts = showAllProducts ? displayProducts : displayProducts.slice(0, 6);
+  const groupedCollections = useMemo(() => {
+    try {
+      const groups = {};
+      (displayProducts || []).forEach((product) => {
+        const head = String(product?.head_category_name || 'Other Category');
+        const sub = String(product?.sub_category_name || 'Other Subcategory');
+        if (!groups[head]) groups[head] = {};
+        if (!groups[head][sub]) groups[head][sub] = [];
+        groups[head][sub].push(product);
+      });
+      return groups;
+    } catch (e) {
+      console.error('[VendorProfile] product grouping failed:', e);
+      return {};
+    }
+  }, [displayProducts]);
+  const hasCollections = Object.keys(groupedCollections || {}).length > 0;
+  const collectionList = useMemo(() => {
+    const list = [];
+    Object.entries(groupedCollections || {}).forEach(([headName, subGroups]) => {
+      const safeSubGroups = subGroups && typeof subGroups === 'object' ? subGroups : {};
+      Object.entries(safeSubGroups).forEach(([subName, items]) => {
+        const key = `${headName}|||${subName}`;
+        list.push({
+          key,
+          headName,
+          subName,
+          items: Array.isArray(items) ? items : []
+        });
+      });
+    });
+    return list.sort((a, b) => String(a.subName).localeCompare(String(b.subName)));
+  }, [groupedCollections]);
+  const selectedCollection = collectionList.find((c) => c.key === selectedCollectionKey) || null;
+  const visibleCollections = showAllServiceCollections ? collectionList : collectionList.slice(0, 6);
+
+  const handleEnquire = (product) => {
+    const vendorName = encodeURIComponent(displayVendor?.company_name || '');
+    const productName = encodeURIComponent(product?.name || '');
+    if (isBuyer) {
+      navigate(`/buyer/proposals/new?vendorId=${displayVendor.id}&vendorName=${vendorName}&productName=${productName}`);
+    } else {
+      navigate('/buyer/login');
+    }
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8 space-y-6">
@@ -337,12 +502,6 @@ const VendorProfile = () => {
       </div>
     );
   }
-
-  // Always use fallback if no vendor, but not for products
-  const displayVendor = vendor || FALLBACK_VENDORS[0];
-  const displayProducts = products;
-  const displayServices = services;
-  const visibleProducts = showAllProducts ? displayProducts : displayProducts.slice(0, 6);
 
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl font-sans">
@@ -424,18 +583,31 @@ const VendorProfile = () => {
             <TabsContent value="products" className="pt-6">
               {displayProducts && displayProducts.length > 0 ? (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {visibleProducts.map(product => (
                       <Card key={product.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
-                        <div className="h-48 bg-gray-100 relative overflow-hidden">
-                          <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                        <div className="h-24 bg-gray-100 relative overflow-hidden">
+                          <img
+                            src={product.image || 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80'}
+                            alt={product.name}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          />
                         </div>
-                        <Card.Content className="p-4">
-                          <Badge variant="outline" className="mb-2">{product.category}</Badge>
-                          <h3 className="font-semibold text-lg text-gray-900 mb-1">{product.name}</h3>
-                          <div className="flex justify-between items-center mt-2">
-                            <span className="font-bold text-[#003D82] text-lg">{product.price}</span>
-                            <Button size="sm" variant="secondary" className="h-8">Enquire</Button>
+                        <Card.Content className="p-2.5">
+                          <Badge variant="outline" className="mb-1.5 text-[10px]">
+                            {product.category}
+                          </Badge>
+                          <h3 className="font-semibold text-xs text-gray-900 mb-1 line-clamp-2">{product.name}</h3>
+                          <div className="flex justify-between items-center mt-1.5">
+                            <span className="font-semibold text-[#003D82] text-xs">{product.price}</span>
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              className="h-6 px-2 text-[10px]"
+                              onClick={() => handleEnquire(product)}
+                            >
+                              Enquire
+                            </Button>
                           </div>
                         </Card.Content>
                       </Card>
@@ -471,50 +643,104 @@ const VendorProfile = () => {
             </TabsContent>
 
             <TabsContent value="services" className="pt-6">
-              {displayServices && displayServices.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  {displayServices.map(service => (
-                    <Card key={service.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
-                      <div className="h-44 bg-gray-100 relative overflow-hidden">
-                        <img
-                          src={service.image || FALLBACK_SERVICE_IMAGE}
-                          alt={service.name}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      </div>
-                      <Card.Content className="p-4">
-                        <Badge variant="outline" className="mb-2">{service.category || 'Service'}</Badge>
-                        <h3 className="font-semibold text-lg text-gray-900 mb-1">{service.name}</h3>
-                        <p className="text-sm text-gray-600 line-clamp-2">{service.description || 'Service details coming soon.'}</p>
-                        <div className="flex justify-between items-center mt-3">
-                          <span className="font-bold text-[#003D82] text-base">
-                            {service.price || 'Price on request'}
-                          </span>
-                          <Button size="sm" variant="secondary" className="h-8">Enquire</Button>
-                        </div>
-                      </Card.Content>
-                    </Card>
-                  ))}
-                </div>
-              ) : serviceCategories && serviceCategories.length > 0 ? (
-                <Card>
-                  <Card.Content className="p-6">
-                    <h4 className="font-semibold text-gray-900 mb-3">Service Categories</h4>
-                    <div className="flex flex-wrap gap-2">
-                      {serviceCategories.map((cat) => (
-                        <Badge key={cat.id} variant="secondary" className="px-3 py-1">
-                          {cat.name}
-                        </Badge>
-                      ))}
+              {hasCollections ? (
+                <div className="space-y-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {visibleCollections.map((col) => {
+                      const previewImage = col.items?.[0]?.image || 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80';
+                      return (
+                        <Card
+                          key={col.key}
+                          className={`overflow-hidden hover:shadow-md transition-shadow cursor-pointer border ${selectedCollectionKey === col.key ? 'border-[#00A699]' : 'border-gray-200'}`}
+                          onClick={() => setSelectedCollectionKey(col.key)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedCollectionKey(col.key);
+                            }
+                          }}
+                        >
+                          <div className="h-20 bg-gray-100 relative overflow-hidden">
+                            <img src={previewImage} alt={col.subName} className="w-full h-full object-cover" />
+                          </div>
+                          <Card.Content className="p-2.5">
+                            <div className="text-[11px] font-semibold text-gray-900 line-clamp-1">{col.subName}</div>
+                            <div className="text-[10px] text-gray-500 line-clamp-1">{col.headName}</div>
+                            <div className="mt-2 flex items-center justify-between">
+                              <Badge variant="secondary" className="text-[10px]">{col.items.length} item(s)</Badge>
+                              <span className="text-[10px] text-[#00A699]">View</span>
+                            </div>
+                          </Card.Content>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                  {collectionList.length > 6 && !showAllServiceCollections && (
+                    <div className="flex justify-center">
+                      <Button variant="outline" onClick={() => setShowAllServiceCollections(true)}>
+                        View all services ({collectionList.length})
+                      </Button>
                     </div>
-                  </Card.Content>
-                </Card>
+                  )}
+                  {showAllServiceCollections && collectionList.length > 6 && (
+                    <div className="flex justify-center">
+                      <Button variant="ghost" onClick={() => setShowAllServiceCollections(false)}>
+                        Show fewer services
+                      </Button>
+                    </div>
+                  )}
+
+                  <Dialog open={!!selectedCollection} onOpenChange={(open) => { if (!open) setSelectedCollectionKey(''); }}>
+                    <DialogContent className="max-w-4xl">
+                      <DialogHeader>
+                        <DialogTitle className="text-base">
+                          {selectedCollection?.subName}
+                        </DialogTitle>
+                        <p className="text-xs text-gray-500">{selectedCollection?.headName}</p>
+                      </DialogHeader>
+                      {selectedCollection && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                          {selectedCollection.items.map(product => (
+                            <Card key={product.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
+                              <div className="h-24 bg-gray-100 relative overflow-hidden">
+                                <img
+                                  src={product.image || 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80'}
+                                  alt={product.name}
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                              <Card.Content className="p-2.5">
+                                <Badge variant="outline" className="mb-1.5 text-[10px]">
+                                  {product.micro_category_name || product.sub_category_name || product.category}
+                                </Badge>
+                                <h3 className="font-semibold text-xs text-gray-900 mb-1 line-clamp-2">{product.name}</h3>
+                                <div className="flex justify-between items-center mt-1.5">
+                                  <span className="font-semibold text-[#003D82] text-xs">{product.price}</span>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-6 px-2 text-[10px]"
+                                    onClick={() => handleEnquire(product)}
+                                  >
+                                    Enquire
+                                  </Button>
+                                </div>
+                              </Card.Content>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </DialogContent>
+                  </Dialog>
+                </div>
               ) : (
                 <Card>
                   <Card.Content className="p-6 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-3">
                       <Wrench className="h-12 w-12 text-gray-300" />
-                      <p>No services added yet</p>
+                      <p>No collections available yet</p>
                     </div>
                   </Card.Content>
                 </Card>
@@ -634,18 +860,6 @@ const VendorProfile = () => {
                 </div>
               </div>
 
-              {displayVendor.website && (
-                <div className="flex gap-3 items-start">
-                  <div className="bg-cyan-50 p-2 rounded-lg"><Globe className="h-5 w-5 text-cyan-600" /></div>
-                  <div>
-                    <p className="text-xs text-gray-500">Website</p>
-                    <a href={displayVendor.website} target="_blank" rel="noopener noreferrer" className="font-medium text-cyan-600 hover:text-cyan-700 text-sm break-all">
-                      {displayVendor.website.replace(/^https?:\/\/(www\.)?/, '')}
-                    </a>
-                  </div>
-                </div>
-              )}
-
               <div className="pt-2">
                 <Button className="w-full bg-[#003D82]">Contact Supplier</Button>
               </div>
@@ -667,5 +881,11 @@ const VendorProfile = () => {
     </div>
   );
 };
+
+const VendorProfile = () => (
+  <VendorProfileErrorBoundary>
+    <VendorProfileContent />
+  </VendorProfileErrorBoundary>
+);
 
 export default VendorProfile;

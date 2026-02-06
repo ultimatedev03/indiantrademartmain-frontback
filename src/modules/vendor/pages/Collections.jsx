@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,7 +29,7 @@ const Collections = () => {
   const [selectedGroup, setSelectedGroup] = useState('');
   const [assigning, setAssigning] = useState(false);
   const [productForGroup, setProductForGroup] = useState('');
-  const [groupMode, setGroupMode] = useState('custom'); // custom | head | sub | micro | category
+  const [groupMode, setGroupMode] = useState('sub'); // custom | head | sub | micro | category
 
   // ---------------- helpers ----------------
   const fetchVendorId = async () => {
@@ -50,12 +52,124 @@ const Collections = () => {
     try {
       const { data, error } = await supabase
         .from('products')
-        .select('id, name, category, is_service, metadata, status')
+        .select('id, name, category, category_path, category_other, extra_micro_categories, is_service, metadata, status, head_category_id, sub_category_id, micro_category_id')
         .eq('vendor_id', vid)
         .neq('status', 'ARCHIVED')
         .order('created_at', { ascending: false });
       if (error) throw error;
-      setProducts(data || []);
+      const rows = data || [];
+
+      const extraMicroIds = new Set();
+      rows.forEach((p) => {
+        const extras = Array.isArray(p.extra_micro_categories) ? p.extra_micro_categories : [];
+        extras.forEach((item) => {
+          if (!item) return;
+          if (typeof item === 'string') return;
+          const id = item.id || item.micro_category_id;
+          if (id) extraMicroIds.add(id);
+        });
+      });
+
+      const headIds = Array.from(new Set(rows.map((p) => p.head_category_id).filter(Boolean)));
+      const subIds = Array.from(new Set(rows.map((p) => p.sub_category_id).filter(Boolean)));
+      const microIds = Array.from(
+        new Set([
+          ...rows.map((p) => p.micro_category_id).filter(Boolean),
+          ...Array.from(extraMicroIds),
+        ])
+      );
+
+      const [headRes, subRes, microRes] = await Promise.all([
+        headIds.length
+          ? supabase.from('head_categories').select('id, name').in('id', headIds)
+          : Promise.resolve({ data: [] }),
+        subIds.length
+          ? supabase.from('sub_categories').select('id, name, head_categories(id, name)').in('id', subIds)
+          : Promise.resolve({ data: [] }),
+        microIds.length
+          ? supabase
+            .from('micro_categories')
+            .select('id, name, sub_categories(id, name, head_categories(id, name))')
+            .in('id', microIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const headMap = new Map((headRes.data || []).map((h) => [h.id, h.name]));
+      const subMap = new Map(
+        (subRes.data || []).map((s) => [
+          s.id,
+          {
+            name: s.name,
+            headId: s.head_categories?.id || null,
+            headName: s.head_categories?.name || null,
+          },
+        ])
+      );
+      const microMap = new Map(
+        (microRes.data || []).map((m) => [
+          m.id,
+          {
+            name: m.name,
+            subId: m.sub_categories?.id || null,
+            subName: m.sub_categories?.name || null,
+            headId: m.sub_categories?.head_categories?.id || null,
+            headName: m.sub_categories?.head_categories?.name || null,
+          },
+        ])
+      );
+
+      const mapped = rows.map((p) => ({
+        ...p,
+        ...(function deriveNames() {
+          const pathParts = (p.category_path || '')
+            .split('>')
+            .map((part) => part.trim())
+            .filter(Boolean);
+
+          const subInfo = p.sub_category_id ? subMap.get(p.sub_category_id) : null;
+          const microInfo = p.micro_category_id ? microMap.get(p.micro_category_id) : null;
+
+          const extraMicroNames = (Array.isArray(p.extra_micro_categories) ? p.extra_micro_categories : [])
+            .map((item) => {
+              if (!item) return null;
+              if (typeof item === 'string') return item.trim();
+              return item.name || null;
+            })
+            .filter(Boolean);
+
+          const microNames = Array.from(
+            new Set([
+              microInfo?.name,
+              ...extraMicroNames,
+              pathParts[2],
+              p.category,
+              p.category_other,
+            ].filter(Boolean))
+          );
+
+          const microName = microNames[0] || null;
+          const subName =
+            subInfo?.name ||
+            microInfo?.subName ||
+            pathParts[1] ||
+            null;
+          const headName =
+            headMap.get(p.head_category_id) ||
+            subInfo?.headName ||
+            microInfo?.headName ||
+            pathParts[0] ||
+            null;
+
+          return {
+            head_category_name: headName,
+            sub_category_name: subName,
+            micro_category_name: microName,
+            micro_category_names: microNames,
+          };
+        })(),
+      }));
+
+      setProducts(mapped);
       // preload existing custom groups from metadata
       const groups = new Set();
       (data || []).forEach((p) => {
@@ -81,13 +195,29 @@ const Collections = () => {
 
   const grouped = useMemo(() => {
     const map = {};
+    const addToGroup = (key, product) => {
+      if (!map[key]) map[key] = [];
+      map[key].push(product);
+    };
+
     products.forEach((p) => {
+      if (groupMode === 'micro') {
+        const microList = Array.isArray(p.micro_category_names) && p.micro_category_names.length
+          ? p.micro_category_names
+          : (p.micro_category_name ? [p.micro_category_name] : []);
+        const uniqueMicros = Array.from(new Set(microList.filter(Boolean)));
+        if (uniqueMicros.length) {
+          uniqueMicros.forEach((name) => addToGroup(`Micro: ${name}`, p));
+          return;
+        }
+      }
+
       let grp = 'Uncategorized';
-      if (groupMode === 'head' && p.head_category_id && p.head_category_name) {
+      if (groupMode === 'head' && p.head_category_name) {
         grp = `Head: ${p.head_category_name}`;
-      } else if (groupMode === 'sub' && p.sub_category_id && p.sub_category_name) {
+      } else if (groupMode === 'sub' && p.sub_category_name) {
         grp = `Sub: ${p.sub_category_name}`;
-      } else if (groupMode === 'micro' && p.micro_category_id && p.micro_category_name) {
+      } else if (groupMode === 'micro' && p.micro_category_name) {
         grp = `Micro: ${p.micro_category_name}`;
       } else if (groupMode === 'category' && p.category) {
         grp = `Category: ${p.category}`;
@@ -97,8 +227,7 @@ const Collections = () => {
           (p.category ? `Category: ${p.category}` : p.is_service ? 'Services' : 'Uncategorized');
       }
 
-      if (!map[grp]) map[grp] = [];
-      map[grp].push(p);
+      addToGroup(grp, p);
     });
     return map;
   }, [products, groupMode]);
@@ -110,17 +239,16 @@ const Collections = () => {
     }
     setSaving(true);
     try {
-      // Notify data-entry via support ticket
-      if (vendorId) {
-        await supabase.from('support_tickets').insert({
-          vendor_id: vendorId,
-          subject: `New category/group request: ${newGroupName.trim()}`,
-          description:
-            newGroupNote?.trim() ||
-            'Vendor requested a custom category/group that does not exist yet.',
-          category: 'Category Request',
-          priority: 'Medium',
-        });
+      const response = await fetchWithCsrf(apiUrl('/api/category-requests'), {
+        method: 'POST',
+        body: JSON.stringify({
+          group_name: newGroupName.trim(),
+          note: newGroupNote?.trim() || '',
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to notify data-entry');
       }
       setCustomGroups((prev) => Array.from(new Set([...prev, newGroupName.trim()])));
       toast({ title: 'Custom group created', description: 'We also notified data-entry to add this category.' });
@@ -265,7 +393,7 @@ const Collections = () => {
         <div className="flex flex-wrap gap-2 text-sm">
           <span className="text-slate-600">Group by:</span>
           {[
-            { key: 'custom', label: 'Custom/Category (default)' },
+            { key: 'custom', label: 'Custom/Category' },
             { key: 'head', label: 'Head Category' },
             { key: 'sub', label: 'Sub Category' },
             { key: 'micro', label: 'Micro Category' },

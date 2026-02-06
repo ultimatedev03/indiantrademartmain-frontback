@@ -15,21 +15,31 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   const wantsInternal =
     (location.pathname || '').startsWith('/admin') ||
     (location.pathname || '').startsWith('/hr') ||
-    allowedRoles.some(r => ['ADMIN', 'HR'].includes(r));
+    (location.pathname || '').startsWith('/finance-portal') ||
+    allowedRoles.some(r => ['ADMIN', 'HR', 'FINANCE'].includes(String(r || '').trim().toUpperCase()));
 
   const loading = wantsInternal ? (internal?.isLoading ?? false) : (supa?.loading ?? false);
   const user = wantsInternal ? internal?.user : supa?.user;
   const role = wantsInternal ? (internal?.user?.role) : (supa?.userRole || supa?.user?.role);
   const isAuthenticated = wantsInternal ? !!internal?.isAuthenticated : !!supa?.user;
-  const normalizedRole = String(role || '').trim().toUpperCase();
-  const allowedSet = new Set((allowedRoles || []).map((r) => String(r || '').trim().toUpperCase()));
+  const normalizeRole = (value) => {
+    const raw = String(value || '').trim().toUpperCase();
+    if (!raw) return '';
+    if (raw === 'DATAENTRY') return 'DATA_ENTRY';
+    if (raw === 'FINACE') return 'FINANCE';
+    return raw;
+  };
+  const normalizedRole = normalizeRole(role);
+  const allowedSet = new Set((allowedRoles || []).map((r) => normalizeRole(r)));
 
   const internalHome = (r) => {
+    const path = location.pathname || '';
+    const financeBase = path.startsWith('/admin') ? '/admin/finance-portal/dashboard' : '/finance-portal/dashboard';
     switch (r) {
       case 'ADMIN':
         return '/admin/dashboard';
       case 'FINANCE':
-        return '/admin/finance-portal/dashboard';
+        return financeBase;
       case 'HR':
         return '/hr/dashboard';
       case 'DATA_ENTRY':
@@ -60,6 +70,10 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
     if (p.startsWith('/buyer')) return '/buyer/login';
     if (p.startsWith('/vendor')) return '/vendor/login';
     if (p.startsWith('/admin') || p.startsWith('/employee') || p.startsWith('/hr')) return '/admin/login';
+    if (p.startsWith('/finance-portal')) {
+      const isAdminSubdomain = host.startsWith('admin.') || host.startsWith('management.');
+      return isAdminSubdomain ? '/login' : '/admin/login';
+    }
 
     // 3) Infer from allowedRoles (subdomain-safe)
     if (allowedRoles.includes('BUYER')) return isBuyerSubdomain ? '/login' : '/buyer/login';

@@ -142,6 +142,16 @@ const Footer = () => {
                     Success Stories
                   </Link>
                 </li>
+                <li>
+                  <a
+                    href="https://blog.indiantrademart.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gray-300 hover:text-blue-400 transition-colors"
+                  >
+                    Blog
+                  </a>
+                </li>
               </ul>
             </div>
 

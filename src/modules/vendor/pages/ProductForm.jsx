@@ -749,20 +749,21 @@ const ProductForm = () => {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        <CategoryTypeahead
-                          onSelect={(item) => {
-                            if (item) {
-                              setFormData((p) => ({
-                                ...p,
-                                category_path: item.path,
-                                micro_category_id: item.id,
-                                sub_category_id: item.sub_id,
-                                head_category_id: item.head_id,
-                                category_other: '',
-                              }));
-                            }
-                          }}
-                        />
+                          <CategoryTypeahead
+                            onSelect={(item) => {
+                              if (item) {
+                                const isSub = item.type === 'sub';
+                                setFormData((p) => ({
+                                  ...p,
+                                  category_path: item.path,
+                                  micro_category_id: isSub ? null : item.id,
+                                  sub_category_id: isSub ? item.id : item.sub_id,
+                                  head_category_id: item.head_id,
+                                  category_other: '',
+                                }));
+                              }
+                            }}
+                          />
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500">Or</span>
                           <Input

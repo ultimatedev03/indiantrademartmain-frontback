@@ -25,9 +25,17 @@ const CoverageSettings = () => {
   const [selectedStates, setSelectedStates] = useState([]);
   const [selectedCities, setSelectedCities] = useState([]);
 
-  const [headCategories, setHeadCategories] = useState([]);
+  const [subCategories, setSubCategories] = useState([]);
+  const [microCategories, setMicroCategories] = useState([]);
+  const [microCategoryLookup, setMicroCategoryLookup] = useState({});
   const [preferredCategories, setPreferredCategories] = useState([]);
-  const [selectedCategoryId, setSelectedCategoryId] = useState('');
+  const [selectedSubCategoryId, setSelectedSubCategoryId] = useState('');
+  const [selectedMicroCategoryId, setSelectedMicroCategoryId] = useState('');
+  const [categoryQuery, setCategoryQuery] = useState('');
+  const [catSuggestions, setCatSuggestions] = useState([]);
+  const [catLoading, setCatLoading] = useState(false);
+  const [showCatDropdown, setShowCatDropdown] = useState(false);
+  const [categoryHint, setCategoryHint] = useState('');
   const [planName, setPlanName] = useState('');
 
   // ---------- helpers ----------
@@ -167,13 +175,28 @@ const CoverageSettings = () => {
           setStateCities(grouped);
         }
 
-        // categories
-        const { data: cats } = await supabase
-          .from('head_categories')
-          .select('id, name')
+        // sub categories
+        const { data: subCats } = await supabase
+          .from('sub_categories')
+          .select('id, name, head_categories(id, name)')
           .eq('is_active', true)
           .order('name');
-        setHeadCategories(cats || []);
+        setSubCategories(subCats || []);
+
+        // micro category details for selected preferences
+        if (prefCats.length) {
+          const { data: microDetails } = await supabase
+            .from('micro_categories')
+            .select('id, name, sub_categories(id, name, head_categories(id, name))')
+            .in('id', prefCats);
+          const lookup = {};
+          (microDetails || []).forEach((item) => {
+            lookup[item.id] = item;
+          });
+          setMicroCategoryLookup(lookup);
+        } else {
+          setMicroCategoryLookup({});
+        }
       } catch (e) {
         console.error('Coverage load failed', e);
         toast({ title: 'Error', description: 'Could not load coverage data', variant: 'destructive' });
@@ -230,9 +253,177 @@ const CoverageSettings = () => {
     }
   };
 
+  const handleSubCategoryChange = async (subId, options = {}) => {
+    const { keepQuery = false, hint } = options;
+    setSelectedSubCategoryId(subId);
+    setSelectedMicroCategoryId('');
+    if (hint !== undefined) {
+      setCategoryHint(hint);
+    } else {
+      setCategoryHint('');
+    }
+    if (!keepQuery) {
+      setCategoryQuery('');
+      setShowCatDropdown(false);
+      setCatSuggestions([]);
+    }
+    if (!subId) {
+      setMicroCategories([]);
+      return;
+    }
+    try {
+      const { data } = await supabase
+        .from('micro_categories')
+        .select('id, name, sub_categories(id, name, head_categories(id, name))')
+        .eq('sub_category_id', subId)
+        .eq('is_active', true)
+        .order('name');
+      const list = data || [];
+      setMicroCategories(list);
+      if (list.length) {
+        setMicroCategoryLookup((prev) => {
+          const next = { ...prev };
+          list.forEach((item) => {
+            next[item.id] = item;
+          });
+          return next;
+        });
+      }
+      return list;
+    } catch (e) {
+      console.error('Micro categories load failed', e);
+      toast({ title: 'Error', description: 'Could not load micro categories', variant: 'destructive' });
+      setMicroCategories([]);
+      return [];
+    }
+  };
+
+  const handleMicroChange = (microId) => {
+    setSelectedMicroCategoryId(microId);
+    setCategoryHint('');
+    const micro = microCategories.find((m) => m.id === microId);
+    if (micro?.name) {
+      setCategoryQuery(micro.name);
+    }
+    setShowCatDropdown(false);
+  };
+
+  const applyMicroSelection = async (item, silent = false) => {
+    if (!item?.id || !item?.sub_id) return;
+    if (!silent) {
+      setCategoryQuery(item.name || '');
+    }
+    setCategoryHint('');
+    setShowCatDropdown(false);
+    setCatSuggestions([]);
+    await handleSubCategoryChange(item.sub_id, { keepQuery: true });
+    setSelectedMicroCategoryId(item.id);
+    if (item.raw) {
+      setMicroCategoryLookup((prev) => ({ ...prev, [item.id]: item.raw }));
+    }
+  };
+
+  const applySubSelection = async (item, silent = false) => {
+    if (!item?.id) return;
+    if (!silent) {
+      setCategoryQuery(item.name || '');
+    }
+    setShowCatDropdown(false);
+    setCatSuggestions([]);
+    await handleSubCategoryChange(item.id, {
+      keepQuery: true,
+      hint: 'Sub category selected. Please select a micro category.'
+    });
+  };
+
+  const applySearchSelection = async (item, silent = false) => {
+    if (!item) return;
+    if (item.type === 'sub') {
+      await applySubSelection(item, silent);
+      return;
+    }
+    await applyMicroSelection(item, silent);
+  };
+
+  useEffect(() => {
+    const q = (categoryQuery || '').trim();
+    if (q.length < 2) {
+      setCatSuggestions([]);
+      setShowCatDropdown(false);
+      setCatLoading(false);
+      return;
+    }
+
+    setCatLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const [microRes, subRes] = await Promise.all([
+          supabase
+            .from('micro_categories')
+            .select('id, name, sub_categories(id, name, head_categories(id, name))')
+            .ilike('name', `%${q}%`)
+            .eq('is_active', true)
+            .order('name')
+            .limit(6),
+          supabase
+            .from('sub_categories')
+            .select('id, name, head_categories(id, name)')
+            .ilike('name', `%${q}%`)
+            .eq('is_active', true)
+            .order('name')
+            .limit(6)
+        ]);
+
+        if (microRes.error) throw microRes.error;
+        if (subRes.error) throw subRes.error;
+
+        const microList = (microRes.data || []).map((m) => ({
+          type: 'micro',
+          id: m.id,
+          name: m.name,
+          sub_id: m.sub_categories?.id,
+          sub_name: m.sub_categories?.name,
+          head_id: m.sub_categories?.head_categories?.id,
+          head_name: m.sub_categories?.head_categories?.name,
+          raw: m
+        }));
+        const subList = (subRes.data || []).map((s) => ({
+          type: 'sub',
+          id: s.id,
+          name: s.name,
+          head_id: s.head_categories?.id,
+          head_name: s.head_categories?.name,
+          raw: s
+        }));
+
+        const combined = [...microList, ...subList].slice(0, 8);
+        setCatSuggestions(combined);
+        setShowCatDropdown(true);
+
+        const exactMicro = microList.find((item) => (item.name || '').toLowerCase() === q.toLowerCase());
+        if (exactMicro) {
+          await applySearchSelection(exactMicro, true);
+          return;
+        }
+        const exactSub = subList.find((item) => (item.name || '').toLowerCase() === q.toLowerCase());
+        if (exactSub) {
+          await applySearchSelection(exactSub, true);
+        }
+      } catch (e) {
+        console.error('Category search failed', e);
+        setCatSuggestions([]);
+        setShowCatDropdown(false);
+      } finally {
+        setCatLoading(false);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [categoryQuery]);
+
   const addCategory = async () => {
-    if (!selectedCategoryId) return;
-    if (preferredCategories.includes(selectedCategoryId)) {
+    if (!selectedMicroCategoryId) return;
+    if (preferredCategories.includes(selectedMicroCategoryId)) {
       toast({ title: 'Already added', variant: 'destructive' });
       return;
     }
@@ -242,10 +433,11 @@ const CoverageSettings = () => {
     }
     setSavingCategory(true);
     try {
-      const updated = [...preferredCategories, selectedCategoryId];
+      const updated = [...preferredCategories, selectedMicroCategoryId];
       await vendorApi.preferences.update({ preferred_micro_categories: updated });
       setPreferredCategories(updated);
-      setSelectedCategoryId('');
+      setSelectedMicroCategoryId('');
+      setCategoryQuery('');
       toast({ title: 'Category added' });
     } catch (e) {
       toast({ title: 'Error', description: e?.message || 'Could not add category', variant: 'destructive' });
@@ -375,26 +567,89 @@ const CoverageSettings = () => {
             <Layers className="w-5 h-5 text-blue-600" />
             <div>
               <h3 className="font-semibold text-gray-900">Service Categories</h3>
-              <p className="text-sm text-gray-600">Select up to {coverageLimits.categories} categories (based on your plan).</p>
+              <p className="text-sm text-gray-600">Select sub category and micro category (up to {coverageLimits.categories}).</p>
             </div>
           </div>
-          <Button variant="outline" onClick={addCategory} disabled={!selectedCategoryId || savingCategory || preferredCategories.length >= coverageLimits.categories}>
+          <Button variant="outline" onClick={addCategory} disabled={!selectedMicroCategoryId || savingCategory || preferredCategories.length >= coverageLimits.categories}>
             {savingCategory ? 'Saving...' : 'Add'}
           </Button>
         </div>
 
-        <div className="flex gap-2">
+        <div className="space-y-3">
+          <div className="relative">
+            <input
+              type="text"
+              value={categoryQuery}
+              onChange={(e) => {
+                setCategoryQuery(e.target.value);
+                setCategoryHint('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && catSuggestions.length) {
+                  e.preventDefault();
+                  applySearchSelection(catSuggestions[0]);
+                }
+              }}
+              onFocus={() => {
+                if (catSuggestions.length) setShowCatDropdown(true);
+              }}
+              onBlur={() => setTimeout(() => setShowCatDropdown(false), 150)}
+              placeholder="Type micro or sub category (auto select)"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            />
+            {categoryHint && (
+              <p className="mt-1 text-xs text-amber-600">{categoryHint}</p>
+            )}
+            {showCatDropdown && (
+              <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow">
+                {catLoading && (
+                  <div className="px-3 py-2 text-sm text-gray-500">Searching...</div>
+                )}
+                {!catLoading && catSuggestions.length === 0 && (
+                  <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+                )}
+                {!catLoading && catSuggestions.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                    onMouseDown={() => applySearchSelection(item)}
+                  >
+                    <div className="text-sm font-medium text-gray-900">{item.name}</div>
+                    <div className="text-xs text-gray-500">
+                      {item.type === 'micro' ? 'Micro' : 'Sub'} • {item.sub_name || item.name} • {item.head_name || 'Head'}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <select
-            value={selectedCategoryId}
-            onChange={(e) => setSelectedCategoryId(e.target.value)}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
-            disabled={preferredCategories.length >= coverageLimits.categories || headCategories.length === 0}
+            value={selectedSubCategoryId}
+            onChange={(e) => handleSubCategoryChange(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            disabled={subCategories.length === 0}
           >
-            <option value="">Select a category</option>
-            {headCategories.map((cat) => (
+            <option value="">Select a sub category</option>
+            {subCategories.map((sub) => (
+              <option key={sub.id} value={sub.id}>
+                {sub.name}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedMicroCategoryId}
+            onChange={(e) => handleMicroChange(e.target.value)}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
+            disabled={preferredCategories.length >= coverageLimits.categories || microCategories.length === 0 || !selectedSubCategoryId}
+          >
+            <option value="">Select a micro category</option>
+            {microCategories.map((cat) => (
               <option key={cat.id} value={cat.id}>{cat.name}</option>
             ))}
           </select>
+          </div>
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -402,7 +657,10 @@ const CoverageSettings = () => {
             <p className="text-sm text-gray-500">No categories selected yet.</p>
           ) : (
             preferredCategories.map((catId) => {
-              const catName = headCategories.find((c) => c.id === catId)?.name || catId;
+              const micro = microCategoryLookup[catId];
+              const catName = micro
+                ? `${micro.sub_categories?.name || 'Sub'} > ${micro.name}`
+                : catId;
               return (
                 <Badge key={catId} variant="secondary" className="flex items-center gap-2 px-3 py-1">
                   {catName}

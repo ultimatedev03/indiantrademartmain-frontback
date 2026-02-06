@@ -16,6 +16,7 @@ import financeRoutes from './routes/finance.js';
 import chatbotRoutes from './routes/chatbot.js';
 import superadminRoutes from './routes/superadmin.js';
 import employeeRoutes from './routes/employee.js';
+import categoryRequestRoutes from './routes/categoryRequests.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 
@@ -92,6 +93,7 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/employee', employeeRoutes);
+app.use('/api/category-requests', categoryRequestRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();

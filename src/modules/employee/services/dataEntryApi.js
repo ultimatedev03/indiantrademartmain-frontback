@@ -1,6 +1,7 @@
 
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 const getUser = async () => {
   const { data: { user } } = await supabase.auth.getUser();
@@ -12,18 +13,48 @@ const getUser = async () => {
 const getEmployeeContext = async () => {
     const user = await getUser();
     // Verify role in employees table
-    const { data: emp, error } = await supabase
+    let { data: emp } = await supabase
         .from('employees')
         .select('*')
         .eq('user_id', user.id)
         .maybeSingle(); // Use maybeSingle to avoid 406 errors if row missing
+
+    if (!emp && user?.email) {
+        const { data: empByEmail } = await supabase
+            .from('employees')
+            .select('*')
+            .ilike('email', user.email)
+            .maybeSingle();
+        emp = empByEmail || null;
+        if (emp && !emp.user_id) {
+            try {
+                await supabase.from('employees').update({ user_id: user.id }).eq('id', emp.id);
+                emp = { ...emp, user_id: user.id };
+            } catch (_) {
+                // ignore update failures; continue with fallback
+            }
+        }
+    }
     
+    // Fallback: if direct query fails, try server-side resolver (bypasses RLS)
+    if (!emp) {
+        try {
+            const res = await fetchWithCsrf(apiUrl('/api/employee/me'));
+            if (res.ok) {
+                const data = await res.json();
+                if (data?.employee) return data.employee;
+            }
+        } catch (_) {
+            // ignore
+        }
+    }
+
     // Fallback: If not in employees, check admin_users for dev/testing
     if (!emp) {
         const { data: admin } = await supabase.from('admin_users').select('*').eq('id', user.id).maybeSingle();
         if (admin) return { ...admin, user_id: admin.id };
         // If still nothing, just return user object assuming RLS will handle permission
-        return { user_id: user.id, role: 'UNKNOWN' }; 
+        return { user_id: user.id, role: 'UNKNOWN' };
     }
     return emp;
 };
@@ -37,26 +68,46 @@ const generateRandomString = (length, chars) => {
   return result;
 };
 
+const buildVendorFilter = ({ userId, employeeId }) => {
+  const parts = [];
+  if (userId) {
+    parts.push(
+      `assigned_to.eq.${userId}`,
+      `created_by_user_id.eq.${userId}`,
+      `user_id.eq.${userId}`
+    );
+  }
+  if (employeeId && employeeId !== userId) {
+    parts.push(`assigned_to.eq.${employeeId}`);
+  }
+  return parts.join(',');
+};
+
 export const dataEntryApi = {
   // --- DASHBOARD ---
   getDashboardStats: async (userId) => {
     try {
-      console.log('📊 Dashboard: Fetching stats for userId:', userId);
+      const emp = await getEmployeeContext();
+      const effectiveUserId = userId || emp?.user_id;
+      const filter = buildVendorFilter({ userId: effectiveUserId, employeeId: emp?.id });
+      console.log('📊 Dashboard: Fetching stats for userId:', effectiveUserId, 'empId:', emp?.id);
       
       // Count vendors assigned to, created by, or owned by user (checking user_id as well)
-      const { count: totalVendors, error: vendorError } = await supabase
+      let vendorQuery = supabase
         .from('vendors')
-        .select('*', { count: 'exact', head: true })
-        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+        .select('*', { count: 'exact', head: true });
+      if (filter) vendorQuery = vendorQuery.or(filter);
+      const { count: totalVendors, error: vendorError } = await vendorQuery;
       
       if (vendorError) console.error('❌ Error counting vendors:', vendorError);
       console.log('✅ Total vendors found:', totalVendors);
 
       // Get vendor IDs to count products
-      const { data: vendorIds, error: vendorIdError } = await supabase
+      let vendorIdQuery = supabase
         .from('vendors')
-        .select('id')
-        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+        .select('id');
+      if (filter) vendorIdQuery = vendorIdQuery.or(filter);
+      const { data: vendorIds, error: vendorIdError } = await vendorIdQuery;
       
       if (vendorIdError) console.error('❌ Error fetching vendor IDs:', vendorIdError);
       
@@ -76,31 +127,58 @@ export const dataEntryApi = {
       }
 
       // Count pending KYC vendors
-      const { count: pendingCount, error: pendingError } = await supabase
+      let pendingQuery = supabase
         .from('vendors')
         .select('*', { count: 'exact', head: true })
-        .eq('kyc_status', 'PENDING')
-        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+        .eq('kyc_status', 'PENDING');
+      if (filter) pendingQuery = pendingQuery.or(filter);
+      const { count: pendingCount, error: pendingError } = await pendingQuery;
       
       if (pendingError) console.error('❌ Error counting pending KYC:', pendingError);
       console.log('✅ Pending KYC found:', pendingCount);
 
       // Count approved/verified KYC vendors
-      const { count: verifiedCount, error: verifiedError } = await supabase
+      let verifiedQuery = supabase
         .from('vendors')
         .select('*', { count: 'exact', head: true })
-        .or(`kyc_status.eq.approved,kyc_status.eq.APPROVED`)
-        .or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId},user_id.eq.${userId}`);
+        .in('kyc_status', ['approved', 'APPROVED']);
+      if (filter) verifiedQuery = verifiedQuery.or(filter);
+      const { count: verifiedCount, error: verifiedError } = await verifiedQuery;
       
       if (verifiedError) console.error('❌ Error counting verified KYC:', verifiedError);
       console.log('✅ Approved KYC found:', verifiedCount);
 
-      return { 
+      const scopedStats = { 
         totalVendors: totalVendors || 0, 
         totalProducts, 
         pendingKyc: pendingCount || 0, 
         approvedKyc: verifiedCount || 0 
       };
+
+      const allZero = Object.values(scopedStats).every((v) => Number(v || 0) === 0);
+
+      if (allZero && effectiveUserId) {
+        try {
+          const [allVendors, allProducts, allPending, allApproved] = await Promise.all([
+            supabase.from('vendors').select('*', { count: 'exact', head: true }),
+            supabase.from('products').select('*', { count: 'exact', head: true }),
+            supabase.from('vendors').select('*', { count: 'exact', head: true }).in('kyc_status', ['PENDING', 'pending']),
+            supabase.from('vendors').select('*', { count: 'exact', head: true }).in('kyc_status', ['APPROVED', 'approved']),
+          ]);
+
+          return {
+            totalVendors: allVendors.count || 0,
+            totalProducts: allProducts.count || 0,
+            pendingKyc: allPending.count || 0,
+            approvedKyc: allApproved.count || 0,
+          };
+        } catch (fallbackErr) {
+          console.error('❌ Dashboard fallback stats error:', fallbackErr);
+          return scopedStats;
+        }
+      }
+
+      return scopedStats;
     } catch (error) {
       console.error('❌ Dashboard stats error:', error);
       return { totalVendors: 0, totalProducts: 0, pendingKyc: 0, approvedKyc: 0 };
@@ -108,17 +186,57 @@ export const dataEntryApi = {
   },
 
   getRecentActivities: async (userId) => {
-    let vendorQuery = supabase.from('vendors').select('id, company_name, created_at, kyc_status').order('created_at', { ascending: false }).limit(5);
-    if(userId) vendorQuery = vendorQuery.or(`assigned_to.eq.${userId},created_by_user_id.eq.${userId}`);
+    const emp = await getEmployeeContext();
+    const effectiveUserId = userId || emp?.user_id;
+    const filter = buildVendorFilter({ userId: effectiveUserId, employeeId: emp?.id });
+    let vendorQuery = supabase
+      .from('vendors')
+      .select('id, company_name, created_at, kyc_status')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (filter) vendorQuery = vendorQuery.or(filter);
     
     const { data: vendors } = await vendorQuery;
 
-    return (vendors || []).map(v => ({
+    const mapped = (vendors || []).map(v => ({
+      type: 'VENDOR',
+      message: `Created vendor ${v.company_name}`,
+      time: v.created_at,
+      id: v.id
+    }));
+
+    if (mapped.length === 0 && effectiveUserId) {
+      const { data: recent } = await supabase
+        .from('vendors')
+        .select('id, company_name, created_at, kyc_status')
+        .order('created_at', { ascending: false })
+        .limit(5);
+      return (recent || []).map(v => ({
         type: 'VENDOR',
         message: `Created vendor ${v.company_name}`,
         time: v.created_at,
         id: v.id
-    }));
+      }));
+    }
+
+    return mapped;
+  },
+
+  getCategoryRequests: async (limit = 6) => {
+    try {
+      const { data, error } = await supabase
+        .from('support_tickets')
+        .select('id, subject, description, status, priority, created_at, vendor_id, vendors(company_name), attachments')
+        .eq('category', 'Category Request')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('❌ Category requests fetch error:', error);
+      return [];
+    }
   },
 
   // --- VENDORS ---
@@ -130,11 +248,13 @@ export const dataEntryApi = {
   
   getAssignedVendors: async () => {
     const emp = await getEmployeeContext();
-    const { data, error } = await supabase
+    const filter = buildVendorFilter({ userId: emp?.user_id, employeeId: emp?.id });
+    let query = supabase
       .from('vendors')
       .select('*, products(count)')
-      .or(`assigned_to.eq.${emp.user_id},created_by_user_id.eq.${emp.user_id}`)
       .order('created_at', { ascending: false });
+    if (filter) query = query.or(filter);
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   },
@@ -169,6 +289,8 @@ export const dataEntryApi = {
 
   createVendor: async (vendorData) => {
     const emp = await getEmployeeContext();
+    const user = await getUser();
+    const actorId = emp?.user_id || user.id;
     
     // Generate new style Vendor ID if not provided (though this function allows passing one in via prompt logic, let's enforce generator)
     const generatedId = dataEntryApi.generateVendorId();
@@ -177,8 +299,8 @@ export const dataEntryApi = {
     const payload = {
         ...vendorData,
         vendor_id: generatedId,
-        assigned_to: emp.user_id,
-        created_by_user_id: emp.user_id,
+        assigned_to: actorId,
+        created_by_user_id: actorId,
         kyc_status: 'PENDING',
         profile_completion: 10,
         is_active: true,
@@ -621,10 +743,12 @@ export const dataEntryApi = {
   createProduct: async (productData) => {
     try {
       const emp = await getEmployeeContext();
+      const user = await getUser();
+      const actorId = emp?.user_id || user.id;
       const payload = {
         ...productData,
         status: 'ACTIVE',
-        created_by: emp.user_id,
+        created_by: actorId,
         created_at: new Date().toISOString()
       };
 
@@ -703,10 +827,12 @@ export const dataEntryApi = {
   addProduct: async (productData) => {
     try {
       const emp = await getEmployeeContext();
+      const user = await getUser();
+      const actorId = emp?.user_id || user.id;
       const payload = {
         ...productData,
         status: 'ACTIVE',
-        created_by: emp.user_id,
+        created_by: actorId,
         created_at: new Date().toISOString()
       };
 

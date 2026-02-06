@@ -100,12 +100,18 @@ export const categoryHierarchyApi = {
 
   // --- META TAGS ---
   getMicroCategoryMeta: async (microId) => {
-    const { data, error } = await supabase
+    let res = await supabase
       .from('micro_category_meta')
       .select('*, states(name), cities(name)')
       .eq('micro_category_id', microId);
-    if (error) throw error;
-    return data || [];
+    if (res.error && (res.error.code === '42703' || /column .* does not exist/i.test(res.error.message || ''))) {
+      res = await supabase
+        .from('micro_category_meta')
+        .select('*, states(name), cities(name)')
+        .eq('micro_categories', microId);
+    }
+    if (res.error) throw res.error;
+    return res.data || [];
   },
 
   createMicroCategoryMeta: async (payload) => {
@@ -115,9 +121,27 @@ export const categoryHierarchyApi = {
       state_id: payload.state_id === 'none' || !payload.state_id ? null : payload.state_id,
       city_id: payload.city_id === 'none' || !payload.city_id ? null : payload.city_id,
     };
-    const { data, error } = await supabase.from('micro_category_meta').insert([cleanPayload]).select().single();
-    if (error) throw error;
-    return data;
+    const basePayload = {
+      ...cleanPayload,
+    };
+    delete basePayload.micro_category_id;
+    delete basePayload.micro_categories;
+
+    const microId = payload.micro_category_id || payload.micro_categories || null;
+    let res = await supabase
+      .from('micro_category_meta')
+      .insert([{ ...basePayload, micro_category_id: microId }])
+      .select()
+      .single();
+    if (res.error && (res.error.code === '42703' || /column .* does not exist/i.test(res.error.message || ''))) {
+      res = await supabase
+        .from('micro_category_meta')
+        .insert([{ ...basePayload, micro_categories: microId }])
+        .select()
+        .single();
+    }
+    if (res.error) throw res.error;
+    return res.data;
   },
 
   deleteMicroCategoryMeta: async (id) => {

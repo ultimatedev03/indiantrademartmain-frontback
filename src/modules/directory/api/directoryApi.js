@@ -16,6 +16,12 @@ const isMissingColumnError = (err) => {
   return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
 };
 
+const normalizeMetaRows = (rows = []) =>
+  (Array.isArray(rows) ? rows : []).map((r) => ({
+    ...r,
+    micro_categories: r?.micro_categories ?? r?.micro_category_id ?? null,
+  }));
+
 // ✅ NEW: safely extract first image url
 const pickFirstImageUrl = (images) => {
   const imgs = images;
@@ -430,11 +436,19 @@ export const directoryApi = {
           const extraIds = extraCategories.map(c => c?.id).filter(Boolean);
 
           if (extraIds.length > 0) {
-            const { data: metaData } = await supabase
+            let metaRes = await supabase
               .from('micro_category_meta')
               .select('micro_categories, meta_tags, description')
               .in('micro_categories', extraIds);
 
+            if (metaRes.error && isMissingColumnError(metaRes.error)) {
+              metaRes = await supabase
+                .from('micro_category_meta')
+                .select('micro_category_id, meta_tags, description')
+                .in('micro_category_id', extraIds);
+            }
+
+            const metaData = normalizeMetaRows(metaRes.data || []);
             if (metaData && metaData.length > 0) {
               product.extra_micro_categories = extraCategories.map(cat => {
                 const withMeta = metaData.find(m => m.micro_categories === cat?.id);
@@ -450,7 +464,7 @@ export const directoryApi = {
 
     if (product && product.micro_category_id) {
       try {
-        const { data: primaryMeta } = await supabase
+        let metaRes = await supabase
           .from('micro_category_meta')
           .select('meta_tags, description')
           .eq('micro_categories', product.micro_category_id)
@@ -458,9 +472,19 @@ export const directoryApi = {
           .limit(1)
           .maybeSingle();
 
-        if (primaryMeta) {
-          product.primary_meta_tags = primaryMeta.meta_tags;
-          product.primary_meta_description = primaryMeta.description;
+        if (metaRes.error && isMissingColumnError(metaRes.error)) {
+          metaRes = await supabase
+            .from('micro_category_meta')
+            .select('meta_tags, description')
+            .eq('micro_category_id', product.micro_category_id)
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        }
+
+        if (metaRes.data) {
+          product.primary_meta_tags = metaRes.data.meta_tags;
+          product.primary_meta_description = metaRes.data.description;
         } else {
           if (product.micro_categories?.name) {
             product.primary_meta_tags = `${product.name} | ${product.micro_categories.name}`;
@@ -662,22 +686,24 @@ export const directoryApi = {
 
       if (error || !micro) return null;
 
-      let metaRes = await supabase
-        .from('micro_category_meta')
-        .select('meta_tags, description, keywords')
-        .eq('micro_categories', micro.id)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (metaRes.error && isMissingColumnError(metaRes.error)) {
-        metaRes = await supabase
+      const runMetaQuery = async (col, fields) =>
+        supabase
           .from('micro_category_meta')
-          .select('meta_tags, description')
-          .eq('micro_categories', micro.id)
+          .select(fields)
+          .eq(col, micro.id)
           .order('updated_at', { ascending: false })
           .limit(1)
           .maybeSingle();
+
+      let metaRes = await runMetaQuery('micro_categories', 'meta_tags, description, keywords');
+      if (metaRes.error && isMissingColumnError(metaRes.error)) {
+        metaRes = await runMetaQuery('micro_categories', 'meta_tags, description');
+      }
+      if (metaRes.error && isMissingColumnError(metaRes.error)) {
+        metaRes = await runMetaQuery('micro_category_id', 'meta_tags, description, keywords');
+      }
+      if (metaRes.error && isMissingColumnError(metaRes.error)) {
+        metaRes = await runMetaQuery('micro_category_id', 'meta_tags, description');
       }
 
       return {

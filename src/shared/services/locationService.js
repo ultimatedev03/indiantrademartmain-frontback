@@ -10,10 +10,21 @@ export const locationService = {
       .order('name');
     
     if (error) {
-      console.error('Error fetching states:', error);
+      console.error('Error fetching states (is_active filter):', error);
+    }
+
+    if (Array.isArray(data) && data.length > 0) return data;
+
+    const { data: fallback, error: fallbackError } = await supabase
+      .from('states')
+      .select('*')
+      .order('name');
+
+    if (fallbackError) {
+      console.error('Error fetching states:', fallbackError);
       return [];
     }
-    return data;
+    return fallback || [];
   },
 
   // Fetch cities for a specific state
@@ -28,10 +39,22 @@ export const locationService = {
       .order('name');
       
     if (error) {
-      console.error('Error fetching cities:', error);
+      console.error('Error fetching cities (is_active filter):', error);
+    }
+
+    if (Array.isArray(data) && data.length > 0) return data;
+
+    const { data: fallback, error: fallbackError } = await supabase
+      .from('cities')
+      .select('*')
+      .eq('state_id', stateId)
+      .order('name');
+
+    if (fallbackError) {
+      console.error('Error fetching cities:', fallbackError);
       return [];
     }
-    return data;
+    return fallback || [];
   },
 
   // Fetch cities by state slug for nearby navigation

@@ -212,32 +212,32 @@ const Home = () => {
             <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {visibleFeaturedVendors.map((vendor) => (
               <motion.div
                 key={vendor.id}
                 whileHover={{ y: -5 }}
-                className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-xl transition-all cursor-pointer group"
+                className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-lg transition-all cursor-pointer group"
                 onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
               >
-                <div className="relative h-48 mb-4 rounded-lg bg-slate-100 overflow-hidden">
+                <div className="relative h-32 mb-3 rounded-lg bg-slate-100 overflow-hidden">
                   <VendorImage src={vendor.image} name={vendor.name} />
                   {vendor.verified && (
-                    <span className="absolute top-3 right-3 bg-white/95 backdrop-blur-sm px-2.5 py-1 rounded-md text-xs font-bold text-blue-700 flex items-center gap-1.5 shadow-sm">
-                      <CheckCircle className="w-3.5 h-3.5 fill-blue-100" /> Verified
+                    <span className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] font-semibold text-blue-700 flex items-center gap-1 shadow-sm">
+                      <CheckCircle className="w-3 h-3 fill-blue-100" /> Verified
                     </span>
                   )}
                 </div>
 
-                <h3 className="font-bold text-slate-900 text-lg line-clamp-1 mb-1 group-hover:text-blue-700 transition-colors">
+                <h3 className="font-semibold text-slate-900 text-base line-clamp-1 mb-1 group-hover:text-blue-700 transition-colors">
                   {vendor.name}
                 </h3>
 
-                <div className="flex items-center text-sm text-slate-500 mb-4">
-                  <MapPin className="w-3.5 h-3.5 mr-1.5" /> {vendor.city}, {vendor.state}
+                <div className="flex items-center text-xs text-slate-500 mb-3">
+                  <MapPin className="w-3 h-3 mr-1.5" /> {vendor.city}, {vendor.state}
                 </div>
 
-                <Button className="w-full bg-white border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all font-medium h-10">
+                <Button className="w-full bg-white border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all font-medium h-8 text-xs">
                   Contact Supplier
                 </Button>
               </motion.div>

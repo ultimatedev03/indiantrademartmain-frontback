@@ -47,7 +47,7 @@ const SearchableSelect = ({
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[300px] p-0" align="start">
+      <PopoverContent className="w-[300px] p-0 z-[10050]" align="start">
         <div className="p-2 border-b">
           <Input 
             placeholder={searchPlaceholder} 

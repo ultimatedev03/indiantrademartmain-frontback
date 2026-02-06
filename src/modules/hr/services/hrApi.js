@@ -9,7 +9,8 @@ export const hrApi = {
   },
   
   getStats: async () => {
-     const { count } = await supabase.from('employees').select('*', { count: 'exact', head: true });
+     const { count, error } = await supabase.from('employees').select('*', { count: 'exact', head: true });
+     if (error) throw error;
      return {
         totalEmployees: count || 0,
         active: count || 0, // Simplified

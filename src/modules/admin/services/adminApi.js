@@ -91,7 +91,18 @@ export const adminApi = {
 
     // For each, count vendors created
     const performance = await Promise.all(employees.map(async (emp) => {
-      if (!emp.user_id) {
+      let userId = emp.user_id;
+
+      if (!userId && emp?.email) {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', emp.email)
+          .maybeSingle();
+        if (userRow?.id) userId = userRow.id;
+      }
+
+      if (!userId) {
         return {
           id: emp.id,
           name: emp.full_name || emp.email || 'Data Entry',
@@ -100,16 +111,23 @@ export const adminApi = {
           kycVerified: 0
         };
       }
+
+      const vendorFilter = [
+        `created_by_user_id.eq.${userId}`,
+        `assigned_to.eq.${userId}`,
+        `user_id.eq.${userId}`,
+        emp?.id ? `assigned_to.eq.${emp.id}` : null,
+      ].filter(Boolean).join(',');
       const { count } = await supabase
         .from('vendors')
         .select('*', { count: 'exact', head: true })
-        .or(`created_by_user_id.eq.${emp.user_id},assigned_to.eq.${emp.user_id}`);
+        .or(vendorFilter);
       
       // Count products for those vendors
       const { data: vendors } = await supabase
         .from('vendors')
         .select('id')
-        .or(`created_by_user_id.eq.${emp.user_id},assigned_to.eq.${emp.user_id}`);
+        .or(vendorFilter);
         
       let productCount = 0;
       if (vendors && vendors.length > 0) {
@@ -119,11 +137,17 @@ export const adminApi = {
             .select('*', { count: 'exact', head: true })
             .in('vendor_id', vendorIds);
          productCount = pCount || 0;
+      } else {
+        const { count: pCount, error: pErr } = await supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true })
+          .eq('created_by', userId);
+        if (!pErr) productCount = pCount || 0;
       }
 
       return {
-        id: emp.user_id,
-        name: emp.full_name,
+        id: userId,
+        name: emp.full_name || emp.email || 'Data Entry',
         vendorsCreated: count || 0,
         productsListed: productCount,
         kycVerified: 0 // Placeholder logic

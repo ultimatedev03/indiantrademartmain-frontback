@@ -11,6 +11,11 @@ import AddEditCategoryDialog from '@/modules/employee/components/AddEditCategory
 import DeleteCategoryDialog from '@/modules/employee/components/DeleteCategoryDialog';
 import { headCategoryApi, subCategoryApi, microCategoryApi } from '@/modules/employee/services/categoryApi';
 
+const isMissingColumnError = (error) => {
+  if (!error) return false;
+  return error.code === '42703' || /column .* does not exist/i.test(error.message || '');
+};
+
 const CategoriesFixed = () => {
   // State for head categories
   const [headCategories, setHeadCategories] = useState([]);
@@ -122,17 +127,25 @@ const CategoriesFixed = () => {
   // Fetch meta for micro category
   const fetchMicroMeta = async (microCategoryId) => {
     try {
-      const { data, error } = await supabase
+      let res = await supabase
         .from('micro_category_meta')
         .select('*')
         .eq('micro_categories', microCategoryId)
         .maybeSingle();
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Error fetching meta:', error);
+      if (res.error && isMissingColumnError(res.error)) {
+        res = await supabase
+          .from('micro_category_meta')
+          .select('*')
+          .eq('micro_category_id', microCategoryId)
+          .maybeSingle();
+      }
+
+      if (res.error && res.error.code !== 'PGRST116') {
+        console.error('Error fetching meta:', res.error);
         return;
       }
-      setMicroMeta((prev) => ({ ...prev, [microCategoryId]: data || null }));
+      setMicroMeta((prev) => ({ ...prev, [microCategoryId]: res.data || null }));
     } catch (error) {
       console.error('Error fetching meta:', error);
     }
@@ -344,50 +357,70 @@ const CategoriesFixed = () => {
   const saveMeta = async () => {
     try {
       const existing = microMeta[selectedMicroCategory.id];
+      const payload = {
+        meta_tags: metaData.meta_tags,
+        keywords: metaData.keywords,
+        description: metaData.description,
+        updated_at: new Date().toISOString(),
+      };
+      const insertPayload = {
+        meta_tags: metaData.meta_tags,
+        keywords: metaData.keywords,
+        description: metaData.description,
+        created_at: new Date().toISOString(),
+      };
 
       if (existing) {
-        const { error } = await supabase
+        let res = await supabase
           .from('micro_category_meta')
-          .update({
-            meta_tags: metaData.meta_tags,
-            keywords: metaData.keywords,
-            description: metaData.description,
-            updated_at: new Date().toISOString(),
-          })
+          .update(payload)
           .eq('micro_categories', selectedMicroCategory.id);
 
-        if (error) {
-          if (error.code === '42501') {
+        if (res.error && isMissingColumnError(res.error)) {
+          res = await supabase
+            .from('micro_category_meta')
+            .update(payload)
+            .eq('micro_category_id', selectedMicroCategory.id);
+        }
+
+        if (res.error) {
+          if (res.error.code === '42501') {
             toast({
               title: 'Permission Denied',
               description: 'RLS policy blocks this operation. Contact admin to fix permissions.',
               variant: 'destructive',
             });
           } else {
-            throw error;
+            throw res.error;
           }
           return;
         }
       } else {
-        const { error } = await supabase.from('micro_category_meta').insert([
+        let res = await supabase.from('micro_category_meta').insert([
           {
             micro_categories: selectedMicroCategory.id,
-            meta_tags: metaData.meta_tags,
-            keywords: metaData.keywords,
-            description: metaData.description,
-            created_at: new Date().toISOString(),
+            ...insertPayload,
           },
         ]);
 
-        if (error) {
-          if (error.code === '42501') {
+        if (res.error && isMissingColumnError(res.error)) {
+          res = await supabase.from('micro_category_meta').insert([
+            {
+              micro_category_id: selectedMicroCategory.id,
+              ...insertPayload,
+            },
+          ]);
+        }
+
+        if (res.error) {
+          if (res.error.code === '42501') {
             toast({
               title: 'Permission Denied',
               description: 'RLS policy blocks this operation. Contact admin to fix permissions.',
               variant: 'destructive',
             });
           } else {
-            throw error;
+            throw res.error;
           }
           return;
         }

@@ -7,10 +7,17 @@ export const extractKeywords = (sentence) => {
   
   // Common words to ignore
   const stopWords = new Set([
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
     'of', 'from', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
     'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'should',
-    'could', 'may', 'might', 'must', 'can', 'me', 'my', 'myself', 'you'
+    'could', 'may', 'might', 'must', 'can', 'me', 'my', 'myself', 'you',
+    // common marketplace filler words
+    'best', 'top', 'quality', 'services', 'service', 'provider', 'providers',
+    'supplier', 'suppliers', 'company', 'companies', 'pvt', 'ltd', 'limited',
+    'manufacturer', 'manufacturers', 'dealer', 'dealers', 'distributor', 'distributors',
+    'wholesaler', 'wholesalers', 'trader', 'traders', 'exporter', 'exporters',
+    'agency', 'agencies', 'solution', 'solutions', 'consultant', 'consultants',
+    'contractor', 'contractors', 'work', 'works', 'job', 'jobs'
   ]);
   
   return sentence

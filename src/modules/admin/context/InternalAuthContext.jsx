@@ -291,16 +291,21 @@ export const InternalAuthProvider = ({ children }) => {
         throw new Error('Invalid credentials');
       }
 
-      // ✅ 2. YOUR EXISTING RPC (ROLE / ACCESS CHECK)
-      const { data, error } = await supabase.rpc('login_admin', {
-        p_email: email,
-        p_password: password,
-      });
-
-      if (error || !data) {
-        // rollback auth session
-        await supabase.auth.signOut();
-        throw new Error('Unauthorized');
+      // ✅ 2. RPC (ROLE / ACCESS CHECK) - treat as advisory if missing
+      let rpcData = null;
+      let rpcError = null;
+      try {
+        const { data, error } = await supabase.rpc('login_admin', {
+          p_email: email,
+          p_password: password,
+        });
+        if (error || !data) {
+          rpcError = error || new Error('login_admin RPC unavailable');
+        } else {
+          rpcData = data;
+        }
+      } catch (err) {
+        rpcError = err;
       }
 
       // Prefer the employees/users tables as source-of-truth for role + profile
@@ -344,8 +349,19 @@ export const InternalAuthProvider = ({ children }) => {
         }
       }
 
+      if (!normalized && rpcData) {
+        normalized = normalizeInternalUser(rpcData, email, expectedRole);
+      }
+
+      if (!normalized && rpcError) {
+        // If RPC is missing or returns nothing, fall back to employee-based auth only.
+        console.warn('[InternalAuth] login_admin RPC failed, using employee fallback:', rpcError);
+      }
+
       if (!normalized) {
-        normalized = normalizeInternalUser(data, email, expectedRole);
+        // rollback auth session
+        await supabase.auth.signOut();
+        throw new Error('Unauthorized');
       }
 
       if (!isInternalRole(normalized.role) && expectedRole) {

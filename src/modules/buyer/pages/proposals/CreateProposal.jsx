@@ -14,12 +14,13 @@ const CreateProposal = () => {
   const [searchParams] = useSearchParams();
   const preVendorId = searchParams.get('vendorId');
   const preVendorName = searchParams.get('vendorName');
+  const preProductName = searchParams.get('productName');
 
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
     vendor_id: preVendorId || '',
-    product_name: '',
+    product_name: preProductName || '',
     quantity: '',
     budget: '',
     required_by_date: '',

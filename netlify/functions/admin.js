@@ -444,8 +444,9 @@ export async function handler(event) {
 
         const performance = await Promise.all(
           (employees || []).map(async (emp) => {
-            const userId = emp.user_id;
             const displayName = emp.full_name || emp.email || "Data Entry";
+            const authUser = await resolveEmployeeAuthUser(emp);
+            const userId = authUser?.id || emp.user_id;
 
             if (!userId) {
               return {
@@ -457,15 +458,16 @@ export async function handler(event) {
               };
             }
 
+            const vendorFilter = `created_by_user_id.eq.${userId},assigned_to.eq.${userId},user_id.eq.${userId}`;
             const { count: vendorCount } = await supabase
               .from("vendors")
               .select("*", { count: "exact", head: true })
-              .or(`created_by_user_id.eq.${userId},assigned_to.eq.${userId}`);
+              .or(vendorFilter);
 
             const { data: vendors } = await supabase
               .from("vendors")
               .select("id")
-              .or(`created_by_user_id.eq.${userId},assigned_to.eq.${userId}`);
+              .or(vendorFilter);
 
             let productCount = 0;
             if (vendors && vendors.length > 0) {
@@ -475,6 +477,12 @@ export async function handler(event) {
                 .select("*", { count: "exact", head: true })
                 .in("vendor_id", vendorIds);
               productCount = pCount || 0;
+            } else {
+              const { count: pCount, error: pErr } = await supabase
+                .from("products")
+                .select("*", { count: "exact", head: true })
+                .eq("created_by", userId);
+              if (!pErr) productCount = pCount || 0;
             }
 
             return {

@@ -4,13 +4,12 @@ const nowIso = () => new Date().toISOString();
 
 const normalizeRole = (role) => String(role || "").trim().toUpperCase();
 
-const buildNotification = ({ user_id, type, title, message, link, meta }) => ({
+const buildNotification = ({ user_id, type, title, message, link }) => ({
   user_id,
   type: type || "INFO",
   title: title || "Notification",
   message: message || "",
   link: link || null,
-  meta: meta || null,
   is_read: false,
   created_at: nowIso(),
 });

@@ -365,11 +365,17 @@ export const microCategoryApi = {
   delete: async (id) => {
     // If meta exists, it can block deletion due to FK constraint.
     // So delete meta first (safe even if there is no meta row).
-    const { error: metaErr } = await supabase
+    let metaRes = await supabase
       .from('micro_category_meta')
       .delete()
       .eq('micro_categories', id);
-    if (metaErr) throw metaErr;
+    if (metaRes.error && (metaRes.error.code === '42703' || /column .* does not exist/i.test(metaRes.error.message || ''))) {
+      metaRes = await supabase
+        .from('micro_category_meta')
+        .delete()
+        .eq('micro_category_id', id);
+    }
+    if (metaRes.error) throw metaRes.error;
 
     const { data, error } = await supabase
       .from('micro_categories')

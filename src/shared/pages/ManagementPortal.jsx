@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldCheck, Users, Briefcase, Database, Headphones, TrendingUp, ChevronLeft } from 'lucide-react';
+import { ShieldCheck, Users, Briefcase, Database, Headphones, TrendingUp, ChevronLeft, Wallet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const ManagementPortal = () => {
@@ -46,6 +46,11 @@ const ManagementPortal = () => {
               <Link to="/hr/login" className="w-full">
                 <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
                   <Users className="h-5 w-5" /> HR Portal
+                </Button>
+              </Link>
+              <Link to="/admin/login?portal=finance" className="w-full">
+                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                  <Wallet className="h-5 w-5" /> Finance Portal
                 </Button>
               </Link>
             </div>

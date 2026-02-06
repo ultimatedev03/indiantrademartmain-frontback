@@ -113,7 +113,7 @@ const VendorListing = () => {
 
     if (!src || failed) {
       return (
-        <div className="w-full h-full flex items-center justify-center bg-gray-100 text-5xl font-extrabold text-gray-300">
+        <div className="w-full h-full flex items-center justify-center bg-slate-100 text-3xl font-extrabold text-slate-300">
           {letter}
         </div>
       );
@@ -226,7 +226,7 @@ const VendorListing = () => {
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {loading ? (
           <div className="col-span-full text-center text-gray-500 py-10">Loading vendors...</div>
         ) : filteredVendors.length === 0 ? (
@@ -237,45 +237,50 @@ const VendorListing = () => {
           filteredVendors.map((vendor) => (
             <Card
               key={vendor.id}
-              className="hover:shadow-lg transition-shadow cursor-pointer"
+              className="group hover:shadow-md transition-all cursor-pointer border border-slate-200"
               onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
             >
               <Card.Content className="p-0">
-                <div className="h-40 bg-gray-100 relative overflow-hidden">
-                  <VendorImage src={vendor.image} name={vendor.name} />
+                <div className="p-2">
+                  <div className="relative h-20 rounded-lg bg-slate-50 overflow-hidden">
+                    <VendorImage src={vendor.image} name={vendor.name} />
 
-                  {vendor.verified && (
-                    <span className="absolute top-2 right-2 bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full flex items-center">
-                      <ShieldCheck className="w-3 h-3 mr-1" /> Verified
-                    </span>
-                  )}
+                    {vendor.verified && (
+                      <span className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm text-[10px] px-2 py-0.5 rounded-full flex items-center gap-1 text-emerald-700 shadow-sm">
+                        <ShieldCheck className="w-3 h-3" /> Verified
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div className="p-5">
-                  <h3 className="font-bold text-lg mb-1">{vendor.name}</h3>
+                <div className="px-3 pb-3 pt-0 flex flex-col gap-2 min-h-[104px]">
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="font-semibold text-[13px] text-slate-900 line-clamp-1">
+                      {vendor.name}
+                    </h3>
+                    {vendor.rating !== null && vendor.rating !== undefined && Number(vendor.rating) > 0 && (
+                      <span className="inline-flex items-center bg-amber-100 text-amber-800 text-[10px] font-semibold px-1.5 py-0.5 rounded">
+                        <Star className="w-3 h-3 mr-1 fill-amber-600 text-amber-600" />
+                        {Number(vendor.rating).toFixed(1)}
+                      </span>
+                    )}
+                  </div>
 
-                  <div className="flex items-center text-sm text-gray-500 mb-3">
-                    <MapPin className="w-4 h-4 mr-1" />
+                  <div className="flex items-center text-[11px] text-slate-500">
+                    <MapPin className="w-3 h-3 mr-1" />
                     {vendor.city || "-"}
                     {vendor.state ? `, ${vendor.state}` : ""}
                   </div>
 
-                  {vendor.rating !== null && vendor.rating !== undefined && (
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="flex items-center bg-yellow-100 px-2 py-0.5 rounded text-xs font-bold text-yellow-800">
-                        <Star className="w-3 h-3 mr-1 fill-yellow-800" />
-                        {Number(vendor.rating).toFixed(1)}
-                      </div>
-                    </div>
-                  )}
-
-                  {vendor.description && (
-                    <p className="text-sm text-gray-600 mb-4 line-clamp-2">{vendor.description}</p>
+                  {(vendor.description || vendor.primary_business_type) && (
+                    <p className="text-[11px] text-slate-500 line-clamp-1">
+                      {vendor.description || vendor.primary_business_type}
+                    </p>
                   )}
 
                   <Button
                     variant="outline"
-                    className="w-full"
+                    className="w-full h-7 text-[11px] mt-auto"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigate(`/directory/vendor/${vendor.id}`);
