@@ -28,6 +28,7 @@ const ImgOrFallback = ({ src, alt, className }) => {
       src={s}
       alt={alt}
       loading="lazy"
+      decoding="async"
       className={cx('object-cover', className)}
       onError={(e) => {
         e.currentTarget.style.display = 'none';

@@ -292,8 +292,14 @@ const AdminFinance = () => {
                 <TableRow key={c.id}>
                   <TableCell className="font-semibold">{c.code}</TableCell>
                   <TableCell>{c.discount_type === 'PERCENT' ? `${c.value}%` : `₹ ${c.value}`}</TableCell>
-                  <TableCell>{c.plan_id || 'Any'}</TableCell>
-                  <TableCell>{c.vendor_id || 'Any'}</TableCell>
+                  <TableCell>
+                    {c.plan_id ? (c.plan?.name || c.plan_id) : 'Any'}
+                  </TableCell>
+                  <TableCell>
+                    {c.vendor_id
+                      ? (c.vendor?.company_name || c.vendor?.owner_name || c.vendor?.vendor_id || c.vendor_id)
+                      : 'Any'}
+                  </TableCell>
                   <TableCell>{c.used_count || 0}/{c.max_uses || '∞'}</TableCell>
                   <TableCell>
                     <Badge variant={c.is_active ? 'default' : 'secondary'}>{c.is_active ? 'Active' : 'Inactive'}</Badge>

@@ -3,6 +3,13 @@ import { supabase } from '../lib/supabaseClient.js';
 import { notifyUser } from '../lib/notify.js';
 import { writeAuditLog } from '../lib/audit.js';
 import {
+  getPublicUserByEmail,
+  hashPassword,
+  normalizeEmail,
+  setPublicUserPassword,
+  upsertPublicUser,
+} from '../lib/auth.js';
+import {
   loginSuperAdmin,
   requireSuperAdmin,
   changeSuperAdminPassword,
@@ -24,7 +31,7 @@ const normalizeRole = (role) => String(role || '').trim().toUpperCase();
 const nowIso = () => new Date().toISOString();
 
 async function findPublicUserByEmail(email) {
-  const target = String(email || '').trim().toLowerCase();
+  const target = normalizeEmail(email);
   if (!target) return null;
 
   const { data, error } = await supabase
@@ -41,107 +48,72 @@ async function findPublicUserByEmail(email) {
 }
 
 async function findAuthUserByEmail(email) {
-  const target = String(email || '').trim().toLowerCase();
+  const target = normalizeEmail(email);
   if (!target) return null;
+  const publicUser = await findPublicUserByEmail(target);
+  return publicUser?.id ? { id: publicUser.id, email: publicUser.email } : null;
+}
 
-  // 0) Fast-path: check public.users first (usually aligned to auth.users id)
-  try {
-    const publicUser = await findPublicUserByEmail(target);
-    if (publicUser?.id) {
-      return { id: publicUser.id, email: publicUser.email };
-    }
-  } catch (error) {
-    // Don't fail hard here; fall back to auth admin listing.
-    console.warn('[SuperAdmin] Failed to check public.users by email:', error?.message || error);
-  }
+async function ensureEmployeeAuthUser(employee, password) {
+  const existingId = employee?.user_id || null;
+  if (existingId) {
+    const { data, error } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', existingId)
+      .maybeSingle();
 
-  // Supabase Admin API doesn't provide direct "get by email",
-  // so we page through users with a reasonable cap.
-  const perPage = 100;
-  const maxPages = 50;
-
-  for (let page = 1; page <= maxPages; page += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
     if (error) {
       throw new Error(error.message);
     }
 
-    const users = data?.users || [];
-    const match = users.find((u) => String(u?.email || '').trim().toLowerCase() === target);
-    if (match) return match;
-
-    if (users.length < perPage) break;
+    if (data?.id) {
+      return { userId: existingId, created: false };
+    }
   }
 
-  return null;
-}
-
-async function ensureEmployeeAuthUser(employee, password) {
-  if (employee?.user_id) {
-    return { userId: employee.user_id, created: false };
-  }
-
-  const email = String(employee?.email || '').trim().toLowerCase();
+  const email = normalizeEmail(employee?.email);
   if (!email) {
-    const err = new Error('Employee auth user not found');
+    const err = new Error('Employee user not found');
     err.statusCode = 404;
     throw err;
   }
 
   const role = normalizeRole(employee?.role || 'DATA_ENTRY');
   const fullName = String(employee?.full_name || '').trim();
-  const department = String(employee?.department || '').trim() || 'Operations';
   const phone = String(employee?.phone || '').trim() || null;
 
-  // 1) Try to find an existing user by email (public.users -> auth admin list).
-  let authUser = null;
+  let publicUser = null;
   try {
-    authUser = await findAuthUserByEmail(email);
+    publicUser = await findAuthUserByEmail(email);
   } catch (error) {
-    console.warn('[SuperAdmin] Failed to find auth user by email:', error?.message || error);
+    console.warn('[SuperAdmin] Failed to find user by email:', error?.message || error);
   }
 
-  // 2) If not found, create it with the provided password.
   let created = false;
-  if (!authUser) {
-    const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, role, phone, department },
-      app_metadata: { role },
-    });
-
-    if (error || !data?.user) {
-      const err = new Error(error?.message || 'Failed to create employee auth user');
-      err.statusCode = 500;
+  if (!publicUser) {
+    if (!password) {
+      const err = new Error('Password required to create employee user');
+      err.statusCode = 400;
       throw err;
     }
 
-    authUser = data.user;
+    const password_hash = await hashPassword(password);
+    const inserted = await upsertPublicUser({
+      email,
+      full_name: fullName,
+      role,
+      phone,
+      password_hash,
+      allowPasswordUpdate: true,
+    });
+
+    publicUser = { id: inserted.id, email: inserted.email };
     created = true;
   }
 
-  const userId = authUser.id;
+  const userId = publicUser.id;
 
-  // Keep public.users aligned where possible.
-  await supabase.from('users').upsert(
-    [
-      {
-        id: userId,
-        email,
-        full_name: fullName || email.split('@')[0],
-        role,
-        phone,
-        updated_at: nowIso(),
-        created_at: nowIso(),
-      },
-    ],
-    { onConflict: 'id' }
-  );
-
-  // Wire employee -> auth user.
   await supabase
     .from('employees')
     .update({ user_id: userId })
@@ -276,9 +248,9 @@ async function deleteVendorCascade(vendorId) {
   // Best-effort delete of the auth user tied to this vendor.
   if (vendorUserId) {
     try {
-      await supabase.auth.admin.deleteUser(vendorUserId);
+      await supabase.from('users').delete().eq('id', vendorUserId);
     } catch (error) {
-      console.warn('[SuperAdmin] Failed to delete vendor auth user:', error?.message || error);
+      console.warn('[SuperAdmin] Failed to delete vendor public user:', error?.message || error);
     }
   }
 
@@ -361,35 +333,17 @@ router.post('/employees', async (req, res) => {
       });
     }
 
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const password_hash = await hashPassword(password);
+    const publicUser = await upsertPublicUser({
       email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, role, phone, department },
-      app_metadata: { role },
+      full_name: fullName,
+      role,
+      phone,
+      password_hash,
+      allowPasswordUpdate: true,
     });
 
-    if (authError || !authData?.user) {
-      return res.status(500).json({ success: false, error: authError?.message || 'Auth create failed' });
-    }
-
-    const userId = authData.user.id;
-
-    // Keep public.users aligned where possible.
-    await supabase.from('users').upsert(
-      [
-        {
-          id: userId,
-          email,
-          full_name: fullName,
-          role,
-          phone,
-          updated_at: nowIso(),
-          created_at: nowIso(),
-        },
-      ],
-      { onConflict: 'id' }
-    );
+    const userId = publicUser.id;
 
     const empPayload = {
       user_id: userId,
@@ -409,11 +363,11 @@ router.post('/employees', async (req, res) => {
       .maybeSingle();
 
     if (empError) {
-      try {
-        await supabase.auth.admin.deleteUser(userId);
-      } catch (error) {
-        console.warn('[SuperAdmin] Failed to rollback auth user:', error?.message || error);
-      }
+        try {
+          await supabase.from('users').delete().eq('id', userId);
+        } catch (error) {
+          console.warn('[SuperAdmin] Failed to rollback public user:', error?.message || error);
+        }
       return res.status(500).json({ success: false, error: empError.message });
     }
 
@@ -465,14 +419,9 @@ router.delete('/employees/:employeeId', async (req, res) => {
 
     await supabase.from('employees').delete().eq('id', employeeId);
 
-    if (employee.user_id) {
-      await supabase.from('users').delete().eq('id', employee.user_id);
-      try {
-        await supabase.auth.admin.deleteUser(employee.user_id);
-      } catch (error) {
-        console.warn('[SuperAdmin] Failed to delete employee auth user:', error?.message || error);
+      if (employee.user_id) {
+        await supabase.from('users').delete().eq('id', employee.user_id);
       }
-    }
 
     await writeAuditLog({
       req,
@@ -520,27 +469,23 @@ router.put('/employees/:employeeId/password', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Employee not found' });
     }
 
-    // Ensure we have a valid auth user id even if employees.user_id is missing.
+    // Ensure we have a valid public user id even if employees.user_id is missing/invalid.
     let resolvedUserId = employee.user_id || null;
     let createdAuthUser = false;
     try {
-      if (!resolvedUserId) {
-        const ensured = await ensureEmployeeAuthUser(employee, password);
-        resolvedUserId = ensured.userId;
-        createdAuthUser = ensured.created;
-      }
+      const ensured = await ensureEmployeeAuthUser(employee, password);
+      resolvedUserId = ensured.userId;
+      createdAuthUser = ensured.created;
     } catch (error) {
       const statusCode = error?.statusCode || 500;
       return res.status(statusCode).json({ success: false, error: error.message });
     }
 
-    const { error: updateError } = await supabase.auth.admin.updateUserById(resolvedUserId, {
-      password,
-    });
-
-    if (updateError) {
-      return res.status(500).json({ success: false, error: updateError.message });
+    if (!resolvedUserId) {
+      return res.status(404).json({ success: false, error: 'Employee user not found' });
     }
+
+    await setPublicUserPassword(resolvedUserId, password);
 
     await writeAuditLog({
       req,

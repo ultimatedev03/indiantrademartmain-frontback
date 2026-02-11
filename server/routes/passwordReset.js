@@ -1,5 +1,6 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { hashPassword, normalizeEmail, upsertPublicUser } from '../lib/auth.js';
 
 const router = express.Router();
 
@@ -21,7 +22,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters long' });
     }
 
-    const emailLower = email.toLowerCase().trim();
+    const emailLower = normalizeEmail(email);
 
     // Step 1: Find user_id from buyers or vendors table
     let userId = null;
@@ -57,16 +58,14 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Email not found in our records' });
     }
 
-    // Step 2: Update password using admin API
-    const { data: updatedUser, error: updateError } = await supabase.auth.admin.updateUserById(
-      userId,
-      { password: new_password }
-    );
-
-    if (updateError) {
-      console.error('Password update error:', updateError);
-      return res.status(500).json({ error: 'Failed to reset password: ' + updateError.message });
-    }
+    // Step 2: Update password in public.users
+    const password_hash = await hashPassword(new_password);
+    await upsertPublicUser({
+      id: userId,
+      email: emailLower,
+      password_hash,
+      allowPasswordUpdate: true,
+    });
 
     // Log the password reset event for security
     console.log(`✅ Password reset successfully for ${userRole} user: ${emailLower}`);

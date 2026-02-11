@@ -127,22 +127,35 @@ export const categoryApi = {
    *  ]}
    * ]
    */
-  getHomeShowcaseCategories: async () => {
+  getHomeShowcaseCategories: async (options = {}) => {
     try {
+      const headLimit = Number(options?.headLimit || 0);
+      const subLimit = Number(options?.subLimit || 0);
+      const microLimit = Number(options?.microLimit || 0);
+      const useHeadLimit = Number.isFinite(headLimit) && headLimit > 0;
+      const useSubLimit = Number.isFinite(subLimit) && subLimit > 0;
+      const useMicroLimit = Number.isFinite(microLimit) && microLimit > 0;
+
       // 1) Heads
-      let headRes = await supabase
+      let headQuery = supabase
         .from('head_categories')
         .select('id, name, slug, image_url, description')
         .eq('is_active', true)
         .order('sort_order', { ascending: true })
         .order('name', { ascending: true });
 
+      if (useHeadLimit) headQuery = headQuery.limit(headLimit);
+
+      let headRes = await headQuery;
+
       if (headRes.error && isMissingColumnErr(headRes.error, 'sort_order')) {
-        headRes = await supabase
+        let fallbackHeadQuery = supabase
           .from('head_categories')
           .select('id, name, slug, image_url, description')
           .eq('is_active', true)
           .order('name', { ascending: true });
+        if (useHeadLimit) fallbackHeadQuery = fallbackHeadQuery.limit(headLimit);
+        headRes = await fallbackHeadQuery;
       }
 
       if (headRes.error) {
@@ -179,7 +192,24 @@ export const categoryApi = {
       }
 
       const subs = subRes.data || [];
-      const subIds = subs.map((s) => s.id);
+
+      // If subLimit is set, take only top N subs per head (order preserved by query)
+      let limitedSubs = subs;
+      if (useSubLimit) {
+        const subsByHeadRaw = subs.reduce((acc, s) => {
+          if (!acc[s.head_category_id]) acc[s.head_category_id] = [];
+          acc[s.head_category_id].push(s);
+          return acc;
+        }, {});
+
+        limitedSubs = [];
+        for (const h of heads) {
+          const list = subsByHeadRaw[h.id] || [];
+          limitedSubs.push(...list.slice(0, subLimit));
+        }
+      }
+
+      const subIds = limitedSubs.map((s) => s.id);
 
       // 3) Micros (chunked to avoid huge URLs / 400 on Netlify)
       const micros = await fetchMicroCategoriesBySubIds(subIds);
@@ -187,12 +217,14 @@ export const categoryApi = {
       // Group micros by sub
       const microsBySub = micros.reduce((acc, m) => {
         if (!acc[m.sub_category_id]) acc[m.sub_category_id] = [];
-        acc[m.sub_category_id].push({ id: m.id, name: m.name, slug: m.slug });
+        if (!useMicroLimit || acc[m.sub_category_id].length < microLimit) {
+          acc[m.sub_category_id].push({ id: m.id, name: m.name, slug: m.slug });
+        }
         return acc;
       }, {});
 
       // Group subs by head and attach micros
-      const subsByHead = subs.reduce((acc, s) => {
+      const subsByHead = limitedSubs.reduce((acc, s) => {
         if (!acc[s.head_category_id]) acc[s.head_category_id] = [];
         acc[s.head_category_id].push({
           id: s.id,
@@ -213,6 +245,25 @@ export const categoryApi = {
     } catch (err) {
       console.error('Unexpected error building showcase categories:', err);
       return [];
+    }
+  },
+
+  getActiveHeadCategoryCount: async () => {
+    try {
+      const { count, error } = await supabase
+        .from('head_categories')
+        .select('*', { count: 'exact', head: true })
+        .eq('is_active', true);
+
+      if (error) {
+        console.error('Error counting head categories:', error);
+        return 0;
+      }
+
+      return count || 0;
+    } catch (err) {
+      console.error('Unexpected error counting head categories:', err);
+      return 0;
     }
   },
 

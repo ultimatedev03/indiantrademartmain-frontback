@@ -1,8 +1,8 @@
 
-import React from 'react';
+import React, { lazy } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import CareerLayout from '@/modules/career/layouts/CareerLayout';
-import CareerHome from '@/modules/career/pages/CareerHome';
+const CareerHome = lazy(() => import('@/modules/career/pages/CareerHome'));
 
 export const CareerRoutes = () => {
   return (

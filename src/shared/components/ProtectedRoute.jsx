@@ -11,7 +11,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   const supa = useAuth();
   const internal = useInternalAuth();
 
-  // ✅ Admin/HR portal currently uses InternalAuthContext (localStorage + RPC)
+  // ✅ Admin/HR portal uses InternalAuthContext (JWT cookie + RPC)
   const wantsInternal =
     (location.pathname || '').startsWith('/admin') ||
     (location.pathname || '').startsWith('/hr') ||
@@ -19,9 +19,12 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
     allowedRoles.some(r => ['ADMIN', 'HR', 'FINANCE'].includes(String(r || '').trim().toUpperCase()));
 
   const loading = wantsInternal ? (internal?.isLoading ?? false) : (supa?.loading ?? false);
-  const user = wantsInternal ? internal?.user : supa?.user;
-  const role = wantsInternal ? (internal?.user?.role) : (supa?.userRole || supa?.user?.role);
-  const isAuthenticated = wantsInternal ? !!internal?.isAuthenticated : !!supa?.user;
+  const internalUser = internal?.user;
+  const supaUser = supa?.user;
+  const fallbackRole = supa?.userRole || supaUser?.role;
+  const user = wantsInternal ? (internalUser || supaUser) : supaUser;
+  const role = wantsInternal ? (internalUser?.role || fallbackRole) : fallbackRole;
+  const isAuthenticated = wantsInternal ? (!!internal?.isAuthenticated || !!supaUser) : !!supaUser;
   const normalizeRole = (value) => {
     const raw = String(value || '').trim().toUpperCase();
     if (!raw) return '';

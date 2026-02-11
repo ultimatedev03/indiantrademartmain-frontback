@@ -4,6 +4,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 const MigrationVendorIds = () => {
   const [vendors, setVendors] = useState([]);
@@ -193,11 +195,10 @@ const MigrationVendorIds = () => {
           }));
 
           // Call backend API to migrate vendor
-          const response = await fetch('http://localhost:3001/api/migration/vendor-ids/migrate-single', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ vendorId: vendor.id })
-          });
+            const response = await fetchWithCsrf(apiUrl('/api/migration/vendor-ids/migrate-single'), {
+              method: 'POST',
+              body: JSON.stringify({ vendorId: vendor.id })
+            });
 
           const data = await response.json();
 

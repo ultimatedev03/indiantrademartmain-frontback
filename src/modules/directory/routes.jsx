@@ -1,43 +1,41 @@
-import React from 'react';
+import React, { lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
 
-import Directory from '@/modules/directory/pages/Directory';
-import CitiesPage from '@/modules/directory/pages/CitiesPage';
-import CityPage from '@/modules/directory/pages/CityPage';
-import SubCategoryPage from '@/modules/directory/pages/SubCategoryPage';
-import MicroCategoryPage from '@/modules/directory/pages/MicroCategoryPage';
-import DynamicCategory from '@/modules/directory/pages/DynamicCategory';
-import ProductListing from '@/modules/directory/pages/ProductListing';
-import ProductDetail from '@/modules/directory/pages/ProductDetail';
-import SearchResults from '@/modules/directory/pages/SearchResults';
-
 import Home from '@/modules/directory/pages/Home';
-import AboutUs from '@/modules/directory/pages/AboutUs';
-import BecomeVendor from '@/modules/directory/pages/BecomeVendor';
-import Pricing from '@/modules/directory/pages/Pricing';
-import Login from '@/modules/directory/pages/Login';
-import Logistics from '@/modules/directory/pages/Logistics';
+const Directory = lazy(() => import('@/modules/directory/pages/Directory'));
+const CitiesPage = lazy(() => import('@/modules/directory/pages/CitiesPage'));
+const CityPage = lazy(() => import('@/modules/directory/pages/CityPage'));
+const SubCategoryPage = lazy(() => import('@/modules/directory/pages/SubCategoryPage'));
+const MicroCategoryPage = lazy(() => import('@/modules/directory/pages/MicroCategoryPage'));
+const DynamicCategory = lazy(() => import('@/modules/directory/pages/DynamicCategory'));
+const ProductListing = lazy(() => import('@/modules/directory/pages/ProductListing'));
+const ProductDetail = lazy(() => import('@/modules/directory/pages/ProductDetail'));
+const SearchResults = lazy(() => import('@/modules/directory/pages/SearchResults'));
 
-import VendorListing from '@/modules/directory/pages/VendorListing';
-import VendorProfilePublic from '@/modules/directory/pages/VendorProfile';
+const AboutUs = lazy(() => import('@/modules/directory/pages/AboutUs'));
+const BecomeVendor = lazy(() => import('@/modules/directory/pages/BecomeVendor'));
+const Pricing = lazy(() => import('@/modules/directory/pages/Pricing'));
+const Login = lazy(() => import('@/modules/directory/pages/Login'));
+const Logistics = lazy(() => import('@/modules/directory/pages/Logistics'));
 
-import Press from '@/modules/directory/pages/Press';
-import Investor from '@/modules/directory/pages/Investor';
-import ForgotPassword from '@/shared/pages/ForgotPassword';
+const VendorListing = lazy(() => import('@/modules/directory/pages/VendorListing'));
+const VendorProfilePublic = lazy(() => import('@/modules/directory/pages/VendorProfile'));
 
-import {
-  JoinSales,
-  SuccessStories,
-  Help,
-  CustomerCare,
-  Complaints,
-  Jobs,
-  ContactPage,
-  BuyLeads,
-  LearningCentre,
-  ProductsPage
-} from '@/modules/directory/pages/FooterPages';
+const Press = lazy(() => import('@/modules/directory/pages/Press'));
+const Investor = lazy(() => import('@/modules/directory/pages/Investor'));
+const ForgotPassword = lazy(() => import('@/shared/pages/ForgotPassword'));
+
+const JoinSales = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.JoinSales })));
+const SuccessStories = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.SuccessStories })));
+const Help = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Help })));
+const CustomerCare = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.CustomerCare })));
+const Complaints = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Complaints })));
+const Jobs = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Jobs })));
+const ContactPage = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.ContactPage })));
+const BuyLeads = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.BuyLeads })));
+const LearningCentre = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.LearningCentre })));
+const ProductsPage = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.ProductsPage })));
 
 export const DirectoryRoutes = () => {
   return (

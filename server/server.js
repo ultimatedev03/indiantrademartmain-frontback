@@ -17,8 +17,11 @@ import chatbotRoutes from './routes/chatbot.js';
 import superadminRoutes from './routes/superadmin.js';
 import employeeRoutes from './routes/employee.js';
 import categoryRequestRoutes from './routes/categoryRequests.js';
+import authRoutes from './routes/auth.js';
+import vendorProfileRoutes from './routes/vendorProfile.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
+import { ensureDevAdmin } from './lib/devBootstrap.js';
 
 dotenv.config({ path: '.env.local' });
 
@@ -59,6 +62,11 @@ app.use((req, res, next) => {
 });
 
 // Rate limiting middleware
+const isProd = process.env.NODE_ENV === 'production';
+const parseNumber = (value, fallback) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
 const otpLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5, // 5 requests per window
@@ -68,18 +76,35 @@ const otpLimiter = rateLimit({
 });
 
 const apiLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 30, // 30 requests per minute
+  windowMs: parseNumber(process.env.API_RATE_WINDOW_MS, 60 * 1000), // 1 minute
+  max: parseNumber(process.env.API_RATE_MAX, isProd ? 60 : 300), // more lenient in dev
   message: 'Too many requests, try again later',
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    if (process.env.DISABLE_API_RATE_LIMIT === 'true') return true;
+    // Avoid throttling session checks in dev (auth has its own limiter below)
+    if (!isProd && req.path.startsWith('/auth/')) return true;
+    return false;
+  },
+});
+
+const authLimiter = rateLimit({
+  windowMs: parseNumber(process.env.AUTH_RATE_WINDOW_MS, 60 * 1000),
+  max: parseNumber(process.env.AUTH_RATE_MAX, isProd ? 60 : 200),
+  message: 'Too many auth attempts, try again later',
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.DISABLE_API_RATE_LIMIT === 'true',
 });
 
 // Apply rate limiting
 app.use('/api/', apiLimiter);
+app.use('/api/auth', authLimiter);
 app.use('/api/otp', otpLimiter);
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/otp', otpRoutes);
 app.use('/api/quotation', quotationRoutes);
 app.use('/api/password-reset', passwordResetRoutes);
@@ -88,6 +113,7 @@ app.use('/api/support', supportTicketRoutes);
 app.use('/api/kyc', kycRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/dir', dirRoutes);
+app.use('/api/vendors', vendorProfileRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/chat', chatbotRoutes);
@@ -97,6 +123,11 @@ app.use('/api/category-requests', categoryRequestRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();
+
+// Dev-only admin bootstrap (set DEV_ADMIN_EMAIL + DEV_ADMIN_PASSWORD)
+ensureDevAdmin().catch((err) => {
+  console.warn('[DevBootstrap] Failed:', err?.message || err);
+});
 
 // Health check
 app.get('/health', (req, res) => {

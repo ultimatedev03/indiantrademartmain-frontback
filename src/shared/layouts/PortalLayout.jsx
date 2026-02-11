@@ -102,7 +102,27 @@ const PortalLayout = ({ role }) => {
 
   const handleLogout = async () => {
     await logout();
-    navigate(isVendor ? '/vendor/login' : '/admin/login');
+    if (isVendor) {
+      navigate('/vendor/login');
+      return;
+    }
+
+    switch (role) {
+      case 'HR':
+        navigate('/hr/login');
+        break;
+      case 'FINANCE':
+        navigate('/admin/login?portal=finance');
+        break;
+      case 'DATA_ENTRY':
+      case 'SUPPORT':
+      case 'SALES':
+        navigate('/employee/login');
+        break;
+      default:
+        navigate('/admin/login');
+        break;
+    }
   };
 
   // Define menus based on role

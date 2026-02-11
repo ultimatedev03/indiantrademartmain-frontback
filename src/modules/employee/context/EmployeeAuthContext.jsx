@@ -20,15 +20,9 @@ export const EmployeeAuthProvider = ({ children }) => {
         const current = await employeeApi.auth.getCurrentUser();
         if (isMounted) setUser(current);
 
-        // 2) keep local cache (optional, helps faster UI)
-        if (current) {
-          localStorage.setItem('itm_employee_user', JSON.stringify(current));
-        } else {
-          localStorage.removeItem('itm_employee_user');
-        }
+        // No local storage caching for auth data
       } catch (e) {
         console.error('[EmployeeAuth] bootstrap failed:', e);
-        localStorage.removeItem('itm_employee_user');
         if (isMounted) setUser(null);
       } finally {
         if (isMounted) setIsLoading(false);
@@ -42,13 +36,11 @@ export const EmployeeAuthProvider = ({ children }) => {
       try {
         if (event === 'SIGNED_OUT') {
           setUser(null);
-          localStorage.removeItem('itm_employee_user');
           return;
         }
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           const current = await employeeApi.auth.getCurrentUser();
           setUser(current);
-          if (current) localStorage.setItem('itm_employee_user', JSON.stringify(current));
         }
       } catch (e) {
         console.error('[EmployeeAuth] onAuthStateChange failed:', e);
@@ -66,7 +58,6 @@ export const EmployeeAuthProvider = ({ children }) => {
       const res = await employeeApi.auth.login(email, password);
       if (res?.user) {
         setUser(res.user);
-        localStorage.setItem('itm_employee_user', JSON.stringify(res.user));
 
         toast({
           title: 'Welcome back!',
@@ -94,7 +85,6 @@ export const EmployeeAuthProvider = ({ children }) => {
       console.error('Logout error:', e);
     } finally {
       setUser(null);
-      localStorage.removeItem('itm_employee_user');
       toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
     }
   };

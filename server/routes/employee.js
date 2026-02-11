@@ -1,30 +1,13 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { normalizeRole } from '../lib/auth.js';
+import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = express.Router();
 
-function parseBearerToken(req) {
-  const header = req.headers?.authorization || req.headers?.Authorization;
-  if (!header || typeof header !== 'string') return null;
-  if (!header.startsWith('Bearer ')) return null;
-  return header.replace('Bearer ', '').trim();
-}
-
-const normalizeRole = (role) => String(role || '').trim().toUpperCase();
-
-router.get('/me', async (req, res) => {
+router.get('/me', requireAuth(), async (req, res) => {
   try {
-    const token = parseBearerToken(req);
-    if (!token) {
-      return res.status(401).json({ success: false, error: 'Missing auth token' });
-    }
-
-    const { data: authData, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !authData?.user) {
-      return res.status(401).json({ success: false, error: 'Invalid auth token' });
-    }
-
-    const authUser = authData.user;
+    const authUser = req.user;
     const email = String(authUser?.email || '').trim().toLowerCase();
 
     let employee = null;

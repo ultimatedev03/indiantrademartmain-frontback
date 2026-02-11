@@ -8,7 +8,8 @@ import Card from '@/shared/components/Card';
 import { Badge } from '@/shared/components/Badge';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { Skeleton } from '@/components/ui/skeleton';
-import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 
 // Internal Mock Data to ensure page is never blank
@@ -126,20 +127,14 @@ const VendorProfileContent = () => {
   const [showAllServiceCollections, setShowAllServiceCollections] = useState(false);
 
   useEffect(() => {
-    // Fetch vendor data from Supabase
+    // Fetch vendor data from backend APIs
     const fetchVendor = async () => {
       setLoading(true);
       try {
-        // Fetch vendor data from vendors table
-        const { data: vendorData, error: vendorError } = await supabase
-          .from('vendors')
-          .select('*')
-          .eq('id', vendorId)
-          .single();
-
-        if (vendorError && vendorError.code !== 'PGRST116') {
-          throw vendorError;
-        }
+        const vendorRes = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}`));
+        if (!vendorRes.ok) throw new Error('Vendor not found');
+        const vendorJson = await vendorRes.json();
+        const vendorData = vendorJson?.vendor;
 
         if (vendorData) {
           setVendor({
@@ -163,151 +158,34 @@ const VendorProfileContent = () => {
             annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover
           });
 
-          // Fetch products from this vendor (all active, newest first)
-          const { data: productsData, error: productsError } = await supabase
-            .from('products')
-            .select('id, name, price, price_unit, images, category_other, micro_category_id, sub_category_id, head_category_id')
-            .eq('vendor_id', vendorData.id)
-            .eq('status', 'ACTIVE')
-            .order('created_at', { ascending: false });
+          const [productsRes, servicesRes, categoriesRes] = await Promise.all([
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/products`)),
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/services`)),
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/service-categories`)),
+          ]);
 
-          if (productsError) {
-            console.error('Error fetching products:', productsError);
-          }
-
-          if (productsData && productsData.length > 0) {
-            const microIds = Array.from(new Set(productsData.map(p => p.micro_category_id).filter(Boolean)));
-            const subIds = Array.from(new Set(productsData.map(p => p.sub_category_id).filter(Boolean)));
-            const headIds = Array.from(new Set(productsData.map(p => p.head_category_id).filter(Boolean)));
-
-            const [microRes, subRes, headRes] = await Promise.all([
-              microIds.length
-                ? supabase
-                  .from('micro_categories')
-                  .select('id, name, sub_categories(id, name, head_categories(id, name))')
-                  .in('id', microIds)
-                : Promise.resolve({ data: [] }),
-              subIds.length
-                ? supabase
-                  .from('sub_categories')
-                  .select('id, name, head_categories(id, name)')
-                  .in('id', subIds)
-                : Promise.resolve({ data: [] }),
-              headIds.length
-                ? supabase
-                  .from('head_categories')
-                  .select('id, name')
-                  .in('id', headIds)
-                : Promise.resolve({ data: [] }),
-            ]);
-
-            const microLookup = {};
-            (microRes?.data || []).forEach((m) => {
-              microLookup[m.id] = {
-                microName: m.name,
-                subId: m.sub_categories?.id || null,
-                subName: m.sub_categories?.name || null,
-                headId: m.sub_categories?.head_categories?.id || null,
-                headName: m.sub_categories?.head_categories?.name || null,
-              };
-            });
-
-            const subLookup = {};
-            (subRes?.data || []).forEach((s) => {
-              subLookup[s.id] = {
-                subName: s.name,
-                headId: s.head_categories?.id || null,
-                headName: s.head_categories?.name || null,
-              };
-            });
-
-            const headLookup = {};
-            (headRes?.data || []).forEach((h) => {
-              headLookup[h.id] = h.name;
-            });
-
-            const mappedProducts = productsData.map(p => {
-              const microInfo = microLookup[p.micro_category_id] || {};
-              const subInfo = subLookup[p.sub_category_id] || {};
-              const headName =
-                microInfo.headName ||
-                subInfo.headName ||
-                headLookup[p.head_category_id] ||
-                'Other Category';
-              const subName =
-                microInfo.subName ||
-                subInfo.subName ||
-                p.category_other ||
-                'Other Subcategory';
-
-              return {
-                id: p.id,
-                name: p.name,
-                price: `₹${p.price}${p.price_unit ? ' / ' + p.price_unit : ''}`,
-                category: p.category_other || microInfo.microName || subName || 'General',
-                head_category_name: headName,
-                sub_category_name: subName,
-                micro_category_name: microInfo.microName || null,
-                image: (p.images && Array.isArray(p.images) && p.images[0]) || (p.images && typeof p.images === 'string' ? p.images : 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80')
-              };
-            });
-
-            setProducts(mappedProducts);
-            setShowAllProducts(false);
+          if (productsRes.ok) {
+            const productsJson = await productsRes.json();
+            setProducts(productsJson?.products || []);
           } else {
             setProducts([]);
-            setShowAllProducts(false);
+          }
+          setShowAllProducts(false);
+
+          if (servicesRes.ok) {
+            const servicesJson = await servicesRes.json();
+            setServices(servicesJson?.services || []);
+          } else {
+            setServices([]);
           }
 
-          // Fetch services offered by vendor (best-effort)
-          let mappedServices = [];
-          let mappedServiceCategories = [];
-          try {
-            const { data: servicesData, error: servicesError } = await supabase
-              .from('vendor_services')
-              .select('*')
-              .eq('vendor_id', vendorData.id);
-
-            if (servicesError && servicesError.code !== 'PGRST116') {
-              console.warn('Error fetching services:', servicesError);
-            } else if (servicesData && servicesData.length > 0) {
-              mappedServices = servicesData.map(service => ({
-                id: service.id,
-                name: service.name || service.service_name || service.title || 'Service',
-                category: service.category || service.service_type || 'Service',
-                description: service.description || service.details || service.short_description || 'Service details coming soon.',
-                price: service.price
-                  ? `₹${service.price}${service.price_unit ? ' / ' + service.price_unit : ''}`
-                  : service.rate
-                    ? `₹${service.rate}`
-                    : 'Price on request',
-                image: (service.image || service.cover_image || (Array.isArray(service.images) ? service.images[0] : null) || FALLBACK_SERVICE_IMAGE)
-              }));
-            }
-            // Also fetch service categories from vendor_preferences (head categories)
-            const { data: prefs, error: prefsError } = await supabase
-              .from('vendor_preferences')
-              .select('preferred_micro_categories')
-              .eq('vendor_id', vendorData.id)
-              .maybeSingle();
-
-            if (!prefsError && prefs?.preferred_micro_categories?.length) {
-              const { data: headCats, error: headErr } = await supabase
-                .from('head_categories')
-                .select('id, name')
-                .in('id', prefs.preferred_micro_categories);
-
-              if (!headErr && headCats?.length) {
-                mappedServiceCategories = headCats.map(h => ({ id: h.id, name: h.name }));
-              }
-            }
-          } catch (serviceErr) {
-            console.warn('Service fetch failed', serviceErr);
+          if (categoriesRes.ok) {
+            const categoriesJson = await categoriesRes.json();
+            setServiceCategories(categoriesJson?.categories || []);
+          } else {
+            setServiceCategories([]);
           }
-          setServices(mappedServices);
-          setServiceCategories(mappedServiceCategories);
         } else {
-          // Fallback if vendor not found
           setVendor(FALLBACK_VENDORS[0]);
           setProducts([]);
           setServices([]);
@@ -316,7 +194,6 @@ const VendorProfileContent = () => {
         }
       } catch (e) {
         console.error("Vendor fetch failed", e);
-        // Use fallback vendor data on error
         setVendor(FALLBACK_VENDORS[0]);
         setProducts([]);
         setServices([]);
@@ -338,24 +215,10 @@ const VendorProfileContent = () => {
       if (!isBuyer || !user?.id || !vendorId) return;
 
       try {
-        const { data: buyerRow, error: buyerErr } = await supabase
-          .from('buyers')
-          .select('id')
-          .eq('user_id', user.id)
-          .single();
-
-        if (buyerErr) throw buyerErr;
-
-        const { data: favRow, error: favErr } = await supabase
-          .from('favorites')
-          .select('id')
-          .eq('buyer_id', buyerRow.id)
-          .eq('vendor_id', vendorId)
-          .maybeSingle();
-
-        if (favErr && favErr.code !== 'PGRST116') throw favErr;
-
-        setIsFavorite(!!favRow?.id);
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`));
+        if (!res.ok) return;
+        const data = await res.json();
+        setIsFavorite(!!data?.isFavorite);
       } catch (e) {
         console.warn('[VendorProfile] favorite status load failed:', e);
       }
@@ -375,35 +238,19 @@ const VendorProfileContent = () => {
     setFavLoading(true);
 
     try {
-      const { data: buyerRow, error: buyerErr } = await supabase
-        .from('buyers')
-        .select('id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (buyerErr) throw buyerErr;
-
       if (isFavorite) {
-        const { error } = await supabase
-          .from('favorites')
-          .delete()
-          .match({ buyer_id: buyerRow.id, vendor_id: vendorId });
-
-        if (error) throw error;
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`), {
+          method: 'DELETE',
+        });
+        if (!res.ok) throw new Error('Failed to remove favorite');
 
         setIsFavorite(false);
         toast({ title: 'Removed from Favorites' });
       } else {
-        const { error } = await supabase
-          .from('favorites')
-          .insert([{ buyer_id: buyerRow.id, vendor_id: vendorId }]);
-
-        if (error && String(error.message || '').toLowerCase().includes('duplicate')) {
-          setIsFavorite(true);
-          toast({ title: 'Added to Favorites' });
-          return;
-        }
-        if (error) throw error;
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`), {
+          method: 'POST',
+        });
+        if (!res.ok) throw new Error('Failed to add favorite');
 
         setIsFavorite(true);
         toast({ title: 'Added to Favorites' });
@@ -422,14 +269,10 @@ const VendorProfileContent = () => {
       if (!isBuyer || !user?.id) return;
 
       try {
-        const { data, error } = await supabase
-          .from('leads')
-          .select('*')
-          .eq('vendor_id', vendorId);
-
-        if (!error && data) {
-          setLeads(data);
-        }
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/leads`));
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.leads) setLeads(data.leads);
       } catch (error) {
         console.error('Error loading leads:', error);
       }

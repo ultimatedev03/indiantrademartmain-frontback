@@ -1,8 +1,8 @@
 import { Facebook, Instagram, Linkedin, Mail, Twitter, Youtube } from 'lucide-react';
-import { useState } from 'react';
+import { Suspense, useState, lazy } from 'react';
 import { Link } from 'react-router-dom';
-import PostRequirementModal from './modals/PostRequirementModal';
-import SupportModal from './modals/SupportModal';
+const PostRequirementModal = lazy(() => import('./modals/PostRequirementModal'));
+const SupportModal = lazy(() => import('./modals/SupportModal'));
 
 const Footer = () => {
   const [showPostRequirement, setShowPostRequirement] = useState(false);
@@ -11,16 +11,20 @@ const Footer = () => {
   return (
     <>
       {showPostRequirement && (
-        <PostRequirementModal
-          isOpen={showPostRequirement}
-          onClose={() => setShowPostRequirement(false)}
-        />
+        <Suspense fallback={null}>
+          <PostRequirementModal
+            isOpen={showPostRequirement}
+            onClose={() => setShowPostRequirement(false)}
+          />
+        </Suspense>
       )}
       {showSupport && (
-        <SupportModal
-          isOpen={showSupport}
-          onClose={() => setShowSupport(false)}
-        />
+        <Suspense fallback={null}>
+          <SupportModal
+            isOpen={showSupport}
+            onClose={() => setShowSupport(false)}
+          />
+        </Suspense>
       )}
 
       <footer className="bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">

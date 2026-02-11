@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PortalLayout from '@/shared/layouts/PortalLayout';
@@ -6,50 +6,48 @@ import EmployeeLayout from '@/modules/employee/layouts/EmployeeLayout';
 import { useSubdomain } from '@/contexts/SubdomainContext';
 
 // Admin Pages
-import AdminDashboard from '@/modules/admin/pages/Dashboard';
-import AdminVendors from '@/modules/admin/pages/Vendors';
-import AdminVendorProducts from '@/modules/admin/pages/VendorProducts';
-import Staff from '@/modules/admin/pages/Staff';
-import AuditLogs from '@/modules/admin/pages/AuditLogs';
-import AdminSettings from '@/modules/admin/pages/Settings';
-import KYCApproval from '@/modules/admin/pages/KYCApproval';
-import AdminFinance from '@/modules/admin/pages/Finance';
-import FinanceDashboard from '@/modules/finance/pages/Dashboard';
-import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
-import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
-import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
-
-
+const AdminDashboard = lazy(() => import('@/modules/admin/pages/Dashboard'));
+const AdminVendors = lazy(() => import('@/modules/admin/pages/Vendors'));
+const AdminVendorProducts = lazy(() => import('@/modules/admin/pages/VendorProducts'));
+const Staff = lazy(() => import('@/modules/admin/pages/Staff'));
+const AuditLogs = lazy(() => import('@/modules/admin/pages/AuditLogs'));
+const AdminSettings = lazy(() => import('@/modules/admin/pages/Settings'));
+const KYCApproval = lazy(() => import('@/modules/admin/pages/KYCApproval'));
+const AdminFinance = lazy(() => import('@/modules/admin/pages/Finance'));
+const FinanceDashboard = lazy(() => import('@/modules/finance/pages/Dashboard'));
+const SuperAdminLogin = lazy(() => import('@/modules/admin/pages/superadmin/SuperAdminLogin'));
+const SuperAdminDashboard = lazy(() => import('@/modules/admin/pages/superadmin/SuperAdminDashboard'));
+const SuperAdminProtectedRoute = lazy(() => import('@/modules/admin/routes/SuperAdminProtectedRoute'));
 
 // Reuse Employee Support pages for Admin
-import SupportTickets from '@/modules/employee/pages/support/Tickets';
+const SupportTickets = lazy(() => import('@/modules/employee/pages/support/Tickets'));
 
 // HR Pages
-import HrDashboard from '@/modules/hr/pages/Dashboard';
-import HrStaff from '@/modules/hr/pages/Staff';
+const HrDashboard = lazy(() => import('@/modules/hr/pages/Dashboard'));
+const HrStaff = lazy(() => import('@/modules/hr/pages/Staff'));
 
 // Employee Pages
-import EmployeeLogin from '@/modules/employee/pages/auth/Login';
-import DataEntryDashboard from '@/modules/employee/pages/dataentry/Dashboard';
-import DataEntryLocations from '@/modules/employee/pages/dataentry/LocationsFixed';
-import DataEntryVendors from '@/modules/employee/pages/dataentry/Vendors';
-import DataEntryVendorProducts from '@/modules/employee/pages/dataentry/VendorProducts';
-import DataEntryAddProduct from '@/modules/employee/pages/dataentry/AddProduct';
-import DataEntryCategories from '@/modules/employee/pages/dataentry/CategoriesFixed';
-import DataEntryCsvUpload from '@/modules/employee/pages/dataentry/CsvUpload';
-import DataEntryBulkImport from '@/modules/employee/pages/dataentry/BulkImport';
-import DataEntryVendorOnboarding from '@/modules/employee/pages/dataentry/VendorOnboarding';
-import DataEntryRecords from '@/modules/employee/pages/dataentry/DataEntryRecords';
-import KycApprovals from '@/modules/employee/pages/support/KycApprovals';
-import SupportDashboard from '@/modules/employee/pages/support/Dashboard';
-import SalesDashboard from '@/modules/employee/pages/sales/Dashboard';
-import SalesLeads from '@/modules/employee/pages/sales/Leads';
-import PricingRules from '@/modules/employee/pages/sales/PricingRules';
+const EmployeeLogin = lazy(() => import('@/modules/employee/pages/auth/Login'));
+const DataEntryDashboard = lazy(() => import('@/modules/employee/pages/dataentry/Dashboard'));
+const DataEntryLocations = lazy(() => import('@/modules/employee/pages/dataentry/LocationsFixed'));
+const DataEntryVendors = lazy(() => import('@/modules/employee/pages/dataentry/Vendors'));
+const DataEntryVendorProducts = lazy(() => import('@/modules/employee/pages/dataentry/VendorProducts'));
+const DataEntryAddProduct = lazy(() => import('@/modules/employee/pages/dataentry/AddProduct'));
+const DataEntryCategories = lazy(() => import('@/modules/employee/pages/dataentry/CategoriesFixed'));
+const DataEntryCsvUpload = lazy(() => import('@/modules/employee/pages/dataentry/CsvUpload'));
+const DataEntryBulkImport = lazy(() => import('@/modules/employee/pages/dataentry/BulkImport'));
+const DataEntryVendorOnboarding = lazy(() => import('@/modules/employee/pages/dataentry/VendorOnboarding'));
+const DataEntryRecords = lazy(() => import('@/modules/employee/pages/dataentry/DataEntryRecords'));
+const KycApprovals = lazy(() => import('@/modules/employee/pages/support/KycApprovals'));
+const SupportDashboard = lazy(() => import('@/modules/employee/pages/support/Dashboard'));
+const SalesDashboard = lazy(() => import('@/modules/employee/pages/sales/Dashboard'));
+const SalesLeads = lazy(() => import('@/modules/employee/pages/sales/Leads'));
+const PricingRules = lazy(() => import('@/modules/employee/pages/sales/PricingRules'));
 
-import PortalLogin from '@/shared/pages/PortalLogin';
+const PortalLogin = lazy(() => import('@/shared/pages/PortalLogin'));
 import { ShieldCheck, Users } from 'lucide-react';
-import Buyers from '@/modules/admin/pages/Buyers';
-import Unauthorized from '@/shared/pages/Unauthorized';
+const Buyers = lazy(() => import('@/modules/admin/pages/Buyers'));
+const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
 
 const LoginRouter = () => {
   const location = useLocation();
@@ -96,6 +94,16 @@ const LoginRouter = () => {
         />
       );
     }
+    if (portalParam === 'hr') {
+      return (
+        <PortalLogin
+          portalName="HR Portal"
+          colorScheme="emerald"
+          defaultEmail="harsh@hr.com"
+          icon={Users}
+        />
+      );
+    }
     return (
       <PortalLogin
         portalName="Admin Portal"
@@ -118,6 +126,16 @@ const LoginRouter = () => {
         />
       );
     }
+    if (portalParam === 'hr') {
+      return (
+        <PortalLogin
+          portalName="HR Portal"
+          colorScheme="emerald"
+          defaultEmail="harsh@hr.com"
+          icon={Users}
+        />
+      );
+    }
     return (
       <PortalLogin
         portalName="Admin Portal"
@@ -133,95 +151,119 @@ const LoginRouter = () => {
 };
 
 export const AdminRoutes = () => {
+  const location = useLocation();
+  const { appType } = useSubdomain();
+  const path = location.pathname || '';
+  const isFinanceScope = path.includes('/finance-portal');
+  const isHrScope = path.startsWith('/hr');
+  const isEmployeeScope = path.startsWith('/employee');
+  const isAdminScope = appType === 'admin' || appType === 'management' || path.startsWith('/admin') || (!isFinanceScope && !isHrScope && !isEmployeeScope);
+
   return (
     <Routes>
       {/* ✅ Correct login route for /admin/login, /employee/login, /hr/login */}
       <Route path="login" element={<LoginRouter />} />
 
       {/* Superadmin */}
-      <Route path="superadmin/login" element={<SuperAdminLogin />} />
-      <Route element={<SuperAdminProtectedRoute />}>
-        <Route path="superadmin/dashboard" element={<SuperAdminDashboard />} />
-      </Route>
+      {isAdminScope ? (
+        <>
+          <Route path="superadmin/login" element={<SuperAdminLogin />} />
+          <Route element={<SuperAdminProtectedRoute />}>
+            <Route path="superadmin/dashboard" element={<SuperAdminDashboard />} />
+          </Route>
+        </>
+      ) : null}
 
       <Route path="unauthorized" element={<Unauthorized />} />
 
       {/* Finance Portal */}
-      <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
-        <Route element={<PortalLayout role="FINANCE" />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<FinanceDashboard />} />
+      {isFinanceScope ? (
+        <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
+          <Route element={<PortalLayout role="FINANCE" />}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<FinanceDashboard />} />
+          </Route>
         </Route>
-      </Route>
+      ) : null}
 
       {/* Admin */}
-      <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'FINANCE']} />}>
-        <Route element={<PortalLayout role="ADMIN" />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<AdminDashboard />} />
+      {isAdminScope ? (
+        <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'FINANCE']} />}>
+          <Route element={<PortalLayout role="ADMIN" />}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<AdminDashboard />} />
 
-          {/* Vendors (business management) */}
-          <Route path="vendors" element={<AdminVendors />} />
-          <Route path="vendors/:vendorId/products" element={<AdminVendorProducts />} />
+            {/* Vendors (business management) */}
+            <Route path="vendors" element={<AdminVendors />} />
+            <Route path="vendors/:vendorId/products" element={<AdminVendorProducts />} />
 
-          <Route path="tickets" element={<SupportTickets />} />
+            <Route path="tickets" element={<SupportTickets />} />
 
-             {/* ✅ BUYERS (ADDED & FIXED) */}
-          <Route path="buyers" element={<Buyers />} />
+               {/* ✅ BUYERS (ADDED & FIXED) */}
+            <Route path="buyers" element={<Buyers />} />
 
 
-          {/* KYC Approvals (verification) */}
-          <Route path="kyc" element={<KYCApproval />} />
-          <Route path="finance" element={<AdminFinance />} />
+            {/* KYC Approvals (verification) */}
+            <Route path="kyc" element={<KYCApproval />} />
+            <Route path="finance" element={<AdminFinance />} />
 
-          <Route path="staff" element={<Staff />} />
-          <Route path="audit-logs" element={<AuditLogs />} />
-          <Route path="settings" element={<AdminSettings />} />
+            <Route path="staff" element={<Staff />} />
+            <Route path="audit-logs" element={<AuditLogs />} />
+            <Route path="settings" element={<AdminSettings />} />
+          </Route>
         </Route>
-      </Route>
+      ) : null}
 
       {/* HR */}
-      <Route element={<ProtectedRoute allowedRoles={['HR']} />}>
-        <Route element={<PortalLayout role="HR" />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={<HrDashboard />} />
-          <Route path="staff" element={<HrStaff />} />
+      {isHrScope ? (
+        <Route element={<ProtectedRoute allowedRoles={['HR']} />}>
+          <Route element={<PortalLayout role="HR" />}>
+            <Route index element={<Navigate to="dashboard" replace />} />
+            <Route path="dashboard" element={<HrDashboard />} />
+            <Route path="staff" element={<HrStaff />} />
+          </Route>
         </Route>
-      </Route>
+      ) : null}
 
       {/* Employees - Data Entry */}
-      <Route path="dataentry" element={<EmployeeLayout allowedRole="DATA_ENTRY" />}>
-        <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<DataEntryDashboard />} />
-        <Route path="categories" element={<DataEntryCategories />} />
-        <Route path="categories/upload" element={<DataEntryCsvUpload />} />
-        <Route path="locations" element={<DataEntryLocations />} />
-        <Route path="bulk-import" element={<DataEntryBulkImport />} />
-        <Route path="vendor-onboarding" element={<DataEntryVendorOnboarding />} />
-        <Route path="records" element={<DataEntryRecords />} />
-        <Route path="vendors" element={<DataEntryVendors />} />
-        <Route path="vendors/:vendorId" element={<DataEntryVendorProducts />} />
-        <Route path="vendors/:vendorId/products" element={<DataEntryVendorProducts />} />
-        <Route path="vendors/:vendorId/products/add" element={<DataEntryAddProduct />} />
-        <Route path="vendors/:vendorId/products/:productId/edit" element={<DataEntryAddProduct />} />
-        <Route path="kyc-review" element={<KycApprovals />} />
-        <Route path="kyc" element={<KycApprovals />} />
-      </Route>
+      {isEmployeeScope ? (
+        <Route path="dataentry" element={<EmployeeLayout allowedRole="DATA_ENTRY" />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<DataEntryDashboard />} />
+          <Route path="categories" element={<DataEntryCategories />} />
+          <Route path="categories/upload" element={<DataEntryCsvUpload />} />
+          <Route path="locations" element={<DataEntryLocations />} />
+          <Route path="bulk-import" element={<DataEntryBulkImport />} />
+          <Route path="vendor-onboarding" element={<DataEntryVendorOnboarding />} />
+          <Route path="records" element={<DataEntryRecords />} />
+          <Route path="vendors" element={<DataEntryVendors />} />
+          <Route path="vendors/:vendorId" element={<DataEntryVendorProducts />} />
+          <Route path="vendors/:vendorId/products" element={<DataEntryVendorProducts />} />
+          <Route path="vendors/:vendorId/products/add" element={<DataEntryAddProduct />} />
+          <Route path="vendors/:vendorId/products/:productId/edit" element={<DataEntryAddProduct />} />
+          <Route path="kyc-review" element={<KycApprovals />} />
+          <Route path="kyc" element={<KycApprovals />} />
+        </Route>
+      ) : null}
 
       {/* Employees - Support */}
-      <Route path="support" element={<EmployeeLayout allowedRole="SUPPORT" />}>
-        <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<SupportDashboard />} />
-        <Route path="tickets" element={<SupportTickets />} />
-      </Route>
+      {isEmployeeScope ? (
+        <Route path="support" element={<EmployeeLayout allowedRole="SUPPORT" />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<SupportDashboard />} />
+          <Route path="tickets" element={<SupportTickets />} />
+        </Route>
+      ) : null}
 
       {/* Employees - Sales */}
-      <Route path="sales" element={<EmployeeLayout allowedRole="SALES" />}>
-        <Route index element={<Navigate to="dashboard" replace />} />
-        <Route path="dashboard" element={<SalesDashboard />} />
-        <Route path="leads" element={<SalesLeads />} />
-        <Route path="pricing-rules" element={<PricingRules />} />
-      </Route>
+      {isEmployeeScope ? (
+        <Route path="sales" element={<EmployeeLayout allowedRole="SALES" />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<SalesDashboard />} />
+          <Route path="leads" element={<SalesLeads />} />
+          <Route path="pricing-rules" element={<PricingRules />} />
+        </Route>
+      ) : null}
 
       <Route path="*" element={<Navigate to="login" replace />} />
     </Routes>

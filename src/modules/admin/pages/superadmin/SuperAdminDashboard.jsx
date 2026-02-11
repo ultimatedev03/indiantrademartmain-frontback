@@ -64,6 +64,34 @@ const money = (value) => {
   return n.toLocaleString('en-IN');
 };
 
+const normalizeRole = (value) => String(value || '').trim().toUpperCase();
+
+const roleToDepartment = (role) => {
+  switch (normalizeRole(role)) {
+    case 'ADMIN':
+      return 'Administration';
+    case 'HR':
+      return 'Human Resources';
+    case 'FINANCE':
+      return 'Finance';
+    case 'SUPPORT':
+      return 'Support';
+    case 'SALES':
+      return 'Sales';
+    case 'DATA_ENTRY':
+    case 'DATAENTRY':
+      return 'Operations';
+    default:
+      return '';
+  }
+};
+
+const getDepartmentLabel = (emp) =>
+  emp?.department ||
+  emp?.dept ||
+  roleToDepartment(emp?.role) ||
+  '—';
+
 export default function SuperAdminDashboard() {
   const { superAdmin, logout, changePassword } = useSuperAdmin();
 
@@ -890,7 +918,7 @@ export default function SuperAdminDashboard() {
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-neutral-300">
-                                {emp.department || '—'}
+                                {getDepartmentLabel(emp)}
                               </TableCell>
                               <TableCell>
                                 <Badge

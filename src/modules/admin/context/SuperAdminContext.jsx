@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from '@/components/ui/use-toast';
 import {
-  SUPERADMIN_KEYS,
   clearSuperAdminSession,
   getSuperAdminToken,
   setSuperAdminToken,
@@ -36,19 +35,9 @@ export const SuperAdminProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    const stored = localStorage.getItem(SUPERADMIN_KEYS.session);
     const token = getSuperAdminToken();
 
-    if (!stored || !token) {
-      setIsLoading(false);
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(stored);
-      setSuperAdmin(parsed);
-    } catch {
-      clearSuperAdminSession();
+    if (!token) {
       setIsLoading(false);
       return;
     }
@@ -59,7 +48,6 @@ export const SuperAdminProvider = ({ children }) => {
         const { superadmin } = await superAdminServerApi.auth.me();
         if (superadmin) {
           setSuperAdmin(superadmin);
-          localStorage.setItem(SUPERADMIN_KEYS.session, JSON.stringify(superadmin));
         }
       } catch (error) {
         console.warn('[SuperAdminAuth] Session validation failed:', error?.message || error);
@@ -81,7 +69,6 @@ export const SuperAdminProvider = ({ children }) => {
       const normalized = normalizeRow(data?.superadmin, safeEmail);
       if (normalized) {
         setSuperAdmin(normalized);
-        localStorage.setItem(SUPERADMIN_KEYS.session, JSON.stringify(normalized));
         setSuperAdminToken(data.token);
         toast({
           title: "Access Granted",

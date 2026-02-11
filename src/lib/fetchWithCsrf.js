@@ -1,42 +1,33 @@
 
-import { supabase } from '@/lib/customSupabaseClient';
-
 /**
- * A wrapper around native fetch that handles Supabase Auth tokens.
- * Automatically injects the JWT from the current session.
+ * A wrapper around native fetch that handles httpOnly cookie auth + CSRF.
+ * Automatically injects the CSRF token from cookies for mutating requests.
  */
 export async function fetchWithCsrf(url, options = {}) {
-  // 1. Get current session token
-  const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
+  const method = String(options.method || 'GET').toUpperCase();
 
-  // 2. Set default headers including Authorization
-  const hasAuthHeader = Object.keys(options.headers || {}).some(
-    (key) => key.toLowerCase() === 'authorization'
-  );
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
     ...options.headers,
   };
 
-  if (token && !hasAuthHeader) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (typeof document !== 'undefined' && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    const csrfToken = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith('itm_csrf='))
+      ?.split('=')[1];
+
+    if (csrfToken && !headers['X-CSRF-Token']) {
+      headers['X-CSRF-Token'] = decodeURIComponent(csrfToken);
+    }
   }
 
-  // 3. Perform fetch
   const config = {
     ...options,
     headers,
+    credentials: 'include',
   };
 
-  // If calling an internal API route (not supabase direct), use fetch
-  const response = await fetch(url, config);
-  
-  // Handle 401 unauthorized globally if needed
-  if (response.status === 401) {
-    // potentially trigger logout or refresh
-  }
-
-  return response;
+  return fetch(url, config);
 }

@@ -60,7 +60,10 @@ const FeaturedVendors = () => {
                 <img 
                   className="w-full h-full object-cover"
                   alt={`${vendor.name} facility`}
-                 src="https://images.unsplash.com/photo-1674309343862-394ff2960acf" />
+                  src="https://images.unsplash.com/photo-1674309343862-394ff2960acf?auto=format&fit=crop&w=600&q=60"
+                  loading="lazy"
+                  decoding="async"
+                />
                 {vendor.verified && (
                   <div className="absolute top-3 right-3">
                     <Badge variant="success" className="flex items-center gap-1">

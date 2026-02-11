@@ -1,7 +1,19 @@
 // ✅ File: src/modules/vendor/services/vendorApi.js
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 // ---------------- HELPERS ----------------
+
+const fetchVendorJson = async (path, options = {}) => {
+  const res = await fetchWithCsrf(apiUrl(path), options);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = data?.error || data?.message || 'Request failed';
+    throw new Error(message);
+  }
+  return data;
+};
 
 // Helper to get current vendor ID based on auth user
 const getVendorId = async () => {
@@ -493,13 +505,17 @@ export const vendorApi = {
 
       if (error) throw error;
     } else {
+      const nowIso = new Date().toISOString();
       const { error } = await supabase
         .from('vendors')
         .insert([{
           user_id: userId,
           ...vendorData,
-          is_active: false,
-          is_verified: false
+          is_active: true,
+          is_verified: true,
+          verified_at: nowIso,
+          created_at: nowIso,
+          updated_at: nowIso
         }]);
 
       if (error) throw error;
@@ -606,8 +622,6 @@ export const vendorApi = {
 
     // ✅ FIXED: auth fields will NEVER go into vendors update
     updateProfile: async (updates) => {
-      const vendorId = await getVendorId();
-
       // ✅ auth-only keys must never go to vendors table
       const BLOCK = new Set([
         'id', 'user_id', 'aud', 'role', 'created_at', 'updated_at',
@@ -631,28 +645,29 @@ export const vendorApi = {
       // always touch updated_at (optional)
       dbUpdates.updated_at = new Date().toISOString();
 
-      // Get current vendor data to calculate profile completion
-      const { data: currentVendor, error: fetchError } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('id', vendorId)
-        .single();
+      // Try to compute profile completion from existing vendor data (non-blocking)
+      try {
+        const vendorId = await getVendorId();
+        const { data: currentVendor, error: fetchError } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('id', vendorId)
+          .single();
 
-      if (fetchError) throw fetchError;
+        if (!fetchError && currentVendor) {
+          const mergedVendor = { ...currentVendor, ...dbUpdates };
+          dbUpdates.profile_completion = calculateProfileCompletion(mergedVendor);
+        }
+      } catch (err) {
+        console.warn('[VendorProfile] profile completion calc skipped:', err?.message || err);
+      }
 
-      // Merge current data with new updates to calculate completion
-      const mergedVendor = { ...currentVendor, ...dbUpdates };
-      dbUpdates.profile_completion = calculateProfileCompletion(mergedVendor);
+      const { vendor } = await fetchVendorJson('/api/vendors/me', {
+        method: 'PUT',
+        body: JSON.stringify(dbUpdates),
+      });
 
-      const { data, error } = await supabase
-        .from('vendors')
-        .update(dbUpdates)
-        .eq('id', vendorId)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      return vendor || null;
     },
 
     uploadImage: async (file, bucket = 'avatars') => {
@@ -881,58 +896,37 @@ export const vendorApi = {
 
       const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
 
-      const { data, error } = await supabase
-        .from('vendor_documents')
-        .insert([{
-          vendor_id: vendorId,
+      const { document } = await fetchVendorJson('/api/vendors/me/documents', {
+        method: 'POST',
+        body: JSON.stringify({
           document_type: type,
           document_url: publicUrl.publicUrl,
           original_name: file.name,
-          uploaded_at: new Date().toISOString(),
-          verification_status: 'PENDING'
-        }])
-        .select()
-        .single();
+        }),
+      });
 
-      if (error) throw new Error(`Failed to save document: ${error.message}`);
-      return data;
+      return document;
     },
 
     list: async (filters = {}) => {
-      const vendorId = await getVendorId();
-      let query = supabase
-        .from('vendor_documents')
-        .select('*')
-        .eq('vendor_id', vendorId);
+      const params = new URLSearchParams();
+      if (filters.type) params.set('type', filters.type);
+      if (filters.status) params.set('status', filters.status);
+      const query = params.toString();
 
-      if (filters.type) query = query.eq('document_type', filters.type);
-      if (filters.status) query = query.eq('verification_status', filters.status);
-
-      const { data, error } = await query.order('uploaded_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const { documents } = await fetchVendorJson(
+        `/api/vendors/me/documents${query ? `?${query}` : ''}`
+      );
+      return documents || [];
     },
 
     getByType: async (type) => {
-      const vendorId = await getVendorId();
-      const { data, error } = await supabase
-        .from('vendor_documents')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('document_type', type)
-        .order('uploaded_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      return vendorApi.documents.list({ type });
     },
 
     getById: async (id) => {
-      const { data, error } = await supabase
-        .from('vendor_documents')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
+      const { document } = await fetchVendorJson(`/api/vendors/me/documents/${id}`);
+      return document;
     },
 
     updateVerificationStatus: async (id, status) => {
@@ -950,42 +944,20 @@ export const vendorApi = {
     },
 
     getPendingDocuments: async () => {
-      const vendorId = await getVendorId();
-      const { data, error } = await supabase
-        .from('vendor_documents')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('verification_status', 'PENDING')
-        .order('uploaded_at', { ascending: true });
-      if (error) throw error;
-      return data || [];
+      return vendorApi.documents.list({ status: 'PENDING' });
     },
 
     getVerifiedDocuments: async () => {
-      const vendorId = await getVendorId();
-      const { data, error } = await supabase
-        .from('vendor_documents')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('verification_status', 'VERIFIED')
-        .order('uploaded_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      return vendorApi.documents.list({ status: 'VERIFIED' });
     },
 
     delete: async (id) => {
-      const { error } = await supabase.from('vendor_documents').delete().eq('id', id);
-      if (error) throw error;
+      await fetchVendorJson(`/api/vendors/me/documents/${id}`, { method: 'DELETE' });
     },
 
     deleteByType: async (type) => {
-      const vendorId = await getVendorId();
-      const { error } = await supabase
-        .from('vendor_documents')
-        .delete()
-        .eq('vendor_id', vendorId)
-        .eq('document_type', type);
-      if (error) throw error;
+      const params = new URLSearchParams({ type });
+      await fetchVendorJson(`/api/vendors/me/documents?${params.toString()}`, { method: 'DELETE' });
     }
   },
 
@@ -2868,9 +2840,7 @@ export const vendorApi = {
     },
 
     submit: async () => {
-      const vendorId = await getVendorId();
-      const { error } = await supabase.from('vendors').update({ kyc_status: 'SUBMITTED' }).eq('id', vendorId);
-      if (error) throw error;
+      await fetchVendorJson('/api/vendors/me/kyc/submit', { method: 'POST' });
     }
   }
 };

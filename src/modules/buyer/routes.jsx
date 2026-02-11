@@ -1,22 +1,22 @@
-import React from "react";
+import React, { lazy } from "react";
 import { Routes, Route, Navigate, Outlet, useLocation, Link } from "react-router-dom";
 
 import BuyerLayout from "@/modules/buyer/layouts/BuyerLayout";
-import BuyerDashboard from "@/modules/buyer/pages/Dashboard";
-import Proposals from "@/modules/buyer/pages/Proposals";
-import CreateProposal from "@/modules/buyer/pages/CreateProposal";
-import BuyerProfile from "@/modules/buyer/pages/Profile";
-import BuyerMessages from "@/modules/buyer/pages/Messages";
-import BuyerTickets from "@/modules/buyer/pages/Tickets";
-import BuyerFavorites from "@/modules/buyer/pages/Favorites";
-import BuyerSuggestions from "@/modules/buyer/pages/Suggestions";
-import BuyerRegister from "@/modules/buyer/pages/auth/Register";
-import BuyerLogin from "@/modules/buyer/pages/auth/Login";
-import ForgotPassword from "@/shared/pages/ForgotPassword";
 import ProtectedRoute from "@/shared/components/ProtectedRoute";
 import { BuyerAuthProvider, useBuyerAuth } from "@/modules/buyer/context/AuthContext";
 import PageStatusWrapper from "@/components/PageStatusWrapper";
-import ProposalDetail from "@/modules/buyer/pages/ProposalDetail";
+const BuyerDashboard = lazy(() => import("@/modules/buyer/pages/Dashboard"));
+const Proposals = lazy(() => import("@/modules/buyer/pages/Proposals"));
+const CreateProposal = lazy(() => import("@/modules/buyer/pages/CreateProposal"));
+const BuyerProfile = lazy(() => import("@/modules/buyer/pages/Profile"));
+const BuyerMessages = lazy(() => import("@/modules/buyer/pages/Messages"));
+const BuyerTickets = lazy(() => import("@/modules/buyer/pages/Tickets"));
+const BuyerFavorites = lazy(() => import("@/modules/buyer/pages/Favorites"));
+const BuyerSuggestions = lazy(() => import("@/modules/buyer/pages/Suggestions"));
+const BuyerRegister = lazy(() => import("@/modules/buyer/pages/auth/Register"));
+const BuyerLogin = lazy(() => import("@/modules/buyer/pages/auth/Login"));
+const ForgotPassword = lazy(() => import("@/shared/pages/ForgotPassword"));
+const ProposalDetail = lazy(() => import("@/modules/buyer/pages/ProposalDetail"));
 
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";

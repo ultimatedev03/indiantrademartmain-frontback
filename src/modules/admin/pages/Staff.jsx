@@ -63,6 +63,31 @@ const isActiveStatus = (status) => {
   return s === "ACTIVE" || s === "ACTIVATED" || s === "ENABLED";
 };
 
+const normalizeRole = (value) => String(value || "").trim().toUpperCase();
+
+const roleToDepartment = (role) => {
+  switch (normalizeRole(role)) {
+    case "ADMIN":
+      return "Administration";
+    case "HR":
+      return "Human Resources";
+    case "FINANCE":
+      return "Finance";
+    case "SUPPORT":
+      return "Support";
+    case "SALES":
+      return "Sales";
+    case "DATA_ENTRY":
+    case "DATAENTRY":
+      return "Operations";
+    default:
+      return "";
+  }
+};
+
+const getDepartmentLabel = (employee) =>
+  employee?.department || employee?.dept || roleToDepartment(employee?.role) || "-";
+
 const Staff = () => {
   const ADMIN_API_BASE = getAdminBase();
 
@@ -115,7 +140,7 @@ const Staff = () => {
     const t = searchTerm.trim().toLowerCase();
     if (!t) return employees;
     return (employees || []).filter((e) =>
-      [e.full_name, e.name, e.email, e.role, e.department]
+      [e.full_name, e.name, e.email, e.role, e.department, getDepartmentLabel(e)]
         .filter(Boolean)
         .some((x) => String(x).toLowerCase().includes(t))
     );
@@ -307,6 +332,7 @@ const Staff = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="DATA_ENTRY">Data Entry</SelectItem>
+                      <SelectItem value="FINANCE">Finance</SelectItem>
                       <SelectItem value="SALES">Sales</SelectItem>
                       <SelectItem value="SUPPORT">Support</SelectItem>
                       <SelectItem value="HR">HR</SelectItem>
@@ -323,6 +349,7 @@ const Staff = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="Operations">Operations</SelectItem>
+                      <SelectItem value="Finance">Finance</SelectItem>
                       <SelectItem value="Sales">Sales</SelectItem>
                       <SelectItem value="Customer Success">Customer Success</SelectItem>
                       <SelectItem value="IT">IT</SelectItem>
@@ -394,7 +421,7 @@ const Staff = () => {
                       {employee.role}
                     </Badge>
                   </TableCell>
-                  <TableCell>{employee.department || employee.dept || "-"}</TableCell>
+                  <TableCell>{getDepartmentLabel(employee)}</TableCell>
                   <TableCell>
                     <Badge variant={isActiveStatus(employee.status) ? "success" : "secondary"}>
                       {employee.status}

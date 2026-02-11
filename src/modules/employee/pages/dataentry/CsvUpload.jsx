@@ -7,7 +7,6 @@ import { Upload, CheckCircle, AlertTriangle, FileText, Loader2, ArrowLeft } from
 import { toast } from '@/components/ui/use-toast';
 import { dataEntryApi } from '@/modules/employee/services/dataEntryApi';
 import { Link } from 'react-router-dom';
-import Papa from 'papaparse';
 
 const CsvUpload = () => {
     const [file, setFile] = useState(null);
@@ -17,19 +16,24 @@ const CsvUpload = () => {
 
     const onDrop = (acceptedFiles) => {
         const f = acceptedFiles[0];
-        if(f) {
+        if (f) {
             setFile(f);
             setStats(null);
-            Papa.parse(f, {
-                header: true,
-                skipEmptyLines: true,
-                complete: (results) => {
-                    setParsedData(results.data);
-                    toast({ title: "File Parsed", description: `Found ${results.data.length} rows.` });
-                },
-                error: (err) => {
-                    toast({ title: "Parse Error", description: err.message, variant: "destructive" });
-                }
+            (async () => {
+                const { default: Papa } = await import('papaparse');
+                Papa.parse(f, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: (results) => {
+                        setParsedData(results.data);
+                        toast({ title: "File Parsed", description: `Found ${results.data.length} rows.` });
+                    },
+                    error: (err) => {
+                        toast({ title: "Parse Error", description: err.message, variant: "destructive" });
+                    }
+                });
+            })().catch((err) => {
+                toast({ title: "Parse Error", description: err?.message || "Failed to load parser", variant: "destructive" });
             });
         }
     };

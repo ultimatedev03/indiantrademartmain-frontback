@@ -3,6 +3,15 @@ import { supabase } from "../lib/supabaseClient.js";
 import { notifyUser } from "../lib/notify.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { requireEmployeeRoles } from "../middleware/requireEmployeeRoles.js";
+import {
+  getPublicUserByEmail,
+  getPublicUserById,
+  hashPassword,
+  normalizeEmail,
+  normalizeRole,
+  setPublicUserPassword,
+  upsertPublicUser,
+} from "../lib/auth.js";
 
 const router = express.Router();
 
@@ -22,106 +31,82 @@ function isActiveSub(s) {
   return end > Date.now();
 }
 
-async function findAuthUserByEmail(email) {
-  const target = String(email || "").trim().toLowerCase();
+async function findPublicUserByEmail(email) {
+  const target = normalizeEmail(email);
   if (!target) return null;
-
-  if (supabase?.auth?.admin?.getUserByEmail) {
-    const { data, error } = await supabase.auth.admin.getUserByEmail(target);
-    if (error) return null;
-    return data?.user || null;
-  }
-
-  // Fallback: list users and match by email (bounded).
-  const perPage = 100;
-  const maxPages = 50;
-  for (let page = 1; page <= maxPages; page += 1) {
-    // eslint-disable-next-line no-await-in-loop
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error) return null;
-    const users = data?.users || [];
-    const match = users.find(
-      (u) => String(u?.email || "").trim().toLowerCase() === target
-    );
-    if (match) return match;
-    if (users.length < perPage) break;
-  }
-  return null;
+  return getPublicUserByEmail(target);
 }
 
-async function getAuthUserById(userId) {
+async function getPublicUserByIdSafe(userId) {
   if (!userId) return null;
-  if (!supabase?.auth?.admin?.getUserById) return null;
-  const { data, error } = await supabase.auth.admin.getUserById(userId);
-  if (error) return null;
-  return data?.user || null;
+  return getPublicUserById(userId);
 }
 
-async function resolveEmployeeAuthUser(employee) {
+async function resolveEmployeeUser(employee) {
   if (!employee) return null;
-  const email = String(employee?.email || "").trim().toLowerCase();
-  let authUser = null;
+  const email = normalizeEmail(employee?.email);
+  let publicUser = null;
 
   if (employee.user_id) {
-    authUser = await getAuthUserById(employee.user_id);
+    publicUser = await getPublicUserByIdSafe(employee.user_id);
   }
 
-  if (authUser && email) {
-    const authEmail = String(authUser?.email || "").trim().toLowerCase();
-    if (authEmail && authEmail !== email) {
-      authUser = null;
+  if (publicUser && email) {
+    const storedEmail = normalizeEmail(publicUser?.email);
+    if (storedEmail && storedEmail !== email) {
+      publicUser = null;
     }
   }
 
-  if (!authUser && email) {
-    authUser = await findAuthUserByEmail(email);
+  if (!publicUser && email) {
+    publicUser = await findPublicUserByEmail(email);
   }
 
-  if (authUser && authUser.id && authUser.id !== employee.user_id) {
+  if (publicUser?.id && publicUser.id !== employee.user_id) {
     await supabase
       .from("employees")
-      .update({ user_id: authUser.id })
+      .update({ user_id: publicUser.id })
       .eq("id", employee.id);
   }
 
-  return authUser;
+  return publicUser;
 }
 
-async function ensureEmployeeAuthUser(employee, password) {
+async function ensureEmployeeUser(employee, password) {
   if (!employee) return null;
-  const email = String(employee?.email || "").trim().toLowerCase();
+  const email = normalizeEmail(employee?.email);
   if (!email) return null;
 
-  let authUser = await resolveEmployeeAuthUser(employee);
+  let publicUser = await resolveEmployeeUser(employee);
 
-  if (!authUser) {
-    const fullName = String(employee?.full_name || "").trim();
-    const role = String(employee?.role || "DATA_ENTRY").trim().toUpperCase();
-    const department = String(employee?.department || "").trim() || "Operations";
-    const phone = String(employee?.phone || "").trim() || null;
-
-    const { data, error } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName, role, phone, department },
-      app_metadata: { role },
-    });
-
-    if (error || !data?.user) {
-      const err = new Error(error?.message || "Failed to create employee auth user");
-      err.statusCode = 500;
+  if (!publicUser) {
+    if (!password) {
+      const err = new Error("Password required to create employee user");
+      err.statusCode = 400;
       throw err;
     }
 
-    authUser = data.user;
+    const fullName = String(employee?.full_name || "").trim();
+    const role = normalizeRole(employee?.role || "DATA_ENTRY");
+    const phone = String(employee?.phone || "").trim() || null;
+
+    const password_hash = await hashPassword(password);
+
+    publicUser = await upsertPublicUser({
+      email,
+      full_name: fullName,
+      role,
+      phone,
+      password_hash,
+      allowPasswordUpdate: true,
+    });
   }
 
-  if (authUser?.id && authUser.id !== employee.user_id) {
-    await supabase.from("employees").update({ user_id: authUser.id }).eq("id", employee.id);
+  if (publicUser?.id && publicUser.id !== employee.user_id) {
+    await supabase.from("employees").update({ user_id: publicUser.id }).eq("id", employee.id);
   }
 
-  return authUser;
+  return publicUser;
 }
 
 /**
@@ -572,17 +557,15 @@ router.get("/staff", async (req, res) => {
 router.post("/staff", async (req, res) => {
   try {
     const { full_name, email, password, role } = req.body;
-
-    const { data: authData, error } = await supabase.auth.admin.createUser({
+    const password_hash = await hashPassword(password);
+    const publicUser = await upsertPublicUser({
       email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name, role },
+      full_name,
+      role,
+      password_hash,
+      allowPasswordUpdate: true,
     });
-
-    if (error) throw error;
-
-    const userId = authData.user.id;
+    const userId = publicUser.id;
 
     const { data: emp } = await supabase
       .from("employees")
@@ -635,7 +618,9 @@ router.delete("/staff/:employeeId", async (req, res) => {
       .single();
 
     await supabase.from("employees").delete().eq("id", employeeId);
-    await supabase.auth.admin.deleteUser(emp.user_id);
+    if (emp?.user_id) {
+      await supabase.from("users").delete().eq("id", emp.user_id);
+    }
 
     await writeAuditLog({
       req,
@@ -663,20 +648,16 @@ router.put("/staff/:employeeId/password", async (req, res) => {
       .eq("id", employeeId)
       .single();
 
-    let authUser = await resolveEmployeeAuthUser(emp);
-    if (!authUser?.id) {
+    let publicUser = await resolveEmployeeUser(emp);
+    if (!publicUser?.id) {
       try {
-        authUser = await ensureEmployeeAuthUser(emp, password);
+        publicUser = await ensureEmployeeUser(emp, password);
       } catch (err) {
         const statusCode = err?.statusCode || 500;
         return res.status(statusCode).json({ success: false, error: err?.message || "Auth user create failed" });
       }
     }
-
-    const { error: updErr } = await supabase.auth.admin.updateUserById(authUser.id, { password });
-    if (updErr) {
-      return res.status(500).json({ success: false, error: updErr.message });
-    }
+    await setPublicUserPassword(publicUser.id, password);
 
     await writeAuditLog({
       req,
@@ -684,7 +665,7 @@ router.put("/staff/:employeeId/password", async (req, res) => {
       action: "STAFF_PASSWORD_CHANGE",
       entityType: "employees",
       entityId: employeeId,
-      details: { user_id: authUser.id || null, email: emp?.email || null },
+      details: { user_id: publicUser.id || null, email: emp?.email || null },
     });
 
     return res.json({ success: true });
@@ -729,8 +710,8 @@ router.get("/dashboard/data-entry-performance", async (req, res) => {
     const performance = await Promise.all(
       (employees || []).map(async (emp) => {
         const displayName = emp.full_name || emp.email || "Data Entry";
-        const authUser = await resolveEmployeeAuthUser(emp);
-        const userId = authUser?.id || emp.user_id;
+        const publicUser = await resolveEmployeeUser(emp);
+        const userId = publicUser?.id || emp.user_id;
 
         if (!userId) {
           return {

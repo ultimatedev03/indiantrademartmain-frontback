@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { Toaster } from '@/components/ui/toaster';
@@ -12,23 +12,31 @@ import { SubdomainProvider, useSubdomain } from '@/contexts/SubdomainContext';
 import { PageStatusProvider } from '@/contexts/PageStatusContext';
 import { locationService } from '@/shared/services/locationService';
 import { supabase } from '@/lib/customSupabaseClient';
-import AIChatWidget from '@/components/AIChatWidget';
+import { Loader2 } from 'lucide-react';
+import AnalyticsLoader from '@/components/AnalyticsLoader';
 
-import MaintenancePage from '@/shared/components/MaintenancePage';
+const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage'));
 
-// Route Modules
-import { VendorRoutes } from '@/modules/vendor/routes';
-import { BuyerRoutes } from '@/modules/buyer/routes';
-import { AdminRoutes } from '@/modules/admin/routes';
-import { DirectoryRoutes } from '@/modules/directory/routes';
-import { CareerRoutes } from '@/modules/career/routes';
+// Route Modules (lazy)
+const VendorRoutes = lazy(() => import('@/modules/vendor/routes').then((m) => ({ default: m.VendorRoutes })));
+const BuyerRoutes = lazy(() => import('@/modules/buyer/routes').then((m) => ({ default: m.BuyerRoutes })));
+const AdminRoutes = lazy(() => import('@/modules/admin/routes').then((m) => ({ default: m.AdminRoutes })));
+const DirectoryRoutes = lazy(() => import('@/modules/directory/routes').then((m) => ({ default: m.DirectoryRoutes })));
+const CareerRoutes = lazy(() => import('@/modules/career/routes').then((m) => ({ default: m.CareerRoutes })));
 
-import ManagementPortal from '@/shared/pages/ManagementPortal';
-import SuperAdminLogin from '@/modules/admin/pages/superadmin/SuperAdminLogin';
-import SuperAdminDashboard from '@/modules/admin/pages/superadmin/SuperAdminDashboard';
-import SuperAdminProtectedRoute from '@/modules/admin/routes/SuperAdminProtectedRoute';
-import MigrationTools from '@/shared/pages/MigrationTools';
-import Unauthorized from '@/shared/pages/Unauthorized';
+const ManagementPortal = lazy(() => import('@/shared/pages/ManagementPortal'));
+const SuperAdminLogin = lazy(() => import('@/modules/admin/pages/superadmin/SuperAdminLogin'));
+const SuperAdminDashboard = lazy(() => import('@/modules/admin/pages/superadmin/SuperAdminDashboard'));
+const SuperAdminProtectedRoute = lazy(() => import('@/modules/admin/routes/SuperAdminProtectedRoute'));
+const MigrationTools = lazy(() => import('@/shared/pages/MigrationTools'));
+const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
+const AIChatWidget = lazy(() => import('@/components/AIChatWidget'));
+
+const RouteFallback = () => (
+  <div className="min-h-[60vh] flex items-center justify-center">
+    <Loader2 className="h-8 w-8 animate-spin text-[#003D82]" />
+  </div>
+);
 
 const MAINTENANCE_KEY = 'maintenance_mode';
 
@@ -191,7 +199,13 @@ const MaintenanceGate = ({ children }) => {
 
   if (loading) return children;
 
-  if (isMaintenance) return <MaintenancePage message={message} />;
+  if (isMaintenance) {
+    return (
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+        <MaintenancePage message={message} />
+      </Suspense>
+    );
+  }
 
   return children;
 };
@@ -268,32 +282,16 @@ const ScrollToTop = () => {
     }
   }, []);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (typeof window === 'undefined') return;
 
     const scrollNow = () => {
-      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      window.scrollTo(0, 0);
       if (document.scrollingElement) document.scrollingElement.scrollTop = 0;
       if (document.documentElement) document.documentElement.scrollTop = 0;
       if (document.body) document.body.scrollTop = 0;
-
-      const mainEl = document.querySelector('main');
-      if (mainEl && typeof mainEl.scrollTo === 'function') {
-        mainEl.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-      }
-
-      const containers = document.querySelectorAll('[data-scroll-container]');
-      containers.forEach((el) => {
-        if (typeof el.scrollTo === 'function') {
-          el.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-        } else {
-          el.scrollTop = 0;
-          el.scrollLeft = 0;
-        }
-      });
     };
 
-    scrollNow();
     const raf = window.requestAnimationFrame(scrollNow);
     const timeout = window.setTimeout(scrollNow, 120);
     return () => {
@@ -368,8 +366,12 @@ function App() {
                         <PublicNoticeGate>
                           {/* ✅ Vendor suspended gate added here */}
                           <VendorSuspensionGate>
-                            <AppRoutes />
-                            <AIChatWidget />
+                            <Suspense fallback={<RouteFallback />}>
+                              <AppRoutes />
+                            </Suspense>
+                            <Suspense fallback={null}>
+                              <AIChatWidget />
+                            </Suspense>
                           </VendorSuspensionGate>
                         </PublicNoticeGate>
                       </SuperAdminProvider>
@@ -382,6 +384,7 @@ function App() {
         </Router>
       </PageStatusProvider>
 
+      <AnalyticsLoader />
       <Toaster />
     </>
   );

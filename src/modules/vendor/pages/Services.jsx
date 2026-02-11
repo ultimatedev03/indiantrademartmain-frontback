@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -375,7 +376,7 @@ const Services = () => {
       setDetailsOpen(false);
       const appliedCoupon = couponOverride?.trim ? couponOverride.trim().toUpperCase() : '';
 
-      const response = await fetch(apiUrl('/api/payment/initiate'), {
+      const response = await fetchWithCsrf(apiUrl('/api/payment/initiate'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -459,7 +460,7 @@ const Services = () => {
       },
       handler: async (response) => {
         try {
-          const verifyResponse = await fetch(apiUrl('/api/payment/verify'), {
+          const verifyResponse = await fetchWithCsrf(apiUrl('/api/payment/verify'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -563,7 +564,7 @@ const Services = () => {
     if (!vendorId) return;
     try {
       setLoadingHistory(true);
-      const response = await fetch(apiUrl(`/api/payment/history/${vendorId}`));
+      const response = await fetchWithCsrf(apiUrl(`/api/payment/history/${vendorId}`));
       if (response.ok) {
         const data = await response.json();
         setPaymentHistory(data.data || []);

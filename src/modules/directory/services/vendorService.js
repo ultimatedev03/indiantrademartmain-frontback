@@ -1,5 +1,10 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
+const isMissingColumnError = (err) => {
+  if (!err) return false;
+  return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
+};
+
 const mapVendorRow = (v) => {
   const companyName =
     v.company_name ||
@@ -28,6 +33,29 @@ const mapVendorRow = (v) => {
   };
 };
 
+const isVerifiedVendor = (v) => {
+  const kyc = String(v?.kyc_status || '').toUpperCase();
+  return Boolean(v?.is_verified) || Boolean(v?.verification_badge) || kyc === 'APPROVED';
+};
+
+const sortFeaturedVendors = (rows = []) => {
+  const list = Array.isArray(rows) ? [...rows] : [];
+  list.sort((a, b) => {
+    const aVerified = isVerifiedVendor(a) ? 1 : 0;
+    const bVerified = isVerifiedVendor(b) ? 1 : 0;
+    if (aVerified !== bVerified) return bVerified - aVerified;
+
+    const aCreated = Date.parse(a?.created_at || '') || 0;
+    const bCreated = Date.parse(b?.created_at || '') || 0;
+    if (aCreated !== bCreated) return bCreated - aCreated;
+
+    const aName = String(a?.company_name || a?.owner_name || '').toLowerCase();
+    const bName = String(b?.company_name || b?.owner_name || '').toLowerCase();
+    return aName.localeCompare(bName);
+  });
+  return list;
+};
+
 export const vendorService = {
   /**
    * Returns vendors from DB but also adds UI-friendly fields:
@@ -38,30 +66,34 @@ export const vendorService = {
    * NOTE: We keep the original DB columns intact by spreading the row.
    */
   getFeaturedVendors: async (options = {}) => {
-    const limit = Number(options?.limit || 6);
+    const limit = Math.max(1, Number(options?.limit || 6));
+    const onlyActive = options?.onlyActive !== false;
 
-    const { data, error } = await supabase
-      .from('vendors')
-      .select(
-        `
-          *,
-          city_ref:city_id (name, slug),
-          state_ref:state_id (name, slug)
-        `
-      )
-      .eq('is_active', true)
-      .order('is_verified', { ascending: false })
-      .order('verification_badge', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    // NOTE: Avoid selecting columns that may not exist in some DBs.
+    // Fetch all columns and sort/filter client-side to prevent 400 errors.
+    let res = await supabase.from('vendors').select('*').limit(limit);
 
-    if (error) {
-      console.error('Error fetching featured vendors:', error);
+    if (res.error && isMissingColumnError(res.error)) {
+      // ultra-safe fallback without limit-related SQL issues
+      res = await supabase.from('vendors').select('*');
+    }
+
+    if (res.error) {
+      console.error('Error fetching featured vendors:', res.error);
       return [];
     }
 
-    const rows = Array.isArray(data) ? data : [];
-    return rows.map(mapVendorRow);
+    let rows = Array.isArray(res.data) ? res.data : [];
+
+    const hasIsActive = rows.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'is_active'));
+    if (onlyActive && hasIsActive) {
+      rows = rows.filter((r) => r?.is_active === true);
+    }
+
+    rows = sortFeaturedVendors(rows);
+
+    const sliced = rows.slice(0, limit);
+    return sliced.map(mapVendorRow);
   },
 
   getVendorById: async (vendorId) => {

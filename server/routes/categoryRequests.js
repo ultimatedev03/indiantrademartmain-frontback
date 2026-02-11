@@ -3,17 +3,12 @@ import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { notifyUser, notifyRole } from '../lib/notify.js';
 import { requireEmployeeRoles } from '../middleware/requireEmployeeRoles.js';
+import { requireAuth } from '../middleware/requireAuth.js';
+import { normalizeEmail } from '../lib/auth.js';
 
 const router = express.Router();
 
 const nowIso = () => new Date().toISOString();
-
-const parseBearerToken = (req) => {
-  const header = req.headers?.authorization || req.headers?.Authorization;
-  if (!header || typeof header !== 'string') return null;
-  if (!header.startsWith('Bearer ')) return null;
-  return header.replace('Bearer ', '').trim();
-};
 
 const normalizeStatus = (status) => String(status || '').trim().toUpperCase();
 
@@ -35,13 +30,17 @@ const pickRandom = (arr) => {
 
 const resolveEmployeeUserId = async (emp) => {
   if (!emp || emp.user_id || !emp.email) return emp;
-  if (!supabase?.auth?.admin?.getUserByEmail) return emp;
   try {
-    const { data, error } = await supabase.auth.admin.getUserByEmail(String(emp.email).trim().toLowerCase());
-    if (error || !data?.user?.id) return emp;
-    const userId = data.user.id;
-    await supabase.from('employees').update({ user_id: userId }).eq('id', emp.id);
-    return { ...emp, user_id: userId };
+    const email = normalizeEmail(emp.email);
+    if (!email) return emp;
+    const { data: publicUser } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (!publicUser?.id) return emp;
+    await supabase.from('employees').update({ user_id: publicUser.id }).eq('id', emp.id);
+    return { ...emp, user_id: publicUser.id };
   } catch {
     return emp;
   }
@@ -51,17 +50,9 @@ const TASK_TYPE = 'CATEGORY_REQUEST';
 const VALID_STATUSES = ['ASSIGNED', 'IN_PROGRESS', 'DONE', 'CANCELLED', 'UNASSIGNED'];
 
 // Vendor creates a category request -> assign to active data-entry and notify
-router.post('/', async (req, res) => {
+router.post('/', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
-    const token = parseBearerToken(req);
-    if (!token) return res.status(401).json({ success: false, error: 'Missing auth token' });
-
-    const { data: authData, error: authError } = await supabase.auth.getUser(token);
-    if (authError || !authData?.user) {
-      return res.status(401).json({ success: false, error: 'Invalid auth token' });
-    }
-
-    const authUser = authData.user;
+    const authUser = req.user;
 
     const groupName = String(req.body?.group_name || '').trim();
     const note = String(req.body?.note || '').trim();

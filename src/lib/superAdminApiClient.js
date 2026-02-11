@@ -1,30 +1,15 @@
-const SUPERADMIN_TOKEN_KEY = 'itm_superadmin_token';
-const SUPERADMIN_SESSION_KEY = 'itm_superadmin_session';
+let superAdminToken = null;
 
 export function getSuperAdminToken() {
-  try {
-    return localStorage.getItem(SUPERADMIN_TOKEN_KEY);
-  } catch {
-    return null;
-  }
+  return superAdminToken;
 }
 
 export function setSuperAdminToken(token) {
-  try {
-    if (!token) localStorage.removeItem(SUPERADMIN_TOKEN_KEY);
-    else localStorage.setItem(SUPERADMIN_TOKEN_KEY, token);
-  } catch {
-    // ignore storage errors
-  }
+  superAdminToken = token || null;
 }
 
 export function clearSuperAdminSession() {
-  try {
-    localStorage.removeItem(SUPERADMIN_TOKEN_KEY);
-    localStorage.removeItem(SUPERADMIN_SESSION_KEY);
-  } catch {
-    // ignore storage errors
-  }
+  superAdminToken = null;
 }
 
 export function getSuperAdminBase() {
@@ -55,7 +40,6 @@ export async function superAdminFetch(path, options = {}) {
 }
 
 export const SUPERADMIN_KEYS = {
-  token: SUPERADMIN_TOKEN_KEY,
-  session: SUPERADMIN_SESSION_KEY,
+  token: 'itm_superadmin_token',
+  session: 'itm_superadmin_session',
 };
-

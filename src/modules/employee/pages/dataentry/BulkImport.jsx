@@ -7,7 +7,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { dataEntryApi } from '@/modules/employee/services/dataEntryApi';
-import Papa from 'papaparse';
 
 const BulkImport = () => {
   const [file, setFile] = useState(null);
@@ -17,10 +16,16 @@ const BulkImport = () => {
   const onDrop = (acceptedFiles) => {
     const f = acceptedFiles[0];
     setFile(f);
-    Papa.parse(f, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => setData(results.data)
+    if (!f) return;
+    (async () => {
+      const { default: Papa } = await import('papaparse');
+      Papa.parse(f, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => setData(results.data)
+      });
+    })().catch((err) => {
+      toast({ title: "Parse Error", description: err?.message || "Failed to load parser", variant: "destructive" });
     });
   };
   

@@ -42,11 +42,9 @@ const fetchEmployeeRow = async (authUserId) => {
   return data || null;
 };
 
-const resolveEmployeeViaApi = async (accessToken) => {
+const resolveEmployeeViaApi = async () => {
   try {
-    const res = await fetchWithCsrf(apiUrl('/api/employee/me'), accessToken ? {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    } : undefined);
+    const res = await fetchWithCsrf(apiUrl('/api/employee/me'));
     if (!res.ok) return null;
     const data = await res.json();
     return data?.employee || null;
@@ -58,8 +56,7 @@ const resolveEmployeeViaApi = async (accessToken) => {
 export const employeeApi = {
   auth: {
     /**
-     * Real auth using Supabase Auth.
-     * Requires the employee to exist in Supabase Auth + public.employees (mapped by user_id).
+     * Auth via backend JWT + cookies.
      */
     login: async (email, password) => {
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -70,7 +67,7 @@ export const employeeApi = {
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error('Login failed: user not returned');
 
-      const empRow = (await resolveEmployeeViaApi(data?.session?.access_token)) || (await fetchEmployeeRow(data.user.id));
+      const empRow = (await resolveEmployeeViaApi()) || (await fetchEmployeeRow(data.user.id));
       if (!empRow) {
         // If you want to allow auth-only login, you can remove this throw.
         throw new Error('No employee profile found. Please ask admin to create your employee account.');
@@ -98,7 +95,7 @@ export const employeeApi = {
       const authUser = sessionData?.session?.user;
       if (!authUser?.id) return null;
 
-      const empRow = (await resolveEmployeeViaApi(sessionData?.session?.access_token)) || (await fetchEmployeeRow(authUser.id));
+      const empRow = (await resolveEmployeeViaApi()) || (await fetchEmployeeRow(authUser.id));
       if (!empRow) return null;
 
       return buildEmployeeUser(authUser, empRow);

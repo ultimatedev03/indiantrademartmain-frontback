@@ -39,11 +39,9 @@ const normalizeRoleValue = (value, fallback) => {
 
 const isInternalRole = (role) => INTERNAL_ROLES.has(String(role || '').trim().toUpperCase());
 
-const resolveEmployeeFromApi = async (accessToken) => {
+const resolveEmployeeFromApi = async () => {
   try {
-    const res = await fetchWithCsrf(apiUrl('/api/employee/me'), accessToken ? {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    } : undefined);
+    const res = await fetchWithCsrf(apiUrl('/api/employee/me'));
     if (!res.ok) return null;
     const data = await res.json();
     return data?.employee || null;
@@ -109,38 +107,7 @@ export const InternalAuthProvider = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  const hydrateStoredUser = async (stored) => {
-    try {
-      const email = stored?.email;
-      if (!email) return stored;
-
-      const { data: emp } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('email', email)
-        .maybeSingle();
-
-      if (emp) {
-        return { ...stored, ...normalizeInternalUser(emp, email, stored?.role) };
-      }
-
-      const { data: usr } = await supabase
-        .from('users')
-        .select('*')
-        .eq('email', email)
-        .maybeSingle();
-
-      if (usr) {
-        return { ...stored, ...normalizeInternalUser(usr, email, stored?.role) };
-      }
-
-      return stored;
-    } catch {
-      return stored;
-    }
-  };
-
-  const fetchInternalUserFromSession = async (authUser, accessToken) => {
+  const fetchInternalUserFromSession = async (authUser) => {
     try {
       if (!authUser?.id) return null;
 
@@ -180,7 +147,7 @@ export const InternalAuthProvider = ({ children }) => {
       }
 
       // 4) Fallback to server-side resolver (bypasses RLS, syncs user_id)
-      const resolved = await resolveEmployeeFromApi(accessToken);
+      const resolved = await resolveEmployeeFromApi();
       if (resolved && isInternalRole(resolved.role)) {
         return normalizeInternalUser(resolved, authUser.email, resolved.role);
       }
@@ -195,37 +162,13 @@ export const InternalAuthProvider = ({ children }) => {
     const boot = async () => {
       try {
         let resolvedUser = null;
-
-        // 1) Try stored internal user
-        const storedUser = localStorage.getItem('itm_admin_user');
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            const hydrated = await hydrateStoredUser(parsed);
-            if (hydrated && isInternalRole(hydrated.role)) {
-              resolvedUser = hydrated;
-              localStorage.setItem('itm_admin_user', JSON.stringify(hydrated));
-            } else {
-              localStorage.removeItem('itm_admin_user');
-            }
-          } catch {
-            localStorage.removeItem('itm_admin_user');
-          }
-        }
-
-        // 2) Sync from active Supabase session (authoritative)
+        // Sync from active session (authoritative)
         const {
           data: { session },
         } = await supabase.auth.getSession();
 
         if (session?.user) {
-          const sessionUser = await fetchInternalUserFromSession(session.user, session?.access_token);
-          if (sessionUser) {
-            resolvedUser = sessionUser;
-            localStorage.setItem('itm_admin_user', JSON.stringify(sessionUser));
-          } else if (!resolvedUser) {
-            localStorage.removeItem('itm_admin_user');
-          }
+          resolvedUser = await fetchInternalUserFromSession(session.user);
         }
 
         setUser(resolvedUser);
@@ -241,24 +184,16 @@ export const InternalAuthProvider = ({ children }) => {
         if (event === 'SIGNED_OUT') {
           setUser(null);
           setIsAuthenticated(false);
-          localStorage.removeItem('itm_admin_user');
           return;
         }
 
         if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
           const internalUser = session?.user
-            ? await fetchInternalUserFromSession(session.user, session?.access_token)
+            ? await fetchInternalUserFromSession(session.user)
             : null;
 
-          if (internalUser) {
-            setUser(internalUser);
-            setIsAuthenticated(true);
-            localStorage.setItem('itm_admin_user', JSON.stringify(internalUser));
-          } else {
-            setUser(null);
-            setIsAuthenticated(false);
-            localStorage.removeItem('itm_admin_user');
-          }
+          setUser(internalUser);
+          setIsAuthenticated(!!internalUser);
         }
       } catch {
         // keep current state on transient auth errors
@@ -291,6 +226,16 @@ export const InternalAuthProvider = ({ children }) => {
         throw new Error('Invalid credentials');
       }
 
+      const authUser = authData?.user || null;
+      const authUserRole = normalizeRoleValue(
+        pickFirst(
+          authUser?.role,
+          authUser?.user_metadata?.role,
+          authUser?.app_metadata?.role
+        ),
+        expectedRole
+      );
+
       // ✅ 2. RPC (ROLE / ACCESS CHECK) - treat as advisory if missing
       let rpcData = null;
       let rpcError = null;
@@ -310,9 +255,13 @@ export const InternalAuthProvider = ({ children }) => {
 
       // Prefer the employees/users tables as source-of-truth for role + profile
       let normalized = null;
+      const authFallback =
+        authUser && isInternalRole(authUserRole)
+          ? normalizeInternalUser(authUser, email, authUserRole)
+          : null;
 
       // ✅ Resolve via server (ensures employee.user_id sync)
-      const resolved = await resolveEmployeeFromApi(authData?.session?.access_token);
+      const resolved = await resolveEmployeeFromApi();
       if (resolved && isInternalRole(resolved.role)) {
         normalized = normalizeInternalUser(resolved, email, resolved.role);
       }
@@ -358,6 +307,10 @@ export const InternalAuthProvider = ({ children }) => {
         console.warn('[InternalAuth] login_admin RPC failed, using employee fallback:', rpcError);
       }
 
+      if (!normalized && authFallback) {
+        normalized = authFallback;
+      }
+
       if (!normalized) {
         // rollback auth session
         await supabase.auth.signOut();
@@ -370,7 +323,6 @@ export const InternalAuthProvider = ({ children }) => {
 
       setUser(normalized);
       setIsAuthenticated(true);
-      localStorage.setItem('itm_admin_user', JSON.stringify(normalized));
 
       toast({
         title: 'Login Successful',
@@ -383,7 +335,6 @@ export const InternalAuthProvider = ({ children }) => {
       await supabase.auth.signOut();
       setUser(null);
       setIsAuthenticated(false);
-      localStorage.removeItem('itm_admin_user');
 
       toast({
         title: 'Login Failed',
@@ -401,7 +352,6 @@ export const InternalAuthProvider = ({ children }) => {
     await supabase.auth.signOut();
     setUser(null);
     setIsAuthenticated(false);
-    localStorage.removeItem('itm_admin_user');
     toast({ title: 'Logged Out', description: 'You have been logged out successfully.' });
   };
 

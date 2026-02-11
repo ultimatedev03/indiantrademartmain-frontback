@@ -121,6 +121,7 @@ const PremiumBrandsSection = () => {
                   alt={brand.name}
                   className={logoClass}
                   loading="lazy"
+                  decoding="async"
                   onError={(e) => {
                     e.currentTarget.style.display = "none";
                   }}

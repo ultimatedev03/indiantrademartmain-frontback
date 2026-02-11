@@ -122,7 +122,51 @@ router.get('/coupons', async (_req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
     if (error) return res.status(500).json({ success: false, error: error.message });
-    return res.json({ success: true, data: data || [] });
+
+    const coupons = Array.isArray(data) ? data : [];
+    const planIds = Array.from(new Set(coupons.map((c) => c.plan_id).filter(Boolean)));
+    const vendorIds = Array.from(new Set(coupons.map((c) => c.vendor_id).filter(Boolean)));
+
+    let planMap = {};
+    let vendorMap = {};
+
+    if (planIds.length) {
+      const { data: plans, error: planErr } = await supabase
+        .from('vendor_plans')
+        .select('id, name')
+        .in('id', planIds);
+      if (planErr) {
+        console.warn('[finance/coupons] plan lookup failed:', planErr.message);
+      } else {
+        planMap = (plans || []).reduce((acc, p) => {
+          if (p?.id) acc[p.id] = p;
+          return acc;
+        }, {});
+      }
+    }
+
+    if (vendorIds.length) {
+      const { data: vendors, error: vendorErr } = await supabase
+        .from('vendors')
+        .select('id, company_name, owner_name, vendor_id')
+        .in('id', vendorIds);
+      if (vendorErr) {
+        console.warn('[finance/coupons] vendor lookup failed:', vendorErr.message);
+      } else {
+        vendorMap = (vendors || []).reduce((acc, v) => {
+          if (v?.id) acc[v.id] = v;
+          return acc;
+        }, {});
+      }
+    }
+
+    const enriched = coupons.map((c) => ({
+      ...c,
+      plan: c.plan_id ? planMap[c.plan_id] || null : null,
+      vendor: c.vendor_id ? vendorMap[c.vendor_id] || null : null,
+    }));
+
+    return res.json({ success: true, data: enriched });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

@@ -1,9 +1,10 @@
-import React from 'react';
+import { Suspense, lazy } from 'react';
 import { Outlet } from 'react-router-dom';
 import Header from '@/shared/components/Header';
-import Footer from '@/shared/components/Footer';
-import QuotePopup from '@/shared/components/QuotePopup';
 import { Toaster } from '@/components/ui/toaster';
+
+const Footer = lazy(() => import('@/shared/components/Footer'));
+const QuotePopup = lazy(() => import('@/shared/components/QuotePopup'));
 
 const PublicLayout = () => {
   return (
@@ -14,9 +15,13 @@ const PublicLayout = () => {
         <Outlet />
       </main>
 
-      <Footer />
+      <Suspense fallback={null}>
+        <Footer />
+      </Suspense>
 
-      <QuotePopup />
+      <Suspense fallback={null}>
+        <QuotePopup />
+      </Suspense>
       <Toaster />
     </div>
   );
