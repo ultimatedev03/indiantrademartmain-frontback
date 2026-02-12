@@ -19,14 +19,27 @@ const SearchResultsList = ({ products, query, city, category }) => {
   const safeFirstImage = (product) => {
     const raw = product?.images;
 
+    const pick = (val) => {
+      if (typeof val === 'string') return val;
+      if (val && typeof val === 'object') return val.url || val.image_url || val.src || null;
+      return null;
+    };
+
     if (typeof raw === 'string') {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed[0]) return parsed[0];
+        if (Array.isArray(parsed) && parsed[0]) {
+          const picked = pick(parsed[0]);
+          if (picked) return picked;
+        }
       } catch (_) {}
     }
 
-    if (Array.isArray(raw) && raw[0]) return raw[0];
+    if (Array.isArray(raw) && raw[0]) {
+      const picked = pick(raw[0]);
+      if (picked) return picked;
+    }
+
     return product?.image || 'https://images.unsplash.com/photo-1635865165118-917ed9e20936';
   };
 

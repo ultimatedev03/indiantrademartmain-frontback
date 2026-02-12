@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/use-toast';
 import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
-import { generateUniqueSlug } from '@/shared/utils/slugUtils';
+import { generateSlug, generateUniqueSlug } from '@/shared/utils/slugUtils';
 import { Switch } from '@/components/ui/switch';
 import { ArrowLeft, Loader2, Upload, X, Plus } from 'lucide-react';
 
@@ -484,6 +484,11 @@ const ProductForm = () => {
       return;
     }
 
+    if (!formData.category_path && !formData.category_other) {
+      toast({ title: 'Please select a category', description: 'Public search needs a category to show your product.', variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
     try {
       const payload = { ...formData };
@@ -492,6 +497,33 @@ const ProductForm = () => {
       if (!payload.slug || payload.slug.trim() === '') {
         payload.slug = generateUniqueSlug(formData.name);
       }
+
+      // Normalize images to plain URL strings (avoid object arrays)
+      payload.images = (payload.images || [])
+        .map((img) => {
+          if (typeof img === 'string') return img;
+          if (img && typeof img === 'object') return img.url || img.image_url || img.src || '';
+          return '';
+        })
+        .filter(Boolean);
+
+      // Derive category + slug for search compatibility
+      const derivedCategory =
+        (payload.category_other || '').trim() ||
+        String(payload.category_path || '')
+          .split('>')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .pop() ||
+        '';
+
+      if (derivedCategory) {
+        payload.category = derivedCategory;
+        payload.category_slug = generateSlug(derivedCategory);
+        if (!payload.category_path) payload.category_path = derivedCategory;
+      }
+
+      if (!payload.status) payload.status = 'ACTIVE';
 
       if (id) {
         await vendorApi.products.update(id, payload);
