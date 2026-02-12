@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { normalizeEmail } from '../lib/auth.js';
 import { requireAuth } from '../middleware/requireAuth.js';
@@ -9,8 +10,52 @@ const FALLBACK_IMAGE =
   'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80';
 const FALLBACK_SERVICE_IMAGE =
   'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80';
+const ALLOWED_UPLOAD_BUCKETS = new Set(['avatars', 'product-images', 'product-media']);
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+const MIME_EXT = {
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/svg+xml': 'svg',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
+};
 
 const isValidId = (v) => typeof v === 'string' && v.trim().length > 0;
+
+const parseDataUrl = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (raw.startsWith('data:')) {
+    const match = raw.match(/^data:([^;]+);base64,(.*)$/);
+    if (!match) return null;
+    return { mime: match[1], base64: match[2] };
+  }
+  return { mime: null, base64: raw };
+};
+
+const sanitizeFilename = (name) =>
+  String(name || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/^_+/, '')
+    .slice(0, 120) || 'upload';
+
+const buildUploadPath = ({ vendorId, originalName, contentType }) => {
+  const safeName = sanitizeFilename(originalName || '');
+  const extFromMime = MIME_EXT[contentType] || '';
+  const hasExt = safeName.includes('.');
+  const base = hasExt ? safeName.replace(/\.[^/.]+$/, '') : safeName;
+  const ext = hasExt ? safeName.split('.').pop() : (extFromMime || 'bin');
+  const fileName = `${base || 'upload'}.${ext}`;
+  return `${vendorId}/${Date.now()}-${randomUUID()}-${fileName}`;
+};
 
 const VENDOR_UPDATE_BLOCK = new Set([
   'id',
@@ -115,6 +160,77 @@ router.put('/me', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
 
     if (error) return res.status(500).json({ success: false, error: error.message });
     return res.json({ success: true, vendor: data || { ...vendor, ...payload } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Upload image/media to Supabase Storage (auth-required, bypasses RLS)
+router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const bucket = String(req.body?.bucket || 'avatars').trim() || 'avatars';
+    if (!ALLOWED_UPLOAD_BUCKETS.has(bucket)) {
+      return res.status(400).json({ success: false, error: 'Invalid upload bucket' });
+    }
+
+    const dataUrl = String(req.body?.data_url || req.body?.dataUrl || '').trim();
+    const originalName = String(req.body?.file_name || req.body?.fileName || '').trim();
+    const explicitType = String(req.body?.content_type || req.body?.contentType || '').trim();
+
+    if (!dataUrl) {
+      return res.status(400).json({ success: false, error: 'data_url is required' });
+    }
+
+    const parsed = parseDataUrl(dataUrl);
+    if (!parsed?.base64) {
+      return res.status(400).json({ success: false, error: 'Invalid base64 payload' });
+    }
+
+    const contentType = explicitType || parsed.mime || 'application/octet-stream';
+    const allowVideo = bucket === 'product-media';
+    const isAllowed =
+      contentType.startsWith('image/') ||
+      (allowVideo && contentType.startsWith('video/'));
+
+    if (!isAllowed) {
+      return res.status(400).json({ success: false, error: 'Unsupported file type' });
+    }
+
+    const buffer = Buffer.from(parsed.base64, 'base64');
+    if (!buffer?.length) {
+      return res.status(400).json({ success: false, error: 'Empty upload payload' });
+    }
+    if (buffer.length > MAX_UPLOAD_BYTES) {
+      return res.status(413).json({ success: false, error: 'File too large (max 10MB)' });
+    }
+
+    const objectPath = buildUploadPath({
+      vendorId: vendor.id,
+      originalName,
+      contentType,
+    });
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(objectPath, buffer, {
+        contentType,
+        upsert: true,
+      });
+
+    if (uploadError) {
+      return res.status(500).json({ success: false, error: uploadError.message || 'Upload failed' });
+    }
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+    return res.json({
+      success: true,
+      bucket,
+      path: objectPath,
+      publicUrl: data?.publicUrl || null,
+    });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

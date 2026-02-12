@@ -671,17 +671,37 @@ export const vendorApi = {
     },
 
     uploadImage: async (file, bucket = 'avatars') => {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
+      if (!file) throw new Error('No file provided');
+      const MAX_BYTES = 10 * 1024 * 1024;
+      if (file.size > MAX_BYTES) {
+        throw new Error('File too large (max 10MB)');
+      }
 
-      const { error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, file, { upsert: true });
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
 
-      if (uploadError) throw uploadError;
+      const payload = {
+        bucket,
+        file_name: file.name,
+        content_type: file.type,
+        data_url: dataUrl,
+        size: file.size,
+      };
 
-      const { data } = supabase.storage.from(bucket).getPublicUrl(fileName);
-      return data.publicUrl;
+      const res = await fetchVendorJson('/api/vendors/me/upload', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+
+      if (!res?.publicUrl) {
+        throw new Error('Upload failed');
+      }
+
+      return res.publicUrl;
     }
   },
 
