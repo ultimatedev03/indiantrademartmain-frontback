@@ -28,6 +28,14 @@ export const AuthProvider = ({ children }) => {
       // vendorApi.auth.me() already merges vendors table info
       const me = await vendorApi.auth.me();
 
+      if (role === 'VENDOR' && !me) {
+        // Guard: prevent vendor-role users without vendor profile from entering portal.
+        await supabase.auth.signOut().catch(() => {});
+        setUser(null);
+        setIsAuthenticated(false);
+        return null;
+      }
+
       const finalUser = me ? { ...me, role } : { ...session.user, role };
 
       setUser(finalUser);
@@ -91,6 +99,27 @@ export const AuthProvider = ({ children }) => {
     window.addEventListener('vendor_profile_updated', onProfileUpdated);
     return () => window.removeEventListener('vendor_profile_updated', onProfileUpdated);
   }, [refreshUser]);
+
+  // Keep vendor status/profile fresh so suspension reflects without manual refresh.
+  useEffect(() => {
+    if (!isAuthenticated) return undefined;
+
+    const id = window.setInterval(() => {
+      refreshUser().catch(() => {});
+    }, 15000);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        refreshUser().catch(() => {});
+      }
+    };
+
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [isAuthenticated, refreshUser]);
 
   return (
     <AuthContext.Provider value={{ user, setUser, loading, isAuthenticated, refreshUser, logout }}>

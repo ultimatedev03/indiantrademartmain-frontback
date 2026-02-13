@@ -17,6 +17,13 @@ const fetchVendorJson = async (path, options = {}) => {
 
 // Helper to get current vendor ID based on auth user
 const getVendorId = async () => {
+  try {
+    const { vendor } = await fetchVendorJson('/api/vendors/me');
+    if (vendor?.id) return vendor.id;
+  } catch {
+    // Fallback to direct Supabase lookup when API route is unavailable.
+  }
+
   const { data: { user }, error: uErr } = await supabase.auth.getUser();
   if (uErr) throw uErr;
   if (!user) throw new Error('Not authenticated');
@@ -548,13 +555,19 @@ export const vendorApi = {
       if (uErr) throw uErr;
       if (!user) return null;
 
-      const { data: vendor, error: vErr } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (vErr) throw vErr;
+      let vendor = null;
+      try {
+        const res = await fetchVendorJson('/api/vendors/me');
+        vendor = res?.vendor || null;
+      } catch {
+        const { data, error: vErr } = await supabase
+          .from('vendors')
+          .select('*')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (vErr) throw vErr;
+        vendor = data || null;
+      }
 
       const account = normalizeVendorAccountStatus(vendor);
 
@@ -2585,33 +2598,28 @@ export const vendorApi = {
   support: {
     getTickets: async (filters = {}) => {
       const vendorId = await getVendorId();
-      let query = supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('vendor_id', vendorId);
+      const params = new URLSearchParams();
+      if (filters.status) params.set('status', String(filters.status).toUpperCase());
+      if (filters.priority) params.set('priority', String(filters.priority).toUpperCase());
+      const query = params.toString();
+      const { tickets } = await fetchVendorJson(
+        `/api/support/vendor/${vendorId}${query ? `?${query}` : ''}`
+      );
 
-      if (filters.status) query = query.eq('status', filters.status);
-      if (filters.priority) query = query.eq('priority', filters.priority);
-      if (filters.category) query = query.eq('category', filters.category);
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      let rows = tickets || [];
+      if (filters.category) {
+        rows = rows.filter(
+          (t) => String(t.category || '').toLowerCase() === String(filters.category || '').toLowerCase()
+        );
+      }
+      return rows;
     },
 
     getTicketsByStatus: async (status) => {
-      const vendorId = await getVendorId();
-      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS'];
-      if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('status', status)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const normalized = String(status || '').toUpperCase();
+      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'];
+      if (!validStatuses.includes(normalized)) throw new Error(`Invalid status: ${status}`);
+      return vendorApi.support.getTickets({ status: normalized });
     },
 
     getOpenTickets: async () => {
@@ -2624,102 +2632,65 @@ export const vendorApi = {
 
     createTicket: async (ticketData) => {
       const vendorId = await getVendorId();
+      const payload = {
+        vendor_id: vendorId,
+        subject: String(ticketData?.subject || '').trim(),
+        description: String(ticketData?.description || '').trim(),
+        category: String(ticketData?.category || 'General Inquiry'),
+        priority: String(ticketData?.priority || 'MEDIUM').toUpperCase(),
+        status: 'OPEN',
+      };
 
-      const ticketDisplayId = `TKT-${Date.now()}`;
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .insert([{
-          vendor_id: vendorId,
-          subject: ticketData.subject,
-          description: ticketData.description,
-          category: ticketData.category || 'General Inquiry',
-          priority: ticketData.priority || 'Medium',
-          status: 'OPEN',
-          ticket_display_id: ticketDisplayId,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const { ticket } = await fetchVendorJson('/api/support/tickets', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      return ticket || null;
     },
 
     getTicket: async (id) => {
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
+      const { ticket } = await fetchVendorJson(`/api/support/tickets/${id}`);
+      return ticket || null;
     },
 
     deleteTicket: async (id) => {
-      // Vendors can only delete their own tickets
       const vendorId = await getVendorId();
-      const { error } = await supabase
-        .from('support_tickets')
-        .delete()
-        .eq('id', id)
-        .eq('vendor_id', vendorId);
-      if (error) throw error;
+      const params = new URLSearchParams({ vendor_id: vendorId });
+      await fetchVendorJson(`/api/support/tickets/${id}?${params.toString()}`, {
+        method: 'DELETE',
+      });
       return true;
     },
 
     getTicketDetail: async (id) => {
-      const { data: ticket, error: ticketError } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (ticketError) throw ticketError;
-
-      const { data: messages, error: messagesError } = await supabase
-        .from('ticket_messages')
-        .select('*')
-        .eq('ticket_id', id)
-        .order('created_at', { ascending: true });
-      if (messagesError) throw messagesError;
-
+      const [ticket, messages] = await Promise.all([
+        vendorApi.support.getTicket(id),
+        vendorApi.support.getMessages(id),
+      ]);
+      if (!ticket) return null;
       return { ...ticket, messages: messages || [] };
     },
 
     updateTicketStatus: async (id, status) => {
-      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS'];
-      if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-
-      const updateData = {
-        status,
-        updated_at: new Date().toISOString()
-      };
-
-      if (status === 'CLOSED') {
-        updateData.resolved_at = new Date().toISOString();
-      }
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const normalized = String(status || '').toUpperCase();
+      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'];
+      if (!validStatuses.includes(normalized)) throw new Error(`Invalid status: ${status}`);
+      const { ticket } = await fetchVendorJson(`/api/support/tickets/${id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: normalized }),
+      });
+      return ticket || null;
     },
 
     updateTicketPriority: async (id, priority) => {
-      const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
-      if (!validPriorities.includes(priority)) throw new Error(`Invalid priority: ${priority}`);
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .update({ priority, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const normalized = String(priority || '').toUpperCase();
+      const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'URGENT'];
+      if (!validPriorities.includes(normalized)) throw new Error(`Invalid priority: ${priority}`);
+      const { ticket } = await fetchVendorJson(`/api/support/tickets/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ priority: normalized }),
+      });
+      return ticket || null;
     },
 
     closeTicket: async (id) => {
@@ -2731,74 +2702,31 @@ export const vendorApi = {
     },
 
     addMessage: async (ticketId, message) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      // Update ticket's last_reply_at
-      const { error: updateErr } = await supabase
-        .from('support_tickets')
-        .update({ last_reply_at: new Date().toISOString() })
-        .eq('id', ticketId);
-      if (updateErr) throw updateErr;
-
-      const { data, error } = await supabase
-        .from('ticket_messages')
-        .insert([{
-          ticket_id: ticketId,
-          sender_id: user.id,
+      const { message: row } = await fetchVendorJson(`/api/support/tickets/${ticketId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
           sender_type: 'VENDOR',
-          message: message,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+          message: String(message || '').trim(),
+        }),
+      });
+      return row || null;
     },
 
     getMessages: async (ticketId) => {
-      const { data, error } = await supabase
-        .from('ticket_messages')
-        .select('*')
-        .eq('ticket_id', ticketId)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      return data || [];
+      const { messages } = await fetchVendorJson(`/api/support/tickets/${ticketId}/messages`);
+      return messages || [];
     },
 
     deleteMessage: async (id) => {
-      const { error } = await supabase
-        .from('ticket_messages')
-        .delete()
-        .eq('id', id);
-      if (error) throw error;
+      throw new Error('Message deletion is not supported.');
     },
 
     getStats: async () => {
-      const vendorId = await getVendorId();
-      const { count: totalCount } = await supabase
-        .from('support_tickets')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId);
-
-      const { count: openCount } = await supabase
-        .from('support_tickets')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId)
-        .eq('status', 'OPEN');
-
-      const { count: closedCount } = await supabase
-        .from('support_tickets')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId)
-        .eq('status', 'CLOSED');
-
-      const { count: inProgressCount } = await supabase
-        .from('support_tickets')
-        .select('*', { count: 'exact', head: true })
-        .eq('vendor_id', vendorId)
-        .eq('status', 'IN_PROGRESS');
+      const rows = await vendorApi.support.getTickets();
+      const totalCount = rows.length;
+      const openCount = rows.filter((x) => String(x.status || '').toUpperCase() === 'OPEN').length;
+      const closedCount = rows.filter((x) => String(x.status || '').toUpperCase() === 'CLOSED').length;
+      const inProgressCount = rows.filter((x) => String(x.status || '').toUpperCase() === 'IN_PROGRESS').length;
 
       return {
         total: totalCount || 0,

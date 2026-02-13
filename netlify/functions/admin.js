@@ -637,6 +637,136 @@ export async function handler(event) {
     }
 
     // -------------------------
+    // BUYERS
+    // GET /buyers
+    // POST /buyers/:buyerId/terminate
+    // POST /buyers/:buyerId/activate
+    // PUT /buyers/:buyerId
+    // -------------------------
+    if (event.httpMethod === "GET" && tail[0] === "buyers" && tail.length === 1) {
+      const { data, error } = await supabase
+        .from("buyers")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) return fail("Failed to fetch buyers", error.message);
+      return ok({ success: true, buyers: data || [] });
+    }
+
+    if (event.httpMethod === "POST" && tail[0] === "buyers" && tail[2] === "terminate") {
+      const buyerId = tail[1];
+      if (!buyerId) return bad("buyerId missing");
+      const body = await readBody(event);
+      const reason = String(body?.reason || "").trim();
+
+      const { data, error } = await supabase
+        .from("buyers")
+        .update({ is_active: false })
+        .eq("id", buyerId)
+        .select("*")
+        .maybeSingle();
+
+      if (error) return fail("Buyer terminate failed", error.message);
+
+      await writeAudit({
+        action: "BUYER_TERMINATE",
+        entity_type: "buyers",
+        entity_id: buyerId,
+        details: { reason: reason || null },
+      });
+
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "ACCOUNT_SUSPENDED",
+          title: "Account suspended",
+          message: reason || "Your buyer account has been suspended by admin.",
+          link: "/buyer/tickets",
+        });
+      }
+
+      return ok({ success: true, buyer: data });
+    }
+
+    if (event.httpMethod === "POST" && tail[0] === "buyers" && tail[2] === "activate") {
+      const buyerId = tail[1];
+      if (!buyerId) return bad("buyerId missing");
+
+      const { data, error } = await supabase
+        .from("buyers")
+        .update({ is_active: true })
+        .eq("id", buyerId)
+        .select("*")
+        .maybeSingle();
+
+      if (error) return fail("Buyer activate failed", error.message);
+
+      await writeAudit({
+        action: "BUYER_ACTIVATE",
+        entity_type: "buyers",
+        entity_id: buyerId,
+        details: {},
+      });
+
+      if (data?.user_id) {
+        await notifyUser({
+          user_id: data.user_id,
+          type: "ACCOUNT_ACTIVATED",
+          title: "Account re-activated",
+          message: "Your buyer account has been activated by admin.",
+          link: "/buyer/dashboard",
+        });
+      }
+
+      return ok({ success: true, buyer: data });
+    }
+
+    if (event.httpMethod === "PUT" && tail[0] === "buyers" && tail[1]) {
+      const buyerId = tail[1];
+      const body = await readBody(event);
+      const allowed = [
+        "full_name",
+        "phone",
+        "company_name",
+        "address",
+        "city",
+        "state",
+        "pincode",
+        "pan_card",
+        "gst_number",
+        "is_active",
+        "status",
+        "terminated_at",
+        "terminated_reason",
+      ];
+
+      const payload = {};
+      allowed.forEach((k) => {
+        if (body?.[k] !== undefined) payload[k] = body[k];
+      });
+      if (Object.keys(payload).length === 0) return bad("No fields to update");
+      payload.updated_at = nowIso();
+
+      const { data, error } = await supabase
+        .from("buyers")
+        .update(payload)
+        .eq("id", buyerId)
+        .select("*")
+        .maybeSingle();
+
+      if (error) return fail("Buyer update failed", error.message);
+
+      await writeAudit({
+        action: "BUYER_UPDATE",
+        entity_type: "buyers",
+        entity_id: buyerId,
+        details: { payload },
+      });
+
+      return ok({ success: true, buyer: data });
+    }
+
+    // -------------------------
     // GET /vendors/:vendorId/products
     // -------------------------
     if (event.httpMethod === "GET" && tail[0] === "vendors" && tail[2] === "products") {

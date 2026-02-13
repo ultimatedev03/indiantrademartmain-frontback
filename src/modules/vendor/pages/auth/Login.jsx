@@ -22,9 +22,30 @@ const VendorLogin = () => {
 
   // If already authenticated as vendor, send to dashboard
   React.useEffect(() => {
-    if (supaAuth?.userRole === 'VENDOR') {
-      navigate('/vendor/dashboard', { replace: true });
-    }
+    let mounted = true;
+    const run = async () => {
+      if (supaAuth?.userRole !== 'VENDOR') return;
+      try {
+        const me = await vendorApi.auth.me();
+        if (!mounted) return;
+        if (!me) {
+          await supabase.auth.signOut().catch(() => {});
+          return;
+        }
+        if (me.is_active === false || me.isActive === false) {
+          await supabase.auth.signOut().catch(() => {});
+          toast({ title: "Login Failed", description: "Inactive user", variant: "destructive" });
+          return;
+        }
+        navigate('/vendor/dashboard', { replace: true });
+      } catch {
+        // Ignore bootstrap check failures here; login flow handles hard errors.
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
   }, [supaAuth?.userRole, navigate]);
 
   const handleLogin = async (e) => {
@@ -32,12 +53,14 @@ const VendorLogin = () => {
     setLoading(true);
 
     try {
+      const normalizedEmail = String(formData.email || '').trim().toLowerCase();
+
       // 1. Authenticate with Supabase
       let authData = null;
       let authError = null;
       
       ({ data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email: formData.email,
+        email: normalizedEmail,
         password: formData.password
       }));
 
@@ -50,7 +73,7 @@ const VendorLogin = () => {
              // Retry the login after a brief delay
              await new Promise(resolve => setTimeout(resolve, 1000));
              const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
-               email: formData.email,
+               email: normalizedEmail,
                password: formData.password
              });
              if (retryError) throw retryError;
@@ -72,7 +95,7 @@ const VendorLogin = () => {
         const { data: vendorByEmail } = await supabase
           .from('vendors')
           .select('*')
-          .eq('email', formData.email.toLowerCase())
+          .eq('email', normalizedEmail)
           .maybeSingle();
         if (vendorByEmail) {
           await supabase.from('vendors').update({ user_id: authData.user.id }).eq('id', vendorByEmail.id);
@@ -81,15 +104,20 @@ const VendorLogin = () => {
       }
 
       if (!vendor) {
-        // Auth exists but no profile? Should typically go to registration or profile completion
-        // For now, let's treat as onboarding needed or error
+        await supabase.auth.signOut().catch(() => {});
         toast({ title: "Profile Missing", description: "Vendor profile not found. Please register.", variant: "destructive" });
+        return;
+      }
+
+      if (vendor.is_active === false) {
+        await supabase.auth.signOut().catch(() => {});
+        toast({ title: "Login Failed", description: "Inactive user", variant: "destructive" });
         return;
       }
 
       if (!vendor.is_verified) {
         toast({ title: "Account Unverified", description: "Redirecting to verification...", variant: "warning" });
-        navigate('/vendor/verify', { state: { email: formData.email } });
+        navigate('/vendor/verify', { state: { email: normalizedEmail } });
         return;
       }
 

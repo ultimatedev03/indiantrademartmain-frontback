@@ -477,6 +477,64 @@ router.post("/buyers/:buyerId/activate", async (req, res) => {
   }
 });
 
+router.put("/buyers/:buyerId", async (req, res) => {
+  try {
+    const { buyerId } = req.params;
+    if (!buyerId) {
+      return res.status(400).json({ success: false, error: "buyerId missing" });
+    }
+
+    const allowed = [
+      "full_name",
+      "phone",
+      "company_name",
+      "address",
+      "city",
+      "state",
+      "pincode",
+      "pan_card",
+      "gst_number",
+      "is_active",
+      "status",
+      "terminated_at",
+      "terminated_reason",
+    ];
+
+    const payload = {};
+    allowed.forEach((k) => {
+      if (req.body?.[k] !== undefined) payload[k] = req.body[k];
+    });
+    if (Object.keys(payload).length === 0) {
+      return res.status(400).json({ success: false, error: "No fields to update" });
+    }
+    payload.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("buyers")
+      .update(payload)
+      .eq("id", buyerId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: "BUYER_UPDATE",
+      entityType: "buyers",
+      entityId: buyerId,
+      details: { payload },
+    });
+
+    return res.json({ success: true, buyer: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 /**
  * =========================
  * PRODUCTS

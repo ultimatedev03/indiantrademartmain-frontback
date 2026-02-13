@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
 const OTP_LENGTH = 6;
-const OTP_EXPIRY_MINUTES = 2;
+const OTP_EXPIRY_MINUTES = 5;
 
 // Check if running locally or on Netlify
 const isLocalDevelopment = () => {
@@ -20,9 +20,14 @@ function isValidEmail(email) {
   return !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
 // Local development: Use Supabase directly
 async function requestOtpLocal(email) {
-  if (!isValidEmail(email)) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!isValidEmail(normalizedEmail)) {
     throw new Error('Invalid email format');
   }
 
@@ -30,11 +35,11 @@ async function requestOtpLocal(email) {
   const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000).toISOString();
 
   // Delete old OTPs
-  await supabase.from('auth_otps').delete().eq('email', email).eq('used', false);
+  await supabase.from('auth_otps').delete().eq('email', normalizedEmail).eq('used', false);
 
   // Insert new OTP
   const { error: dbError } = await supabase.from('auth_otps').insert([{
-    email,
+    email: normalizedEmail,
     otp_code: otp,
     expires_at: expiresAt,
     used: false
@@ -54,22 +59,23 @@ async function requestOtpLocal(email) {
     message: `OTP Code: ${otp}\n\nCheck browser console for the code.\nThis OTP is also saved in database.`,
     expiresIn: OTP_EXPIRY_MINUTES * 60,
     otp: otp, // Show OTP in development for testing
-    email: email
+    email: normalizedEmail
   };
 }
 
 async function verifyOtpLocal(email, otpCode) {
-  if (!email || !otpCode) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOtp = String(otpCode || '').trim();
+  if (!normalizedEmail || !normalizedOtp) {
     throw new Error('Email and OTP code are required');
   }
 
   const { data, error } = await supabase
     .from('auth_otps')
     .select('*')
-    .eq('email', email)
-    .eq('otp_code', String(otpCode))
+    .eq('email', normalizedEmail)
+    .eq('otp_code', normalizedOtp)
     .eq('used', false)
-    .gt('expires_at', new Date().toISOString())
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -79,7 +85,25 @@ async function verifyOtpLocal(email, otpCode) {
   }
 
   if (!data) {
+    const { data: activeOtp } = await supabase
+      .from('auth_otps')
+      .select('id, expires_at')
+      .eq('email', normalizedEmail)
+      .eq('used', false)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (activeOtp) {
+      throw new Error('A newer OTP was sent. Please use the latest code.');
+    }
+
     throw new Error('Invalid or expired OTP code');
+  }
+
+  const expiresAt = data?.expires_at ? new Date(data.expires_at) : null;
+  if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+    throw new Error('OTP expired. Please request a new code.');
   }
 
   await supabase.from('auth_otps').update({ used: true }).eq('id', data.id);
@@ -87,7 +111,7 @@ async function verifyOtpLocal(email, otpCode) {
   return {
     success: true,
     message: 'OTP verified successfully',
-    email
+    email: normalizedEmail
   };
 }
 
@@ -97,10 +121,11 @@ async function resendOtpLocal(email) {
 
 // Netlify production: Use functions
 async function requestOtpProduction(email) {
+  const normalizedEmail = normalizeEmail(email);
   const response = await fetch(`${OTP_FN_BASE}/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email: normalizedEmail }),
   });
 
   if (!response.ok) {
@@ -112,10 +137,11 @@ async function requestOtpProduction(email) {
 }
 
 async function verifyOtpProduction(email, otpCode) {
+  const normalizedEmail = normalizeEmail(email);
   const response = await fetch(`${OTP_FN_BASE}/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, otp_code: otpCode }),
+    body: JSON.stringify({ email: normalizedEmail, otp_code: String(otpCode || '').trim() }),
   });
 
   if (!response.ok) {
@@ -127,10 +153,11 @@ async function verifyOtpProduction(email, otpCode) {
 }
 
 async function resendOtpProduction(email) {
+  const normalizedEmail = normalizeEmail(email);
   const response = await fetch(`${OTP_FN_BASE}/resend`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email: normalizedEmail }),
   });
 
   if (!response.ok) {
@@ -151,12 +178,13 @@ export const otpService = {
   requestOtp: async (email) => {
     try {
       if (!email) throw new Error('Email is required');
+      const normalizedEmail = normalizeEmail(email);
 
       // Use local or production based on environment
       if (isLocalDevelopment()) {
-        return await requestOtpLocal(email);
+        return await requestOtpLocal(normalizedEmail);
       } else {
-        return await requestOtpProduction(email);
+        return await requestOtpProduction(normalizedEmail);
       }
     } catch (error) {
       console.error('Request OTP Error:', error);
@@ -167,12 +195,13 @@ export const otpService = {
   verifyOtp: async (email, otpCode) => {
     try {
       if (!email || !otpCode) throw new Error('Email and OTP code are required');
+      const normalizedEmail = normalizeEmail(email);
 
       // Use local or production based on environment
       if (isLocalDevelopment()) {
-        return await verifyOtpLocal(email, otpCode);
+        return await verifyOtpLocal(normalizedEmail, otpCode);
       } else {
-        return await verifyOtpProduction(email, otpCode);
+        return await verifyOtpProduction(normalizedEmail, otpCode);
       }
     } catch (error) {
       console.error('Verify OTP Error:', error);
@@ -183,12 +212,13 @@ export const otpService = {
   resendOtp: async (email) => {
     try {
       if (!email) throw new Error('Email is required');
+      const normalizedEmail = normalizeEmail(email);
 
       // Use local or production based on environment
       if (isLocalDevelopment()) {
-        return await resendOtpLocal(email);
+        return await resendOtpLocal(normalizedEmail);
       } else {
-        return await resendOtpProduction(email);
+        return await resendOtpProduction(normalizedEmail);
       }
     } catch (error) {
       console.error('Resend OTP Error:', error);

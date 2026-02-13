@@ -10,7 +10,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
 
 const OTP_LENGTH = 6;
-const OTP_TTL_SECONDS = 120;
+const OTP_TTL_SECONDS = 300;
 
 const Verify = () => {
   const navigate = useNavigate();
@@ -89,9 +89,10 @@ const Verify = () => {
           return;
         }
 
-        await otpService.resendOtp(email);
+        const otpResp = await otpService.resendOtp(email);
         setInitialSent(true);
-        setTimer(OTP_TTL_SECONDS);
+        const expiresIn = Number(otpResp?.expiresIn);
+        setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TTL_SECONDS);
 
         toast({
           title: "OTP Sent",
@@ -192,8 +193,9 @@ const Verify = () => {
   const handleResend = async () => {
     try {
       setLoading(true);
-      await otpService.resendOtp(email);
-      setTimer(OTP_TTL_SECONDS);
+      const otpResp = await otpService.resendOtp(email);
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TTL_SECONDS);
       setOtp('');
       toast({
         title: "OTP Resent",

@@ -49,7 +49,7 @@ const VendorRegister = () => {
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [cityLoading, setCityLoading] = useState(false);
-  const [timer, setTimer] = useState(120);
+  const [timer, setTimer] = useState(300);
 
   const [states, setStates] = useState([]);
   const [cities, setCities] = useState([]);
@@ -202,13 +202,14 @@ const VendorRegister = () => {
 
     setLoading(true);
     try {
-      await otpService.requestOtp(formData.email);
+      const otpResp = await otpService.requestOtp(formData.email);
 
       setStep(3);
-      setTimer(120);
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 300);
       toast({
         title: 'OTP Sent',
-        description: 'A 6-digit code has been sent to your email. It will expire in 2 minutes.',
+        description: 'A 6-digit code has been sent to your email. It will expire in 5 minutes.',
       });
     } catch (error) {
       toast({ title: 'Registration Failed', description: error.message, variant: 'destructive' });
@@ -295,8 +296,9 @@ const VendorRegister = () => {
 
   const resendOtp = async () => {
     try {
-      await otpService.resendOtp(formData.email);
-      setTimer(120);
+      const otpResp = await otpService.resendOtp(formData.email);
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 300);
       setFormData((prev) => ({ ...prev, otp: '' }));
       toast({ title: 'OTP Resent', description: 'A new 6-digit code has been sent to your email.' });
     } catch (e) {

@@ -10,8 +10,9 @@ const json = (statusCode, body) => ({
   headers: {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CSRF-Token",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "Access-Control-Allow-Credentials": "true",
   },
   body: JSON.stringify(body),
 });
@@ -334,6 +335,34 @@ export async function handler(event) {
         .single();
       if (error) return fail("Failed to update ticket", error.message);
       return ok({ success: true, message: "Ticket updated successfully", ticket: data });
+    }
+
+    // -------------------------
+    // DELETE /tickets/:id
+    // -------------------------
+    if (event.httpMethod === "DELETE" && root === "tickets" && id && tail.length === 2) {
+      const vendorId =
+        String(event.queryStringParameters?.vendor_id || "").trim() || null;
+
+      let ticketQuery = supabase
+        .from("support_tickets")
+        .select("id, vendor_id")
+        .eq("id", id);
+      if (vendorId) ticketQuery = ticketQuery.eq("vendor_id", vendorId);
+
+      const { data: ticket, error: tErr } = await ticketQuery.maybeSingle();
+      if (tErr) return fail("Failed to fetch ticket", tErr.message);
+      if (!ticket) return json(404, { error: "Ticket not found" });
+
+      await supabase.from("ticket_messages").delete().eq("ticket_id", id);
+
+      const { error: delErr } = await supabase
+        .from("support_tickets")
+        .delete()
+        .eq("id", id);
+      if (delErr) return fail("Failed to delete ticket", delErr.message);
+
+      return ok({ success: true });
     }
 
     // -------------------------

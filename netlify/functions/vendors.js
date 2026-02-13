@@ -503,16 +503,22 @@ export const handler = async (event) => {
     if (event.httpMethod === 'GET' && action === 'products') {
       const { data: products, error: pErr } = await supabase
         .from('products')
-        .select('id, name, price, price_unit, images, category_other, micro_category_id, sub_category_id, head_category_id')
+        .select('id, name, price, price_unit, images, category_other, micro_category_id, sub_category_id, head_category_id, status')
         .eq('vendor_id', vendorId)
-        .eq('status', 'ACTIVE')
         .order('created_at', { ascending: false });
 
       if (pErr) return fail(event, pErr.message || 'Failed to fetch products');
 
-      const microIds = Array.from(new Set((products || []).map((p) => p.micro_category_id).filter(Boolean)));
-      const subIds = Array.from(new Set((products || []).map((p) => p.sub_category_id).filter(Boolean)));
-      const headIds = Array.from(new Set((products || []).map((p) => p.head_category_id).filter(Boolean)));
+      const isPublicStatus = (rawStatus) => {
+        const s = String(rawStatus || 'ACTIVE').trim().toUpperCase();
+        return !['DRAFT', 'ARCHIVED', 'INACTIVE', 'DELETED', 'BLOCKED', 'PENDING'].includes(s);
+      };
+
+      const visibleProducts = (products || []).filter((p) => isPublicStatus(p.status));
+
+      const microIds = Array.from(new Set(visibleProducts.map((p) => p.micro_category_id).filter(Boolean)));
+      const subIds = Array.from(new Set(visibleProducts.map((p) => p.sub_category_id).filter(Boolean)));
+      const headIds = Array.from(new Set(visibleProducts.map((p) => p.head_category_id).filter(Boolean)));
 
       const [microRes, subRes, headRes] = await Promise.all([
         microIds.length
@@ -557,7 +563,7 @@ export const handler = async (event) => {
         headLookup[h.id] = h.name;
       });
 
-      const mappedProducts = (products || []).map((p) => {
+      const mappedProducts = visibleProducts.map((p) => {
         const microInfo = microLookup[p.micro_category_id] || {};
         const subInfo = subLookup[p.sub_category_id] || {};
         const headName =

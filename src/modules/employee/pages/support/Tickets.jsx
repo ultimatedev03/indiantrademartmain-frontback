@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { supportApi } from '@/modules/employee/services/supportApi';
+import { apiUrl } from '@/lib/apiBase';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -106,9 +107,7 @@ const Tickets = () => {
 
     setUpdatingStatus(true);
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-
-      const response = await fetchWithCsrf(`${API_URL}/api/support/tickets/${selectedTicket.id}/status`, {
+      const response = await fetchWithCsrf(apiUrl(`/api/support/tickets/${selectedTicket.id}/status`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: newStatus })

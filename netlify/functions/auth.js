@@ -437,6 +437,9 @@ const assertUserActive = async (user) => {
           .join(',')
       )
       .maybeSingle();
+    if (!vendor) {
+      return { ok: false, error: 'Vendor profile not found' };
+    }
     if (vendor && vendor.is_active === false) {
       return { ok: false, error: 'Vendor account is inactive' };
     }

@@ -3,6 +3,9 @@ import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 
 const router = express.Router();
+const OTP_TTL_SECONDS = 300; // 5 minutes
+const OTP_TTL_MS = OTP_TTL_SECONDS * 1000;
+const OTP_TTL_MINUTES = Math.floor(OTP_TTL_SECONDS / 60);
 
 // Generate 6-digit OTP
 function generateOtp() {
@@ -38,7 +41,7 @@ async function sendOtpEmail(email, otp) {
               <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
                 <h1 style="color: #003D82; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
               </div>
-              <p style="color: #666; font-size: 14px;">This code will expire in 2 minutes.</p>
+              <p style="color: #666; font-size: 14px;">This code will expire in ${OTP_TTL_MINUTES} minutes.</p>
               <p style="color: #999; font-size: 12px; margin-top: 20px;">If you didn't request this code, please ignore this email.</p>
             </div>
             <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
@@ -63,28 +66,29 @@ async function sendOtpEmail(email, otp) {
 router.post('/request', async (req, res) => {
   try {
     const { email } = req.body;
+    const normalizedEmail = String(email || '').toLowerCase().trim();
 
     // Validate email
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
     // Generate OTP
     const otp = generateOtp();
-    const expiresAt = new Date(Date.now() + 2 * 60 * 1000); // 2 minutes
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     // Delete old unused OTPs for this email
     await supabase
       .from('auth_otps')
       .delete()
-      .eq('email', email)
+      .eq('email', normalizedEmail)
       .eq('used', false);
 
     // Store OTP in database
     const { error: dbError } = await supabase
       .from('auth_otps')
       .insert({
-        email,
+        email: normalizedEmail,
         otp_code: otp,
         expires_at: expiresAt.toISOString(),
         used: false
@@ -96,12 +100,12 @@ router.post('/request', async (req, res) => {
     }
 
     // Send OTP email
-    await sendOtpEmail(email, otp);
+    await sendOtpEmail(normalizedEmail, otp);
 
     res.json({
       success: true,
       message: 'OTP sent successfully to your email',
-      expiresIn: 120 // 2 minutes in seconds
+      expiresIn: OTP_TTL_SECONDS
     });
   } catch (error) {
     console.error('OTP request error:', error);
@@ -113,8 +117,10 @@ router.post('/request', async (req, res) => {
 router.post('/verify', async (req, res) => {
   try {
     const { email, otp_code } = req.body;
+    const normalizedEmail = String(email || '').toLowerCase().trim();
+    const otpCode = String(otp_code || '').trim();
 
-    if (!email || !otp_code) {
+    if (!normalizedEmail || !otpCode) {
       return res.status(400).json({ error: 'Email and OTP code are required' });
     }
 
@@ -122,10 +128,9 @@ router.post('/verify', async (req, res) => {
     const { data, error } = await supabase
       .from('auth_otps')
       .select('*')
-      .eq('email', email)
-      .eq('otp_code', otp_code)
+      .eq('email', normalizedEmail)
+      .eq('otp_code', otpCode)
       .eq('used', false)
-      .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -136,7 +141,25 @@ router.post('/verify', async (req, res) => {
     }
 
     if (!data) {
+      const { data: activeOtp } = await supabase
+        .from('auth_otps')
+        .select('id, expires_at')
+        .eq('email', normalizedEmail)
+        .eq('used', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (activeOtp) {
+        return res.status(401).json({ error: 'A newer OTP was sent. Please use the latest code.' });
+      }
+
       return res.status(401).json({ error: 'Invalid or expired OTP code' });
+    }
+
+    const expiresAt = data?.expires_at ? new Date(data.expires_at) : null;
+    if (!expiresAt || Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date()) {
+      return res.status(401).json({ error: 'OTP expired. Please request a new code.' });
     }
 
     // Mark OTP as used
@@ -148,7 +171,7 @@ router.post('/verify', async (req, res) => {
     res.json({
       success: true,
       message: 'OTP verified successfully',
-      email: email
+      email: normalizedEmail
     });
   } catch (error) {
     console.error('OTP verification error:', error);
@@ -160,8 +183,9 @@ router.post('/verify', async (req, res) => {
 router.post('/resend', async (req, res) => {
   try {
     const { email } = req.body;
+    const normalizedEmail = String(email || '').toLowerCase().trim();
 
-    if (!email) {
+    if (!normalizedEmail) {
       return res.status(400).json({ error: 'Email is required' });
     }
 
@@ -169,18 +193,18 @@ router.post('/resend', async (req, res) => {
     await supabase
       .from('auth_otps')
       .delete()
-      .eq('email', email)
+      .eq('email', normalizedEmail)
       .eq('used', false);
 
     // Generate new OTP
     const otp = generateOtp();
-    const expiresAt = new Date(Date.now() + 2 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + OTP_TTL_MS);
 
     // Store new OTP
     const { error: dbError } = await supabase
       .from('auth_otps')
       .insert({
-        email,
+        email: normalizedEmail,
         otp_code: otp,
         expires_at: expiresAt.toISOString(),
         used: false
@@ -191,12 +215,12 @@ router.post('/resend', async (req, res) => {
     }
 
     // Send OTP email
-    await sendOtpEmail(email, otp);
+    await sendOtpEmail(normalizedEmail, otp);
 
     res.json({
       success: true,
       message: 'New OTP sent to your email',
-      expiresIn: 120
+      expiresIn: OTP_TTL_SECONDS
     });
   } catch (error) {
     console.error('Resend OTP error:', error);

@@ -11,8 +11,8 @@ import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelecto
 import { otpService } from '@/services/otpService';
 
 // Keep UI timer aligned with backend (Netlify function returns expiresIn).
-// Default to 2 minutes.
-const OTP_TIMER_SECONDS = 120; // 2 minutes
+// Default to 5 minutes.
+const OTP_TIMER_SECONDS = 300; // 5 minutes
 
 const StepIndicator = ({ step }) => {
   const steps = [

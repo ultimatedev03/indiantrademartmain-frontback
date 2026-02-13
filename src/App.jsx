@@ -107,7 +107,9 @@ const VendorSuspensionGate = ({ children }) => {
       user.is_active === false ||
       user.status === 'TERMINATED' ||
       user.account_status === 'SUSPENDED' ||
-      user.account_status === 'TERMINATED'
+      user.account_status === 'TERMINATED' ||
+      user.accountStatus === 'SUSPENDED' ||
+      user.accountStatus === 'TERMINATED'
     );
 
   // ✅ Allow support page even if suspended

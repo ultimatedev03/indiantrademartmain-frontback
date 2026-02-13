@@ -374,6 +374,46 @@ router.patch('/tickets/:id', async (req, res) => {
   }
 });
 
+// DELETE /api/support/tickets/:id - Delete ticket (optionally constrained by vendor_id)
+router.delete('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const vendorId =
+      String(req.query?.vendor_id || req.body?.vendor_id || '').trim() || null;
+
+    if (!id) return res.status(400).json({ error: 'Ticket id is required' });
+
+    const ticketQuery = supabase
+      .from('support_tickets')
+      .select('id, vendor_id')
+      .eq('id', id);
+    if (vendorId) ticketQuery.eq('vendor_id', vendorId);
+
+    const { data: ticket, error: tErr } = await ticketQuery.maybeSingle();
+    if (tErr) {
+      return res.status(500).json({ error: 'Failed to fetch ticket', details: tErr.message });
+    }
+    if (!ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    await supabase.from('ticket_messages').delete().eq('ticket_id', id);
+
+    const { error: delErr } = await supabase
+      .from('support_tickets')
+      .delete()
+      .eq('id', id);
+
+    if (delErr) {
+      return res.status(500).json({ error: 'Failed to delete ticket', details: delErr.message });
+    }
+
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to delete ticket', details: error.message });
+  }
+});
+
 // PUT /api/support/tickets/:id/status - Update ticket status
 router.put('/tickets/:id/status', async (req, res) => {
   try {

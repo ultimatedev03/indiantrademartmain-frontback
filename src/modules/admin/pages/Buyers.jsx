@@ -21,9 +21,10 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/use-toast";
+import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
+import { apiUrl } from "@/lib/apiBase";
 
 import { Eye, Edit, Loader2, Search, Ban, CheckCircle2 } from "lucide-react";
-import { supabase } from "@/lib/customSupabaseClient";
 
 /* ================= VALIDATION HELPERS ================= */
 const nameRegex = /^[A-Za-z\s]+$/;
@@ -70,19 +71,27 @@ export default function Buyers() {
     [terminateReason]
   );
 
+  const adminRequest = async (path, options = {}) => {
+    const res = await fetchWithCsrf(apiUrl(`/api/admin${path}`), {
+      headers: {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+      ...options,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data?.error || data?.message || `Request failed (${res.status})`);
+    }
+    return data;
+  };
+
   /* ================= LOAD BUYERS ================= */
   const load = async () => {
     setLoading(true);
     try {
-      // NOTE: We select "*" so it will include is_active/status if exists.
-      const { data, error } = await supabase
-        .from("buyers")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-
-      let list = data || [];
+      const data = await adminRequest("/buyers");
+      let list = data?.buyers || [];
       const t = searchTerm.trim().toLowerCase();
       if (t) {
         list = list.filter(
@@ -142,39 +151,16 @@ export default function Buyers() {
   const updateBuyerStatus = async (buyerId, nextActive, reasonText = "") => {
     setProcessing(true);
     try {
-      // First fetch one buyer to detect which columns exist (safe)
-      const { data: current, error: curErr } = await supabase
-        .from("buyers")
-        .select("*")
-        .eq("id", buyerId)
-        .single();
-
-      if (curErr) throw curErr;
-
-      const updates = {
-        updated_at: new Date().toISOString(),
-      };
-
-      // If column exists: is_active
-      if (typeof current?.is_active === "boolean" || "is_active" in current) {
-        updates.is_active = !!nextActive;
+      if (nextActive) {
+        await adminRequest(`/buyers/${buyerId}/activate`, {
+          method: "POST",
+        });
+      } else {
+        await adminRequest(`/buyers/${buyerId}/terminate`, {
+          method: "POST",
+          body: JSON.stringify({ reason: reasonText || "" }),
+        });
       }
-
-      // If column exists: status
-      if (typeof current?.status === "string" || "status" in current) {
-        updates.status = nextActive ? "ACTIVE" : "TERMINATED";
-      }
-
-      // Optional terminated fields
-      if ("terminated_at" in current) {
-        updates.terminated_at = nextActive ? null : new Date().toISOString();
-      }
-      if ("terminated_reason" in current) {
-        updates.terminated_reason = nextActive ? null : (reasonText || null);
-      }
-
-      const { error } = await supabase.from("buyers").update(updates).eq("id", buyerId);
-      if (error) throw error;
 
       toast({
         title: "Success",
@@ -272,9 +258,9 @@ export default function Buyers() {
 
     setProcessing(true);
     try {
-      const { error } = await supabase
-        .from("buyers")
-        .update({
+      await adminRequest(`/buyers/${b.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
           full_name: b.full_name.trim(),
           phone: b.phone || null,
           company_name: b.company_name || null,
@@ -284,11 +270,8 @@ export default function Buyers() {
           pincode: b.pincode || null,
           pan_card: b.pan_card || null,
           gst_number: b.gst_number || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", b.id);
-
-      if (error) throw error;
+        }),
+      });
 
       toast({ title: "Success", description: "Buyer updated successfully" });
       setShowEditModal(false);

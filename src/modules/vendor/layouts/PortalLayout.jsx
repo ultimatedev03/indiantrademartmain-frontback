@@ -173,6 +173,14 @@ const PortalLayout = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (!user) return undefined;
+    const id = window.setInterval(() => {
+      loadVendorStatus().catch(() => {});
+    }, 10000);
+    return () => window.clearInterval(id);
+  }, [user, loadVendorStatus]);
+
   // ✅ This is the KEY fix: blur actual UI (not backdrop-filter)
   const blurWrapperClass = showOverlay
     ? 'filter blur-[6px] pointer-events-none select-none'

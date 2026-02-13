@@ -117,6 +117,40 @@ export const passwordResetApi = {
   },
 
   // ===============================
+  // STEP 3.5: Resend OTP
+  // ===============================
+  resendOTP: async (email) => {
+    try {
+      if (!email) {
+        throw new Error('Email is required');
+      }
+
+      const url = `${API_BASE}/otp/resend`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: email.toLowerCase().trim()
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to resend OTP');
+      }
+
+      return data;
+    } catch (error) {
+      console.error('Error resending OTP:', error);
+      throw error;
+    }
+  },
+
+  // ===============================
   // STEP 4: RESET PASSWORD
   // ===============================
   resetPassword: async (email, newPassword) => {

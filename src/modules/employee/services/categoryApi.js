@@ -1,4 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 // NOTE:
 // In Supabase/PostgREST, `.single()` throws:
@@ -34,28 +36,65 @@ const safeSlug = (v) =>
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 
+const fileToDataUrl = async (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+};
+
 const uploadCategoryImage = async ({ level, slug, file }) => {
   if (!file) return null;
 
-  const ext = String(file?.name || '').split('.').pop() || 'png';
-  const safe = safeSlug(slug) || 'category';
-  const key = `category-images/${level}/${safe}-${Date.now()}.${ext}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from(CATEGORY_IMAGE_BUCKET)
-    .upload(key, file, {
-      upsert: true,
-      contentType: file.type || undefined
+  // Prefer backend upload (service role) to avoid client-side storage/RLS issues.
+  try {
+    const dataUrl = await fileToDataUrl(file);
+    const res = await fetchWithCsrf(apiUrl('/api/employee/upload-category-image'), {
+      method: 'POST',
+      body: JSON.stringify({
+        level,
+        slug,
+        file_name: file.name,
+        content_type: file.type,
+        size: file.size,
+        data_url: dataUrl,
+      }),
     });
 
-  if (uploadError) {
-    throw new Error(`Image upload failed: ${uploadError.message}`);
-  }
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(payload?.error || 'Image upload failed');
+    }
 
-  const { data } = supabase.storage.from(CATEGORY_IMAGE_BUCKET).getPublicUrl(key);
-  const publicUrl = data?.publicUrl;
-  if (!publicUrl) throw new Error('Image upload succeeded but public URL was not generated.');
-  return publicUrl;
+    if (!payload?.publicUrl) {
+      throw new Error('Image upload succeeded but public URL was not generated.');
+    }
+
+    return payload.publicUrl;
+  } catch (apiError) {
+    // Fallback to direct storage upload for environments without backend endpoint.
+    const ext = String(file?.name || '').split('.').pop() || 'png';
+    const safe = safeSlug(slug) || 'category';
+    const key = `category-images/${level}/${safe}-${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(CATEGORY_IMAGE_BUCKET)
+      .upload(key, file, {
+        upsert: true,
+        contentType: file.type || undefined
+      });
+
+    if (uploadError) {
+      throw new Error(`Image upload failed: ${apiError?.message || uploadError.message}`);
+    }
+
+    const { data } = supabase.storage.from(CATEGORY_IMAGE_BUCKET).getPublicUrl(key);
+    const publicUrl = data?.publicUrl;
+    if (!publicUrl) throw new Error('Image upload succeeded but public URL was not generated.');
+    return publicUrl;
+  }
 };
 
 // HEAD CATEGORIES
