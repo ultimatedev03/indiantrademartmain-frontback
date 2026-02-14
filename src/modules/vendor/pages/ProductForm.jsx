@@ -250,9 +250,10 @@ const ProductForm = () => {
       const data = await vendorApi.products.get(id);
       if (data) {
         const safeImages = Array.isArray(data.images) ? data.images : [];
-        const safeSpecs = Array.isArray(data.specifications) && data.specifications.length
-          ? data.specifications
-          : [{ key: '', value: '' }];
+        const safeSpecs =
+          Array.isArray(data.specifications) && data.specifications.length
+            ? data.specifications
+            : [{ key: '', value: '' }];
         const safeTargets = {
           pan_india: !!data?.target_locations?.pan_india,
           states: data?.target_locations?.states || [],
@@ -476,6 +477,21 @@ const ProductForm = () => {
     }
   };
 
+  // ✅ helper: make metadata always an object (metadata column exists in DB)
+  const normalizeMetadata = (m) => {
+    if (!m) return {};
+    if (typeof m === 'object') return m;
+    if (typeof m === 'string') {
+      try {
+        const parsed = JSON.parse(m);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return {};
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
 
@@ -485,7 +501,11 @@ const ProductForm = () => {
     }
 
     if (!formData.category_path && !formData.category_other) {
-      toast({ title: 'Please select a category', description: 'Public search needs a category to show your product.', variant: 'destructive' });
+      toast({
+        title: 'Please select a category',
+        description: 'Public search needs a category to show your product.',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -507,7 +527,7 @@ const ProductForm = () => {
         })
         .filter(Boolean);
 
-      // Derive category + slug for search compatibility
+      // Derive category for compatibility
       const derivedCategory =
         (payload.category_other || '').trim() ||
         String(payload.category_path || '')
@@ -519,7 +539,16 @@ const ProductForm = () => {
 
       if (derivedCategory) {
         payload.category = derivedCategory;
-        payload.category_slug = generateSlug(derivedCategory);
+
+        // ✅ IMPORTANT FIX:
+        // products table DOES NOT have category_slug column, so NEVER send it.
+        // If you still want it, store inside metadata (safe JSON column).
+        const catSlug = generateSlug(derivedCategory);
+        payload.metadata = {
+          ...normalizeMetadata(payload.metadata),
+          category_slug: catSlug,
+        };
+
         if (!payload.category_path) payload.category_path = derivedCategory;
       }
 
@@ -781,21 +810,21 @@ const ProductForm = () => {
                       </div>
                     ) : (
                       <div className="space-y-2">
-                          <CategoryTypeahead
-                            onSelect={(item) => {
-                              if (item) {
-                                const isSub = item.type === 'sub';
-                                setFormData((p) => ({
-                                  ...p,
-                                  category_path: item.path,
-                                  micro_category_id: isSub ? null : item.id,
-                                  sub_category_id: isSub ? item.id : item.sub_id,
-                                  head_category_id: item.head_id,
-                                  category_other: '',
-                                }));
-                              }
-                            }}
-                          />
+                        <CategoryTypeahead
+                          onSelect={(item) => {
+                            if (item) {
+                              const isSub = item.type === 'sub';
+                              setFormData((p) => ({
+                                ...p,
+                                category_path: item.path,
+                                micro_category_id: isSub ? null : item.id,
+                                sub_category_id: isSub ? item.id : item.sub_id,
+                                head_category_id: item.head_id,
+                                category_other: '',
+                              }));
+                            }
+                          }}
+                        />
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-gray-500">Or</span>
                           <Input
