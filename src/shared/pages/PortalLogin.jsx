@@ -39,7 +39,7 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
     setError('');
 
     try {
-      // ✅ pass expectedRole so fallback role can be applied if RPC doesn't return role
+      // Strict portal-role enforcement (no cross-dashboard login)
       const user = await login(formData.email, formData.password, expectedRole);
 
       if (user) {

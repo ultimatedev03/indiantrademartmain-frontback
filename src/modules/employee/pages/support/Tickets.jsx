@@ -56,6 +56,15 @@ const Tickets = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, priorityFilter, searchTerm, ticketScope]);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      fetchTickets();
+    }, 12000);
+
+    return () => window.clearInterval(intervalId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, priorityFilter, searchTerm, ticketScope]);
+
   const fetchTickets = async () => {
     try {
       setLoading(true);

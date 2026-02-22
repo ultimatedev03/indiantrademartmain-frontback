@@ -1,6 +1,4 @@
-
 import React from 'react';
-import { motion } from 'framer-motion';
 import { Filter, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -8,14 +6,40 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Slider } from '@/components/ui/react-slider';
 import Card from '@/shared/components/Card';
 
-const SearchFilters = ({ filters, setFilters }) => {
+const DEFAULT_MIN_PRICE = 0;
+const DEFAULT_MAX_PRICE = 100000;
+
+const getSliderStep = (minValue, maxValue) => {
+  const span = Math.max(0, Number(maxValue || 0) - Number(minValue || 0));
+  if (span <= 200) return 1;
+  if (span <= 2000) return 10;
+  if (span <= 20000) return 100;
+  return 1000;
+};
+
+const SearchFilters = ({ filters, setFilters, priceBounds }) => {
+  const minPrice = Number.isFinite(priceBounds?.min) ? Number(priceBounds.min) : DEFAULT_MIN_PRICE;
+  const rawMaxPrice = Number.isFinite(priceBounds?.max) ? Number(priceBounds.max) : DEFAULT_MAX_PRICE;
+  const maxPrice = rawMaxPrice > minPrice ? rawMaxPrice : minPrice + 1;
+  const sliderStep = getSliderStep(minPrice, maxPrice);
+
+  const currentRange =
+    Array.isArray(filters?.priceRange) && filters.priceRange.length === 2
+      ? filters.priceRange
+      : [minPrice, maxPrice];
+
+  const safeMin = Math.max(minPrice, Math.min(Number(currentRange[0]) || minPrice, maxPrice));
+  const safeMax = Math.max(safeMin, Math.min(Number(currentRange[1]) || maxPrice, maxPrice));
+  const safeRange = [safeMin, safeMax];
+
   const handleReset = () => {
-    setFilters({
-      priceRange: [0, 100000],
+    setFilters((prev) => ({
+      ...prev,
+      priceRange: [minPrice, maxPrice],
       rating: 0,
       verified: false,
       inStock: false,
-    });
+    }));
   };
 
   return (
@@ -37,26 +61,28 @@ const SearchFilters = ({ filters, setFilters }) => {
           </Button>
         </div>
       </Card.Header>
-      
+
       <Card.Content className="space-y-6">
-        {/* Price Range */}
         <div>
           <Label className="text-sm font-semibold mb-3 block">Price Range</Label>
           <Slider
-            value={filters.priceRange}
-            onValueChange={(value) => setFilters({ ...filters, priceRange: value })}
-            min={0}
-            max={100000}
-            step={1000}
+            value={safeRange}
+            onValueChange={(value) => {
+              const nextMin = Math.max(minPrice, Math.min(value?.[0] ?? minPrice, maxPrice));
+              const nextMax = Math.max(nextMin, Math.min(value?.[1] ?? maxPrice, maxPrice));
+              setFilters((prev) => ({ ...prev, priceRange: [nextMin, nextMax] }));
+            }}
+            min={minPrice}
+            max={maxPrice}
+            step={sliderStep}
             className="mb-2"
           />
           <div className="flex justify-between text-sm text-neutral-600">
-            <span>₹{filters.priceRange[0].toLocaleString()}</span>
-            <span>₹{filters.priceRange[1].toLocaleString()}</span>
+            <span>Rs {safeRange[0].toLocaleString()}</span>
+            <span>Rs {safeRange[1].toLocaleString()}</span>
           </div>
         </div>
 
-        {/* Rating */}
         <div>
           <Label className="text-sm font-semibold mb-3 block">Minimum Rating</Label>
           <div className="space-y-2">
@@ -65,22 +91,18 @@ const SearchFilters = ({ filters, setFilters }) => {
                 <Checkbox
                   id={`rating-${rating}`}
                   checked={filters.rating === rating}
-                  onCheckedChange={(checked) => 
-                    setFilters({ ...filters, rating: checked ? rating : 0 })
+                  onCheckedChange={(checked) =>
+                    setFilters((prev) => ({ ...prev, rating: checked ? rating : 0 }))
                   }
                 />
-                <label
-                  htmlFor={`rating-${rating}`}
-                  className="text-sm cursor-pointer"
-                >
-                  {rating}★ & above
+                <label htmlFor={`rating-${rating}`} className="text-sm cursor-pointer">
+                  {rating}* & above
                 </label>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Verified Suppliers */}
         <div>
           <Label className="text-sm font-semibold mb-3 block">Supplier Status</Label>
           <div className="space-y-2">
@@ -88,8 +110,8 @@ const SearchFilters = ({ filters, setFilters }) => {
               <Checkbox
                 id="verified"
                 checked={filters.verified}
-                onCheckedChange={(checked) => 
-                  setFilters({ ...filters, verified: checked })
+                onCheckedChange={(checked) =>
+                  setFilters((prev) => ({ ...prev, verified: checked === true }))
                 }
               />
               <label htmlFor="verified" className="text-sm cursor-pointer">
@@ -100,8 +122,8 @@ const SearchFilters = ({ filters, setFilters }) => {
               <Checkbox
                 id="inStock"
                 checked={filters.inStock}
-                onCheckedChange={(checked) => 
-                  setFilters({ ...filters, inStock: checked })
+                onCheckedChange={(checked) =>
+                  setFilters((prev) => ({ ...prev, inStock: checked === true }))
                 }
               />
               <label htmlFor="inStock" className="text-sm cursor-pointer">
@@ -116,3 +138,4 @@ const SearchFilters = ({ filters, setFilters }) => {
 };
 
 export default SearchFilters;
+

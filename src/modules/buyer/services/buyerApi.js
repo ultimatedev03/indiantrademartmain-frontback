@@ -170,11 +170,45 @@ export const buyerApi = {
 
   // --- STATISTICS ---
   getStats: async (buyerId) => {
+    let authUser = null;
+    try {
+      authUser = await getAuthUser();
+    } catch {
+      authUser = null;
+    }
+
     if (!buyerId) {
       buyerId = await getBuyerId();
     }
 
-    const [proposalsRes, ticketsRes, favoritesRes] = await Promise.allSettled([
+    const unreadMessagesPromise = (async () => {
+      try {
+        const res = await fetchWithCsrf(apiUrl('/api/quotation/unread-count'));
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json?.success) {
+          const n = Number(json?.unread || 0);
+          return Number.isFinite(n) && n > 0 ? n : 0;
+        }
+      } catch {
+        // fallback below
+      }
+
+      if (!authUser?.id) return 0;
+      try {
+        const { count, error } = await supabase
+          .from('notifications')
+          .select('*', { count: 'exact', head: true })
+          .eq('user_id', authUser.id)
+          .in('type', ['PROPOSAL_MESSAGE', 'SUPPORT_MESSAGE'])
+          .eq('is_read', false);
+        if (!error) return count || 0;
+      } catch {
+        // ignore
+      }
+      return 0;
+    })();
+
+    const [proposalsRes, ticketsRes, favoritesRes, unreadMessagesRes] = await Promise.allSettled([
       supabase
         .from('proposals')
         .select('*', { count: 'exact', head: true })
@@ -182,6 +216,7 @@ export const buyerApi = {
         .eq('status', 'SENT'),
       buyerApi.getTickets(buyerId),
       buyerApi.getFavorites(buyerId),
+      unreadMessagesPromise,
     ]);
 
     const proposals =
@@ -198,11 +233,16 @@ export const buyerApi = {
       favoritesRes.status === 'fulfilled'
         ? (Array.isArray(favoritesRes.value) ? favoritesRes.value.length : 0)
         : 0;
+    const unreadMessages =
+      unreadMessagesRes.status === 'fulfilled'
+        ? (Number(unreadMessagesRes.value) || 0)
+        : 0;
 
     return {
       activeProposals: proposals || 0,
       openTickets: tickets || 0,
-      favoriteVendors: favorites || 0
+      favoriteVendors: favorites || 0,
+      unreadMessages: unreadMessages || 0,
     };
   },
 

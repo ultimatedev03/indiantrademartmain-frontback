@@ -1,6 +1,6 @@
 import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
-import { notifyUser } from "../lib/notify.js";
+import { notifyRole, notifyUser } from "../lib/notify.js";
 import { writeAuditLog } from "../lib/audit.js";
 import { requireEmployeeRoles } from "../middleware/requireEmployeeRoles.js";
 import {
@@ -124,6 +124,32 @@ async function resolveBuyerRecordForAdmin(buyerId) {
   return { data: null, error: null };
 }
 
+async function resolveVendorRecordForAdmin(vendorId) {
+  const id = String(vendorId || "").trim();
+  if (!id) return { data: null, error: null };
+
+  const byId = await supabase.from("vendors").select("*").eq("id", id).maybeSingle();
+  if (byId.error) return { data: null, error: byId.error };
+  if (byId.data) return { data: byId.data, error: null };
+
+  const byUserId = await supabase.from("vendors").select("*").eq("user_id", id).maybeSingle();
+  if (byUserId.error) return { data: null, error: byUserId.error };
+  if (byUserId.data) return { data: byUserId.data, error: null };
+
+  const normalizedIdEmail = normalizeIdentityEmail(id);
+  if (normalizedIdEmail) {
+    const byEmail = await supabase
+      .from("vendors")
+      .select("*")
+      .ilike("email", normalizedIdEmail)
+      .maybeSingle();
+    if (byEmail.error) return { data: null, error: byEmail.error };
+    if (byEmail.data) return { data: byEmail.data, error: null };
+  }
+
+  return { data: null, error: null };
+}
+
 const normalizeIdentityEmail = (value) => normalizeEmail(value || "");
 
 async function fetchBuyerRoleIdentitySets() {
@@ -176,6 +202,79 @@ function buildBuyerStatusUpdates(current, { isActive, reason = "" }) {
   }
 
   return updates;
+}
+
+function buildVendorStatusUpdates(current, { isActive, reason = "" }) {
+  const updates = { updated_at: new Date().toISOString() };
+
+  if (typeof current?.is_active === "boolean" || "is_active" in (current || {})) {
+    updates.is_active = !!isActive;
+  }
+
+  if (typeof current?.status === "string" || "status" in (current || {})) {
+    updates.status = isActive ? "ACTIVE" : "TERMINATED";
+  }
+
+  if ("terminated_at" in (current || {})) {
+    updates.terminated_at = isActive ? null : new Date().toISOString();
+  }
+
+  if ("terminated_reason" in (current || {})) {
+    updates.terminated_reason = isActive ? null : (String(reason || "").trim() || null);
+  }
+
+  return updates;
+}
+
+function buildAdminSupportTicketId() {
+  const rand = Math.floor(100 + Math.random() * 900);
+  return `TKT-${Date.now()}-${rand}`;
+}
+
+async function createSupportStatusTicket({
+  entityType,
+  entityId,
+  entityName,
+  action,
+  reason = "",
+}) {
+  const normalizedEntity = String(entityType || "").trim().toUpperCase();
+  const normalizedAction = String(action || "").trim().toUpperCase();
+  const label = String(entityName || normalizedEntity || "Account").trim();
+  const reasonText = String(reason || "").trim();
+  const actor = normalizedEntity === "VENDOR" ? "Vendor" : "Buyer";
+  const statusText = normalizedAction === "TERMINATED" ? "suspended" : "activated";
+
+  const payload = {
+    subject: `${actor} account ${statusText}: ${label}`,
+    description:
+      normalizedAction === "TERMINATED"
+        ? `Admin suspended ${actor.toLowerCase()} "${label}".${reasonText ? ` Reason: ${reasonText}` : ""}`
+        : `Admin activated ${actor.toLowerCase()} "${label}".`,
+    category: "Account Status",
+    priority: normalizedAction === "TERMINATED" ? "HIGH" : "MEDIUM",
+    status: "OPEN",
+    vendor_id: normalizedEntity === "VENDOR" ? entityId : null,
+    buyer_id: normalizedEntity === "BUYER" ? entityId : null,
+    ticket_display_id: buildAdminSupportTicketId(),
+    attachments: JSON.stringify([]),
+    created_at: new Date().toISOString(),
+  };
+
+  try {
+    const { error } = await supabase.from("support_tickets").insert([payload]);
+    if (error) {
+      console.warn(
+        `[admin] support ticket create failed for ${normalizedEntity} ${normalizedAction}:`,
+        error?.message || error
+      );
+    }
+  } catch (err) {
+    console.warn(
+      `[admin] support ticket create exception for ${normalizedEntity} ${normalizedAction}:`,
+      err?.message || err
+    );
+  }
 }
 
 /**
@@ -373,37 +472,91 @@ router.post("/vendors/:vendorId/terminate", async (req, res) => {
   try {
     const { vendorId } = req.params;
     const reason = String(req.body?.reason || "").trim();
+    const { data: existing, error: findErr } = await resolveVendorRecordForAdmin(vendorId);
+    if (findErr) {
+      return res.status(500).json({ success: false, error: findErr.message });
+    }
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Vendor not found" });
+    }
+
+    const updates = buildVendorStatusUpdates(existing, { isActive: false, reason });
 
     const { data, error } = await supabase
       .from("vendors")
-      .update({ is_active: false })
-      .eq("id", vendorId)
+      .update(updates)
+      .eq("id", existing.id)
       .select()
       .maybeSingle();
 
     if (error)
       return res.status(500).json({ success: false, error: error.message });
+    const updatedVendor = data || { ...existing, ...updates };
 
     await writeAuditLog({
       req,
       actor: req.actor,
       action: "VENDOR_TERMINATE",
       entityType: "vendors",
-      entityId: vendorId,
+      entityId: existing.id,
       details: { reason },
     });
 
-    if (data?.user_id) {
+    await createSupportStatusTicket({
+      entityType: "VENDOR",
+      entityId: updatedVendor?.id || existing.id,
+      entityName:
+        updatedVendor?.company_name ||
+        updatedVendor?.vendor_id ||
+        updatedVendor?.owner_name ||
+        "Vendor",
+      action: "TERMINATED",
+      reason,
+    });
+
+    if (updatedVendor?.user_id) {
       await notifyUser({
-        user_id: data.user_id,
+        user_id: updatedVendor.user_id,
+        email: updatedVendor?.email || null,
         type: "ACCOUNT_SUSPENDED",
         title: "Account suspended",
         message: reason || "Your vendor account has been suspended by admin.",
         link: "/vendor/support",
+        role: "VENDOR",
+        full_name: updatedVendor?.owner_name || updatedVendor?.company_name || "Vendor",
+      });
+    } else if (updatedVendor?.email) {
+      await notifyUser({
+        email: updatedVendor.email,
+        type: "ACCOUNT_SUSPENDED",
+        title: "Account suspended",
+        message: reason || "Your vendor account has been suspended by admin.",
+        link: "/vendor/support",
+        role: "VENDOR",
+        full_name: updatedVendor?.owner_name || updatedVendor?.company_name || "Vendor",
       });
     }
 
-    return res.json({ success: true, vendor: data });
+    await Promise.all([
+      notifyRole("SUPPORT", {
+        type: "VENDOR_STATUS_UPDATED",
+        title: "Vendor account suspended",
+        message:
+          `Admin suspended vendor "${updatedVendor?.company_name || updatedVendor?.vendor_id || "Vendor"}"` +
+          `${reason ? `: ${reason}` : "."}`,
+        link: "/employee/support/tickets/vendor",
+      }),
+      notifyRole("DATA_ENTRY", {
+        type: "VENDOR_STATUS_UPDATED",
+        title: "Vendor account suspended",
+        message:
+          `Admin suspended vendor "${updatedVendor?.company_name || updatedVendor?.vendor_id || "Vendor"}"` +
+          `${reason ? `: ${reason}` : "."}`,
+        link: "/employee/dataentry/vendors",
+      }),
+    ]);
+
+    return res.json({ success: true, vendor: updatedVendor });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -412,36 +565,85 @@ router.post("/vendors/:vendorId/terminate", async (req, res) => {
 router.post("/vendors/:vendorId/activate", async (req, res) => {
   try {
     const { vendorId } = req.params;
+    const { data: existing, error: findErr } = await resolveVendorRecordForAdmin(vendorId);
+    if (findErr) {
+      return res.status(500).json({ success: false, error: findErr.message });
+    }
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Vendor not found" });
+    }
+
+    const updates = buildVendorStatusUpdates(existing, { isActive: true });
 
     const { data, error } = await supabase
       .from("vendors")
-      .update({ is_active: true })
-      .eq("id", vendorId)
+      .update(updates)
+      .eq("id", existing.id)
       .select()
       .maybeSingle();
 
     if (error)
       return res.status(500).json({ success: false, error: error.message });
+    const updatedVendor = data || { ...existing, ...updates };
 
     await writeAuditLog({
       req,
       actor: req.actor,
       action: "VENDOR_ACTIVATE",
       entityType: "vendors",
-      entityId: vendorId,
+      entityId: existing.id,
     });
 
-    if (data?.user_id) {
+    await createSupportStatusTicket({
+      entityType: "VENDOR",
+      entityId: updatedVendor?.id || existing.id,
+      entityName:
+        updatedVendor?.company_name ||
+        updatedVendor?.vendor_id ||
+        updatedVendor?.owner_name ||
+        "Vendor",
+      action: "ACTIVATED",
+    });
+
+    if (updatedVendor?.user_id) {
       await notifyUser({
-        user_id: data.user_id,
+        user_id: updatedVendor.user_id,
+        email: updatedVendor?.email || null,
         type: "ACCOUNT_ACTIVATED",
         title: "Account re-activated",
         message: "Your vendor account has been activated by admin.",
         link: "/vendor/dashboard",
+        role: "VENDOR",
+        full_name: updatedVendor?.owner_name || updatedVendor?.company_name || "Vendor",
+      });
+    } else if (updatedVendor?.email) {
+      await notifyUser({
+        email: updatedVendor.email,
+        type: "ACCOUNT_ACTIVATED",
+        title: "Account re-activated",
+        message: "Your vendor account has been activated by admin.",
+        link: "/vendor/dashboard",
+        role: "VENDOR",
+        full_name: updatedVendor?.owner_name || updatedVendor?.company_name || "Vendor",
       });
     }
 
-    return res.json({ success: true, vendor: data });
+    await Promise.all([
+      notifyRole("SUPPORT", {
+        type: "VENDOR_STATUS_UPDATED",
+        title: "Vendor account activated",
+        message: `Admin activated vendor "${updatedVendor?.company_name || updatedVendor?.vendor_id || "Vendor"}".`,
+        link: "/employee/support/tickets/vendor",
+      }),
+      notifyRole("DATA_ENTRY", {
+        type: "VENDOR_STATUS_UPDATED",
+        title: "Vendor account activated",
+        message: `Admin activated vendor "${updatedVendor?.company_name || updatedVendor?.vendor_id || "Vendor"}".`,
+        link: "/employee/dataentry/vendors",
+      }),
+    ]);
+
+    return res.json({ success: true, vendor: updatedVendor });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -564,15 +766,45 @@ router.post("/buyers/:buyerId/terminate", async (req, res) => {
       details: { reason },
     });
 
+    await createSupportStatusTicket({
+      entityType: "BUYER",
+      entityId: existing.id,
+      entityName: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
+      action: "TERMINATED",
+      reason,
+    });
+
     if (updatedBuyer?.user_id) {
       await notifyUser({
         user_id: updatedBuyer.user_id,
+        email: updatedBuyer?.email || null,
         type: "ACCOUNT_SUSPENDED",
         title: "Account suspended",
         message: reason || "Your buyer account has been suspended by admin.",
         link: "/buyer/tickets",
+        role: "BUYER",
+        full_name: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
+      });
+    } else if (updatedBuyer?.email) {
+      await notifyUser({
+        email: updatedBuyer.email,
+        type: "ACCOUNT_SUSPENDED",
+        title: "Account suspended",
+        message: reason || "Your buyer account has been suspended by admin.",
+        link: "/buyer/tickets",
+        role: "BUYER",
+        full_name: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
       });
     }
+
+    await notifyRole("SUPPORT", {
+      type: "BUYER_STATUS_UPDATED",
+      title: "Buyer account suspended",
+      message:
+        `Admin suspended buyer "${updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer"}"` +
+        `${reason ? `: ${reason}` : "."}`,
+      link: "/employee/support/tickets/buyer",
+    });
 
     return res.json({ success: true, buyer: updatedBuyer });
   } catch (e) {
@@ -614,15 +846,42 @@ router.post("/buyers/:buyerId/activate", async (req, res) => {
       entityId: existing.id,
     });
 
+    await createSupportStatusTicket({
+      entityType: "BUYER",
+      entityId: existing.id,
+      entityName: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
+      action: "ACTIVATED",
+    });
+
     if (updatedBuyer?.user_id) {
       await notifyUser({
         user_id: updatedBuyer.user_id,
+        email: updatedBuyer?.email || null,
         type: "ACCOUNT_ACTIVATED",
         title: "Account re-activated",
         message: "Your buyer account has been activated by admin.",
         link: "/buyer/dashboard",
+        role: "BUYER",
+        full_name: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
+      });
+    } else if (updatedBuyer?.email) {
+      await notifyUser({
+        email: updatedBuyer.email,
+        type: "ACCOUNT_ACTIVATED",
+        title: "Account re-activated",
+        message: "Your buyer account has been activated by admin.",
+        link: "/buyer/dashboard",
+        role: "BUYER",
+        full_name: updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer",
       });
     }
+
+    await notifyRole("SUPPORT", {
+      type: "BUYER_STATUS_UPDATED",
+      title: "Buyer account activated",
+      message: `Admin activated buyer "${updatedBuyer?.full_name || updatedBuyer?.company_name || "Buyer"}".`,
+      link: "/employee/support/tickets/buyer",
+    });
 
     return res.json({ success: true, buyer: updatedBuyer });
   } catch (e) {

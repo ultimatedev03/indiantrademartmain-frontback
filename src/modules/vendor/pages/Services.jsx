@@ -37,6 +37,12 @@ const formatINR = (v) => {
   const n = Number(v || 0);
   return n.toLocaleString('en-IN');
 };
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 32);
 
 const badgeStyle = (variant) => {
   switch ((variant || '').toLowerCase()) {
@@ -374,7 +380,7 @@ const Services = () => {
     try {
       toast({ title: 'Processing...', description: `Initiating payment for ${plan.name}` });
       setDetailsOpen(false);
-      const appliedCoupon = couponOverride?.trim ? couponOverride.trim().toUpperCase() : '';
+      const appliedCoupon = normalizeCouponCode(couponOverride);
 
       const response = await fetchWithCsrf(apiUrl('/api/payment/initiate'), {
         method: 'POST',
@@ -469,7 +475,7 @@ const Services = () => {
               signature: response.razorpay_signature,
               vendor_id: vendorId,
               plan_id: plan.id,
-              coupon_code: appliedCoupon?.trim ? appliedCoupon.trim().toUpperCase() : undefined,
+              coupon_code: appliedCoupon || undefined,
             }),
           });
 
@@ -1015,18 +1021,19 @@ const Services = () => {
                         <Input
                           placeholder="Enter coupon code"
                           value={couponCode}
-                          onChange={(e) => setCouponCode(e.target.value)}
+                          onChange={(e) => setCouponCode(normalizeCouponCode(e.target.value))}
                           className="w-full h-11 text-sm"
+                          disableAutoSanitize
                         />
                         <Button
                           variant="secondary"
                           className="h-11 whitespace-nowrap px-3 text-sm font-semibold"
                           onClick={() => {
-                            if (!couponCode.trim()) {
+                            const val = normalizeCouponCode(couponCode);
+                            if (!val) {
                               toast({ title: 'Coupon', description: 'Enter a code first' });
                               return;
                             }
-                            const val = couponCode.trim().toUpperCase();
                             setCouponCode(val);
                             toast({ title: 'Coupon noted', description: `${val} will be applied before payment.` });
                           }}

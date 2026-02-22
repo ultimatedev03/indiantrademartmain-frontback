@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/Card';
 import { 
   Ticket, FileText, Star, TrendingUp, Clock, 
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { buyerApi } from '@/modules/buyer/services/buyerApi';
+import { productFavorites, PRODUCT_FAVORITES_UPDATED_EVENT } from '@/modules/buyer/services/productFavorites';
 
 const Dashboard = () => {
   const { user } = useAuth();
@@ -22,16 +23,27 @@ const Dashboard = () => {
   const [recentActivity, setRecentActivity] = useState([]);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    if (user) {
-      fetchDashboardData();
-    }
-  }, [user]);
+  const fetchDashboardData = useCallback(async ({ silent = false } = {}) => {
+    const currentUserId = user?.id || null;
 
-  const fetchDashboardData = async () => {
     try {
-      setLoading(true);
-      setError(null);
+      if (!silent) {
+        setLoading(true);
+        setError(null);
+      }
+
+      if (silent) {
+        const statData = await buyerApi.getStats();
+        setStats((prev) => ({
+          ...prev,
+          activeTickets: statData?.openTickets || 0,
+          pendingProposals: statData?.activeProposals || 0,
+          favorites: currentUserId ? productFavorites.list(currentUserId).length : (statData?.favoriteVendors || 0),
+          unreadMessages: statData?.unreadMessages || 0,
+        }));
+        return;
+      }
+
       const [statData, proposals] = await Promise.all([
         buyerApi.getStats(),
         buyerApi.getProposals(),
@@ -40,19 +52,56 @@ const Dashboard = () => {
       setStats({
         activeTickets: statData?.openTickets || 0,
         pendingProposals: statData?.activeProposals || 0,
-        favorites: statData?.favoriteVendors || 0,
-        unreadMessages: 0,
+        favorites: currentUserId ? productFavorites.list(currentUserId).length : (statData?.favoriteVendors || 0),
+        unreadMessages: statData?.unreadMessages || 0,
       });
 
       setRecentActivity((proposals || []).slice(0, 5));
-
     } catch (error) {
       console.error("Dashboard data fetch error:", error);
-      setError(error?.message || "Failed to load dashboard data. Please check connection.");
+      if (!silent) {
+        setError(error?.message || "Failed to load dashboard data. Please check connection.");
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
-  };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return undefined;
+
+    fetchDashboardData();
+
+    if (typeof window === 'undefined') return undefined;
+    const onFocus = () => fetchDashboardData({ silent: true });
+    window.addEventListener('focus', onFocus);
+    const interval = window.setInterval(() => {
+      fetchDashboardData({ silent: true });
+    }, 15000);
+
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.clearInterval(interval);
+    };
+  }, [user?.id, fetchDashboardData]);
+
+  useEffect(() => {
+    if (!user?.id || typeof window === 'undefined') return undefined;
+
+    const syncFavorites = () => {
+      const nextFavorites = productFavorites.list(user.id).length;
+      setStats((prev) => ({ ...prev, favorites: nextFavorites }));
+    };
+
+    window.addEventListener(PRODUCT_FAVORITES_UPDATED_EVENT, syncFavorites);
+    window.addEventListener('focus', syncFavorites);
+    return () => {
+      window.removeEventListener(PRODUCT_FAVORITES_UPDATED_EVENT, syncFavorites);
+      window.removeEventListener('focus', syncFavorites);
+    };
+  }, [user?.id]);
 
   if (loading) return <div className="flex h-96 justify-center items-center"><Loader2 className="h-8 w-8 animate-spin text-gray-300" /></div>;
   if (error) return <div className="flex h-96 justify-center items-center text-red-500 gap-2"><AlertCircle /> {error}</div>;
@@ -82,8 +131,8 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard label="Pending Proposals" value={stats.pendingProposals} icon={FileText} color="text-blue-600" bg="bg-blue-50" link="/buyer/proposals" />
         <StatCard label="Active Tickets" value={stats.activeTickets} icon={Ticket} color="text-orange-600" bg="bg-orange-50" link="/buyer/tickets" />
-        <StatCard label="Favorite Vendors" value={stats.favorites} icon={Star} color="text-yellow-600" bg="bg-yellow-50" link="/buyer/favorites" />
-        <StatCard label="Messages" value={stats.unreadMessages} icon={MessageSquare} color="text-green-600" bg="bg-green-50" link="/buyer/messages" />
+        <StatCard label="Favorite Services" value={stats.favorites} icon={Star} color="text-yellow-600" bg="bg-yellow-50" link="/buyer/favorites" />
+        <StatCard label="Unread Messages" value={stats.unreadMessages} icon={MessageSquare} color="text-green-600" bg="bg-green-50" link="/buyer/messages" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -98,7 +147,12 @@ const Dashboard = () => {
               {recentActivity.length > 0 ? (
                 <div className="space-y-4">
                   {recentActivity.map((item, i) => (
-                    <div key={i} className="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100">
+                    <Link
+                      key={i}
+                      to={`/buyer/proposals/${item.id}`}
+                      className="block"
+                    >
+                    <div className="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors border border-transparent hover:border-gray-100">
                       <div className="h-10 w-10 rounded-full bg-blue-50 flex items-center justify-center mr-4 shrink-0">
                         <Clock className="h-5 w-5 text-blue-600" />
                       </div>
@@ -117,6 +171,7 @@ const Dashboard = () => {
                          <p className="text-[10px] text-gray-400 mt-1">{new Date(item.created_at).toLocaleDateString()}</p>
                       </div>
                     </div>
+                    </Link>
                   ))}
                 </div>
               ) : (

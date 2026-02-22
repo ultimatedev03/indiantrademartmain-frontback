@@ -8,37 +8,50 @@ const nowIso = () => new Date().toISOString();
 
 const normalizeSenderType = (v) => String(v || '').trim().toUpperCase();
 
-const notifyAdmins = async (payload) => {
-  await notifyRole('ADMIN', payload);
-  await notifyRole('SUPERADMIN', payload);
-  await notifyRole('SUPPORT', payload);
+const notifyAdmins = async (payload, { adminLink = null, supportLink = null } = {}) => {
+  const adminPayload = {
+    ...payload,
+    link: adminLink || payload?.link || '/admin/tickets',
+  };
+  const supportPayload = {
+    ...payload,
+    link: supportLink || '/employee/support/dashboard',
+  };
+
+  await notifyRole('ADMIN', adminPayload);
+  await notifyRole('SUPERADMIN', adminPayload);
+  await notifyRole('SUPPORT', supportPayload);
 };
 
 const getTicketUsers = async (ticket) => {
   const vendorId = ticket?.vendor_id || null;
   const buyerId = ticket?.buyer_id || null;
   let vendorUserId = null;
+  let vendorEmail = null;
   let buyerUserId = null;
+  let buyerEmail = null;
 
   if (vendorId) {
     const { data } = await supabase
       .from('vendors')
-      .select('user_id')
+      .select('user_id, email')
       .eq('id', vendorId)
       .maybeSingle();
     vendorUserId = data?.user_id || null;
+    vendorEmail = data?.email || null;
   }
 
   if (buyerId) {
     const { data } = await supabase
       .from('buyers')
-      .select('user_id')
+      .select('user_id, email')
       .eq('id', buyerId)
       .maybeSingle();
     buyerUserId = data?.user_id || null;
+    buyerEmail = data?.email || null;
   }
 
-  return { vendorUserId, buyerUserId };
+  return { vendorUserId, vendorEmail, buyerUserId, buyerEmail };
 };
 
 // GET /api/support/tickets - Fetch all support tickets with filters
@@ -46,7 +59,6 @@ router.get('/tickets', async (req, res) => {
   try {
     const { status, priority, search, scope = 'ALL', page = 1, pageSize = 100 } = req.query;
     
-    console.log('🔍 Fetching support tickets with filters:', { status, priority, search });
     
     let query = supabase
       .from('support_tickets')
@@ -91,7 +103,6 @@ router.get('/tickets', async (req, res) => {
       });
     }
     
-    console.log(`📋 Found ${tickets?.length || 0} support tickets`);
     
     res.json({
       success: true,
@@ -206,23 +217,25 @@ router.post('/tickets/:id/messages', async (req, res) => {
       return res.status(500).json({ error: 'Failed to send message', details: error.message });
     }
 
-    const { vendorUserId, buyerUserId } = await getTicketUsers(ticket);
+    const { vendorUserId, vendorEmail, buyerUserId, buyerEmail } = await getTicketUsers(ticket);
     const title = `Support ticket update: ${ticket.ticket_display_id || ticket.id}`;
     const linkBase = ticket.vendor_id ? '/vendor/support' : '/buyer/tickets';
 
     if (['SUPPORT', 'ADMIN', 'STAFF'].includes(senderType)) {
-      if (vendorUserId) {
+      if (vendorUserId || vendorEmail) {
         await notifyUser({
           user_id: vendorUserId,
+          email: vendorEmail,
           type: 'SUPPORT_MESSAGE',
           title,
           message: String(message || '').trim(),
           link: linkBase,
         });
       }
-      if (buyerUserId) {
+      if (buyerUserId || buyerEmail) {
         await notifyUser({
           user_id: buyerUserId,
+          email: buyerEmail,
           type: 'SUPPORT_MESSAGE',
           title,
           message: String(message || '').trim(),
@@ -230,12 +243,19 @@ router.post('/tickets/:id/messages', async (req, res) => {
         });
       }
     } else {
-      await notifyAdmins({
+      await notifyAdmins(
+        {
         type: 'SUPPORT_MESSAGE',
         title,
         message: String(message || '').trim(),
-        link: '/admin/tickets',
-      });
+      },
+        {
+          adminLink: '/admin/tickets',
+          supportLink: ticket.vendor_id
+            ? '/employee/support/tickets/vendor'
+            : '/employee/support/tickets/buyer',
+        }
+      );
     }
 
     return res.json({ success: true, message: data });
@@ -299,12 +319,19 @@ router.post('/tickets', async (req, res) => {
     
     console.log('✅ Ticket created:', newTicket.id);
 
-    await notifyAdmins({
-      type: 'SUPPORT_TICKET',
-      title: `New support ticket: ${ticketNumber}`,
-      message: subject.trim(),
-      link: '/admin/tickets',
-    });
+    await notifyAdmins(
+      {
+        type: 'SUPPORT_TICKET',
+        title: `New support ticket: ${ticketNumber}`,
+        message: subject.trim(),
+      },
+      {
+        adminLink: '/admin/tickets',
+        supportLink: newTicket?.vendor_id
+          ? '/employee/support/tickets/vendor'
+          : '/employee/support/tickets/buyer',
+      }
+    );
 
     res.status(201).json({
       success: true,
@@ -432,14 +459,28 @@ router.put('/tickets/:id/status', async (req, res) => {
     console.log('✅ Ticket status updated:', id);
 
     if (updatedTicket) {
-      const { vendorUserId, buyerUserId } = await getTicketUsers(updatedTicket);
+      const { vendorUserId, vendorEmail, buyerUserId, buyerEmail } = await getTicketUsers(updatedTicket);
       const title = `Ticket status updated: ${updatedTicket.ticket_display_id || updatedTicket.id}`;
       const message = `Status changed to ${updatePayload.status}`;
-      if (vendorUserId) {
-        await notifyUser({ user_id: vendorUserId, type: 'SUPPORT_STATUS', title, message, link: '/vendor/support' });
+      if (vendorUserId || vendorEmail) {
+        await notifyUser({
+          user_id: vendorUserId,
+          email: vendorEmail,
+          type: 'SUPPORT_STATUS',
+          title,
+          message,
+          link: '/vendor/support',
+        });
       }
-      if (buyerUserId) {
-        await notifyUser({ user_id: buyerUserId, type: 'SUPPORT_STATUS', title, message, link: '/buyer/tickets' });
+      if (buyerUserId || buyerEmail) {
+        await notifyUser({
+          user_id: buyerUserId,
+          email: buyerEmail,
+          type: 'SUPPORT_STATUS',
+          title,
+          message,
+          link: '/buyer/tickets',
+        });
       }
     }
 
@@ -474,8 +515,8 @@ router.post('/tickets/:id/notify-customer', async (req, res) => {
       return res.status(404).json({ error: 'Ticket not found' });
     }
 
-    const { vendorUserId, buyerUserId } = await getTicketUsers(ticket);
-    if (!vendorUserId && !buyerUserId) {
+    const { vendorUserId, vendorEmail, buyerUserId, buyerEmail } = await getTicketUsers(ticket);
+    if (!vendorUserId && !vendorEmail && !buyerUserId && !buyerEmail) {
       return res.status(400).json({ error: 'No linked vendor or buyer found for this ticket' });
     }
 
@@ -485,12 +526,13 @@ router.post('/tickets/:id/notify-customer', async (req, res) => {
       : `Support update: ${ticket.ticket_display_id || ticket.id}`;
 
     let sent = 0;
-    if (vendorUserId) {
+    if (vendorUserId || vendorEmail) {
       const vendorLink = String(ticket.category || '').toUpperCase().includes('KYC')
         ? '/vendor/profile?tab=kyc'
         : '/vendor/support';
       await notifyUser({
         user_id: vendorUserId,
+        email: vendorEmail,
         type: 'SUPPORT_ALERT',
         title,
         message,
@@ -498,9 +540,10 @@ router.post('/tickets/:id/notify-customer', async (req, res) => {
       });
       sent += 1;
     }
-    if (buyerUserId) {
+    if (buyerUserId || buyerEmail) {
       await notifyUser({
         user_id: buyerUserId,
+        email: buyerEmail,
         type: 'SUPPORT_ALERT',
         title,
         message,

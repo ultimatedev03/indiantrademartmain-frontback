@@ -37,11 +37,15 @@ import {
   Twitter,
   Link as LinkIcon,
   Check,
+  Heart,
+  Star,
 } from 'lucide-react';
 import { shareUtils } from '@/shared/utils/shareUtils';
 import { phoneUtils } from '@/shared/utils/phoneUtils';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
+import { productFavorites } from '@/modules/buyer/services/productFavorites';
+import { productRatings, PRODUCT_RATINGS_UPDATED_EVENT } from '@/shared/services/productRatings';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 
@@ -55,6 +59,17 @@ const ProductDetail = () => {
   const [activeImage, setActiveImage] = useState(0);
   const [isDraft, setIsDraft] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favLoading, setFavLoading] = useState(false);
+  const [ratingDialogOpen, setRatingDialogOpen] = useState(false);
+  const [ratingDraft, setRatingDraft] = useState(0);
+  const [feedbackDraft, setFeedbackDraft] = useState('');
+  const [savingRating, setSavingRating] = useState(false);
+  const [myRating, setMyRating] = useState(0);
+  const [myRatingUpdatedAt, setMyRatingUpdatedAt] = useState('');
+  const [ratingSummary, setRatingSummary] = useState({ average: 0, count: 0 });
+  const [recentFeedback, setRecentFeedback] = useState([]);
+  const isBuyer = String(userRole || user?.role || '').toUpperCase() === 'BUYER';
 
   // Enquiry modal
   const [enquiryOpen, setEnquiryOpen] = useState(false);
@@ -137,6 +152,19 @@ const ProductDetail = () => {
     const numeric = Number(numericPart);
     if (!Number.isFinite(numeric) || numeric <= 0) return null;
     return numeric * multiplier;
+  };
+
+  const formatDateTime = (value) => {
+    if (!value) return '';
+    const stamp = new Date(value);
+    if (Number.isNaN(stamp.getTime())) return '';
+    return stamp.toLocaleString([], {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   const handleCopyLink = async () => {
@@ -260,6 +288,183 @@ const ProductDetail = () => {
   const handleCompanyClick = () => {
     if (data?.vendors?.id) {
       navigate(`/directory/vendor/${data.vendors.id}`);
+    }
+  };
+
+  const favoriteProduct = useMemo(() => {
+    if (!data?.id) return null;
+    return {
+      productId: data.id,
+      slug: data.slug || productSlug || data.id,
+      name: data.name || 'Service',
+      price: data.price ?? null,
+      images: Array.isArray(data.images) ? data.images : [],
+      vendorId: data?.vendors?.id || data?.vendor_id || null,
+      vendorName: data?.vendors?.company_name || '',
+      vendorCity: data?.vendors?.city || '',
+      vendorState: data?.vendors?.state || '',
+    };
+  }, [data, productSlug]);
+
+  useEffect(() => {
+    const productId = favoriteProduct?.productId;
+    if (!productId || !user?.id || !isBuyer) {
+      setIsFavorite(false);
+      return;
+    }
+    setIsFavorite(productFavorites.isFavorite(user.id, productId));
+  }, [favoriteProduct?.productId, user?.id, isBuyer]);
+
+  const handleToggleFavorite = async () => {
+    if (!favoriteProduct?.productId || favLoading) return;
+
+    if (!user) {
+      toast({ title: 'Login required', description: 'Please login as Buyer to add favorites.' });
+      navigate('/buyer/login');
+      return;
+    }
+
+    if (!isBuyer) {
+      toast({ title: 'Buyer account required', description: 'Only buyers can save favorite services.' });
+      return;
+    }
+
+    setFavLoading(true);
+    try {
+      const next = productFavorites.toggle(user.id, favoriteProduct);
+      setIsFavorite(Boolean(next?.isFavorite));
+      toast({ title: next?.isFavorite ? 'Added to Favorites' : 'Removed from Favorites' });
+    } catch (e) {
+      console.error('[ProductDetail] favorite toggle failed:', e);
+      toast({ title: 'Failed', description: 'Could not update favorite service', variant: 'destructive' });
+    } finally {
+      setFavLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const productId = data?.id;
+    if (!productId) {
+      setRatingSummary({ average: 0, count: 0 });
+      setMyRating(0);
+      setMyRatingUpdatedAt('');
+      setRecentFeedback([]);
+      return;
+    }
+
+    const refreshRatings = () => {
+      const summary = productRatings.getProductSummary(productId);
+      const mine = user?.id ? productRatings.getUserRating(productId, user.id) : null;
+      const feedbackList = productRatings
+        .getProductRatings(productId)
+        .filter((row) => String(row?.feedback || '').trim())
+        .slice(0, 3);
+
+      setRatingSummary(summary);
+      setMyRating(mine?.rating || 0);
+      setMyRatingUpdatedAt(mine?.updated_at || mine?.created_at || '');
+      setRecentFeedback(feedbackList);
+    };
+
+    refreshRatings();
+    if (typeof window !== 'undefined') {
+      window.addEventListener(PRODUCT_RATINGS_UPDATED_EVENT, refreshRatings);
+      window.addEventListener('focus', refreshRatings);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(PRODUCT_RATINGS_UPDATED_EVENT, refreshRatings);
+        window.removeEventListener('focus', refreshRatings);
+      }
+    };
+  }, [data?.id, user?.id]);
+
+  const openRatingDialog = () => {
+    if (!data?.id) return;
+
+    if (!user) {
+      toast({ title: 'Login required', description: 'Please login as Buyer to rate this service.' });
+      navigate('/buyer/login');
+      return;
+    }
+
+    if (!isBuyer) {
+      toast({ title: 'Buyer account required', description: 'Only buyers can add ratings and feedback.' });
+      return;
+    }
+
+    const mine = productRatings.getUserRating(data.id, user.id);
+    setRatingDraft(mine?.rating || 0);
+    setFeedbackDraft(mine?.feedback || '');
+    setRatingDialogOpen(true);
+  };
+
+  const handleSaveRating = async () => {
+    if (!data?.id || !user?.id) return;
+
+    if (ratingDraft < 1 || ratingDraft > 5) {
+      toast({ title: 'Select rating', description: 'Please select at least 1 star.' });
+      return;
+    }
+
+    setSavingRating(true);
+    try {
+      const displayName =
+        user?.user_metadata?.full_name ||
+        user?.user_metadata?.name ||
+        user?.full_name ||
+        user?.email ||
+        'Buyer';
+
+      const { summary, entry } = productRatings.upsertRating({
+        productId: data.id,
+        userId: user.id,
+        rating: ratingDraft,
+        feedback: feedbackDraft,
+        buyerName: displayName,
+      });
+
+      setRatingSummary(summary || { average: 0, count: 0 });
+      setMyRating(entry?.rating || ratingDraft);
+      setMyRatingUpdatedAt(entry?.updated_at || '');
+      setRatingDialogOpen(false);
+      toast({ title: 'Thanks', description: 'Your rating and feedback are saved.' });
+    } catch (error) {
+      console.error('[ProductDetail] save rating failed:', error);
+      toast({ title: 'Failed', description: 'Could not save your rating', variant: 'destructive' });
+    } finally {
+      setSavingRating(false);
+    }
+  };
+
+  const handleDeleteRating = async () => {
+    if (!data?.id || !user?.id || !isBuyer || savingRating) return;
+
+    setSavingRating(true);
+    try {
+      const { removed, summary } = productRatings.deleteRating({
+        productId: data.id,
+        userId: user.id,
+      });
+
+      if (!removed) {
+        toast({ title: 'Nothing to delete', description: 'No rating found for this service.' });
+        return;
+      }
+
+      setRatingSummary(summary || { average: 0, count: 0 });
+      setMyRating(0);
+      setMyRatingUpdatedAt('');
+      setRatingDraft(0);
+      setFeedbackDraft('');
+      setRatingDialogOpen(false);
+      toast({ title: 'Deleted', description: 'Your rating and feedback were removed.' });
+    } catch (error) {
+      console.error('[ProductDetail] delete rating failed:', error);
+      toast({ title: 'Failed', description: 'Could not delete your rating', variant: 'destructive' });
+    } finally {
+      setSavingRating(false);
     }
   };
 
@@ -547,6 +752,88 @@ const ProductDetail = () => {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={ratingDialogOpen} onOpenChange={(v) => !savingRating && setRatingDialogOpen(v)}>
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>Rate This Service</DialogTitle>
+            <DialogDescription>
+              Give star rating and feedback. This helps other buyers choose better.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {myRating > 0 && myRatingUpdatedAt ? (
+              <p className="text-xs text-slate-500">
+                Last updated: {formatDateTime(myRatingUpdatedAt)}
+              </p>
+            ) : null}
+            <div>
+              <Label className="mb-2 block">Your Rating</Label>
+              <div className="flex items-center gap-2">
+                {[1, 2, 3, 4, 5].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setRatingDraft(val)}
+                    className="rounded p-1 hover:bg-slate-100 transition"
+                    aria-label={`Rate ${val} star`}
+                  >
+                    <Star
+                      className={`h-7 w-7 ${
+                        val <= ratingDraft ? 'fill-yellow-400 text-yellow-400' : 'text-slate-300'
+                      }`}
+                    />
+                  </button>
+                ))}
+                <span className="text-sm text-slate-500 ml-1">
+                  {ratingDraft > 0 ? `${ratingDraft} / 5` : 'Select stars'}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <Label htmlFor="rating-feedback" className="mb-2 block">
+                Feedback (optional)
+              </Label>
+              <Textarea
+                id="rating-feedback"
+                rows={5}
+                maxLength={1000}
+                placeholder="Share your experience about service quality, response, timeline, etc."
+                value={feedbackDraft}
+                onChange={(e) => setFeedbackDraft(e.target.value)}
+              />
+              <div className="text-xs text-slate-500 text-right mt-1">{feedbackDraft.length}/1000</div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            {isBuyer && myRating > 0 ? (
+              <Button
+                variant="outline"
+                className="mr-auto border-red-200 text-red-600 hover:bg-red-50"
+                onClick={handleDeleteRating}
+                disabled={savingRating}
+              >
+                Delete Rating
+              </Button>
+            ) : null}
+            <Button variant="outline" onClick={() => setRatingDialogOpen(false)} disabled={savingRating}>
+              Cancel
+            </Button>
+            <Button className="bg-[#003D82] hover:bg-blue-800" onClick={handleSaveRating} disabled={savingRating}>
+              {savingRating ? (
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                </span>
+              ) : (
+                'Submit'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {isDraft && (
         <div className="bg-yellow-50 border-b border-yellow-200 py-3 px-4 mb-0 shadow-sm">
           <div className="container mx-auto text-sm text-yellow-800 flex items-center gap-2">
@@ -677,12 +964,57 @@ const ProductDetail = () => {
                 Min Order: {data.min_order_qty} {data.qty_unit}
               </div>
             )}
+
+            <div className="mt-2 flex items-center gap-2 text-sm">
+              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
+              {ratingSummary.count > 0 ? (
+                <>
+                  <span className="font-semibold text-slate-900">{Number(ratingSummary.average || 0).toFixed(1)}</span>
+                  <span className="text-slate-500">({ratingSummary.count} buyer ratings)</span>
+                </>
+              ) : (
+                <span className="text-slate-500">No ratings yet</span>
+              )}
+              {myRating > 0 ? (
+                <span className="text-slate-400">
+                  Your rating: {myRating.toFixed(1)}
+                  {myRatingUpdatedAt ? ` on ${formatDateTime(myRatingUpdatedAt)}` : ''}
+                </span>
+              ) : null}
+            </div>
           </div>
 
           <div
             className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border break-words whitespace-pre-wrap overflow-hidden"
             dangerouslySetInnerHTML={{ __html: data.description || 'No description available.' }}
           />
+
+          {recentFeedback.length > 0 && (
+            <div className="bg-white rounded border p-4 shadow-sm">
+              <h3 className="font-bold mb-3 text-sm uppercase text-gray-500 border-b pb-2">Buyer Feedback</h3>
+              <div className="space-y-3">
+                {recentFeedback.map((row, idx) => (
+                  <div key={`${row.userId}-${row.updated_at || idx}`} className="rounded-md border border-slate-100 p-3">
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <div>
+                        <span className="text-sm font-semibold text-slate-800">{row.buyerName || 'Buyer'}</span>
+                        {row.updated_at || row.created_at ? (
+                          <p className="text-[11px] text-slate-400">
+                            Rated on {formatDateTime(row.updated_at || row.created_at)}
+                          </p>
+                        ) : null}
+                      </div>
+                      <span className="inline-flex items-center gap-1 text-sm text-slate-600">
+                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                        {Number(row.rating || 0).toFixed(1)}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{row.feedback}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Specs */}
           {data.specifications && data.specifications.length > 0 && (
@@ -772,6 +1104,31 @@ const ProductDetail = () => {
 
             <Button onClick={openEnquiryModal} className="w-full bg-[#003D82] h-12 text-lg mb-3 hover:bg-blue-800">
               Send Enquiry
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleToggleFavorite}
+              disabled={favLoading}
+              className={`w-full h-11 ${
+                isFavorite ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : ''
+              }`}
+            >
+              <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current text-yellow-500' : ''}`} />
+              {favLoading ? 'Please wait...' : isFavorite ? 'Favorited' : 'Add to Favorites'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={openRatingDialog}
+              disabled={Boolean(user) && !isBuyer}
+              className="w-full h-11 mt-3"
+              title={Boolean(user) && !isBuyer ? 'Only buyers can add/edit ratings' : undefined}
+            >
+              <Star className={`w-4 h-4 mr-2 ${myRating > 0 ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+              {Boolean(user) && !isBuyer
+                ? 'Buyer Account Required'
+                : myRating > 0
+                  ? 'Update Rating & Feedback'
+                  : 'Rate & Feedback'}
             </Button>
             {/* ✅ Removed "View Phone Number" button (privacy + prevents scraping) */}
           </div>

@@ -17,7 +17,7 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
     
-    const user = await login(formData.email, formData.password);
+    const user = await login(formData.email, formData.password, 'ADMIN');
     
     if (user) {
       // Role-based redirection

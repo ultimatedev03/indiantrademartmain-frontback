@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { normalizeEmail } from '../lib/auth.js';
 import { requireAuth } from '../middleware/requireAuth.js';
-import { notifyRole } from '../lib/notify.js';
+import { notifyRole, notifyUser } from '../lib/notify.js';
 
 const router = express.Router();
 
@@ -1126,6 +1126,26 @@ router.post('/me/kyc/submit', requireAuth({ roles: ['VENDOR'] }), async (req, re
       message: `Vendor "${vendor.company_name || vendor.id}" submitted KYC for review.`,
       link: '/admin/kyc',
     });
+    await notifyRole('DATA_ENTRY', {
+      type: 'KYC_SUBMITTED',
+      title: 'Vendor submitted KYC',
+      message: `Vendor "${vendor.company_name || vendor.id}" submitted KYC for review.`,
+      link: '/employee/dataentry/kyc-review',
+    });
+    await notifyRole('SUPPORT', {
+      type: 'KYC_SUBMITTED',
+      title: 'Vendor submitted KYC',
+      message: `Vendor "${vendor.company_name || vendor.id}" submitted KYC for review.`,
+      link: '/employee/support/kyc-review',
+    });
+    await notifyUser({
+      user_id: vendor.user_id || req.user?.id || null,
+      email: vendor.email || req.user?.email || null,
+      type: 'KYC_SUBMITTED',
+      title: 'KYC Submitted',
+      message: 'Your KYC documents were submitted successfully. Verification is in progress.',
+      link: '/vendor/profile?tab=kyc',
+    });
 
     return res.json({ success: true, vendor: data || { ...vendor, kyc_status: 'SUBMITTED' } });
   } catch (e) {
@@ -1268,6 +1288,18 @@ router.post('/me/documents', requireAuth({ roles: ['VENDOR'] }), async (req, res
       title: 'Vendor uploaded KYC document',
       message: `Vendor "${vendor.company_name || vendor.id}" uploaded ${document_type} document for KYC.`,
       link: '/admin/kyc',
+    });
+    await notifyRole('SUPPORT', {
+      type: 'KYC_DOCUMENT_UPLOADED',
+      title: 'Vendor uploaded KYC document',
+      message: `Vendor "${vendor.company_name || vendor.id}" uploaded ${document_type} document for KYC.`,
+      link: '/employee/support/kyc-review',
+    });
+    await notifyRole('DATA_ENTRY', {
+      type: 'KYC_DOCUMENT_UPLOADED',
+      title: 'Vendor uploaded KYC document',
+      message: `Vendor "${vendor.company_name || vendor.id}" uploaded ${document_type} document for KYC.`,
+      link: '/employee/dataentry/kyc-review',
     });
 
     return res.json({ success: true, document: data });

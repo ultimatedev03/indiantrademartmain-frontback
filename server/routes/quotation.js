@@ -2,6 +2,7 @@ import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { notifyUser } from '../lib/notify.js';
 
 const router = express.Router();
 
@@ -66,15 +67,40 @@ const createTransporter = () => {
 const transporter = createTransporter();
 
 const insertNotification = async (payload) => {
-  if (!payload?.user_id) return;
+  const safeUserId = String(payload?.user_id || '').trim();
+  const safeEmail = normalizeEmail(payload?.user_email || payload?.email || '');
+  if (!safeUserId && !safeEmail) return null;
 
-  let { error } = await supabase.from('notifications').insert([payload]);
-  if (error && String(error?.message || '').toLowerCase().includes('reference_id')) {
-    const fallbackPayload = { ...payload };
-    delete fallbackPayload.reference_id;
-    ({ error } = await supabase.from('notifications').insert([fallbackPayload]));
+  // Prefer direct insert first (keeps extended columns like reference_id when schema allows).
+  if (safeUserId) {
+    let { error } = await supabase
+      .from('notifications')
+      .insert([{ ...payload, user_id: safeUserId }]);
+
+    if (error && String(error?.message || '').toLowerCase().includes('reference_id')) {
+      const fallbackPayload = { ...payload, user_id: safeUserId };
+      delete fallbackPayload.reference_id;
+      ({ error } = await supabase.from('notifications').insert([fallbackPayload]));
+    }
+
+    if (!error) return true;
   }
-  if (error) throw error;
+
+  // Fallback to robust resolver (auth/public user id reconciliation + upsert).
+  const created = await notifyUser({
+    user_id: safeUserId || null,
+    email: safeEmail || null,
+    type: payload?.type,
+    title: payload?.title,
+    message: payload?.message,
+    link: payload?.link,
+  });
+
+  if (!created) {
+    throw new Error('Failed to insert notification');
+  }
+
+  return true;
 };
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
@@ -201,6 +227,13 @@ const sanitizeMessageText = (value) =>
   String(value || '')
     .replace(/\r\n/g, '\n')
     .trim();
+
+const toNotificationSnippet = (value, maxLength = 160) => {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (clean.length <= maxLength) return clean;
+  return `${clean.slice(0, Math.max(1, maxLength - 1))}...`;
+};
 
 const MESSAGE_MARKERS = {
   edited: /^::itm_edited::$/i,
@@ -434,7 +467,9 @@ async function resolveProposalForMessaging(proposalId) {
 async function resolveProposalParticipantUserIds(proposal = {}) {
   const participantIds = {
     buyer_user_id: null,
+    buyer_email: null,
     vendor_user_id: null,
+    vendor_email: null,
   };
 
   const buyerId = String(proposal?.buyer_id || '').trim();
@@ -448,6 +483,7 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
       .eq('id', buyerId)
       .maybeSingle();
     participantIds.buyer_user_id = String(buyerRow?.user_id || '').trim() || null;
+    participantIds.buyer_email = normalizeEmail(buyerRow?.email || buyerEmail || '');
   }
 
   if (!participantIds.buyer_user_id && buyerEmail) {
@@ -459,6 +495,9 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
       .limit(1)
       .maybeSingle();
     participantIds.buyer_user_id = String(buyerByEmail?.user_id || '').trim() || null;
+    if (!participantIds.buyer_email) {
+      participantIds.buyer_email = normalizeEmail(buyerEmail);
+    }
   }
 
   if (!participantIds.buyer_user_id && buyerEmail) {
@@ -470,6 +509,9 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
       .limit(1)
       .maybeSingle();
     participantIds.buyer_user_id = String(buyerUserByEmail?.id || '').trim() || null;
+    if (!participantIds.buyer_email) {
+      participantIds.buyer_email = normalizeEmail(buyerEmail);
+    }
   }
 
   if (vendorId) {
@@ -479,6 +521,7 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
       .eq('id', vendorId)
       .maybeSingle();
     participantIds.vendor_user_id = String(vendorRow?.user_id || '').trim() || null;
+    participantIds.vendor_email = normalizeEmail(vendorRow?.email || '');
 
     const vendorEmail = normalizeEmail(vendorRow?.email || '');
     if (!participantIds.vendor_user_id && vendorEmail) {
@@ -490,7 +533,14 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
         .limit(1)
         .maybeSingle();
       participantIds.vendor_user_id = String(vendorUserByEmail?.id || '').trim() || null;
+      if (!participantIds.vendor_email) {
+        participantIds.vendor_email = vendorEmail;
+      }
     }
+  }
+
+  if (!participantIds.buyer_email && buyerEmail) {
+    participantIds.buyer_email = normalizeEmail(buyerEmail);
   }
 
   return participantIds;
@@ -737,6 +787,80 @@ router.post('/messages/ack-delivered', requireAuth(), async (req, res) => {
   }
 });
 
+// GET /api/quotation/unread-count (buyer chat unread messages)
+router.get('/unread-count', requireAuth(), async (req, res) => {
+  try {
+    const actorPublicUserId = await resolvePublicUserIdForActor(req.user);
+    if (!actorPublicUserId) {
+      return res.json({ success: true, unread: 0 });
+    }
+
+    const buyer = await resolveBuyerForUser(req.user);
+    const buyerId = String(buyer?.id || '').trim();
+    const buyerEmail = normalizeEmail(buyer?.email || req.user?.email || '');
+
+    if (!buyerId && !buyerEmail) {
+      return res.json({ success: true, unread: 0 });
+    }
+
+    const proposalIdSet = new Set();
+
+    if (buyerId) {
+      const { data: byIdRows } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('buyer_id', buyerId)
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      (byIdRows || []).forEach((row) => {
+        const id = String(row?.id || '').trim();
+        if (id) proposalIdSet.add(id);
+      });
+    }
+
+    if (buyerEmail) {
+      const { data: byEmailRows } = await supabase
+        .from('proposals')
+        .select('id')
+        .eq('buyer_email', buyerEmail)
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      (byEmailRows || []).forEach((row) => {
+        const id = String(row?.id || '').trim();
+        if (id) proposalIdSet.add(id);
+      });
+    }
+
+    const proposalIds = Array.from(proposalIdSet).slice(0, 1000);
+    if (!proposalIds.length) {
+      return res.json({ success: true, unread: 0 });
+    }
+
+    const { data: messages, error } = await supabase
+      .from('proposal_messages')
+      .select('id, proposal_id, sender_id, message')
+      .in('proposal_id', proposalIds);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message || 'Failed to calculate unread messages' });
+    }
+
+    let unread = 0;
+    for (const row of messages || []) {
+      const senderId = String(row?.sender_id || '').trim();
+      if (senderId === String(actorPublicUserId).trim()) continue;
+      const parsed = parseStoredMessage(row?.message || '');
+      if (!parsed?.meta?.read_buyer_at) unread += 1;
+    }
+
+    return res.json({ success: true, unread });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to calculate unread messages' });
+  }
+});
+
 // GET /api/quotation/:proposalId/messages
 router.get('/:proposalId/messages', requireAuth(), async (req, res) => {
   try {
@@ -846,6 +970,55 @@ router.post('/:proposalId/messages', requireAuth(), async (req, res) => {
 
     if (error) {
       return res.status(500).json({ success: false, error: error.message || 'Failed to send message' });
+    }
+
+    try {
+      const participants = await resolveProposalParticipantUserIds(proposal);
+      const receiverUserId =
+        actorRole === 'buyer' ? participants?.vendor_user_id : participants?.buyer_user_id;
+      const receiverEmail =
+        actorRole === 'buyer' ? participants?.vendor_email : participants?.buyer_email;
+      const receiverLink =
+        actorRole === 'buyer'
+          ? `/vendor/messages?proposal=${proposalId}`
+          : `/buyer/messages?proposal=${proposalId}`;
+      const senderLabel = actorRole === 'buyer' ? 'buyer' : 'vendor';
+      const contextLabel = String(proposal?.product_name || proposal?.title || '').trim();
+      const preview = toNotificationSnippet(messageText);
+
+      if (receiverUserId || receiverEmail) {
+        await insertNotification({
+          user_id: receiverUserId,
+          user_email: receiverEmail || null,
+          type: 'PROPOSAL_MESSAGE',
+          title: `New message from ${senderLabel}`,
+          message: preview || (contextLabel ? `New message on ${contextLabel}` : 'You received a new message.'),
+          link: receiverLink,
+          reference_id: proposalId,
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      }
+
+      if (actorRole === 'vendor') {
+        const buyerId = String(proposal?.buyer_id || '').trim();
+        if (buyerId) {
+          await supabase.from('buyer_notifications').insert([
+            {
+              buyer_id: buyerId,
+              type: 'PROPOSAL_MESSAGE',
+              title: 'New message from vendor',
+              message: preview || (contextLabel ? `New update on ${contextLabel}` : 'You received a new message.'),
+              reference_id: proposalId,
+              reference_type: 'proposal',
+              is_read: false,
+              created_at: new Date().toISOString(),
+            },
+          ]);
+        }
+      }
+    } catch (notificationError) {
+      console.warn('Proposal message notification failed:', notificationError);
     }
 
     return res.status(201).json({
@@ -1331,9 +1504,10 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
           ]);
         }
 
-        if (buyerUserId) {
+        if (buyerUserId || buyerEmail) {
           await insertNotification({
             user_id: buyerUserId,
+            user_email: buyerEmail || null,
             type: 'QUOTATION_RECEIVED',
             title: `New Quotation from ${vendor_company || vendor_name}`,
             message: `You received quotation: ${quotation_title}`,
@@ -1385,9 +1559,10 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
         }
       }
 
-      if (vendorUserId) {
+      if (vendorUserId || vendor_email) {
         await insertNotification({
           user_id: vendorUserId,
+          user_email: vendor_email || null,
           type: 'QUOTATION_SENT',
           title: 'Quotation sent',
           message: `Quotation sent to ${buyerEmail}`,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, Bell, LogOut, Settings, User as UserIcon, Home } from 'lucide-react';
+import { Menu, LogOut, Settings, User as UserIcon, Home } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import NotificationBell from '@/shared/components/NotificationBell';
 
 const getInitials = (name = '') => {
   const parts = String(name).trim().split(' ').filter(Boolean);
@@ -72,13 +73,10 @@ const VendorHeader = ({ onMenuClick }) => {
             Home
           </Button>
 
-          <button
-            type="button"
-            className="-m-2.5 p-2.5 text-gray-400 hover:text-gray-500"
-          >
-            <span className="sr-only">View notifications</span>
-            <Bell className="h-6 w-6" aria-hidden="true" />
-          </button>
+          <NotificationBell
+            userId={user?.user_id || user?.id || null}
+            userEmail={user?.email || null}
+          />
 
           <div className="hidden lg:block lg:h-6 lg:w-px lg:bg-gray-200" aria-hidden="true" />
 

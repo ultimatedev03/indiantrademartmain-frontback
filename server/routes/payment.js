@@ -14,6 +14,44 @@ const normalizeText = (value) => String(value || '').trim();
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '');
+
+const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
+
+const normalizeScope = (value) => String(value || '').trim();
+
+const isGlobalScope = (value) => {
+  const scope = normalizeScope(value);
+  if (!scope) return true;
+  return GLOBAL_SCOPE_TOKENS.has(scope.toUpperCase());
+};
+
+const equalsIgnoreCase = (a, b) =>
+  normalizeScope(a).toLowerCase() === normalizeScope(b).toLowerCase();
+
+const isCouponVendorApplicable = (couponVendorScope, vendor) => {
+  if (isGlobalScope(couponVendorScope)) return true;
+  if (!vendor) return false;
+
+  const scope = normalizeScope(couponVendorScope);
+  const candidates = [vendor.id, vendor.vendor_id, vendor.email].filter(Boolean);
+  return candidates.some((candidate) => equalsIgnoreCase(scope, candidate));
+};
+
+const isCouponPlanApplicable = (couponPlanScope, plan) => {
+  if (isGlobalScope(couponPlanScope)) return true;
+  if (!plan) return false;
+
+  const scope = normalizeScope(couponPlanScope);
+  const candidates = [plan.id, plan.name].filter(Boolean);
+  return candidates.some((candidate) => equalsIgnoreCase(scope, candidate));
+};
+
 const parseCurrencyAmount = (value, fallback = 50) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
@@ -83,7 +121,7 @@ const createTransporter = () => {
 router.post('/initiate', async (req, res) => {
   try {
     const { vendor_id, plan_id } = req.body;
-    const coupon_code = (req.body?.coupon_code || '').toString().trim().toUpperCase();
+    const coupon_code = normalizeCouponCode(req.body?.coupon_code);
 
     // Check if Razorpay keys are configured
     if (!process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.includes('your_razorpay')) {
@@ -145,10 +183,10 @@ router.post('/initiate', async (req, res) => {
       if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) {
         return res.status(400).json({ error: 'Coupon usage limit reached' });
       }
-      if (cpn.vendor_id && cpn.vendor_id !== vendor_id) {
+      if (!isCouponVendorApplicable(cpn.vendor_id, vendor)) {
         return res.status(400).json({ error: 'Coupon not valid for this vendor' });
       }
-      if (cpn.plan_id && cpn.plan_id !== plan_id) {
+      if (!isCouponPlanApplicable(cpn.plan_id, plan)) {
         return res.status(400).json({ error: 'Coupon not valid for this plan' });
       }
 
@@ -213,7 +251,7 @@ router.post('/initiate', async (req, res) => {
 router.post('/verify', async (req, res) => {
   try {
     const { order_id, payment_id, signature, vendor_id, plan_id } = req.body;
-    const coupon_code = (req.body?.coupon_code || '').toString().trim().toUpperCase();
+    const coupon_code = normalizeCouponCode(req.body?.coupon_code);
 
     if (!order_id || !payment_id || !signature || !vendor_id || !plan_id) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -264,8 +302,8 @@ router.post('/verify', async (req, res) => {
         const now = new Date();
         const okUsage = !cpn.max_uses || cpn.max_uses === 0 || cpn.used_count < cpn.max_uses;
         const okExpiry = !cpn.expires_at || new Date(cpn.expires_at) >= now;
-        const okVendor = !cpn.vendor_id || cpn.vendor_id === vendor_id;
-        const okPlan = !cpn.plan_id || cpn.plan_id === plan_id;
+        const okVendor = isCouponVendorApplicable(cpn.vendor_id, vendor);
+        const okPlan = isCouponPlanApplicable(cpn.plan_id, plan);
 
         if (okUsage && okExpiry && okVendor && okPlan) {
           if (cpn.discount_type === 'PERCENT') {

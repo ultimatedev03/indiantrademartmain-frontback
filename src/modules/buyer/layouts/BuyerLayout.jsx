@@ -590,7 +590,10 @@ const BuyerLayout = () => {
                   </Button>
                 </form>
 
-                <NotificationBell userId={user?.id || null} />
+                <NotificationBell
+                  userId={user?.id || user?.user_id || null}
+                  userEmail={user?.email || null}
+                />
               </div>
             )}
           </header>

@@ -2,8 +2,9 @@ import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/hooks/useAuth';
 import { Button } from '@/components/ui/button';
-import { Search, Bell, Menu, LayoutDashboard, LogIn, LogOut, ChevronDown } from 'lucide-react';
+import { Search, Menu, LayoutDashboard, LogIn, LogOut, ChevronDown } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
+import NotificationBell from '@/shared/components/NotificationBell';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader } from '@/components/ui/sheet';
 import {
   DropdownMenu,
@@ -150,9 +151,10 @@ const Header = () => {
             <div className="hidden md:flex items-center space-x-4">
               {user ? (
                 <div className="flex items-center space-x-3">
-                   <button className="text-gray-400 hover:text-white">
-                      <Bell className="w-5 h-5" />
-                   </button>
+                   <NotificationBell
+                     userId={user?.id || user?.user_id || null}
+                     userEmail={user?.email || null}
+                   />
                    <div className="h-6 w-px bg-slate-700 mx-2"></div>
                    <Link to={
                      user.role === 'VENDOR' ? '/vendor/dashboard' : 

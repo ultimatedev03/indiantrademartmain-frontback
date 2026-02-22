@@ -167,6 +167,7 @@ const PortalLayout = ({ role }) => {
       case 'SUPPORT':
         return [
           { icon: LayoutDashboard, label: 'Dashboard', path: '/employee/support/dashboard' },
+          { icon: ShieldCheck, label: 'KYC Review', path: '/employee/support/kyc-review' },
           { icon: Ticket, label: 'Tickets', path: '/employee/support/tickets' },
         ];
       case 'SALES':
@@ -263,7 +264,10 @@ const PortalLayout = ({ role }) => {
           </div>
 
           <div className="flex items-center gap-4">
-            <NotificationBell />
+            <NotificationBell
+              userId={user?.user_id || user?.id || null}
+              userEmail={user?.email || null}
+            />
             <div className="flex items-center gap-3 pl-4 border-l border-neutral-200">
               <div className="text-right hidden sm:block">
                 <p className="text-sm font-medium text-neutral-900">{user?.name || user?.email}</p>

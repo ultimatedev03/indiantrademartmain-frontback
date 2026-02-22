@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import NotificationBell from '@/shared/components/NotificationBell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -534,6 +535,10 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-6">
+          <NotificationBell
+            userId={superAdmin?.user_id || superAdmin?.id || null}
+            userEmail={superAdmin?.email || null}
+          />
           <div className="text-right hidden md:block">
             <p className="text-sm font-medium text-white">
               {superAdmin?.name || superAdmin?.full_name || 'Super Admin'}

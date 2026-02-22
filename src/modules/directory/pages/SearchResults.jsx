@@ -1,5 +1,5 @@
 // ✅ File: src/modules/directory/pages/SearchResults.jsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Helmet } from 'react-helmet';
 import { useSearchParams, useParams, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -193,6 +193,27 @@ const getPlanPriority = (planName) => {
   return 10;
 };
 
+const toFiniteNumber = (value) => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  const parsed = Number(String(value).replace(/[^0-9.]/g, '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const parsePriceValue = (rawPrice) => toFiniteNumber(rawPrice);
+
+const buildPriceBounds = (items = []) => {
+  const prices = (Array.isArray(items) ? items : [])
+    .map((row) => parsePriceValue(row?.price))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+
+  if (!prices.length) return { min: 0, max: 100000 };
+
+  const min = Math.floor(Math.min(...prices));
+  const max = Math.ceil(Math.max(...prices));
+  return { min, max: max > min ? max : min + 1 };
+};
+
 const SearchResults = () => {
   const [searchParams] = useSearchParams();
   const params = useParams();
@@ -215,7 +236,29 @@ const SearchResults = () => {
     inStock: false,
   });
 
+  const priceBounds = useMemo(() => buildPriceBounds(results), [results]);
+
   const autoCorrectedRef = useRef(false);
+
+  useEffect(() => {
+    setFilters((prev) => {
+      const range =
+        Array.isArray(prev?.priceRange) && prev.priceRange.length === 2
+          ? prev.priceRange
+          : [priceBounds.min, priceBounds.max];
+
+      const useFreshBounds = range[0] === 0 && range[1] === 100000;
+      const nextMin = useFreshBounds
+        ? priceBounds.min
+        : Math.max(priceBounds.min, Math.min(Number(range[0]) || priceBounds.min, priceBounds.max));
+      const nextMax = useFreshBounds
+        ? priceBounds.max
+        : Math.max(nextMin, Math.min(Number(range[1]) || priceBounds.max, priceBounds.max));
+
+      if (nextMin === range[0] && nextMax === range[1]) return prev;
+      return { ...prev, priceRange: [nextMin, nextMax] };
+    });
+  }, [priceBounds.min, priceBounds.max]);
 
   const buildSearchUrl = (svc, st, ct) => {
     if (!svc) return '/directory';
@@ -622,11 +665,38 @@ const SearchResults = () => {
     fetchResults();
   }, [parsedParams.serviceSlug, parsedParams.stateSlug, parsedParams.citySlug, searchParams]);
 
-  const filteredResults = (results || []).filter((item) => {
-    if (filters.verified && !item.vendorVerified) return false;
-    if (filters.inStock && !item.inStock) return false;
-    return true;
-  });
+  const filteredResults = useMemo(() => {
+    let out = Array.isArray(results) ? [...results] : [];
+    const [minPrice, maxPrice] = Array.isArray(filters?.priceRange)
+      ? filters.priceRange
+      : [priceBounds.min, priceBounds.max];
+
+    out = out.filter((item) => {
+      const priceValue = parsePriceValue(item?.price);
+      if (priceValue === null) return true;
+      return priceValue >= minPrice && priceValue <= maxPrice;
+    });
+
+    if (filters.rating > 0) {
+      out = out.filter((item) => {
+        const rating = toFiniteNumber(item?.rating) ?? toFiniteNumber(item?.vendorRating) ?? 0;
+        return rating >= filters.rating;
+      });
+    }
+
+    if (filters.verified) {
+      out = out.filter((item) => !!item?.vendorVerified);
+    }
+
+    if (filters.inStock) {
+      out = out.filter((item) => {
+        const stock = toFiniteNumber(item?.stock) ?? toFiniteNumber(item?.available_quantity);
+        return stock === null ? true : stock > 0;
+      });
+    }
+
+    return out;
+  }, [results, filters, priceBounds.min, priceBounds.max]);
 
   const formatName = (s) => (s ? s.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) : '');
   const serviceName = formatName(parsedParams.serviceSlug);
@@ -705,7 +775,7 @@ const SearchResults = () => {
         <div className="container mx-auto px-4 py-5">
           <div className="flex flex-col lg:flex-row gap-6">
             <aside className="w-full lg:w-64 flex-shrink-0 hidden lg:block">
-              <SearchFilters filters={filters} setFilters={setFilters} />
+              <SearchFilters filters={filters} setFilters={setFilters} priceBounds={priceBounds} />
             </aside>
 
             <main className="flex-1">
@@ -725,3 +795,4 @@ const SearchResults = () => {
 };
 
 export default SearchResults;
+

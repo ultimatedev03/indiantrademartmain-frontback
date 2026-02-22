@@ -50,7 +50,7 @@ const resolveEmployeeFromApi = async () => {
   }
 };
 
-const normalizeInternalUser = (raw, email, expectedRole) => {
+const normalizeInternalUser = (raw, email) => {
   const row = Array.isArray(raw) ? raw[0] : raw;
 
   const role = normalizeRoleValue(
@@ -64,7 +64,7 @@ const normalizeInternalUser = (raw, email, expectedRole) => {
       row?.employeeRole,
       row?.type
     ),
-    expectedRole
+    undefined
   );
 
   const name = pickFirst(
@@ -97,7 +97,7 @@ const normalizeInternalUser = (raw, email, expectedRole) => {
     id,
     email: pickFirst(row?.email, email),
     name: name || (email ? email.split('@')[0] : 'User'),
-    role: role || normalizeRoleValue(expectedRole, 'ADMIN'),
+    role: role || '',
     status: String(status || 'ACTIVE').toUpperCase(),
   };
 };
@@ -123,7 +123,7 @@ export const InternalAuthProvider = ({ children }) => {
         .maybeSingle();
 
       if (empById && isInternalRole(empById.role)) {
-        return normalizeInternalUser(empById, authUser.email, empById.role);
+        return normalizeInternalUser(empById, authUser.email);
       }
 
       // 2) Employees table by email (fallback when user_id not wired yet)
@@ -135,7 +135,7 @@ export const InternalAuthProvider = ({ children }) => {
           .maybeSingle();
 
         if (empByEmail && isInternalRole(empByEmail.role)) {
-          return normalizeInternalUser(empByEmail, authUser.email, empByEmail.role);
+          return normalizeInternalUser(empByEmail, authUser.email);
         }
       }
 
@@ -147,7 +147,7 @@ export const InternalAuthProvider = ({ children }) => {
       // 4) Fallback to server-side resolver (bypasses RLS, syncs user_id)
       const resolved = await resolveEmployeeFromApi();
       if (resolved && isInternalRole(resolved.role)) {
-        return normalizeInternalUser(resolved, authUser.email, resolved.role);
+        return normalizeInternalUser(resolved, authUser.email);
       }
 
       return null;
@@ -209,6 +209,7 @@ export const InternalAuthProvider = ({ children }) => {
   const login = async (email, password, expectedRole) => {
     try {
       setIsLoading(true);
+      const expectedNormalizedRole = normalizeRoleValue(expectedRole, undefined);
 
       // 🚨 IMPORTANT: kill any cached session
       await supabase.auth.signOut();
@@ -247,7 +248,7 @@ export const InternalAuthProvider = ({ children }) => {
       // ✅ Resolve via server (ensures employee.user_id sync)
       const resolved = await resolveEmployeeFromApi();
       if (resolved && isInternalRole(resolved.role)) {
-        normalized = normalizeInternalUser(resolved, email, resolved.role);
+        normalized = normalizeInternalUser(resolved, email);
       }
 
       const { data: empById } = await supabase
@@ -256,22 +257,27 @@ export const InternalAuthProvider = ({ children }) => {
         .eq('user_id', authData.user.id)
         .maybeSingle();
 
-      if (empById) {
-        normalized = normalizeInternalUser(empById, email, empById.role);
-      } else {
+      if (empById && isInternalRole(empById.role)) {
+        normalized = normalizeInternalUser(empById, email);
+      }
+
+      if (!normalized) {
         const { data: empByEmail } = await supabase
           .from('employees')
           .select('*')
           .eq('email', email)
           .maybeSingle();
 
-        if (empByEmail) {
-          normalized = normalizeInternalUser(empByEmail, email, empByEmail.role);
+        if (empByEmail && isInternalRole(empByEmail.role)) {
+          normalized = normalizeInternalUser(empByEmail, email);
         }
       }
 
       if (!normalized && rpcData) {
-        normalized = normalizeInternalUser(rpcData, email, expectedRole);
+        const rpcNormalized = normalizeInternalUser(rpcData, email);
+        if (rpcNormalized?.role && isInternalRole(rpcNormalized.role)) {
+          normalized = rpcNormalized;
+        }
       }
 
       if (!normalized && rpcError) {
@@ -286,6 +292,14 @@ export const InternalAuthProvider = ({ children }) => {
       }
 
       if (!isInternalRole(normalized.role)) {
+        await supabase.auth.signOut();
+        throw new Error('Unauthorized');
+      }
+
+      if (
+        expectedNormalizedRole &&
+        normalizeRoleValue(normalized.role, undefined) !== expectedNormalizedRole
+      ) {
         await supabase.auth.signOut();
         throw new Error('Unauthorized');
       }

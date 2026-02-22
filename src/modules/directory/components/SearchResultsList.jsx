@@ -1,15 +1,44 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Star, MapPin, BadgeCheck, PackageX, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/shared/components/Badge';
+import { productRatings, PRODUCT_RATINGS_UPDATED_EVENT } from '@/shared/services/productRatings';
 
 const SearchResultsList = ({ products, query, city, category }) => {
   const navigate = useNavigate();
 
   const displayProducts = Array.isArray(products) ? products : [];
   const isUsingMock = false;
+  const [ratingsVersion, setRatingsVersion] = useState(0);
+
+  const productIds = useMemo(
+    () =>
+      displayProducts
+        .map((item) => String(item?.id || item?.slug || '').trim())
+        .filter(Boolean),
+    [displayProducts]
+  );
+
+  useEffect(() => {
+    const refresh = () => setRatingsVersion((v) => v + 1);
+    if (typeof window !== 'undefined') {
+      window.addEventListener(PRODUCT_RATINGS_UPDATED_EVENT, refresh);
+      window.addEventListener('focus', refresh);
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(PRODUCT_RATINGS_UPDATED_EVENT, refresh);
+        window.removeEventListener('focus', refresh);
+      }
+    };
+  }, []);
+
+  const ratingSummaryMap = useMemo(
+    () => productRatings.getSummaryMap(productIds),
+    [productIds, ratingsVersion]
+  );
 
   const getProductDetailPath = (product) => {
     const slugOrId = product?.slug || product?.productSlug || product?.id;
@@ -96,6 +125,24 @@ const SearchResultsList = ({ products, query, city, category }) => {
       ?.toString?.()
       ?.trim?.();
     return v || '';
+  };
+
+  const getRatingMeta = (product) => {
+    const key = String(product?.id || product?.slug || '').trim();
+    const summary = key ? ratingSummaryMap[key] : null;
+    if (summary?.count > 0) {
+      return {
+        rating: Number(summary.average) || 0,
+        reviews: Number(summary.count) || 0,
+      };
+    }
+
+    const fallbackRating = Number(product?.rating ?? product?.vendorRating ?? 0);
+    const fallbackReviews = Number(product?.reviews ?? 0);
+    return {
+      rating: Number.isFinite(fallbackRating) && fallbackRating > 0 ? fallbackRating : 4.5,
+      reviews: Number.isFinite(fallbackReviews) && fallbackReviews > 0 ? fallbackReviews : 0,
+    };
   };
 
   // ✅ Plan label
@@ -240,6 +287,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
         {displayProducts.map((product, index) => {
           const planText = getPlanBadgeText(product);
           const metaBadges = buildMetaBadges(product);
+          const ratingMeta = getRatingMeta(product);
 
           return (
             <motion.div
@@ -348,8 +396,8 @@ const SearchResultsList = ({ products, query, city, category }) => {
 
                   <div className="flex items-center gap-1">
                     <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                    <span className="font-semibold text-sm">{product.rating || product.vendorRating || 4.5}</span>
-                    <span className="text-sm text-neutral-500">({product.reviews || 0})</span>
+                    <span className="font-semibold text-sm">{Number(ratingMeta.rating || 0).toFixed(1)}</span>
+                    <span className="text-sm text-neutral-500">({ratingMeta.reviews || 0})</span>
                   </div>
                 </div>
 

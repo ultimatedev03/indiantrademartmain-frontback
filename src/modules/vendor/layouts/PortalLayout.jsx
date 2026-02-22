@@ -54,6 +54,11 @@ const readVendorActive = (obj, fallback = true) => {
   return fallback;
 };
 
+const normalizePath = (value = '') => {
+  const cleaned = String(value || '').split('?')[0].replace(/\/+$/, '');
+  return cleaned || '/';
+};
+
 const SidebarItem = ({ icon: Icon, label, path, active, collapsed, resolvePath, onNavigate }) => {
   const resolved = resolvePath(path, 'vendor');
 
@@ -144,6 +149,28 @@ const PortalLayout = () => {
     { icon: HelpCircle, label: 'Support', path: 'support' },
     { icon: Settings, label: 'Settings', path: 'settings' },
   ];
+
+  const isNavItemActive = useCallback((itemPath) => {
+    const currentPath = normalizePath(location.pathname);
+    const resolvedPath = normalizePath(resolvePath(itemPath, 'vendor'));
+
+    if (currentPath === resolvedPath || currentPath.startsWith(`${resolvedPath}/`)) {
+      return true;
+    }
+
+    // KYC menu points to /kyc, but route redirects to /profile?tab=primary
+    if (itemPath === 'kyc') {
+      const profilePath = normalizePath(resolvePath('profile', 'vendor'));
+      return currentPath === profilePath || currentPath.startsWith(`${profilePath}/`);
+    }
+
+    // Some flows open dashboard as /vendor/:vendorId/dashboard
+    if (itemPath === 'dashboard') {
+      return /\/dashboard$/.test(currentPath);
+    }
+
+    return false;
+  }, [location.pathname, resolvePath]);
 
   // ✅ When suspended: only allow Support in menu
   const effectiveNavItems = useMemo(() => {
@@ -247,8 +274,7 @@ const PortalLayout = () => {
 
           <div className="flex-1 py-4 px-3 space-y-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
             {effectiveNavItems.map((item) => {
-              const resolved = resolvePath(item.path, 'vendor');
-              const isActive = location.pathname === resolved || location.pathname.startsWith(`${resolved}/`);
+              const isActive = isNavItemActive(item.path);
 
               return (
                 <SidebarItem
@@ -301,7 +327,10 @@ const PortalLayout = () => {
             </div>
 
             <div className="flex items-center gap-3 sm:gap-5">
-              <NotificationBell userId={user?.user_id || user?.id || null} />
+              <NotificationBell
+                userId={user?.user_id || user?.id || null}
+                userEmail={user?.email || null}
+              />
 
               <div className="h-6 w-px bg-neutral-200 hidden sm:block"></div>
 
@@ -387,12 +416,11 @@ const PortalLayout = () => {
 
                 <div className="flex-1 py-4 px-3 space-y-1 overflow-y-auto">
                   {effectiveNavItems.map((item) => {
-                    const resolved = resolvePath(item.path, 'vendor');
                     return (
                       <SidebarItem
                         key={item.path}
                         {...item}
-                        active={location.pathname === resolved || location.pathname.startsWith(`${resolved}/`)}
+                        active={isNavItemActive(item.path)}
                         collapsed={false}
                         resolvePath={resolvePath}
                         onNavigate={() => setMobileMenuOpen(false)}

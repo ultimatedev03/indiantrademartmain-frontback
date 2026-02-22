@@ -11,6 +11,13 @@ import { IndianRupee, Percent } from 'lucide-react';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const number = (v) => Number(v || 0);
+const COUPON_CODE_REGEX = /^[A-Z0-9_-]+$/;
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '')
+    .slice(0, 32);
 const fmt = (d) => {
   if (!d) return '-';
   const date = new Date(d);
@@ -80,17 +87,54 @@ const AdminFinance = () => {
 
   const createCoupon = async () => {
     try {
-      if (!form.code || !form.value) {
+      const normalizedCode = normalizeCouponCode(form.code);
+      const numericValue = Number(form.value);
+      const numericMaxUses = form.max_uses === '' ? 0 : Number(form.max_uses);
+
+      if (!normalizedCode || form.value === '') {
         toast({ title: 'Required', description: 'Code and value are required', variant: 'destructive' });
         return;
       }
+
+      if (!COUPON_CODE_REGEX.test(normalizedCode)) {
+        toast({
+          title: 'Invalid code',
+          description: 'Use letters, numbers, hyphen, or underscore only',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (!Number.isFinite(numericValue) || numericValue <= 0) {
+        toast({ title: 'Invalid value', description: 'Value must be greater than 0', variant: 'destructive' });
+        return;
+      }
+
+      if (form.discount_type === 'PERCENT' && numericValue > 100) {
+        toast({
+          title: 'Invalid percent',
+          description: 'Percent coupon cannot be more than 100',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (!Number.isFinite(numericMaxUses) || numericMaxUses < 0) {
+        toast({
+          title: 'Invalid max uses',
+          description: 'Max uses must be 0 or more',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const payload = {
         ...form,
-        code: form.code.trim().toUpperCase(),
-        value: Number(form.value),
-        max_uses: form.max_uses ? Number(form.max_uses) : 0,
+        code: normalizedCode,
+        value: numericValue,
+        max_uses: Math.trunc(numericMaxUses),
         plan_id: form.plan_id === 'ANY' ? null : form.plan_id,
-        vendor_id: form.vendor_id || null,
+        vendor_id: form.vendor_id.trim() || null,
         expires_at: form.expires_at || null,
       };
       const res = await fetchWithCsrf('/api/finance/coupons', {
@@ -100,7 +144,7 @@ const AdminFinance = () => {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed');
       toast({ title: 'Coupon created', description: payload.code });
-      setForm({ ...form, code: '', value: '', max_uses: '', vendor_id: '' });
+      setForm((prev) => ({ ...prev, code: '', value: '', max_uses: '', vendor_id: '' }));
       fetchData();
     } catch (e) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -222,7 +266,12 @@ const AdminFinance = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <Label>Code</Label>
-              <Input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} placeholder="NEWYEAR50" />
+              <Input
+                value={form.code}
+                onChange={(e) => setForm({ ...form, code: normalizeCouponCode(e.target.value) })}
+                placeholder="NEWYEAR50"
+                disableAutoSanitize
+              />
             </div>
             <div>
               <Label>Type</Label>
@@ -254,8 +303,13 @@ const AdminFinance = () => {
               </Select>
             </div>
             <div>
-              <Label>Vendor ID (optional)</Label>
-              <Input value={form.vendor_id} onChange={(e) => setForm({ ...form, vendor_id: e.target.value })} placeholder="Limit to vendor" />
+              <Label>Vendor (optional)</Label>
+              <Input
+                value={form.vendor_id}
+                onChange={(e) => setForm({ ...form, vendor_id: e.target.value })}
+                placeholder="Vendor UUID or vendor code"
+                disableAutoSanitize
+              />
             </div>
             <div>
               <Label>Max Uses (0 = unlimited)</Label>
@@ -266,6 +320,9 @@ const AdminFinance = () => {
               <Input type="datetime-local" value={form.expires_at} onChange={(e) => setForm({ ...form, expires_at: e.target.value })} />
             </div>
           </div>
+          <p className="text-xs text-neutral-500">
+            Tip: Keep <span className="font-medium">Plan = Any</span> and <span className="font-medium">Vendor blank</span> to make this coupon usable for all vendors and all plans.
+          </p>
           <Button onClick={createCoupon}>Create Coupon</Button>
         </CardContent>
       </Card>

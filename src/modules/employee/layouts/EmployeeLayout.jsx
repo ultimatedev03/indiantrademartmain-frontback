@@ -125,6 +125,7 @@ const EmployeeLayout = ({ allowedRole }) => {
           {user.role === 'SUPPORT' && (
             <>
               <SidebarLink to="/employee/support/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
+              <SidebarLink to="/employee/support/kyc-review" icon={ShieldCheck} onNavigate={() => setIsSidebarOpen(false)}>KYC Review</SidebarLink>
               <SidebarLink to="/employee/support/tickets/vendor" icon={Building2} onNavigate={() => setIsSidebarOpen(false)}>Help for Vendor</SidebarLink>
               <SidebarLink to="/employee/support/tickets/buyer" icon={User} onNavigate={() => setIsSidebarOpen(false)}>Help for Buyer</SidebarLink>
             </>
@@ -173,7 +174,10 @@ const EmployeeLayout = ({ allowedRole }) => {
               {getPageTitle()}
             </h1>
           </div>
-          <NotificationBell userId={user?.user_id || user?.id || null} />
+          <NotificationBell
+            userId={user?.user_id || user?.id || null}
+            userEmail={user?.email || null}
+          />
         </header>
 
         <main className="flex-1 min-h-0 p-4 lg:p-8 overflow-y-auto">

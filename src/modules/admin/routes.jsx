@@ -251,6 +251,8 @@ export const AdminRoutes = () => {
         <Route path="support" element={<EmployeeLayout allowedRole="SUPPORT" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<SupportDashboard />} />
+          <Route path="kyc-review" element={<KycApprovals />} />
+          <Route path="kyc" element={<KycApprovals />} />
           <Route path="tickets" element={<SupportTickets />} />
           <Route path="tickets/vendor" element={<SupportTickets />} />
           <Route path="tickets/buyer" element={<SupportTickets />} />

@@ -8,6 +8,74 @@ const router = express.Router();
 // Finance APIs require FINANCE or ADMIN employees.
 router.use(requireEmployeeRoles(['FINANCE', 'ADMIN']));
 
+const COUPON_CODE_REGEX = /^[A-Z0-9_-]+$/;
+const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
+
+const looksLikeUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '').trim()
+  );
+
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '');
+
+const normalizeScopeToken = (value) => String(value || '').trim();
+
+const isGlobalScopeValue = (value) => {
+  const token = normalizeScopeToken(value);
+  if (!token) return true;
+  return GLOBAL_SCOPE_TOKENS.has(token.toUpperCase());
+};
+
+const normalizePlanScopeId = (planScope) => {
+  const token = normalizeScopeToken(planScope);
+  if (isGlobalScopeValue(token)) return null;
+  return token;
+};
+
+async function resolveVendorScopeId(vendorRef) {
+  const ref = normalizeScopeToken(vendorRef);
+  if (isGlobalScopeValue(ref)) return null;
+
+  if (looksLikeUuid(ref)) {
+    const { data: byId, error: byIdError } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('id', ref)
+      .maybeSingle();
+    if (byIdError) throw new Error(byIdError.message || 'Failed to validate vendor UUID');
+    if (byId?.id) return byId.id;
+  }
+
+  const { data: byPublicId, error: byPublicIdError } = await supabase
+    .from('vendors')
+    .select('id')
+    .ilike('vendor_id', ref)
+    .limit(2);
+  if (byPublicIdError) throw new Error(byPublicIdError.message || 'Failed to resolve vendor');
+  if ((byPublicId || []).length === 1) return byPublicId[0].id;
+  if ((byPublicId || []).length > 1) {
+    throw new Error('Multiple vendors matched this vendor ID. Use vendor UUID.');
+  }
+
+  const { data: byEmail, error: byEmailError } = await supabase
+    .from('vendors')
+    .select('id')
+    .ilike('email', ref)
+    .limit(2);
+  if (byEmailError) throw new Error(byEmailError.message || 'Failed to resolve vendor');
+  if ((byEmail || []).length === 1) return byEmail[0].id;
+  if ((byEmail || []).length > 1) {
+    throw new Error('Multiple vendors matched this email. Use vendor UUID.');
+  }
+
+  throw new Error('Vendor not found. Enter vendor UUID, vendor code, or vendor email.');
+}
+
 // GET /api/finance/payments
 // Optional query params: vendor_id, plan_id, from, to, limit
 router.get('/payments', async (req, res) => {
@@ -124,8 +192,12 @@ router.get('/coupons', async (_req, res) => {
     if (error) return res.status(500).json({ success: false, error: error.message });
 
     const coupons = Array.isArray(data) ? data : [];
-    const planIds = Array.from(new Set(coupons.map((c) => c.plan_id).filter(Boolean)));
-    const vendorIds = Array.from(new Set(coupons.map((c) => c.vendor_id).filter(Boolean)));
+    const planIds = Array.from(
+      new Set(coupons.map((c) => normalizePlanScopeId(c.plan_id)).filter((id) => id && looksLikeUuid(id)))
+    );
+    const vendorIds = Array.from(
+      new Set(coupons.map((c) => normalizeScopeToken(c.vendor_id)).filter((id) => id && looksLikeUuid(id)))
+    );
 
     let planMap = {};
     let vendorMap = {};
@@ -186,24 +258,63 @@ router.post('/coupons', async (req, res) => {
       is_active = true,
     } = req.body || {};
 
-    if (!code || !discount_type || !value) {
+    const normalizedCode = normalizeCouponCode(code);
+    const normalizedDiscountType = String(discount_type || '').trim().toUpperCase();
+    const numericValue = Number(value);
+    const numericMaxUses = Number(max_uses || 0);
+
+    if (!normalizedCode || !normalizedDiscountType || value === undefined || value === null || value === '') {
       return res.status(400).json({ success: false, error: 'code, discount_type, value are required' });
     }
 
+    if (!COUPON_CODE_REGEX.test(normalizedCode)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Coupon code must use letters, numbers, hyphen, or underscore only',
+      });
+    }
+
+    if (!['PERCENT', 'FLAT'].includes(normalizedDiscountType)) {
+      return res.status(400).json({ success: false, error: 'discount_type must be PERCENT or FLAT' });
+    }
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return res.status(400).json({ success: false, error: 'value must be a number greater than 0' });
+    }
+
+    if (normalizedDiscountType === 'PERCENT' && numericValue > 100) {
+      return res.status(400).json({ success: false, error: 'Percent coupon value cannot exceed 100' });
+    }
+
+    if (!Number.isFinite(numericMaxUses) || numericMaxUses < 0) {
+      return res.status(400).json({ success: false, error: 'max_uses must be 0 or more' });
+    }
+
+    const normalizedExpiresAt = expires_at ? new Date(expires_at) : null;
+    if (normalizedExpiresAt && Number.isNaN(normalizedExpiresAt.getTime())) {
+      return res.status(400).json({ success: false, error: 'expires_at must be a valid date/time' });
+    }
+
+    const resolvedVendorId = await resolveVendorScopeId(vendor_id);
+    const normalizedPlanId = normalizePlanScopeId(plan_id);
+
     const payload = {
-      code: String(code).toUpperCase(),
-      discount_type: discount_type.toUpperCase(),
-      value,
-      plan_id,
-      vendor_id,
-      max_uses,
-      expires_at,
+      code: normalizedCode,
+      discount_type: normalizedDiscountType,
+      value: numericValue,
+      plan_id: normalizedPlanId,
+      vendor_id: resolvedVendorId,
+      max_uses: Math.trunc(numericMaxUses),
+      expires_at: normalizedExpiresAt ? normalizedExpiresAt.toISOString() : null,
       is_active,
       created_at: new Date().toISOString(),
     };
 
     const { data, error } = await supabase.from('vendor_plan_coupons').insert([payload]).select().single();
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (error) {
+      const status = error.code === '23505' ? 409 : 500;
+      return res.status(status).json({ success: false, error: error.message });
+    }
 
     await writeAuditLog({
       req,
@@ -217,6 +328,7 @@ router.post('/coupons', async (req, res) => {
         value: payload.value,
         plan_id: payload.plan_id,
         vendor_id: payload.vendor_id,
+        vendor_input: vendor_id || null,
         expires_at: payload.expires_at,
       },
     });

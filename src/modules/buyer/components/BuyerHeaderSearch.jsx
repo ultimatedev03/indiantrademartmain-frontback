@@ -40,7 +40,10 @@ const BuyerHeaderSearch = () => {
 
       {/* Right Actions */}
       <div className="flex items-center gap-3">
-        <NotificationBell userId={user?.id || user?.user_id || null} />
+        <NotificationBell
+          userId={user?.id || user?.user_id || null}
+          userEmail={user?.email || null}
+        />
         
         <div className="hidden md:flex items-center gap-3 pl-3 border-l ml-1">
            <div className="text-right hidden lg:block">

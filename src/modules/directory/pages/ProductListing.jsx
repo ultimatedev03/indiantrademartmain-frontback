@@ -49,8 +49,27 @@ const buildKeywords = (...items) => {
 const numOrNull = (v) => {
   if (v === null || v === undefined) return null;
   if (typeof v === 'number') return Number.isFinite(v) ? v : null;
-  const n = Number(String(v).replace(/[₹,\s]/g, '').trim());
+  const n = Number(String(v).replace(/[^0-9.]/g, '').trim());
   return Number.isFinite(n) ? n : null;
+};
+
+const parsePriceOrNull = (v) => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const n = Number(String(v).replace(/[^0-9.]/g, '').trim());
+  return Number.isFinite(n) ? n : null;
+};
+
+const buildPriceBounds = (items = []) => {
+  const prices = (Array.isArray(items) ? items : [])
+    .map((row) => parsePriceOrNull(row?.price))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+
+  if (!prices.length) return { min: 0, max: 100000 };
+
+  const min = Math.floor(Math.min(...prices));
+  const max = Math.ceil(Math.max(...prices));
+  return { min, max: max > min ? max : min + 1 };
 };
 
 const ProductListing = () => {
@@ -68,8 +87,29 @@ const ProductListing = () => {
     verified: false,
     inStock: false,
   });
+  const priceBounds = useMemo(() => buildPriceBounds(results), [results]);
 
   const resolvedRef = useRef({ key: '', stateId: null, cityId: null });
+
+  useEffect(() => {
+    setFilters((prev) => {
+      const range =
+        Array.isArray(prev?.priceRange) && prev.priceRange.length === 2
+          ? prev.priceRange
+          : [priceBounds.min, priceBounds.max];
+
+      const useFreshBounds = range[0] === 0 && range[1] === 100000;
+      const nextMin = useFreshBounds
+        ? priceBounds.min
+        : Math.max(priceBounds.min, Math.min(Number(range[0]) || priceBounds.min, priceBounds.max));
+      const nextMax = useFreshBounds
+        ? priceBounds.max
+        : Math.max(nextMin, Math.min(Number(range[1]) || priceBounds.max, priceBounds.max));
+
+      if (nextMin === range[0] && nextMax === range[1]) return prev;
+      return { ...prev, priceRange: [nextMin, nextMax] };
+    });
+  }, [priceBounds.min, priceBounds.max]);
 
   const headName = useMemo(
     () => microInfo?.sub_categories?.head_categories?.name || toTitleCase(headSlug),
@@ -241,9 +281,11 @@ const ProductListing = () => {
     const list = Array.isArray(results) ? results : [];
     let out = list;
 
-    const [minP, maxP] = filters.priceRange || [0, 100000];
+    const [minP, maxP] = Array.isArray(filters?.priceRange)
+      ? filters.priceRange
+      : [priceBounds.min, priceBounds.max];
     out = out.filter((p) => {
-      const price = numOrNull(p?.price);
+      const price = parsePriceOrNull(p?.price);
       if (price === null) return true;
       return price >= minP && price <= maxP;
     });
@@ -259,13 +301,13 @@ const ProductListing = () => {
 
     if (filters.inStock) {
       out = out.filter((p) => {
-        const stock = numOrNull(p?.stock);
+        const stock = numOrNull(p?.stock) ?? numOrNull(p?.available_quantity);
         return stock === null ? true : stock > 0;
       });
     }
 
     return out;
-  }, [results, filters]);
+  }, [results, filters, priceBounds.min, priceBounds.max]);
 
   const chipBase = 'inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-sm font-medium transition';
   const chip = `${chipBase} bg-white text-slate-700 border-slate-200 hover:border-slate-300`;
@@ -330,7 +372,7 @@ const ProductListing = () => {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-3">
-              <SearchFilters filters={filters} setFilters={setFilters} />
+              <SearchFilters filters={filters} setFilters={setFilters} priceBounds={priceBounds} />
             </div>
             <div className="lg:col-span-9">
               <SearchResultsList products={filtered} query={microName} city={citySlug} category={microSlug} />
@@ -343,3 +385,4 @@ const ProductListing = () => {
 };
 
 export default ProductListing;
+

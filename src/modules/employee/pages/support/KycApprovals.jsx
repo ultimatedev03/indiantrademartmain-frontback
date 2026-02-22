@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, FileText, AlertCircle, Check, X, Eye } from 'lucide-react';
+import { Loader2, FileText, AlertCircle, Check, X, Eye, BellRing, Mail } from 'lucide-react';
 
 const normalizeStatus = (status) => String(status || 'PENDING').trim().toUpperCase();
 const formatDate = (value) => {
@@ -52,6 +52,7 @@ const normalizeDocuments = (documents = []) =>
 
 const KycApprovals = () => {
   const { user } = useEmployeeAuth();
+  const isSupportUser = normalizeStatus(user?.role) === 'SUPPORT';
 
   const [vendorsWithDocs, setVendorsWithDocs] = useState([]);
   const [vendorsWithoutDocs, setVendorsWithoutDocs] = useState([]);
@@ -65,6 +66,7 @@ const KycApprovals = () => {
   const [imgErrors, setImgErrors] = useState({});
 
   const [busyActionKey, setBusyActionKey] = useState('');
+  const [reminderBusyKey, setReminderBusyKey] = useState('');
 
   useEffect(() => {
     if (!user) return;
@@ -72,7 +74,103 @@ const KycApprovals = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel(`kyc-status-map-sync:${user?.id || user?.email || 'employee'}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'vendors' },
+        (payload) => {
+          const oldStatus = normalizeStatus(payload?.old?.kyc_status);
+          const newStatus = normalizeStatus(payload?.new?.kyc_status);
+          if (oldStatus === newStatus && payload?.old?.updated_at === payload?.new?.updated_at) {
+            return;
+          }
+
+          void loadVendors();
+          if (selectedVendor?.id && payload?.new?.id === selectedVendor.id) {
+            setSelectedVendor((prev) => ({ ...(prev || {}), ...(payload?.new || {}) }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.email, selectedVendor?.id]);
+
   const getBusyKey = (action, vendorId) => `${action}:${vendorId}`;
+  const getReminderKey = (target, delivery, vendorId) => `reminder:${target}:${delivery}:${vendorId}`;
+
+  const fetchVendorDocCounts = async (vendorIds = []) => {
+    if (!Array.isArray(vendorIds) || vendorIds.length === 0) return {};
+    const vendorIdSet = new Set(vendorIds.map((id) => String(id || '').trim()).filter(Boolean));
+
+    try {
+      const response = await fetchWithCsrf(apiUrl('/api/kyc/vendors/document-counts'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vendorIds }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success || typeof payload?.counts !== 'object') {
+        throw new Error(payload?.error || payload?.details || 'Failed to fetch document counts');
+      }
+
+      return Object.entries(payload.counts || {}).reduce((acc, [key, value]) => {
+        const safeKey = String(key || '').trim();
+        if (!safeKey) return acc;
+        acc[safeKey] = Number(value) || 0;
+        return acc;
+      }, {});
+    } catch (apiError) {
+      // Fallback for legacy environments where endpoint is not available.
+      let docsRows = [];
+      const { data: vendorDocs, error: docsError } = await supabase
+        .from('vendor_documents')
+        .select('vendor_id')
+        .in('vendor_id', Array.from(vendorIdSet));
+      if (!docsError && Array.isArray(vendorDocs)) {
+        docsRows = vendorDocs;
+      }
+
+      try {
+        const { data: legacyDocs, error: legacyDocsError } = await supabase
+          .from('kyc_documents')
+          .select('vendor_id')
+          .in('vendor_id', Array.from(vendorIdSet));
+        if (!legacyDocsError && Array.isArray(legacyDocs)) {
+          docsRows = [...docsRows, ...legacyDocs];
+        }
+      } catch {
+        // ignore optional table failures
+      }
+
+      const counts = docsRows.reduce((acc, row) => {
+        const key = String(row?.vendor_id || '').trim();
+        if (!key) return acc;
+        if (!vendorIdSet.has(key)) return acc;
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
+
+      vendorIdSet.forEach((id) => {
+        if (!Object.prototype.hasOwnProperty.call(counts, id)) {
+          counts[id] = 0;
+        }
+      });
+
+      if (Object.keys(counts).length) {
+        return counts;
+      }
+      throw apiError;
+    }
+  };
 
   const loadVendors = async () => {
     setLoading(true);
@@ -88,36 +186,7 @@ const KycApprovals = () => {
         TRACKED_KYC_STATUSES.includes(normalizeStatus(vendor?.kyc_status))
       );
       const vendorIds = safeVendors.map((vendor) => vendor.id).filter(Boolean);
-
-      let docsRows = [];
-      if (vendorIds.length > 0) {
-        const { data: vendorDocs, error: docsError } = await supabase
-          .from('vendor_documents')
-          .select('vendor_id')
-          .in('vendor_id', vendorIds);
-        if (docsError) throw docsError;
-        docsRows = vendorDocs || [];
-
-        // Backward-compatible fallback for environments still using kyc_documents.
-        try {
-          const { data: legacyDocs, error: legacyDocsError } = await supabase
-            .from('kyc_documents')
-            .select('vendor_id')
-            .in('vendor_id', vendorIds);
-          if (!legacyDocsError && Array.isArray(legacyDocs)) {
-            docsRows = [...docsRows, ...legacyDocs];
-          }
-        } catch {
-          // ignore optional table failures
-        }
-      }
-
-      const counts = docsRows.reduce((acc, row) => {
-        const key = String(row.vendor_id || '');
-        if (!key) return acc;
-        acc[key] = (acc[key] || 0) + 1;
-        return acc;
-      }, {});
+      const counts = await fetchVendorDocCounts(vendorIds.map((id) => String(id)));
 
       const hasDocs = (vendor) => {
         const key = String(vendor?.id || '');
@@ -350,6 +419,55 @@ const KycApprovals = () => {
     }
   };
 
+  const handleSendReminder = async (
+    vendor,
+    target = 'vendor',
+    source = 'awaiting_docs',
+    delivery = 'both'
+  ) => {
+    const key = getReminderKey(target, delivery, vendor?.id);
+    setReminderBusyKey(key);
+    try {
+      const context = source === 'rejected' ? 'rejected' : 'awaiting_documents';
+      const response = await fetchWithCsrf(apiUrl(`/api/kyc/vendors/${vendor?.id}/reminder`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target, context, delivery }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || payload?.details || 'Failed to send reminder');
+      }
+
+      const summary = payload?.summary || {};
+      const isBuyerTarget = target === 'buyers';
+      const bellCount = Number(isBuyerTarget ? summary?.buyersBellSent : summary?.vendorBellSent) || 0;
+      const emailCount = Number(isBuyerTarget ? summary?.buyersEmailSent : summary?.vendorEmailSent) || 0;
+      const buyersMatched = Number(summary?.buyersMatched) || 0;
+      const emailConfigured = Boolean(summary?.emailConfigured);
+      const actionLabel =
+        delivery === 'bell'
+          ? 'Bell sent'
+          : delivery === 'email'
+            ? 'Email sent'
+            : 'Reminder sent';
+
+      toast({
+        title: isBuyerTarget ? `Buyer ${actionLabel.toLowerCase()}` : `Vendor ${actionLabel.toLowerCase()}`,
+        description: `${isBuyerTarget ? `Matched buyers: ${buyersMatched}. ` : ''}Bell: ${bellCount}, Email: ${emailCount}${emailConfigured ? '' : ' (Email not configured)'}.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Reminder failed',
+        description: error?.message || 'Could not send reminder right now.',
+        variant: 'destructive',
+      });
+    } finally {
+      setReminderBusyKey('');
+    }
+  };
+
   const selectedVendorDocCount = useMemo(() => {
     if (!selectedVendor) return 0;
     const fromMap = vendorDocCounts[String(selectedVendor.id)] || 0;
@@ -359,7 +477,10 @@ const KycApprovals = () => {
   const selectedStatus = normalizeStatus(selectedVendor?.kyc_status);
   const shouldShowInformAdmin =
     (selectedStatus === 'PENDING' || selectedStatus === 'SUBMITTED') && selectedVendorDocCount > 0;
-  const shouldShowInformSupport = selectedStatus === 'REJECTED' || selectedVendorDocCount === 0;
+  const shouldShowInformSupport =
+    !isSupportUser && (selectedStatus === 'REJECTED' || selectedVendorDocCount === 0);
+  const shouldShowSupportReminder =
+    isSupportUser && (selectedStatus === 'REJECTED' || selectedStatus === 'PENDING' || selectedStatus === 'SUBMITTED');
 
   const VendorTable = ({ vendors, title, emptyMessage, variant = 'default', action }) => (
     <Card>
@@ -399,6 +520,11 @@ const KycApprovals = () => {
                   const rowDocCount = vendorDocCounts[String(vendor.id)] || 0;
                   const supportBusy = busyActionKey === getBusyKey('support', vendor.id);
                   const adminBusy = busyActionKey === getBusyKey('admin', vendor.id);
+                  const reminderSource = action === 'support-rejected' ? 'rejected' : 'awaiting_docs';
+                  const vendorBellBusy = reminderBusyKey === getReminderKey('vendor', 'bell', vendor.id);
+                  const vendorEmailBusy = reminderBusyKey === getReminderKey('vendor', 'email', vendor.id);
+                  const buyerReminderBusy = reminderBusyKey === getReminderKey('buyers', 'both', vendor.id);
+                  const isReminderRow = action === 'support-awaiting' || action === 'support-rejected';
                   const vendorStatus = normalizeStatus(vendor.kyc_status);
                   const isApprovedVendor = vendorStatus === 'APPROVED' || vendorStatus === 'VERIFIED';
                   return (
@@ -437,6 +563,54 @@ const KycApprovals = () => {
                                 Inform Admin
                               </Button>
                             )
+                          ) : isSupportUser ? (
+                            isReminderRow ? (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={vendorBellBusy || vendorEmailBusy || buyerReminderBusy}
+                                  onClick={() => handleSendReminder(vendor, 'vendor', reminderSource, 'bell')}
+                                >
+                                  {vendorBellBusy ? (
+                                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <BellRing className="w-4 h-4 mr-1" />
+                                  )}
+                                  Notify Vendor
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={vendorBellBusy || vendorEmailBusy || buyerReminderBusy}
+                                  onClick={() => handleSendReminder(vendor, 'vendor', reminderSource, 'email')}
+                                >
+                                  {vendorEmailBusy ? (
+                                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <Mail className="w-4 h-4 mr-1" />
+                                  )}
+                                  Email Vendor
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={vendorBellBusy || vendorEmailBusy || buyerReminderBusy}
+                                  onClick={() => handleSendReminder(vendor, 'buyers', reminderSource, 'both')}
+                                >
+                                  {buyerReminderBusy ? (
+                                    <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                                  ) : (
+                                    <Mail className="w-4 h-4 mr-1" />
+                                  )}
+                                  Remind Buyers
+                                </Button>
+                              </>
+                            ) : (
+                              <Button size="sm" variant="outline" disabled>
+                                Support Queue
+                              </Button>
+                            )
                           ) : (
                             <Button
                               size="sm"
@@ -465,7 +639,7 @@ const KycApprovals = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-neutral-800">KYC Status Map</h1>
-        <Badge variant="outline">Data Entry Review</Badge>
+        <Badge variant="outline">{isSupportUser ? 'Support Review' : 'Data Entry Review'}</Badge>
       </div>
 
       <VendorTable
@@ -556,6 +730,80 @@ const KycApprovals = () => {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
+            {shouldShowSupportReminder ? (
+              <>
+                <Button
+                  variant="outline"
+                  disabled={
+                    reminderBusyKey === getReminderKey('vendor', 'bell', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('vendor', 'email', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('buyers', 'both', selectedVendor?.id)
+                  }
+                  onClick={() =>
+                    handleSendReminder(
+                      selectedVendor,
+                      'vendor',
+                      selectedStatus === 'REJECTED' ? 'rejected' : 'awaiting_docs',
+                      'bell'
+                    )
+                  }
+                >
+                  {reminderBusyKey === getReminderKey('vendor', 'bell', selectedVendor?.id) ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <BellRing className="w-4 h-4 mr-2" />
+                  )}
+                  Notify Vendor (Bell)
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={
+                    reminderBusyKey === getReminderKey('vendor', 'bell', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('vendor', 'email', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('buyers', 'both', selectedVendor?.id)
+                  }
+                  onClick={() =>
+                    handleSendReminder(
+                      selectedVendor,
+                      'vendor',
+                      selectedStatus === 'REJECTED' ? 'rejected' : 'awaiting_docs',
+                      'email'
+                    )
+                  }
+                >
+                  {reminderBusyKey === getReminderKey('vendor', 'email', selectedVendor?.id) ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Mail className="w-4 h-4 mr-2" />
+                  )}
+                  Email Vendor
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={
+                    reminderBusyKey === getReminderKey('vendor', 'bell', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('vendor', 'email', selectedVendor?.id) ||
+                    reminderBusyKey === getReminderKey('buyers', 'both', selectedVendor?.id)
+                  }
+                  onClick={() =>
+                    handleSendReminder(
+                      selectedVendor,
+                      'buyers',
+                      selectedStatus === 'REJECTED' ? 'rejected' : 'awaiting_docs',
+                      'both'
+                    )
+                  }
+                >
+                  {reminderBusyKey === getReminderKey('buyers', 'both', selectedVendor?.id) ? (
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Mail className="w-4 h-4 mr-2" />
+                  )}
+                  Remind Buyers (Email + Bell)
+                </Button>
+              </>
+            ) : null}
+
             {shouldShowInformSupport ? (
               <Button
                 variant="secondary"
