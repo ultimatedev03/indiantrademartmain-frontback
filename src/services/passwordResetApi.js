@@ -62,6 +62,18 @@ export const passwordResetApi = {
     );
   },
 
+  resendOTP: async (email) => {
+    if (!email) {
+      throw new Error('Email is required');
+    }
+
+    return postJson(
+      '/api/otp/resend',
+      { email: email.toLowerCase().trim() },
+      'Failed to resend OTP'
+    );
+  },
+
   resetPassword: async (email, newPassword) => {
     if (!email || !newPassword) {
       throw new Error('Email and new password are required');
