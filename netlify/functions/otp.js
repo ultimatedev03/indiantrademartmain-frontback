@@ -13,7 +13,96 @@ const supabase = createClient(
   SUPABASE_SERVICE_ROLE_KEY || ""
 );
 
-// 6-digit OTP (same as your code)
+const sanitizeEnvValue = (value) => {
+  if (typeof value !== "string") return "";
+  let cleaned = value.trim();
+  if (
+    (cleaned.startsWith("\"") && cleaned.endsWith("\"")) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned;
+};
+
+const readEnv = (...keys) => {
+  for (const key of keys) {
+    const value = sanitizeEnvValue(process.env[key]);
+    if (value) return value;
+  }
+  return "";
+};
+
+const parseBoolean = (value, fallback = false) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return fallback;
+};
+
+const SMTP_CONFIG = Object.freeze({
+  host: readEnv("SMTP_HOST"),
+  port: Number.parseInt(readEnv("SMTP_PORT") || "587", 10),
+  secure: parseBoolean(readEnv("SMTP_SECURE"), false),
+  user: readEnv("SMTP_USER"),
+  pass: readEnv("SMTP_PASS")
+});
+
+const GMAIL_CONFIG = Object.freeze({
+  email: readEnv("GMAIL_EMAIL", "VITE_GMAIL_EMAIL"),
+  appPassword: readEnv("GMAIL_APP_PASSWORD", "VITE_GMAIL_APP_PASSWORD").replace(/\s+/g, "")
+});
+
+const OTP_FROM_NAME = readEnv("OTP_FROM_NAME") || "IndianTradeMart";
+const OTP_FROM_EMAIL = readEnv("OTP_FROM_EMAIL") || SMTP_CONFIG.user || GMAIL_CONFIG.email;
+
+let cachedTransporter = null;
+const getTransporter = () => {
+  if (cachedTransporter) return cachedTransporter;
+
+  if (SMTP_CONFIG.host && SMTP_CONFIG.user && SMTP_CONFIG.pass) {
+    cachedTransporter = nodemailer.createTransport({
+      host: SMTP_CONFIG.host,
+      port: Number.isNaN(SMTP_CONFIG.port) ? 587 : SMTP_CONFIG.port,
+      secure: SMTP_CONFIG.secure,
+      auth: {
+        user: SMTP_CONFIG.user,
+        pass: SMTP_CONFIG.pass
+      }
+    });
+    return cachedTransporter;
+  }
+
+  if (GMAIL_CONFIG.email && GMAIL_CONFIG.appPassword) {
+    cachedTransporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: GMAIL_CONFIG.email,
+        pass: GMAIL_CONFIG.appPassword
+      }
+    });
+    return cachedTransporter;
+  }
+
+  throw new Error(
+    "Email transporter is not configured. Set SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD in Netlify environment variables."
+  );
+};
+
+const parseRequestBody = (event) => {
+  if (!event?.body) return {};
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64").toString("utf8")
+      : event.body;
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
 function generateOtp() {
   let otp = "";
   for (let i = 0; i < 6; i++) otp += Math.floor(Math.random() * 10);
@@ -24,18 +113,10 @@ function isValidEmail(email) {
   return !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-// Gmail SMTP
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_EMAIL,
-    pass: process.env.GMAIL_APP_PASSWORD
-  }
-});
-
 async function sendOtpEmail(email, otp) {
+  const transporter = getTransporter();
   const mailOptions = {
-    from: `${process.env.OTP_FROM_NAME || "IndianTradeMart"} <${process.env.GMAIL_EMAIL}>`,
+    from: OTP_FROM_EMAIL ? `${OTP_FROM_NAME} <${OTP_FROM_EMAIL}>` : OTP_FROM_NAME,
     to: email,
     subject: `Your OTP Code: ${otp}`,
     html: `
@@ -52,24 +133,43 @@ async function sendOtpEmail(email, otp) {
           </div>
           <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
           <p style="text-align: center; color: #999; font-size: 11px;">
-            © 2025 IndianTradeMart. All rights reserved.
+            &copy; 2025 IndianTradeMart. All rights reserved.
           </p>
         </body>
       </html>
     `
   };
 
-  await transporter.sendMail(mailOptions);
+  try {
+    await transporter.sendMail(mailOptions);
+  } catch (error) {
+    const responseCode = Number(error?.responseCode);
+    const isAuthError = error?.code === "EAUTH" || responseCode === 535;
+    if (isAuthError) {
+      console.error("[otp function] SMTP authentication failed. Verify Netlify email env variables.", {
+        code: error?.code,
+        responseCode: error?.responseCode
+      });
+      throw new Error("Email service authentication failed. Please update Netlify SMTP credentials.");
+    }
+    console.error("[otp function] Failed to send OTP email:", error);
+    throw new Error("Failed to send OTP email");
+  }
 }
 
 export const handler = async (event) => {
   try {
-    // Only POST
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return {
+        statusCode: 500,
+        body: JSON.stringify({ error: "Server is missing Supabase configuration." })
+      };
+    }
+
     if (event.httpMethod !== "POST") {
       return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
     }
 
-    // Parse path: /.netlify/functions/otp/request OR /verify OR /resend
     const path = event.path || "";
     const action =
       path.endsWith("/request") ? "request" :
@@ -80,31 +180,31 @@ export const handler = async (event) => {
       return { statusCode: 404, body: JSON.stringify({ error: "Invalid OTP route" }) };
     }
 
-    const body = JSON.parse(event.body || "{}");
+    const body = parseRequestBody(event);
 
-    // ✅ REQUEST / RESEND
     if (action === "request" || action === "resend") {
-      const { email } = body;
+      const email = normalizeEmail(body?.email);
 
       if (!isValidEmail(email)) {
         return { statusCode: 400, body: JSON.stringify({ error: "Invalid email format" }) };
       }
 
       const otp = generateOtp();
-      const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString(); // 2 minutes
+      const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
 
-      // delete old OTPs
       await supabase.from("auth_otps").delete().eq("email", email).eq("used", false);
 
-      // insert new OTP
-      const { error: dbError } = await supabase.from("auth_otps").insert([{
-        email,
-        otp_code: otp,
-        expires_at: expiresAt,
-        used: false
-      }]);
+      const { error: dbError } = await supabase.from("auth_otps").insert([
+        {
+          email,
+          otp_code: otp,
+          expires_at: expiresAt,
+          used: false
+        }
+      ]);
 
       if (dbError) {
+        console.error("[otp function] Failed to insert OTP:", dbError);
         return { statusCode: 500, body: JSON.stringify({ error: "Failed to generate OTP" }) };
       }
 
@@ -120,11 +220,11 @@ export const handler = async (event) => {
       };
     }
 
-    // ✅ VERIFY
     if (action === "verify") {
-      const { email, otp_code } = body;
+      const email = normalizeEmail(body?.email);
+      const otpCode = String(body?.otp_code || "").trim();
 
-      if (!email || !otp_code) {
+      if (!email || !otpCode) {
         return { statusCode: 400, body: JSON.stringify({ error: "Email and OTP code are required" }) };
       }
 
@@ -132,7 +232,7 @@ export const handler = async (event) => {
         .from("auth_otps")
         .select("*")
         .eq("email", email)
-        .eq("otp_code", String(otp_code))
+        .eq("otp_code", otpCode)
         .eq("used", false)
         .gt("expires_at", new Date().toISOString())
         .order("created_at", { ascending: false })
@@ -140,6 +240,7 @@ export const handler = async (event) => {
         .maybeSingle();
 
       if (error) {
+        console.error("[otp function] Verification query failed:", error);
         return { statusCode: 500, body: JSON.stringify({ error: "Verification failed" }) };
       }
 
@@ -157,6 +258,7 @@ export const handler = async (event) => {
 
     return { statusCode: 404, body: JSON.stringify({ error: "Unknown action" }) };
   } catch (e) {
+    console.error("[otp function] Handler error:", e);
     return { statusCode: 500, body: JSON.stringify({ error: e.message || "Server error" }) };
   }
 };

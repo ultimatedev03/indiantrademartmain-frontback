@@ -25,6 +25,8 @@ Use this checklist to keep Netlify behavior aligned with local `npm run dev`.
 - Auth: `JWT_SECRET` (plus optional `SUPABASE_JWT_SECRET`)
 - Payment: `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`
 - Email/OTP: `GMAIL_EMAIL`, `GMAIL_APP_PASSWORD` (or SMTP variables)
+  - If using Gmail App Password, save it without spaces.
+  - Optional sender override: `OTP_FROM_EMAIL`
 - Chatbot (at least one provider): `OPENAI_API_KEY` or `GROQ_API_KEY`
 
 ## 5) Deploy Verification

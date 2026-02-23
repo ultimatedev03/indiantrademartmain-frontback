@@ -3,30 +3,14 @@
 // This file is imported by React pages (SendQuotation.jsx, Buyer Quotations, etc.)
 // so it MUST be an ESM module and MUST export `quotationApi`.
 //
-// Local dev:
-//   Vite proxy routes /api -> http://localhost:3001 (see vite.config.js)
-// Production (Netlify):
-//   Netlify Functions are available at /.netlify/functions/<name>
+// All environments call same relative /api routes.
+// Dev: Vite proxy forwards /api -> local backend.
+// Prod: Netlify redirects /api/* -> /.netlify/functions/*.
 
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-
-// Helper to decide whether we're on localhost dev or Netlify
-const isLocal =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-const API_BASE = isLocal ? '/api' : '/.netlify/functions';
-
-const safeJson = async (res) => {
-  try {
-    return await res.json();
-  } catch {
-    return null;
-  }
-};
 
 const fetchQuotationJson = async (path, options = {}) => {
   const res = await fetchWithCsrf(apiUrl(path), options);
@@ -54,8 +38,8 @@ const normalizeQuotationRow = (row) => {
 export const quotationApi = {
   /**
    * Send quotation to a buyer email.
-   * - Local:   POST /api/quotation/send (proxied to Express on :3001)
-   * - Netlify: POST /.netlify/functions/quotation/send
+   * Calls same route in all environments:
+   * POST /api/quotation/send
    */
   sendQuotation: async (quotationData) => {
     const vendor = await vendorApi.auth.me();
@@ -85,19 +69,11 @@ export const quotationApi = {
       attachment_mime: quotationData?.attachment?.mime || null,
     };
 
-    const url = `${API_BASE}/quotation/send`;
-    const res = await fetch(url, {
+    return fetchQuotationJson('/api/quotation/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-
-    const data = await safeJson(res);
-    if (!res.ok) {
-      throw new Error(data?.error || data?.message || 'Failed to send quotation');
-    }
-
-    return data;
   },
 
   /**

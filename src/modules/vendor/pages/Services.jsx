@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
+import { apiUrl } from '@/lib/apiBase';
 import {
   CheckCircle2,
   Zap,
@@ -94,37 +95,6 @@ const Services = () => {
   const [paymentHistory, setPaymentHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState(null);
-
-  // ✅ API base
-  // Dev: Vite proxy can forward `/api/*` -> http://localhost:3001
-  // Prod (Netlify): call same-origin `/api/*` and let `public/_redirects`
-  // forward to `/.netlify/functions/*`.
-  // NOTE: If someone accidentally sets VITE_API_URL="http://localhost:3001" in
-  // Netlify environment vars, production will break with ERR_CONNECTION_REFUSED.
-  // So we intentionally ignore localhost API_BASE unless we are on localhost.
-  const API_BASE = useMemo(() => {
-    const raw = (import.meta.env.VITE_API_URL || '').trim();
-    if (!raw) return '';
-
-    const isBrowser = typeof window !== 'undefined';
-    const hostname = isBrowser ? window.location.hostname : '';
-    const isLocalHost = hostname === 'localhost' || hostname === '127.0.0.1';
-
-    const rawLower = raw.toLowerCase();
-    const pointsToLocalhost = rawLower.includes('localhost') || rawLower.includes('127.0.0.1');
-
-    if (!isLocalHost && pointsToLocalhost) {
-      // ✅ Safe fallback for Netlify/prod: use same-origin relative calls.
-      return '';
-    }
-
-    return raw.replace(/\/+$/, '');
-  }, []);
-
-  const apiUrl = (path) => {
-    const p = path.startsWith('/') ? path : `/${path}`;
-    return API_BASE ? `${API_BASE}${p}` : p;
-  };
 
   const mostPopularPlanId = useMemo(() => {
     if (!plans?.length) return null;
