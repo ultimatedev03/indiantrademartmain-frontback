@@ -95,6 +95,8 @@ const fetchVendorJson = async (path, options = {}) => {
     const message = payload?.error || payload?.message || 'Request failed';
     const error = new Error(message);
     error.status = response.status;
+    error.code = payload?.code || null;
+    error.payload = payload;
     throw error;
   }
   return payload;
@@ -304,266 +306,34 @@ export const leadsMarketplaceApi = {
   // ============ LEAD PURCHASE ============
 
   // Purchase a lead
-  purchaseLead: async (leadId, leadSnapshot = null) => {
-    const vendor = await vendorApi.auth.me();
-    if (!vendor?.id) throw new Error('Vendor not found');
-
-    console.log('[TRACE] Starting purchaseLead for vendor:', vendor.id);
-
+  purchaseLead: async (leadId, options = {}) => {
     const normalizedLeadId = String(leadId || '').trim();
     if (!normalizedLeadId) throw new Error('Lead not found');
 
-    // Resolve lead: prefer fresh DB row, but safely fallback to caller snapshot
-    let lead =
-      leadSnapshot && String(leadSnapshot?.id || '').trim() === normalizedLeadId
-        ? leadSnapshot
-        : null;
+    const payload = options && typeof options === 'object' ? options : {};
+    const modeRaw = String(payload?.mode || '').trim().toUpperCase();
+    const mode =
+      modeRaw === 'USE_WEEKLY' || modeRaw === 'BUY_EXTRA' || modeRaw === 'PAID'
+        ? modeRaw
+        : 'AUTO';
 
-    const { data: leadFromDb, error: leadError } = await supabase
-      .from('leads')
-      .select('*')
-      .eq('id', normalizedLeadId)
-      .maybeSingle();
+    const amountSource =
+      payload?.amount ??
+      payload?.purchase_price ??
+      payload?.purchasePrice ??
+      payload?.price;
+    const parsedAmount = Number(amountSource);
 
-    if (leadError && !lead) {
-      throw leadError;
-    }
-    if (leadFromDb) {
-      lead = leadFromDb;
-    }
-    if (!lead) {
-      throw new Error('Lead no longer available');
+    const body = { mode };
+    if (Number.isFinite(parsedAmount)) {
+      body.amount = Math.max(0, parsedAmount);
     }
 
-    // Lead can be purchased by multiple vendors; only block closed states.
-    const status = String(lead?.status || '').toUpperCase();
-    if (status && !['AVAILABLE', 'PURCHASED'].includes(status)) {
-      throw new Error('Lead no longer available');
-    }
-
-    // Check if already purchased by this vendor
-    const { data: alreadyPurchasedRows, error: alreadyPurchasedError } = await supabase
-      .from('lead_purchases')
-      .select('id')
-      .eq('vendor_id', vendor.id)
-      .eq('lead_id', normalizedLeadId)
-      .limit(1);
-
-    if (alreadyPurchasedError) {
-      console.warn('Lead purchase pre-check failed (already purchased):', alreadyPurchasedError);
-    }
-
-    if (Array.isArray(alreadyPurchasedRows) && alreadyPurchasedRows.length > 0) {
-      throw new Error('You already purchased this lead');
-    }
-
-    // Soft-check vendor cap per lead (do not block on read-policy errors)
-    const { count: purchaseCount, error: countError } = await supabase
-      .from('lead_purchases')
-      .select('id', { count: 'exact', head: true })
-      .eq('lead_id', normalizedLeadId);
-
-    if (countError) {
-      console.warn('Lead purchase count check failed:', countError);
-    } else if ((purchaseCount || 0) >= 5) {
-      throw new Error('This lead has reached maximum 5 vendors limit');
-    }
-
-    // ✅ Check active subscription and plan validity
-    console.log('[TRACE] Querying subscriptions for vendor:', vendor.id);
-    
-    // Due to RLS blocking the query, fetch ALL subscriptions and filter client-side
-    const { data: allSubscriptions, error: allError } = await supabase
-      .from('vendor_plan_subscriptions')
-      .select('*')
-      .eq('vendor_id', vendor.id);
-    
-    console.log('[TRACE] All subscriptions query result:', { error: allError, count: allSubscriptions?.length });
-    
-    // Find the first ACTIVE subscription
-    let subData = null;
-    if (allSubscriptions && allSubscriptions.length > 0) {
-      subData = allSubscriptions.find(sub => sub.status === 'ACTIVE');
-      console.log('[TRACE] Found ACTIVE subscription:', { exists: !!subData, subData });
-    }
-    
-    // If subscription exists, fetch the plan separately
-    let subscription = null;
-    if (subData && subData.plan_id) {
-      const { data: planData } = await supabase
-        .from('vendor_plans')
-        .select('*')
-        .eq('id', subData.plan_id)
-        .maybeSingle();
-      
-      subscription = { ...subData, plan: planData };
-      console.log('[TRACE] Plan fetched:', { planExists: !!planData, planName: planData?.name });
-    } else {
-      subscription = subData;
-      console.log('[TRACE] No ACTIVE subscription found or missing plan_id');
-    }
-
-    console.log('[DEBUG] Subscription check:', {
-      vendor_id: vendor.id,
-      subscription_exists: !!subscription,
-      subscription_status: subscription?.status,
-      subscription_end_date: subscription?.end_date,
-      subscription_plan_id: subscription?.plan_id,
-      plan_exists: !!subscription?.plan,
-      plan_data: subscription?.plan,
-      is_subscription_null: subscription === null,
-      is_subscription_undefined: subscription === undefined,
-      is_active_result: isSubscriptionActive(subscription)
+    return fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-
-    if (!isSubscriptionActive(subscription)) {
-      console.error('[ERROR] Subscription check failed:', {
-        subscription,
-        vendor_id: vendor.id,
-        subscription_status: subscription?.status,
-        subscription_end_date: subscription?.end_date
-      });
-      throw new Error('No active subscription plan. Please subscribe to purchase leads.');
-    }
-
-    // Get plan limits from subscription
-    const plan = subscription.plan;
-    const dailyLimit = plan?.daily_limit || 0;
-    const weeklyLimit = plan?.weekly_limit || 0;
-    const yearlyLimit = plan?.yearly_limit || 0;
-
-    // Get and reset quota - create if doesn't exist
-    let { data: quota } = await supabase
-      .from('vendor_lead_quota')
-      .select('*')
-      .eq('vendor_id', vendor.id)
-      .maybeSingle();
-
-    // If quota doesn't exist, create it
-    if (!quota) {
-      const quotaPayload = {
-        vendor_id: vendor.id,
-        plan_id: subscription.plan_id,
-        daily_used: 0,
-        weekly_used: 0,
-        yearly_used: 0,
-        daily_reset_at: new Date().toISOString(),
-        weekly_reset_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const { data: newQuota, error: quotaError } = await supabase
-        .from('vendor_lead_quota')
-        .insert([quotaPayload])
-        .select()
-        .maybeSingle();
-      
-      if (quotaError) {
-        console.error('Failed to create quota:', quotaError);
-        // Continue anyway - maybe quota check isn't critical
-      } else {
-        quota = newQuota || quotaPayload;
-      }
-    } else if (quota) {
-      quota = await resetQuota(vendor.id, quota);
-    }
-
-    // Check quota against plan limits (only if limit > 0, meaning it's enforced)
-    let withinIncludedQuota = true;
-    if (quota) {
-      const dailyRem = dailyLimit > 0 ? dailyLimit - (quota.daily_used || 0) : Infinity;
-      const weeklyRem = weeklyLimit > 0 ? weeklyLimit - (quota.weekly_used || 0) : Infinity;
-      const yearlyRem = yearlyLimit > 0 ? yearlyLimit - (quota.yearly_used || 0) : Infinity;
-      const minRem = Math.min(dailyRem, weeklyRem, yearlyRem);
-      withinIncludedQuota = minRem > 0;
-    }
-
-    // Calculate lead price
-    // If within included quota => free; else pay-per-lead using lead.price or default ₹50
-    const leadPrice = withinIncludedQuota ? 0 : (lead?.price ?? 50);
-
-    // Prefer backend purchase endpoint (service-role path; avoids client RLS insert errors).
-    const purchasePayload = {
-      vendor_id: vendor.id,
-      lead_id: normalizedLeadId,
-      amount: leadPrice,
-      payment_status: 'COMPLETED',
-      purchase_date: new Date().toISOString()
-    };
-
-    let purchase = null;
-    let usedBackendPurchase = false;
-    try {
-      const result = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: leadPrice }),
-      });
-      purchase = result?.purchase || null;
-      usedBackendPurchase = true;
-    } catch (backendError) {
-      const status = Number(backendError?.status || 0);
-      if (status === 401 || status === 403) {
-        throw new Error(backendError?.message || 'Unauthorized');
-      }
-      if (status >= 400 && status < 500 && status !== 404) {
-        throw backendError;
-      }
-      console.warn('Backend lead purchase endpoint failed, falling back to client insert:', backendError);
-    }
-
-    if (!purchase) {
-      const { data: purchaseRow, error: purchaseError } = await supabase
-        .from('lead_purchases')
-        .insert([purchasePayload])
-        .select()
-        .maybeSingle();
-
-      if (purchaseError) throw purchaseError;
-      purchase = purchaseRow || null;
-    }
-
-    if (!usedBackendPurchase) {
-      // Update lead status when fallback path was used.
-      await supabase
-        .from('leads')
-        .update({ status: 'PURCHASED' })
-        .eq('id', normalizedLeadId);
-    }
-
-    // Update quota (track usage even for paid extra leads)
-    if (quota) {
-      await supabase
-        .from('vendor_lead_quota')
-        .update({
-          daily_used: (quota.daily_used || 0) + 1,
-          weekly_used: (quota.weekly_used || 0) + 1,
-          yearly_used: (quota.yearly_used || 0) + 1,
-          updated_at: new Date().toISOString()
-        })
-        .eq('vendor_id', vendor.id);
-    }
-
-    if (!usedBackendPurchase) {
-      try {
-        const userId = vendor.user_id || (await supabase.auth.getUser()).data?.user?.id;
-        if (userId) {
-          await supabase.from('notifications').insert([{
-            user_id: userId,
-            type: 'LEAD_PURCHASED',
-            title: 'Lead purchased',
-            message: `You purchased a lead${lead?.product_name ? ` for ${lead.product_name}` : ''}. Contact details are now available.`,
-            link: '/vendor/leads',
-            is_read: false,
-            created_at: new Date().toISOString()
-          }]);
-        }
-      } catch (e) {
-        console.warn('Lead purchase notification failed:', e);
-      }
-    }
-
-    return purchase || { ...purchasePayload, id: null };
   },
 
   // ============ PURCHASED LEAD DETAILS ============

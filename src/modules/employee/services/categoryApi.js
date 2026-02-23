@@ -210,7 +210,7 @@ const buildSingleImagePayloadCandidates = ({ basePayload, imageUrl }) =>
   ]);
 
 // --- CATEGORY IMAGE UPLOAD ---
-const CATEGORY_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
+// const CATEGORY_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
 const CATEGORY_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
 
 const safeSlug = (v) =>
@@ -238,9 +238,10 @@ const uploadCategoryImage = async ({ level, slug, file }) => {
     throw new Error('Only image files are allowed');
   }
 
-  const size = Number(file?.size || 0);
-  if (size < CATEGORY_IMAGE_MIN_BYTES) {
-    throw new Error(`Image must be at least ${Math.round(CATEGORY_IMAGE_MIN_BYTES / 1024)}KB`);
+ const size = Number(file?.size || 0);
+
+  if (size > CATEGORY_IMAGE_MAX_BYTES) {
+    throw new Error(`Image must be at most ${Math.round(CATEGORY_IMAGE_MAX_BYTES / 1024)}KB`);
   }
   if (size > CATEGORY_IMAGE_MAX_BYTES) {
     throw new Error(`Image must be at most ${Math.round(CATEGORY_IMAGE_MAX_BYTES / 1024)}KB`);

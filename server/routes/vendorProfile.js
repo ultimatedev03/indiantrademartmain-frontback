@@ -946,6 +946,63 @@ async function insertNotification(payload = {}) {
   if (error) throw error;
 }
 
+const LEAD_CONSUMPTION_STATUS_BY_CODE = {
+  INVALID_INPUT: 400,
+  LEAD_NOT_FOUND: 404,
+  LEAD_UNAVAILABLE: 409,
+  LEAD_NOT_PURCHASABLE: 409,
+  LEAD_CAP_REACHED: 409,
+  SUBSCRIPTION_INACTIVE: 403,
+  PAID_REQUIRED: 402,
+};
+
+const normalizeLeadConsumptionMode = (value) => {
+  const mode = String(value || '').trim().toUpperCase();
+  if (mode === 'USE_WEEKLY') return 'USE_WEEKLY';
+  if (mode === 'BUY_EXTRA') return 'BUY_EXTRA';
+  if (mode === 'PAID') return 'PAID';
+  return 'AUTO';
+};
+
+const parseLeadPriceNumber = (value, fallback = 0) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value);
+  const cleaned = String(value ?? '').replace(/[^0-9.]/g, '');
+  const parsed = Number(cleaned);
+  if (Number.isFinite(parsed)) return Math.max(0, parsed);
+  return Math.max(0, Number(fallback) || 0);
+};
+
+async function consumeLeadForVendor({ vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) {
+  const { data, error } = await supabase.rpc('consume_vendor_lead', {
+    p_vendor_id: vendorId,
+    p_lead_id: leadId,
+    p_mode: mode,
+    p_purchase_price: purchasePrice,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Lead consumption failed');
+  }
+
+  const result = data && typeof data === 'object' ? data : {};
+  if (!result.success) {
+    const code = String(result.code || 'CONSUMPTION_FAILED').trim().toUpperCase();
+    const statusCode = LEAD_CONSUMPTION_STATUS_BY_CODE[code] || 400;
+    return {
+      success: false,
+      statusCode,
+      code,
+      error: result.error || 'Lead consumption failed',
+      payload: result,
+    };
+  }
+
+  return {
+    success: true,
+    payload: result,
+  };
+}
+
 // ✅ Current vendor profile (auth-required)
 router.get('/me', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
@@ -1449,69 +1506,45 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
     if (!lead) {
       return res.status(404).json({ success: false, error: 'Lead not found' });
     }
+    const mode = normalizeLeadConsumptionMode(req.body?.mode);
+    const fallbackAmount = parseLeadPriceNumber(lead?.price, 50);
+    const requestedAmount = parseLeadPriceNumber(req.body?.amount, fallbackAmount);
 
-    const leadStatus = String(lead?.status || '').toUpperCase();
-    if (leadStatus && !['AVAILABLE', 'PURCHASED'].includes(leadStatus)) {
-      return res.status(409).json({ success: false, error: 'Lead no longer available' });
+    const consumeResult = await consumeLeadForVendor({
+      vendorId: vendor.id,
+      leadId,
+      mode,
+      purchasePrice: requestedAmount,
+    });
+
+    if (!consumeResult.success) {
+      return res.status(consumeResult.statusCode).json({
+        success: false,
+        code: consumeResult.code,
+        error: consumeResult.error,
+        ...(consumeResult.payload || {}),
+      });
     }
 
-    const { data: existingRows, error: existingError } = await supabase
-      .from('lead_purchases')
-      .select('id, purchase_date, amount')
-      .eq('vendor_id', vendor.id)
-      .eq('lead_id', leadId)
-      .order('purchase_date', { ascending: false })
-      .limit(1);
-
-    if (existingError) {
-      return res.status(500).json({ success: false, error: existingError.message || 'Failed to validate purchase' });
-    }
-    if (Array.isArray(existingRows) && existingRows.length > 0) {
-      return res.status(409).json({ success: false, error: 'You already purchased this lead' });
-    }
-
-    const { count: purchaseCount, error: countError } = await supabase
-      .from('lead_purchases')
-      .select('id', { count: 'exact', head: true })
-      .eq('lead_id', leadId);
-
-    if (countError) {
-      return res.status(500).json({ success: false, error: countError.message || 'Failed to validate lead capacity' });
-    }
-    if ((purchaseCount || 0) >= 5) {
-      return res.status(409).json({ success: false, error: 'This lead has reached maximum 5 vendors limit' });
-    }
-
-    const amountFromBody = Number(req.body?.amount);
-    const fallbackAmount = Number.isFinite(Number(lead?.price)) ? Number(lead.price) : 50;
-    const finalAmount = Number.isFinite(amountFromBody) ? amountFromBody : fallbackAmount;
-
-    const purchasePayload = {
-      vendor_id: vendor.id,
-      lead_id: leadId,
-      amount: finalAmount,
-      payment_status: 'COMPLETED',
-      purchase_date: new Date().toISOString(),
-    };
-
-    const { data: purchaseRow, error: purchaseError } = await supabase
-      .from('lead_purchases')
-      .insert([purchasePayload])
-      .select('*')
-      .maybeSingle();
-
-    if (purchaseError) {
-      return res.status(500).json({ success: false, error: purchaseError.message || 'Failed to purchase lead' });
-    }
-
-    await supabase
-      .from('leads')
-      .update({ status: 'PURCHASED' })
-      .eq('id', leadId);
+    const payload = consumeResult.payload || {};
+    const purchaseRow = payload?.purchase && typeof payload.purchase === 'object'
+      ? payload.purchase
+      : null;
+    const purchaseDatetime =
+      purchaseRow?.purchase_datetime ||
+      purchaseRow?.purchase_date ||
+      payload?.purchase_datetime ||
+      new Date().toISOString();
+    const wasExistingPurchase = Boolean(payload?.existing_purchase);
+    const responseConsumptionType =
+      payload?.consumption_type ||
+      purchaseRow?.consumption_type ||
+      'PAID_EXTRA';
+    const remaining = payload?.remaining || { daily: 0, weekly: 0, yearly: 0 };
 
     try {
       const vendorUserId = vendor?.user_id || null;
-      if (vendorUserId) {
+      if (vendorUserId && !wasExistingPurchase) {
         await insertNotification({
           user_id: vendorUserId,
           type: 'LEAD_PURCHASED',
@@ -1527,9 +1560,17 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
       console.warn('Lead purchase notification failed:', notifError?.message || notifError);
     }
 
-    return res.status(201).json({
+    return res.status(wasExistingPurchase ? 200 : 201).json({
       success: true,
-      purchase: purchaseRow || { ...purchasePayload, id: null },
+      existing_purchase: wasExistingPurchase,
+      consumption_type: responseConsumptionType,
+      remaining,
+      moved_to_my_leads: true,
+      purchase_datetime: purchaseDatetime,
+      plan_name: payload?.plan_name || payload?.subscription_plan_name || purchaseRow?.subscription_plan_name || null,
+      subscription_plan_name: payload?.subscription_plan_name || payload?.plan_name || purchaseRow?.subscription_plan_name || null,
+      lead_status: payload?.lead_status || purchaseRow?.lead_status || 'ACTIVE',
+      purchase: purchaseRow,
     });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to purchase lead' });
@@ -1563,10 +1604,12 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
 
     const { data: purchaseRows, error: purchaseError } = await supabase
       .from('lead_purchases')
-      .select('id, purchase_date, amount, payment_status')
+      .select(
+        'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+      )
       .eq('vendor_id', vendor.id)
       .eq('lead_id', leadId)
-      .order('purchase_date', { ascending: false })
+      .order('purchase_datetime', { ascending: false })
       .limit(1);
 
     if (purchaseError) {
@@ -1598,13 +1641,23 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
     }
 
     const source = isDirect ? 'Direct' : purchase ? 'Purchased' : 'Marketplace';
+    const normalizedPurchaseDatetime =
+      purchase?.purchase_datetime ||
+      purchase?.purchase_date ||
+      lead?.created_at ||
+      null;
     const responseLead = {
       ...lead,
       source,
-      purchase_date: purchase?.purchase_date || lead?.created_at || null,
+      purchase_date: normalizedPurchaseDatetime,
+      purchase_datetime: normalizedPurchaseDatetime,
       lead_purchase_id: purchase?.id || null,
-      purchase_amount: purchase?.amount ?? null,
+      purchase_amount: purchase?.purchase_price ?? purchase?.amount ?? null,
       payment_status: purchase?.payment_status || null,
+      consumption_type: purchase?.consumption_type || null,
+      lead_status: purchase?.lead_status || null,
+      subscription_plan_name: purchase?.subscription_plan_name || null,
+      plan_name: purchase?.subscription_plan_name || null,
     };
 
     return res.json({ success: true, lead: responseLead });
@@ -1620,8 +1673,11 @@ router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => 
 
     const { data: purchases, error: purchaseError } = await supabase
       .from('lead_purchases')
-      .select('id, lead_id, amount, payment_status, purchase_date')
+      .select(
+        'id, lead_id, amount, purchase_price, payment_status, purchase_date, purchase_datetime, consumption_type, lead_status, subscription_plan_name'
+      )
       .eq('vendor_id', vendor.id)
+      .order('purchase_datetime', { ascending: false, nullsFirst: false })
       .order('purchase_date', { ascending: false });
 
     if (purchaseError) {
@@ -1648,13 +1704,23 @@ router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => 
         .map((purchase) => {
           const lead = leadById.get(String(purchase?.lead_id || ''));
           if (!lead) return null;
+          const normalizedPurchaseDatetime =
+            purchase?.purchase_datetime ||
+            purchase?.purchase_date ||
+            lead?.created_at ||
+            null;
           return {
             ...lead,
             source: 'Purchased',
-            purchase_date: purchase?.purchase_date || lead?.created_at || null,
+            purchase_date: normalizedPurchaseDatetime,
+            purchase_datetime: normalizedPurchaseDatetime,
             lead_purchase_id: purchase?.id || null,
-            purchase_amount: purchase?.amount ?? null,
+            purchase_amount: purchase?.purchase_price ?? purchase?.amount ?? null,
             payment_status: purchase?.payment_status || null,
+            consumption_type: purchase?.consumption_type || null,
+            lead_status: purchase?.lead_status || null,
+            subscription_plan_name: purchase?.subscription_plan_name || null,
+            plan_name: purchase?.subscription_plan_name || null,
           };
         })
         .filter(Boolean);

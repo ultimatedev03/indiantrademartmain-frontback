@@ -317,6 +317,7 @@ const Leads = () => {
         if (isPurchased) purchasedCount += 1;
 
         const purchaseDate =
+          row?.purchase_datetime ||
           row?.purchase_date ||
           row?.purchaseDate ||
           row?.purchased_at ||
@@ -364,12 +365,6 @@ const Leads = () => {
           };
         }
         quota = await vendorApi.leadQuota.get();
-        if (!quota || !quota.plan_id) {
-          if (sub?.plan_id) {
-            await vendorApi.leadQuota.initialize(sub.plan_id);
-            quota = await vendorApi.leadQuota.get();
-          }
-        }
       } catch (err) {
         console.error("Failed to load quota:", err);
       }
@@ -464,7 +459,8 @@ const Leads = () => {
   const normalizedMarketplaceLeads = useMemo(() => {
     return (marketplaceLeads || []).map((row) => {
       const leadObj = row?.leads || row;
-      const purchaseDate = row?.purchase_date || row?.purchaseDate || row?.purchased_at || null;
+      const purchaseDate =
+        row?.purchase_datetime || row?.purchase_date || row?.purchaseDate || row?.purchased_at || null;
       return { __raw: row, __lead: leadObj, __purchaseDate: purchaseDate };
     });
   }, [marketplaceLeads]);
@@ -472,7 +468,8 @@ const Leads = () => {
   const normalizedMyLeads = useMemo(() => {
     return (myLeads || []).map((row) => {
       const leadObj = row?.leads || row;
-      const purchaseDate = row?.purchase_date || row?.purchaseDate || row?.purchased_at || null;
+      const purchaseDate =
+        row?.purchase_datetime || row?.purchase_date || row?.purchaseDate || row?.purchased_at || null;
       return { __raw: row, __lead: leadObj, __purchaseDate: purchaseDate };
     });
   }, [myLeads]);
@@ -1080,6 +1077,7 @@ const Leads = () => {
                     lead={__lead}
                     source={__raw?.source || "Purchased"}
                     purchaseDate={__purchaseDate}
+                    purchaseMeta={__raw}
                     onView={handleViewDetails}
                   />
                 ))
@@ -1121,6 +1119,7 @@ const LeadCard = ({
   onBuy,
   isPurchasing,
   purchaseDate,
+  purchaseMeta,
   onView,
 }) => {
   const meta = getLeadMeta(lead);
@@ -1135,8 +1134,38 @@ const LeadCard = ({
     return Number.isFinite(n) ? Math.max(0, n) : 50;
   })();
 
+  const purchaseInfo =
+    purchaseMeta && typeof purchaseMeta === "object"
+      ? { ...(lead || {}), ...purchaseMeta }
+      : lead || {};
+  const purchaseDateTime =
+    purchaseInfo?.purchase_datetime ||
+    purchaseInfo?.purchase_date ||
+    purchaseDate ||
+    null;
+  const consumptionTypeRaw = String(purchaseInfo?.consumption_type || "")
+    .trim()
+    .toUpperCase();
+  const consumptionTypeLabel =
+    consumptionTypeRaw === "DAILY_INCLUDED"
+      ? "Daily Included"
+      : consumptionTypeRaw === "WEEKLY_INCLUDED"
+        ? "Weekly Included"
+        : consumptionTypeRaw === "PAID_EXTRA"
+          ? "Paid Extra"
+          : "";
+  const leadStatusRaw = String(purchaseInfo?.lead_status || "")
+    .trim()
+    .toUpperCase();
+  const leadStatusLabel =
+    leadStatusRaw === "ACTIVE" || leadStatusRaw === "VIEWED" || leadStatusRaw === "CLOSED"
+      ? leadStatusRaw
+      : "";
+  const subscriptionPlanName =
+    purchaseInfo?.subscription_plan_name || purchaseInfo?.plan_name || "";
+
   const dateObj =
-    safeDate(isPurchased || isDirect ? purchaseDate : lead?.created_at || lead?.createdAt) ||
+    safeDate(isPurchased || isDirect ? purchaseDateTime : lead?.created_at || lead?.createdAt) ||
     meta.createdAt;
 
   const displayDate = dateObj ? dateObj.toLocaleDateString() : "-";
@@ -1161,7 +1190,7 @@ const LeadCard = ({
   const buyerName = isBuyerUnlocked ? buyerNameRaw : null;
   const buyerPhone = isBuyerUnlocked ? buyerPhoneRaw : null;
   const buyerEmail = isBuyerUnlocked ? buyerEmailRaw : null;
-  const purchasedAtObj = isPurchased ? safeDate(purchaseDate) : null;
+  const purchasedAtObj = isPurchased ? safeDate(purchaseDateTime) : null;
   const purchasedAtLabel = purchasedAtObj
     ? purchasedAtObj.toLocaleString("en-IN", {
         day: "2-digit",
@@ -1269,6 +1298,21 @@ const LeadCard = ({
                 {isPurchased && purchasedAtLabel ? (
                   <div className="pt-1 text-[11px] text-green-700 font-medium">
                     Purchased on {purchasedAtLabel}
+                  </div>
+                ) : null}
+                {isPurchased && consumptionTypeLabel ? (
+                  <div className="text-[11px] text-green-800">
+                    Type: {consumptionTypeLabel}
+                  </div>
+                ) : null}
+                {isPurchased && leadStatusLabel ? (
+                  <div className="text-[11px] text-green-800">
+                    Status: {leadStatusLabel}
+                  </div>
+                ) : null}
+                {isPurchased && subscriptionPlanName ? (
+                  <div className="text-[11px] text-green-800 truncate">
+                    Plan: {subscriptionPlanName}
                   </div>
                 ) : null}
               </div>

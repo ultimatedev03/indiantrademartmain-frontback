@@ -150,6 +150,66 @@ const parseCurrencyAmount = (value, fallback = 50) => {
   return Math.max(0, n);
 };
 
+const LEAD_CONSUMPTION_STATUS_BY_CODE = {
+  INVALID_INPUT: 400,
+  LEAD_NOT_FOUND: 404,
+  LEAD_UNAVAILABLE: 409,
+  LEAD_NOT_PURCHASABLE: 409,
+  LEAD_CAP_REACHED: 409,
+  SUBSCRIPTION_INACTIVE: 403,
+  PAID_REQUIRED: 402,
+};
+
+const consumeLeadForVendor = async (supabase, { vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) => {
+  const { data, error } = await supabase.rpc('consume_vendor_lead', {
+    p_vendor_id: vendorId,
+    p_lead_id: leadId,
+    p_mode: mode,
+    p_purchase_price: purchasePrice,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Lead consumption failed');
+  }
+
+  const result = data && typeof data === 'object' ? data : {};
+  if (!result.success) {
+    const code = String(result.code || 'CONSUMPTION_FAILED').trim().toUpperCase();
+    const statusCode = LEAD_CONSUMPTION_STATUS_BY_CODE[code] || 400;
+    return {
+      success: false,
+      statusCode,
+      code,
+      error: result.error || 'Lead consumption failed',
+      payload: result,
+    };
+  }
+
+  return {
+    success: true,
+    payload: result,
+  };
+};
+
+const getActiveVendorSubscription = async (supabase, vendorId) => {
+  const nowIso = new Date().toISOString();
+  const { data: rows, error } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('id, vendor_id, plan_id, status, start_date, end_date')
+    .eq('vendor_id', vendorId)
+    .eq('status', 'ACTIVE')
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to validate subscription');
+  }
+
+  const active = (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso);
+  return active || null;
+};
+
 const resolveAuthenticatedUser = async (event, supabase) => {
   const bearer = parseBearerToken(event?.headers || {});
   if (bearer) {
@@ -654,6 +714,11 @@ export const handler = async (event) => {
       const vendor = await resolveVendorForAuthUser(supabase, authUser);
       if (!vendor?.id) return json(404, { error: 'Vendor profile not found' });
 
+      const activeSubscription = await getActiveVendorSubscription(supabase, vendor.id);
+      if (!activeSubscription) {
+        return json(403, { error: 'No active subscription plan' });
+      }
+
       const { data: lead, error: leadError } = await supabase
         .from('leads')
         .select('*')
@@ -780,55 +845,34 @@ export const handler = async (event) => {
         return json(409, { error: 'Lead no longer available' });
       }
 
-      const { data: existingRows, error: existingError } = await supabase
-        .from('lead_purchases')
-        .select('*')
-        .eq('vendor_id', vendor.id)
-        .eq('lead_id', leadId)
-        .order('purchase_date', { ascending: false })
-        .limit(1);
+      const purchaseAmount = parseCurrencyAmount(lead?.price, 50);
+      const consumeResult = await consumeLeadForVendor(supabase, {
+        vendorId: vendor.id,
+        leadId,
+        mode: 'BUY_EXTRA',
+        purchasePrice: purchaseAmount,
+      });
 
-      if (existingError) return json(500, { error: existingError.message || 'Failed to validate purchase' });
-      if (Array.isArray(existingRows) && existingRows.length > 0) {
-        return json(200, {
-          success: true,
-          message: 'Lead already purchased',
-          purchase: existingRows[0],
+      if (!consumeResult.success) {
+        return json(consumeResult.statusCode, {
+          success: false,
+          code: consumeResult.code,
+          error: consumeResult.error,
+          ...(consumeResult.payload || {}),
         });
       }
 
-      const { count: purchaseCount, error: countError } = await supabase
-        .from('lead_purchases')
-        .select('id', { count: 'exact', head: true })
-        .eq('lead_id', leadId);
-
-      if (countError) {
-        return json(500, { error: countError.message || 'Failed to validate lead capacity' });
-      }
-      if ((purchaseCount || 0) >= 5) {
-        return json(409, { error: 'This lead has reached maximum 5 vendors limit' });
-      }
-
-      const purchaseAmount = parseCurrencyAmount(lead?.price, 50);
-      const purchasePayload = {
-        vendor_id: vendor.id,
-        lead_id: leadId,
-        amount: purchaseAmount,
-        payment_status: 'COMPLETED',
-        purchase_date: new Date().toISOString(),
-      };
-
-      const { data: purchaseRow, error: purchaseError } = await supabase
-        .from('lead_purchases')
-        .insert([purchasePayload])
-        .select('*')
-        .maybeSingle();
-
-      if (purchaseError) {
-        return json(500, { error: purchaseError.message || 'Failed to purchase lead' });
-      }
-
-      await supabase.from('leads').update({ status: 'PURCHASED' }).eq('id', leadId);
+      const consumePayload = consumeResult.payload || {};
+      const purchaseRow =
+        consumePayload?.purchase && typeof consumePayload.purchase === 'object'
+          ? consumePayload.purchase
+          : null;
+      const wasExistingPurchase = Boolean(consumePayload?.existing_purchase);
+      const purchaseDatetime =
+        purchaseRow?.purchase_datetime ||
+        purchaseRow?.purchase_date ||
+        consumePayload?.purchase_datetime ||
+        new Date().toISOString();
 
       await writeAuditLog(supabase, {
         actor: {
@@ -850,8 +894,27 @@ export const handler = async (event) => {
 
       return json(200, {
         success: true,
-        message: 'Payment verified and lead unlocked',
-        purchase: purchaseRow || { ...purchasePayload, id: null },
+        message: wasExistingPurchase ? 'Lead already purchased' : 'Payment verified and lead unlocked',
+        existing_purchase: wasExistingPurchase,
+        consumption_type:
+          consumePayload?.consumption_type ||
+          purchaseRow?.consumption_type ||
+          'PAID_EXTRA',
+        remaining: consumePayload?.remaining || { daily: 0, weekly: 0, yearly: 0 },
+        moved_to_my_leads: true,
+        purchase_datetime: purchaseDatetime,
+        plan_name:
+          consumePayload?.plan_name ||
+          consumePayload?.subscription_plan_name ||
+          purchaseRow?.subscription_plan_name ||
+          null,
+        subscription_plan_name:
+          consumePayload?.subscription_plan_name ||
+          consumePayload?.plan_name ||
+          purchaseRow?.subscription_plan_name ||
+          null,
+        lead_status: consumePayload?.lead_status || purchaseRow?.lead_status || 'ACTIVE',
+        purchase: purchaseRow,
       });
     }
 

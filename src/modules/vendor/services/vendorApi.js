@@ -12,6 +12,8 @@ const fetchVendorJson = async (path, options = {}) => {
     const message = data?.error || data?.message || 'Request failed';
     const error = new Error(message);
     error.status = res.status;
+    error.code = data?.code || null;
+    error.payload = data;
     throw error;
   }
   return data;
@@ -2092,8 +2094,28 @@ export const vendorApi = {
 
       if (propError) console.error('Error fetching proposals:', propError);
 
-      const purchasedLeads = (purchases || []).map(p => ({ ...p.lead, source: 'Purchased', purchase_date: p.purchase_date }));
-      const directLeads = (direct || []).map(l => ({ ...l, source: 'Direct', purchase_date: l.created_at }));
+      const purchasedLeads = (purchases || []).map((p) => {
+        const normalizedPurchaseDatetime = p?.purchase_datetime || p?.purchase_date || p?.lead?.created_at || null;
+        return {
+          ...p.lead,
+          source: 'Purchased',
+          purchase_date: normalizedPurchaseDatetime,
+          purchase_datetime: normalizedPurchaseDatetime,
+          lead_purchase_id: p?.id || null,
+          purchase_amount: p?.purchase_price ?? p?.amount ?? null,
+          payment_status: p?.payment_status || null,
+          consumption_type: p?.consumption_type || null,
+          lead_status: p?.lead_status || null,
+          subscription_plan_name: p?.subscription_plan_name || null,
+          plan_name: p?.subscription_plan_name || null,
+        };
+      });
+      const directLeads = (direct || []).map((l) => ({
+        ...l,
+        source: 'Direct',
+        purchase_date: l.created_at,
+        purchase_datetime: l.created_at,
+      }));
       const directProposals = (proposals || []).map(p => ({
         id: p.id,
         title: p.title,
@@ -2114,24 +2136,16 @@ export const vendorApi = {
     },
 
     purchase: async (leadId) => {
-      const vendorId = await getVendorId();
-      const { data: lead, error: lErr } = await supabase.from('leads').select('price').eq('id', leadId).single();
-      if (lErr) throw lErr;
+      const normalizedLeadId = String(leadId || '').trim();
+      if (!normalizedLeadId) throw new Error('Lead id is required');
 
-      const { data, error } = await supabase
-        .from('lead_purchases')
-        .insert([{
-          vendor_id: vendorId,
-          lead_id: leadId,
-          amount: lead?.price || 0,
-          payment_status: 'COMPLETED',
-          purchase_date: new Date().toISOString()
-        }])
-        .select()
-        .single();
+      const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'AUTO' }),
+      });
 
-      if (error) throw error;
-      return data;
+      return payload?.purchase || payload;
     }
   },
 

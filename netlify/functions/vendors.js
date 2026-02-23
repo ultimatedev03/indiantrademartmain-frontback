@@ -497,6 +497,256 @@ const enrichProposalRows = async (rows = []) => {
   });
 };
 
+const LEAD_CONSUMPTION_STATUS_BY_CODE = {
+  INVALID_INPUT: 400,
+  LEAD_NOT_FOUND: 404,
+  LEAD_UNAVAILABLE: 409,
+  LEAD_NOT_PURCHASABLE: 409,
+  LEAD_CAP_REACHED: 409,
+  SUBSCRIPTION_INACTIVE: 403,
+  PAID_REQUIRED: 402,
+};
+
+const normalizeLeadConsumptionMode = (value) => {
+  const mode = String(value || '').trim().toUpperCase();
+  if (mode === 'USE_WEEKLY') return 'USE_WEEKLY';
+  if (mode === 'BUY_EXTRA') return 'BUY_EXTRA';
+  if (mode === 'PAID') return 'PAID';
+  return 'AUTO';
+};
+
+const parseLeadPriceNumber = (value, fallback = 0) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, value);
+  const cleaned = String(value ?? '').replace(/[^0-9.]/g, '');
+  const parsed = Number(cleaned);
+  if (Number.isFinite(parsed)) return Math.max(0, parsed);
+  return Math.max(0, Number(fallback) || 0);
+};
+
+const normalizeLeadFilterText = (value) =>
+  String(value || '')
+    .toLowerCase()
+    .trim();
+
+const dedupeValues = (arr = []) => Array.from(new Set((arr || []).filter(Boolean)));
+
+const fuzzyLeadFilterMatch = (left, right) => {
+  const a = normalizeLeadFilterText(left);
+  const b = normalizeLeadFilterText(right);
+  if (!a || !b) return false;
+  return a.includes(b) || b.includes(a);
+};
+
+const extractLeadCityState = (lead = {}) => {
+  const city = String(lead?.city || lead?.city_name || '').trim();
+  const state = String(lead?.state || lead?.state_name || '').trim();
+  if (city || state) return { city, state };
+
+  const location = String(lead?.location || '').trim();
+  if (!location) return { city: '', state: '' };
+
+  const parts = location
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length >= 2) return { city: parts[0], state: parts.slice(1).join(', ') };
+  if (parts.length === 1) return { city: parts[0], state: '' };
+  return { city: '', state: '' };
+};
+
+const buildLeadTokens = (lead = {}) =>
+  dedupeValues(
+    [
+      lead?.title,
+      lead?.product_name,
+      lead?.product_interest,
+      lead?.category,
+      lead?.category_name,
+      lead?.head_category,
+      lead?.sub_category,
+      lead?.service_name,
+      lead?.requirement_title,
+      lead?.description,
+      lead?.message,
+    ].map(normalizeLeadFilterText)
+  );
+
+const matchesAnyTextSet = (tokens = [], set = new Set()) => {
+  if (!set || set.size === 0) return true;
+  for (const token of tokens) {
+    for (const item of set) {
+      if (fuzzyLeadFilterMatch(token, item)) return true;
+    }
+  }
+  return false;
+};
+
+const loadMarketplaceFilterContext = async (vendorId) => {
+  const context = {
+    autoLeadFilter: true,
+    minBudget: null,
+    maxBudget: null,
+    categorySet: new Set(),
+    citySet: new Set(),
+    stateSet: new Set(),
+  };
+
+  const { data: prefs } = await supabase
+    .from('vendor_preferences')
+    .select('preferred_micro_categories, preferred_states, preferred_cities, auto_lead_filter, min_budget, max_budget')
+    .eq('vendor_id', vendorId)
+    .maybeSingle();
+
+  context.autoLeadFilter = prefs?.auto_lead_filter !== false;
+
+  const minBudgetNum = Number(prefs?.min_budget);
+  const maxBudgetNum = Number(prefs?.max_budget);
+  context.minBudget = Number.isFinite(minBudgetNum) ? minBudgetNum : null;
+  context.maxBudget = Number.isFinite(maxBudgetNum) ? maxBudgetNum : null;
+
+  const prefCategoryIds = dedupeValues((prefs?.preferred_micro_categories || []).map(String));
+  const prefStateIds = dedupeValues((prefs?.preferred_states || []).map(String));
+  const prefCityIds = dedupeValues((prefs?.preferred_cities || []).map(String));
+
+  if (prefCategoryIds.length) {
+    const [microRes, subRes, headRes] = await Promise.all([
+      supabase.from('micro_categories').select('id, name').in('id', prefCategoryIds),
+      supabase.from('sub_categories').select('id, name').in('id', prefCategoryIds),
+      supabase.from('head_categories').select('id, name').in('id', prefCategoryIds),
+    ]);
+
+    [...(microRes?.data || []), ...(subRes?.data || []), ...(headRes?.data || [])].forEach((row) => {
+      const value = normalizeLeadFilterText(row?.name);
+      if (value) context.categorySet.add(value);
+    });
+  }
+
+  if (prefStateIds.length) {
+    const { data: states } = await supabase
+      .from('states')
+      .select('id, name')
+      .in('id', prefStateIds);
+    (states || []).forEach((row) => {
+      const value = normalizeLeadFilterText(row?.name);
+      if (value) context.stateSet.add(value);
+    });
+  }
+
+  if (prefCityIds.length) {
+    const { data: cities } = await supabase
+      .from('cities')
+      .select('id, name')
+      .in('id', prefCityIds);
+    (cities || []).forEach((row) => {
+      const value = normalizeLeadFilterText(row?.name);
+      if (value) context.citySet.add(value);
+    });
+  }
+
+  const { data: products } = await supabase
+    .from('products')
+    .select('name, category_other')
+    .eq('vendor_id', vendorId)
+    .eq('status', 'ACTIVE');
+
+  (products || []).forEach((row) => {
+    const name = normalizeLeadFilterText(row?.name);
+    const categoryOther = normalizeLeadFilterText(row?.category_other);
+    if (name) context.categorySet.add(name);
+    if (categoryOther) context.categorySet.add(categoryOther);
+  });
+
+  return context;
+};
+
+const applyMarketplaceFilters = (leads = [], context) => {
+  const rows = Array.isArray(leads) ? leads : [];
+  if (!rows.length) return [];
+
+  const shouldAuto = context?.autoLeadFilter !== false;
+  if (!shouldAuto) return rows;
+
+  const hasCategoryFilter = (context?.categorySet?.size || 0) > 0;
+  const hasCityFilter = (context?.citySet?.size || 0) > 0;
+  const hasStateFilter = (context?.stateSet?.size || 0) > 0;
+  const hasMinBudget = Number.isFinite(context?.minBudget);
+  const hasMaxBudget = Number.isFinite(context?.maxBudget);
+
+  const shouldFilterCategory = hasCategoryFilter;
+  const shouldFilterLocation = hasCityFilter || hasStateFilter;
+  const shouldFilterBudget = hasMinBudget || hasMaxBudget;
+
+  if (!shouldFilterCategory && !shouldFilterLocation && !shouldFilterBudget) {
+    return rows;
+  }
+
+  return rows.filter((lead) => {
+    if (shouldFilterCategory) {
+      const tokens = buildLeadTokens(lead);
+      if (!matchesAnyTextSet(tokens, context.categorySet)) return false;
+    }
+
+    if (shouldFilterLocation) {
+      const { city, state } = extractLeadCityState(lead);
+      const cityText = normalizeLeadFilterText(city);
+      const stateText = normalizeLeadFilterText(state);
+      const locationText = normalizeLeadFilterText(lead?.location);
+
+      const cityMatch = !hasCityFilter
+        ? true
+        : matchesAnyTextSet([cityText, locationText], context.citySet);
+      const stateMatch = !hasStateFilter
+        ? true
+        : matchesAnyTextSet([stateText, locationText], context.stateSet);
+
+      if (!cityMatch || !stateMatch) return false;
+    }
+
+    if (shouldFilterBudget) {
+      const budget = Number.parseFloat(lead?.budget);
+      if (Number.isFinite(context.minBudget) && Number.isFinite(budget) && budget < context.minBudget) {
+        return false;
+      }
+      if (Number.isFinite(context.maxBudget) && Number.isFinite(budget) && budget > context.maxBudget) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+};
+
+const consumeLeadForVendor = async ({ vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) => {
+  const { data, error } = await supabase.rpc('consume_vendor_lead', {
+    p_vendor_id: vendorId,
+    p_lead_id: leadId,
+    p_mode: mode,
+    p_purchase_price: purchasePrice,
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Lead consumption failed');
+  }
+
+  const result = data && typeof data === 'object' ? data : {};
+  if (!result.success) {
+    const code = String(result.code || 'CONSUMPTION_FAILED').trim().toUpperCase();
+    const statusCode = LEAD_CONSUMPTION_STATUS_BY_CODE[code] || 400;
+    return {
+      success: false,
+      statusCode,
+      code,
+      error: result.error || 'Lead consumption failed',
+      payload: result,
+    };
+  }
+
+  return {
+    success: true,
+    payload: result,
+  };
+};
+
 export const handler = async (event) => {
   try {
     if (event.httpMethod === 'OPTIONS') return ok(event, { ok: true });
@@ -738,7 +988,7 @@ export const handler = async (event) => {
           new Set(allRows.map((row) => String(row?.id || '').trim()).filter(Boolean))
         );
 
-        const [myPurchasesRes, allPurchasesRes] = await Promise.all([
+        const [myPurchasesRes, allPurchasesRes, filterContext] = await Promise.all([
           supabase
             .from('lead_purchases')
             .select('lead_id')
@@ -749,6 +999,7 @@ export const handler = async (event) => {
                 .select('lead_id')
                 .in('lead_id', allLeadIds)
             : Promise.resolve({ data: [], error: null }),
+          loadMarketplaceFilterContext(vendor.id),
         ]);
 
         if (myPurchasesRes?.error) {
@@ -776,7 +1027,12 @@ export const handler = async (event) => {
           return true;
         });
 
-        return ok(event, { success: true, leads: eligibleRows });
+        if (!eligibleRows.length) return ok(event, { success: true, leads: [] });
+
+        const filteredRows = applyMarketplaceFilters(eligibleRows, filterContext);
+        const finalRows = filteredRows.length ? filteredRows : eligibleRows;
+
+        return ok(event, { success: true, leads: finalRows });
       }
 
       // -------------------------
@@ -863,64 +1119,61 @@ export const handler = async (event) => {
 
         if (leadErr) return fail(event, leadErr.message || 'Failed to fetch lead');
         if (!lead) return bad(event, 'Lead not found', null, 404);
-
-        const leadStatus = String(lead?.status || '').toUpperCase();
-        if (leadStatus && !['AVAILABLE', 'PURCHASED'].includes(leadStatus)) {
-          return bad(event, 'Lead no longer available', null, 409);
-        }
-
-        const { data: existingRows, error: existingErr } = await supabase
-          .from('lead_purchases')
-          .select('id')
-          .eq('vendor_id', vendor.id)
-          .eq('lead_id', leadId)
-          .order('purchase_date', { ascending: false })
-          .limit(1);
-
-        if (existingErr) return fail(event, existingErr.message || 'Failed to validate purchase');
-        if (Array.isArray(existingRows) && existingRows.length > 0) {
-          return bad(event, 'You already purchased this lead', null, 409);
-        }
-
-        const { count: purchaseCount, error: countErr } = await supabase
-          .from('lead_purchases')
-          .select('id', { count: 'exact', head: true })
-          .eq('lead_id', leadId);
-
-        if (countErr) return fail(event, countErr.message || 'Failed to validate lead capacity');
-        if ((purchaseCount || 0) >= 5) {
-          return bad(event, 'This lead has reached maximum 5 vendors limit', null, 409);
-        }
-
         const body = readBody(event);
-        const amountFromBody = Number(body?.amount);
-        const fallbackAmount = Number.isFinite(Number(lead?.price)) ? Number(lead.price) : 50;
-        const finalAmount = Number.isFinite(amountFromBody) ? amountFromBody : fallbackAmount;
+        const mode = normalizeLeadConsumptionMode(body?.mode);
+        const fallbackAmount = parseLeadPriceNumber(lead?.price, 50);
+        const requestedAmount = parseLeadPriceNumber(body?.amount, fallbackAmount);
 
-        const purchasePayload = {
-          vendor_id: vendor.id,
-          lead_id: leadId,
-          amount: finalAmount,
-          payment_status: 'COMPLETED',
-          purchase_date: new Date().toISOString(),
-        };
+        const consumeResult = await consumeLeadForVendor({
+          vendorId: vendor.id,
+          leadId,
+          mode,
+          purchasePrice: requestedAmount,
+        });
 
-        const { data: purchaseRow, error: purchaseErr } = await supabase
-          .from('lead_purchases')
-          .insert([purchasePayload])
-          .select('*')
-          .maybeSingle();
+        if (!consumeResult.success) {
+          return json(event, consumeResult.statusCode, {
+            success: false,
+            code: consumeResult.code,
+            error: consumeResult.error,
+            ...(consumeResult.payload || {}),
+          });
+        }
 
-        if (purchaseErr) return fail(event, purchaseErr.message || 'Failed to purchase lead');
+        const payload = consumeResult.payload || {};
+        const purchaseRow =
+          payload?.purchase && typeof payload.purchase === 'object' ? payload.purchase : null;
+        const purchaseDatetime =
+          purchaseRow?.purchase_datetime ||
+          purchaseRow?.purchase_date ||
+          payload?.purchase_datetime ||
+          new Date().toISOString();
+        const wasExistingPurchase = Boolean(payload?.existing_purchase);
+        const responseConsumptionType =
+          payload?.consumption_type ||
+          purchaseRow?.consumption_type ||
+          'PAID_EXTRA';
+        const remaining = payload?.remaining || { daily: 0, weekly: 0, yearly: 0 };
 
-        await supabase
-          .from('leads')
-          .update({ status: 'PURCHASED' })
-          .eq('id', leadId);
-
-        return json(event, 201, {
+        return json(event, wasExistingPurchase ? 200 : 201, {
           success: true,
-          purchase: purchaseRow || { ...purchasePayload, id: null },
+          existing_purchase: wasExistingPurchase,
+          consumption_type: responseConsumptionType,
+          remaining,
+          moved_to_my_leads: true,
+          purchase_datetime: purchaseDatetime,
+          plan_name:
+            payload?.plan_name ||
+            payload?.subscription_plan_name ||
+            purchaseRow?.subscription_plan_name ||
+            null,
+          subscription_plan_name:
+            payload?.subscription_plan_name ||
+            payload?.plan_name ||
+            purchaseRow?.subscription_plan_name ||
+            null,
+          lead_status: payload?.lead_status || purchaseRow?.lead_status || 'ACTIVE',
+          purchase: purchaseRow,
         });
       }
 
@@ -947,10 +1200,12 @@ export const handler = async (event) => {
 
         const { data: purchaseRows, error: purchaseErr } = await supabase
           .from('lead_purchases')
-          .select('id, purchase_date, amount, payment_status')
+          .select(
+            'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+          )
           .eq('vendor_id', vendor.id)
           .eq('lead_id', leadId)
-          .order('purchase_date', { ascending: false })
+          .order('purchase_datetime', { ascending: false })
           .limit(1);
 
         if (purchaseErr) return fail(event, purchaseErr.message || 'Failed to validate lead purchase');
@@ -976,13 +1231,23 @@ export const handler = async (event) => {
         }
 
         const source = isDirect ? 'Direct' : purchase ? 'Purchased' : 'Marketplace';
+        const normalizedPurchaseDatetime =
+          purchase?.purchase_datetime ||
+          purchase?.purchase_date ||
+          lead?.created_at ||
+          null;
         const responseLead = {
           ...lead,
           source,
-          purchase_date: purchase?.purchase_date || lead?.created_at || null,
+          purchase_date: normalizedPurchaseDatetime,
+          purchase_datetime: normalizedPurchaseDatetime,
           lead_purchase_id: purchase?.id || null,
-          purchase_amount: purchase?.amount ?? null,
+          purchase_amount: purchase?.purchase_price ?? purchase?.amount ?? null,
           payment_status: purchase?.payment_status || null,
+          consumption_type: purchase?.consumption_type || null,
+          lead_status: purchase?.lead_status || null,
+          subscription_plan_name: purchase?.subscription_plan_name || null,
+          plan_name: purchase?.subscription_plan_name || null,
         };
 
         return ok(event, { success: true, lead: responseLead });
@@ -997,8 +1262,11 @@ export const handler = async (event) => {
 
         const { data: purchases, error: purchaseError } = await supabase
           .from('lead_purchases')
-          .select('id, lead_id, amount, payment_status, purchase_date')
+          .select(
+            'id, lead_id, amount, purchase_price, payment_status, purchase_date, purchase_datetime, consumption_type, lead_status, subscription_plan_name'
+          )
           .eq('vendor_id', vendor.id)
+          .order('purchase_datetime', { ascending: false, nullsFirst: false })
           .order('purchase_date', { ascending: false });
 
         if (purchaseError) {
@@ -1025,13 +1293,23 @@ export const handler = async (event) => {
             .map((purchase) => {
               const lead = leadById.get(String(purchase?.lead_id || ''));
               if (!lead) return null;
+              const normalizedPurchaseDatetime =
+                purchase?.purchase_datetime ||
+                purchase?.purchase_date ||
+                lead?.created_at ||
+                null;
               return {
                 ...lead,
                 source: 'Purchased',
-                purchase_date: purchase?.purchase_date || lead?.created_at || null,
+                purchase_date: normalizedPurchaseDatetime,
+                purchase_datetime: normalizedPurchaseDatetime,
                 lead_purchase_id: purchase?.id || null,
-                purchase_amount: purchase?.amount ?? null,
+                purchase_amount: purchase?.purchase_price ?? purchase?.amount ?? null,
                 payment_status: purchase?.payment_status || null,
+                consumption_type: purchase?.consumption_type || null,
+                lead_status: purchase?.lead_status || null,
+                subscription_plan_name: purchase?.subscription_plan_name || null,
+                plan_name: purchase?.subscription_plan_name || null,
               };
             })
             .filter(Boolean);

@@ -89,6 +89,8 @@ const fetchVendorJson = async (path, options = {}) => {
     const message = data?.error || data?.message || 'Request failed';
     const error = new Error(message);
     error.status = res.status;
+    error.code = data?.code || null;
+    error.payload = data;
     throw error;
   }
   return data;
@@ -552,52 +554,14 @@ export const leadApi = {
       const parsedAmount = Number(amount);
       const amountPayload = Number.isFinite(parsedAmount) ? parsedAmount : undefined;
 
-      // Preferred path: backend endpoint (service-role path; avoids client-side RLS insert failures).
-      try {
-        const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            amountPayload === undefined ? {} : { amount: amountPayload }
-          ),
-        });
-        if (payload?.purchase) return payload.purchase;
-      } catch (backendError) {
-        const status = Number(backendError?.status || 0);
-        if (status === 401 || status === 403) {
-          throw new Error(backendError?.message || 'Unauthorized');
-        }
-        if (status >= 400 && status < 500 && status !== 404) {
-          throw backendError;
-        }
-        console.warn('[leadApi] backend purchase failed, falling back:', backendError?.message || backendError);
-      }
-
-      // Fallback path (legacy direct Supabase access)
-      const resolvedVendorId = vendorId || (await getVendorId());
-
-      const { count: purchaseCount } = await supabase
-        .from('lead_purchases')
-        .select('*', { count: 'exact', head: true })
-        .eq('lead_id', normalizedLeadId);
-
-      if ((purchaseCount || 0) >= 5) {
-        throw new Error('This lead has reached maximum 5 vendors limit');
-      }
-
-      const { data, error } = await supabase
-        .from('lead_purchases')
-        .insert([{
-          vendor_id: resolvedVendorId,
-          lead_id: normalizedLeadId,
-          amount: Number.isFinite(parsedAmount) ? parsedAmount : 0,
-          payment_status: 'COMPLETED',
-          purchase_date: new Date().toISOString()
-        }])
-        .select()
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          amountPayload === undefined ? { mode: 'AUTO' } : { mode: 'AUTO', amount: amountPayload }
+        ),
+      });
+      return payload?.purchase || payload;
     },
 
     delete: async (id) => {
@@ -817,7 +781,24 @@ export const leadApi = {
         ? await Promise.all(
             purchases.map(async (p) => {
               const lead = await leadApi.get(p.lead_id);
-              return { ...lead, source: 'Purchased', purchase_date: p.purchase_date };
+              const normalizedPurchaseDatetime =
+                p?.purchase_datetime ||
+                p?.purchase_date ||
+                lead?.created_at ||
+                null;
+              return {
+                ...lead,
+                source: 'Purchased',
+                purchase_date: normalizedPurchaseDatetime,
+                purchase_datetime: normalizedPurchaseDatetime,
+                lead_purchase_id: p?.id || null,
+                purchase_amount: p?.purchase_price ?? p?.amount ?? null,
+                payment_status: p?.payment_status || null,
+                consumption_type: p?.consumption_type || null,
+                lead_status: p?.lead_status || null,
+                subscription_plan_name: p?.subscription_plan_name || null,
+                plan_name: p?.subscription_plan_name || null,
+              };
             })
           )
         : [];
@@ -832,7 +813,12 @@ export const leadApi = {
       const purchasedSet = new Set((purchasedLeads || []).map((l) => String(l?.id)).filter(Boolean));
       const directLeads = (direct || [])
         .filter((l) => !purchasedSet.has(String(l?.id)))
-        .map((l) => ({ ...l, source: 'Direct', purchase_date: l.created_at }));
+        .map((l) => ({
+          ...l,
+          source: 'Direct',
+          purchase_date: l.created_at,
+          purchase_datetime: l.created_at,
+        }));
 
       return [...purchasedLeads, ...directLeads].sort((a, b) => {
         const aTs = new Date(a?.purchase_date || a?.created_at || 0).getTime();

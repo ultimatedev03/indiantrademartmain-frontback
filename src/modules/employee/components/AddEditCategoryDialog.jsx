@@ -9,7 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui/use-toast';
 import { ChevronLeft, ChevronRight, Images, Trash2, X } from 'lucide-react';
 
-const IMAGE_MIN_BYTES = 100 * 1024; // 100KB
+
 const IMAGE_MAX_BYTES = 800 * 1024; // 800KB
 
 const formatKb = (bytes) => `${Math.round(Number(bytes || 0) / 1024)}KB`;
@@ -91,7 +91,7 @@ const toImageUrlList = (value) => {
   });
 };
 
-const getMaxImagesForLevel = (level) => (level === 'micro' ? 2 : 1);
+const getMaxImagesForLevel = () => 1;
 
 const getCategoryImageUrls = (category, maxImages) => {
   if (!category || typeof category !== 'object') return [];
@@ -275,11 +275,6 @@ const AddEditCategoryDialog = ({
     for (const file of files) {
       if (!String(file?.type || '').startsWith('image/')) {
         setErrors((prev) => ({ ...prev, image_file: 'Only image files are allowed' }));
-        resetFileInput();
-        return;
-      }
-      if (file.size < IMAGE_MIN_BYTES) {
-        setErrors((prev) => ({ ...prev, image_file: `Image must be at least ${formatKb(IMAGE_MIN_BYTES)}` }));
         resetFileInput();
         return;
       }
@@ -662,7 +657,7 @@ const AddEditCategoryDialog = ({
                 </div>
 
                 <p className="text-[11px] text-slate-500">
-                  Min {formatKb(IMAGE_MIN_BYTES)}, max {formatKb(IMAGE_MAX_BYTES)}.
+                  Max {formatKb(IMAGE_MAX_BYTES)}.
                   {' '}
                   Maximum {maxImages} image{maxImages > 1 ? 's' : ''}.
                 </p>
