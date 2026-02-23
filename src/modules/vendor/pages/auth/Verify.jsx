@@ -89,9 +89,21 @@ const Verify = () => {
           return;
         }
 
-        await otpService.resendOtp(email);
+        const otpResp = await otpService.resendOtp(email);
         setInitialSent(true);
-        setTimer(OTP_TTL_SECONDS);
+
+        const expiresIn = Number(otpResp?.expiresIn);
+        setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TTL_SECONDS);
+
+        if (import.meta.env.DEV && otpResp?.debug_otp) {
+          const debugOtp = String(otpResp.debug_otp).trim().slice(0, OTP_LENGTH);
+          if (debugOtp) setOtp(debugOtp);
+          toast({
+            title: "Dev OTP Mode",
+            description: "Email failed, debug OTP generated for local testing.",
+          });
+          return;
+        }
 
         toast({
           title: "OTP Sent",
@@ -192,9 +204,21 @@ const Verify = () => {
   const handleResend = async () => {
     try {
       setLoading(true);
-      await otpService.resendOtp(email);
-      setTimer(OTP_TTL_SECONDS);
+      const otpResp = await otpService.resendOtp(email);
+      const expiresIn = Number(otpResp?.expiresIn);
+      setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TTL_SECONDS);
       setOtp('');
+
+      if (import.meta.env.DEV && otpResp?.debug_otp) {
+        const debugOtp = String(otpResp.debug_otp).trim().slice(0, OTP_LENGTH);
+        if (debugOtp) setOtp(debugOtp);
+        toast({
+          title: "Dev OTP Mode",
+          description: "Email failed, debug OTP generated for local testing.",
+        });
+        return;
+      }
+
       toast({
         title: "OTP Resent",
         description: `A new ${OTP_LENGTH}-digit code has been sent to your email.`

@@ -1,5 +1,16 @@
 let superAdminToken = null;
 
+function isLocalDevHost() {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function joinBaseAndPath(base, path) {
+  if (path.startsWith('http')) return path;
+  return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
 export function getSuperAdminToken() {
   return superAdminToken;
 }
@@ -31,12 +42,28 @@ export async function superAdminFetch(path, options = {}) {
   }
 
   const base = getSuperAdminBase();
-  const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+  const url = joinBaseAndPath(base, path);
 
-  return fetch(url, {
+  const requestConfig = {
     ...options,
     headers,
-  });
+  };
+
+  let response = await fetch(url, requestConfig);
+
+  // Local fallback: helpful when frontend runs on :3000 without Vite /api proxy.
+  if (
+    !path.startsWith('http') &&
+    response.status === 404 &&
+    isLocalDevHost() &&
+    !import.meta.env.VITE_SUPERADMIN_API_BASE
+  ) {
+    const fallbackBase = 'http://localhost:3001/api/superadmin';
+    const fallbackUrl = joinBaseAndPath(fallbackBase, path);
+    response = await fetch(fallbackUrl, requestConfig);
+  }
+
+  return response;
 }
 
 export const SUPERADMIN_KEYS = {

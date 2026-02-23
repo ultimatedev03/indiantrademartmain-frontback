@@ -59,6 +59,31 @@ export const superAdminServerApi = {
       }),
   },
 
+  plans: {
+    list: (params = {}) => {
+      const qs = new URLSearchParams();
+      Object.entries(params || {}).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && String(v) !== '') qs.set(k, v);
+      });
+      const query = qs.toString();
+      return request(`/plans${query ? `?${query}` : ''}`);
+    },
+    create: (payload) =>
+      request('/plans', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    update: (planId, payload) =>
+      request(`/plans/${planId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
+    delete: (planId) =>
+      request(`/plans/${planId}`, {
+        method: 'DELETE',
+      }),
+  },
+
   finance: {
     summary: () => request('/finance/summary'),
     payments: (params = {}) => {

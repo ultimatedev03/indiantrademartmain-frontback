@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -47,10 +48,12 @@ import {
   IndianRupee,
   History,
   Settings,
+  Package,
 } from 'lucide-react';
 
 const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
 const NOTICE_VARIANTS = ['info', 'warning', 'critical'];
+const PLAN_BADGE_VARIANTS = ['neutral', 'green', 'blue', 'purple', 'gold', 'diamond', 'slate'];
 
 const formatDateTime = (value) => {
   if (!value) return '—';
@@ -63,6 +66,31 @@ const money = (value) => {
   const n = Number(value || 0);
   if (!Number.isFinite(n)) return '0';
   return n.toLocaleString('en-IN');
+};
+
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n;
+};
+
+const clampDiscountPercent = (value) => {
+  const n = toNonNegativeNumber(value, 0);
+  return Math.max(0, Math.min(100, n));
+};
+
+const computeDiscountedPrice = (originalPrice, discountPercent) => {
+  const original = toNonNegativeNumber(originalPrice, 0);
+  const percent = clampDiscountPercent(discountPercent);
+  if (percent >= 100) return 0;
+  return Number(((original * (100 - percent)) / 100).toFixed(2));
+};
+
+const showBlankForZero = (value) => {
+  if (value === '' || value === null || value === undefined) return '';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return n === 0 ? '' : value;
 };
 
 const normalizeRole = (value) => String(value || '').trim().toUpperCase();
@@ -92,6 +120,78 @@ const getDepartmentLabel = (emp) =>
   emp?.dept ||
   roleToDepartment(emp?.role) ||
   '—';
+
+const asObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const getPlanPricingMeta = (plan) => {
+  const features = asObject(plan?.features);
+  const pricing = asObject(features?.pricing);
+  const discountPercent = Number(pricing.discount_percent || 0);
+  const currentPrice = Number(plan?.price || 0);
+  const configuredOriginal = Number(pricing.original_price || 0);
+
+  let originalPrice = configuredOriginal;
+  if ((!Number.isFinite(originalPrice) || originalPrice <= 0) && discountPercent > 0 && discountPercent < 100) {
+    originalPrice = Number(((currentPrice * 100) / (100 - discountPercent)).toFixed(2));
+  }
+  if (!Number.isFinite(originalPrice) || originalPrice <= currentPrice) originalPrice = 0;
+
+  return {
+    original_price: originalPrice,
+    discount_percent: Number.isFinite(discountPercent) ? Math.max(0, Math.min(100, discountPercent)) : 0,
+    discount_label: String(pricing.discount_label || '').trim(),
+    badge_label: String(asObject(features?.badge)?.label || '').trim(),
+    badge_variant: String(asObject(features?.badge)?.variant || 'neutral').trim() || 'neutral',
+  };
+};
+
+const getPlanCoverageMeta = (plan) => {
+  const features = asObject(plan?.features);
+  const coverage = asObject(features?.coverage);
+  const rawStates = coverage.states_limit ?? features.states_limit;
+  const rawCities = coverage.cities_limit ?? features.cities_limit;
+
+  const states = Number(rawStates);
+  const cities = Number(rawCities);
+
+  return {
+    states_limit: Number.isFinite(states) && states >= 0 ? Math.floor(states) : 0,
+    cities_limit: Number.isFinite(cities) && cities >= 0 ? Math.floor(cities) : 0,
+  };
+};
+
+const planToDraft = (plan) => {
+  const pricing = getPlanPricingMeta(plan);
+  const coverage = getPlanCoverageMeta(plan);
+  return {
+    name: String(plan?.name || ''),
+    description: String(plan?.description || ''),
+    price: Number(plan?.price || 0),
+    daily_limit: Number(plan?.daily_limit || 0),
+    weekly_limit: Number(plan?.weekly_limit || 0),
+    yearly_limit: Number(plan?.yearly_limit || 0),
+    duration_days: Number(plan?.duration_days || 365),
+    is_active: plan?.is_active !== false,
+    original_price: Number(pricing.original_price || 0),
+    discount_percent: Number(pricing.discount_percent || 0),
+    discount_label: pricing.discount_label,
+    badge_label: pricing.badge_label,
+    badge_variant: pricing.badge_variant,
+    states_limit: Number(coverage.states_limit || 0),
+    cities_limit: Number(coverage.cities_limit || 0),
+  };
+};
 
 export default function SuperAdminDashboard() {
   const { superAdmin, logout, changePassword } = useSuperAdmin();
@@ -135,6 +235,36 @@ export default function SuperAdminDashboard() {
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorSearch, setVendorSearch] = useState('');
   const [vendorDeletingId, setVendorDeletingId] = useState(null);
+
+  // Plans
+  const [plans, setPlans] = useState([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [planSavingId, setPlanSavingId] = useState(null);
+  const [planSearch, setPlanSearch] = useState('');
+  const [planDrafts, setPlanDrafts] = useState({});
+  const [planCreateOpen, setPlanCreateOpen] = useState(false);
+  const [planCreating, setPlanCreating] = useState(false);
+  const [savingAllPlans, setSavingAllPlans] = useState(false);
+  const [planSelectionMode, setPlanSelectionMode] = useState(false);
+  const [selectedPlanIds, setSelectedPlanIds] = useState([]);
+  const [deletingSelectedPlans, setDeletingSelectedPlans] = useState(false);
+  const [newPlanForm, setNewPlanForm] = useState({
+    name: '',
+    description: '',
+    price: 0,
+    daily_limit: 0,
+    weekly_limit: 0,
+    yearly_limit: 0,
+    duration_days: 365,
+    is_active: true,
+    original_price: 0,
+    discount_percent: 0,
+    discount_label: '',
+    badge_label: '',
+    badge_variant: 'neutral',
+    states_limit: 0,
+    cities_limit: 0,
+  });
 
   // Finance
   const [financeSummary, setFinanceSummary] = useState({ totalGross: 0, totalNet: 0, last30: 0 });
@@ -221,6 +351,31 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const fetchPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const { plans: list } = await superAdminServerApi.plans.list({
+        include_inactive: true,
+        limit: 500,
+      });
+      const next = list || [];
+      setPlans(next);
+      setPlanDrafts(
+        next.reduce((acc, plan) => {
+          if (plan?.id) acc[plan.id] = planToDraft(plan);
+          return acc;
+        }, {})
+      );
+      setSelectedPlanIds((prev) =>
+        (prev || []).filter((id) => next.some((plan) => plan?.id === id))
+      );
+    } catch (error) {
+      handleError(error, 'Failed to load subscription plans');
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
   const fetchFinance = async () => {
     setFinanceLoading(true);
     try {
@@ -262,6 +417,7 @@ export default function SuperAdminDashboard() {
       fetchPages(),
       fetchEmployees(),
       fetchVendors(),
+      fetchPlans(),
       fetchFinance(),
       fetchAuditLogs(),
     ]);
@@ -287,6 +443,395 @@ export default function SuperAdminDashboard() {
         .some((x) => String(x).toLowerCase().includes(term))
     );
   }, [vendors, vendorSearch]);
+
+  const filteredPlans = useMemo(() => {
+    const term = planSearch.trim().toLowerCase();
+    if (!term) return plans;
+    return (plans || []).filter((plan) =>
+      [plan?.name, plan?.description]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term))
+    );
+  }, [plans, planSearch]);
+
+  const draftToPayload = (draft) => ({
+    name: String(draft?.name || '').trim(),
+    description: String(draft?.description || '').trim(),
+    price: Number(draft?.price || 0),
+    daily_limit: Number(draft?.daily_limit || 0),
+    weekly_limit: Number(draft?.weekly_limit || 0),
+    yearly_limit: Number(draft?.yearly_limit || 0),
+    duration_days: Number(draft?.duration_days || 365),
+    is_active: draft?.is_active === true,
+    original_price: Number(draft?.original_price || 0),
+    discount_percent: Number(draft?.discount_percent || 0),
+    discount_label: String(draft?.discount_label || '').trim(),
+    badge_label: String(draft?.badge_label || '').trim(),
+    badge_variant: String(draft?.badge_variant || 'neutral').trim() || 'neutral',
+    states_limit: Number(draft?.states_limit || 0),
+    cities_limit: Number(draft?.cities_limit || 0),
+  });
+
+  const dirtyPlanIds = useMemo(() => {
+    const changed = [];
+    (plans || []).forEach((plan) => {
+      if (!plan?.id) return;
+      const originalPayload = draftToPayload(planToDraft(plan));
+      const currentDraft = planDrafts?.[plan.id] || planToDraft(plan);
+      const currentPayload = draftToPayload(currentDraft);
+      if (JSON.stringify(currentPayload) !== JSON.stringify(originalPayload)) {
+        changed.push(plan.id);
+      }
+    });
+    return changed;
+  }, [plans, planDrafts]);
+
+  const updatePlanDraft = (planId, key, value) => {
+    if (!planId) return;
+    setPlanDrafts((prev) => ({
+      ...prev,
+      [planId]: {
+        ...(prev?.[planId] || {}),
+        [key]: value,
+      },
+    }));
+  };
+
+  const updatePlanPricingDraft = (planId, key, value) => {
+    if (!planId) return;
+    setPlanDrafts((prev) => {
+      const existing = { ...(prev?.[planId] || {}) };
+      const next = { ...existing, [key]: value };
+
+      if (key === 'price' || key === 'original_price') {
+        next[key] = toNonNegativeNumber(value, 0);
+      }
+      if (key === 'discount_percent') {
+        next.discount_percent = clampDiscountPercent(value);
+      }
+
+      if (key === 'discount_percent' || key === 'original_price') {
+        const discountPercent = clampDiscountPercent(next.discount_percent);
+        let originalPrice = toNonNegativeNumber(next.original_price, 0);
+
+        if (originalPrice <= 0 && discountPercent > 0) {
+          const currentPrice = toNonNegativeNumber(next.price, 0);
+          if (currentPrice > 0) {
+            originalPrice = currentPrice;
+            next.original_price = currentPrice;
+          }
+        }
+
+        if (originalPrice > 0) {
+          next.price = computeDiscountedPrice(originalPrice, discountPercent);
+        }
+      }
+
+      return {
+        ...prev,
+        [planId]: next,
+      };
+    });
+  };
+
+  const updateNewPlanPricing = (key, value) => {
+    setNewPlanForm((prev) => {
+      const next = { ...prev, [key]: value };
+
+      if (key === 'price' || key === 'original_price') {
+        next[key] = toNonNegativeNumber(value, 0);
+      }
+      if (key === 'discount_percent') {
+        next.discount_percent = clampDiscountPercent(value);
+      }
+
+      if (key === 'discount_percent' || key === 'original_price') {
+        const discountPercent = clampDiscountPercent(next.discount_percent);
+        let originalPrice = toNonNegativeNumber(next.original_price, 0);
+
+        if (originalPrice <= 0 && discountPercent > 0) {
+          const currentPrice = toNonNegativeNumber(next.price, 0);
+          if (currentPrice > 0) {
+            originalPrice = currentPrice;
+            next.original_price = currentPrice;
+          }
+        }
+
+        if (originalPrice > 0) {
+          next.price = computeDiscountedPrice(originalPrice, discountPercent);
+        }
+      }
+
+      return next;
+    });
+  };
+
+  const resetNewPlanForm = () => {
+    setNewPlanForm({
+      name: '',
+      description: '',
+      price: 0,
+      daily_limit: 0,
+      weekly_limit: 0,
+      yearly_limit: 0,
+      duration_days: 365,
+      is_active: true,
+      original_price: 0,
+      discount_percent: 0,
+      discount_label: '',
+      badge_label: '',
+      badge_variant: 'neutral',
+      states_limit: 0,
+      cities_limit: 0,
+    });
+  };
+
+  const savePlan = async (planId) => {
+    if (!planId) return;
+    const draft = planDrafts?.[planId];
+    if (!draft?.name || !String(draft.name).trim()) {
+      toast({
+        title: 'Required',
+        description: 'Plan name is required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const daily = Number(draft?.daily_limit || 0);
+    const weekly = Number(draft?.weekly_limit || 0);
+    const yearly = Number(draft?.yearly_limit || 0);
+    if (weekly < daily || yearly < weekly) {
+      toast({
+        title: 'Invalid lead limits',
+        description: 'Keep limits in order: Daily <= Weekly <= Yearly.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setPlanSavingId(planId);
+    try {
+      const payload = draftToPayload(draft);
+      const { plan } = await superAdminServerApi.plans.update(planId, payload);
+      if (plan) {
+        setPlans((prev) => (prev || []).map((item) => (item.id === planId ? plan : item)));
+        setPlanDrafts((prev) => ({
+          ...prev,
+          [planId]: planToDraft(plan),
+        }));
+      }
+      toast({ title: 'Plan updated', description: draft.name });
+      await fetchAuditLogs();
+    } catch (error) {
+      handleError(error, 'Failed to update plan');
+    } finally {
+      setPlanSavingId(null);
+    }
+  };
+
+  const saveAllPlans = async () => {
+    const changedPlans = (plans || []).filter((plan) => dirtyPlanIds.includes(plan.id));
+
+    if (!changedPlans.length) {
+      toast({
+        title: 'No changes',
+        description: 'All plans are already up to date.',
+      });
+      return;
+    }
+
+    for (const plan of changedPlans) {
+      const draft = planDrafts?.[plan.id] || planToDraft(plan);
+      const planName = String(draft?.name || plan?.name || '').trim() || `Plan ${plan.id}`;
+      if (!planName) {
+        toast({
+          title: 'Required',
+          description: `Plan name is required (${plan.id}).`,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const daily = Number(draft?.daily_limit || 0);
+      const weekly = Number(draft?.weekly_limit || 0);
+      const yearly = Number(draft?.yearly_limit || 0);
+      if (weekly < daily || yearly < weekly) {
+        toast({
+          title: 'Invalid lead limits',
+          description: `Fix limits for ${planName}: Daily <= Weekly <= Yearly.`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
+    setSavingAllPlans(true);
+    let successCount = 0;
+    const failures = [];
+
+    try {
+      for (const plan of changedPlans) {
+        const draft = planDrafts?.[plan.id] || planToDraft(plan);
+        const planName = String(draft?.name || plan?.name || '').trim() || `Plan ${plan.id}`;
+        try {
+          const payload = draftToPayload(draft);
+          const { plan: updatedPlan } = await superAdminServerApi.plans.update(plan.id, payload);
+          if (updatedPlan) {
+            setPlans((prev) => (prev || []).map((item) => (item.id === plan.id ? updatedPlan : item)));
+            setPlanDrafts((prev) => ({
+              ...prev,
+              [plan.id]: planToDraft(updatedPlan),
+            }));
+          }
+          successCount += 1;
+        } catch (error) {
+          failures.push({ planName, error });
+        }
+      }
+
+      if (successCount > 0) {
+        toast({
+          title: 'Plans updated',
+          description: `${successCount} plan(s) saved successfully.`,
+        });
+        await fetchAuditLogs();
+      }
+
+      if (failures.length > 0) {
+        const first = failures[0];
+        toast({
+          title: 'Some plans failed',
+          description: `${failures.length} failed. First: ${first.planName} (${first.error?.message || 'Update failed'})`,
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setSavingAllPlans(false);
+    }
+  };
+
+  const togglePlanSelectionMode = () => {
+    setPlanSelectionMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedPlanIds([]);
+      }
+      return next;
+    });
+  };
+
+  const togglePlanSelected = (planId, checked) => {
+    if (!planId) return;
+    setSelectedPlanIds((prev) => {
+      const current = prev || [];
+      const alreadySelected = current.includes(planId);
+      if (checked && !alreadySelected) return [...current, planId];
+      if (!checked && alreadySelected) return current.filter((id) => id !== planId);
+      return current;
+    });
+  };
+
+  const deleteSelectedPlans = async () => {
+    const selectedIdSet = new Set(selectedPlanIds || []);
+    const selectedPlans = (plans || []).filter((plan) => selectedIdSet.has(plan?.id));
+
+    if (!selectedPlans.length) {
+      toast({
+        title: 'No plans selected',
+        description: 'Select one or more plans to delete.',
+      });
+      return;
+    }
+
+    const selectedDirtyCount = selectedPlans.filter((plan) =>
+      dirtyPlanIds.includes(plan?.id)
+    ).length;
+
+    const confirmText = window.prompt(
+      `Type DELETE to permanently delete ${selectedPlans.length} selected plan(s).${
+        selectedDirtyCount > 0
+          ? ` ${selectedDirtyCount} selected plan(s) have unsaved changes that will be lost.`
+          : ''
+      }`
+    );
+    if (confirmText !== 'DELETE') return;
+
+    setDeletingSelectedPlans(true);
+    let successCount = 0;
+    const failures = [];
+
+    try {
+      for (const plan of selectedPlans) {
+        const planName = String(plan?.name || '').trim() || `Plan ${plan?.id || ''}`;
+        try {
+          await superAdminServerApi.plans.delete(plan.id);
+          successCount += 1;
+        } catch (error) {
+          failures.push({ planName, error });
+        }
+      }
+
+      if (successCount > 0) {
+        toast({
+          title: 'Plans deleted',
+          description: `${successCount} plan(s) deleted successfully.`,
+        });
+        await fetchPlans();
+        await fetchAuditLogs();
+      }
+
+      if (failures.length > 0) {
+        const first = failures[0];
+        toast({
+          title: 'Some plans could not be deleted',
+          description: `${failures.length} failed. First: ${first.planName} (${first.error?.message || 'Delete failed'})`,
+          variant: 'destructive',
+        });
+      }
+    } finally {
+      setDeletingSelectedPlans(false);
+    }
+  };
+
+  const createPlan = async (e) => {
+    e.preventDefault();
+    if (!newPlanForm.name.trim()) {
+      toast({
+        title: 'Required',
+        description: 'Plan name is required.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const daily = Number(newPlanForm?.daily_limit || 0);
+    const weekly = Number(newPlanForm?.weekly_limit || 0);
+    const yearly = Number(newPlanForm?.yearly_limit || 0);
+    if (weekly < daily || yearly < weekly) {
+      toast({
+        title: 'Invalid lead limits',
+        description: 'Keep limits in order: Daily <= Weekly <= Yearly.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setPlanCreating(true);
+    try {
+      const payload = draftToPayload(newPlanForm);
+      await superAdminServerApi.plans.create(payload);
+      toast({ title: 'Plan created', description: newPlanForm.name.trim() });
+      setPlanCreateOpen(false);
+      resetNewPlanForm();
+      await fetchPlans();
+      await fetchAuditLogs();
+    } catch (error) {
+      handleError(error, 'Failed to create plan');
+    } finally {
+      setPlanCreating(false);
+    }
+  };
 
   const saveSystemConfig = async () => {
     setSystemSaving(true);
@@ -566,6 +1111,9 @@ export default function SuperAdminDashboard() {
             </TabsTrigger>
             <TabsTrigger value="vendors" className="data-[state=active]:bg-neutral-700">
               <Building2 className="h-4 w-4 mr-2" /> Vendors
+            </TabsTrigger>
+            <TabsTrigger value="plans" className="data-[state=active]:bg-neutral-700">
+              <Package className="h-4 w-4 mr-2" /> Plans
             </TabsTrigger>
             <TabsTrigger value="finance" className="data-[state=active]:bg-neutral-700">
               <IndianRupee className="h-4 w-4 mr-2" /> Finance
@@ -1086,6 +1634,357 @@ export default function SuperAdminDashboard() {
             </Card>
           </TabsContent>
 
+          <TabsContent value="plans" className="space-y-4">
+            <Card className="bg-neutral-900 border-neutral-800">
+              <CardHeader className="space-y-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle className="text-white">Subscription Plan Control</CardTitle>
+                    <CardDescription className="text-neutral-400">
+                      Configure vendor plan limits, pricing, discount display, and visibility.
+                    </CardDescription>
+                  </div>
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                    <Button
+                      variant="outline"
+                      onClick={fetchPlans}
+                      disabled={deletingSelectedPlans}
+                      className="border-neutral-700 text-neutral-300 hover:bg-neutral-800 w-full sm:w-auto"
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-2 ${plansLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <Button
+                      variant={planSelectionMode ? 'secondary' : 'outline'}
+                      onClick={togglePlanSelectionMode}
+                      disabled={savingAllPlans || plansLoading || planSavingId !== null || deletingSelectedPlans}
+                      className="border-neutral-700 text-neutral-300 hover:bg-neutral-800 w-full sm:w-auto"
+                    >
+                      {planSelectionMode ? 'Cancel Select' : 'Select Plans'}
+                    </Button>
+                    {planSelectionMode ? (
+                      <Button
+                        variant="destructive"
+                        onClick={deleteSelectedPlans}
+                        disabled={
+                          deletingSelectedPlans ||
+                          savingAllPlans ||
+                          plansLoading ||
+                          planSavingId !== null ||
+                          selectedPlanIds.length === 0
+                        }
+                        className="bg-red-700 hover:bg-red-600 w-full sm:w-auto disabled:opacity-60"
+                      >
+                        {deletingSelectedPlans ? (
+                          <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4 mr-2" />
+                        )}
+                        {deletingSelectedPlans
+                          ? 'Deleting...'
+                          : `Delete Selected (${selectedPlanIds.length})`}
+                      </Button>
+                    ) : null}
+                    <Button
+                      onClick={saveAllPlans}
+                      disabled={
+                        savingAllPlans ||
+                        deletingSelectedPlans ||
+                        plansLoading ||
+                        planSavingId !== null ||
+                        dirtyPlanIds.length === 0
+                      }
+                      className="bg-emerald-700 hover:bg-emerald-600 w-full sm:w-auto disabled:opacity-60"
+                    >
+                      {savingAllPlans ? (
+                        <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Save className="h-4 w-4 mr-2" />
+                      )}
+                      {savingAllPlans ? 'Saving...' : `Save All (${dirtyPlanIds.length})`}
+                    </Button>
+                    <Button
+                      onClick={() => setPlanCreateOpen(true)}
+                      disabled={deletingSelectedPlans}
+                      className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto"
+                    >
+                      <Plus className="h-4 w-4 mr-2" /> Create Plan
+                    </Button>
+                  </div>
+                </div>
+
+                <Input
+                  value={planSearch}
+                  onChange={(e) => setPlanSearch(e.target.value)}
+                  placeholder="Search plans by name or description..."
+                  className="bg-neutral-800 border-neutral-700 text-white"
+                />
+              </CardHeader>
+
+              <CardContent className="space-y-4">
+                {filteredPlans.length === 0 ? (
+                  <div className="rounded-lg border border-neutral-800 py-12 text-center text-neutral-500">
+                    {plansLoading ? 'Loading plans...' : 'No plans found'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    {filteredPlans.map((plan) => {
+                      const draft = planDrafts?.[plan.id] || planToDraft(plan);
+                      const saving = planSavingId === plan.id;
+                      const selected = selectedPlanIds.includes(plan.id);
+                      const nowPrice = Number(draft?.price || 0);
+                      const oldPrice = Number(draft?.original_price || 0);
+                      const discountPercent = Number(draft?.discount_percent || 0);
+                      const showOldPrice = Number.isFinite(oldPrice) && oldPrice > nowPrice && nowPrice >= 0;
+                      const showPercent = Number.isFinite(discountPercent) && discountPercent > 0;
+
+                      return (
+                        <div
+                          key={plan.id}
+                          className={`rounded-xl border bg-neutral-950/40 p-4 sm:p-5 space-y-4 ${
+                            selected
+                              ? 'border-red-700/80 ring-1 ring-red-800/60'
+                              : 'border-neutral-800'
+                          }`}
+                        >
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex items-center gap-2">
+                              {planSelectionMode ? (
+                                <Checkbox
+                                  checked={selected}
+                                  onCheckedChange={(checked) =>
+                                    togglePlanSelected(plan.id, checked === true)
+                                  }
+                                  className="border-neutral-600 data-[state=checked]:bg-red-600 data-[state=checked]:border-red-600"
+                                />
+                              ) : null}
+                              <div className="text-xs text-neutral-500">Plan ID: {plan.id}</div>
+                            </div>
+                            <Badge
+                              variant="secondary"
+                              className={
+                                draft.is_active
+                                  ? 'bg-emerald-900/40 text-emerald-300'
+                                  : 'bg-neutral-800 text-neutral-400'
+                              }
+                            >
+                              {draft.is_active ? 'Active' : 'Hidden'}
+                            </Badge>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-3">
+                            <div className="space-y-1">
+                              <Label className="text-[11px] uppercase tracking-wide text-neutral-400">Plan Name</Label>
+                              <Input
+                                value={draft.name ?? ''}
+                                onChange={(e) => updatePlanDraft(plan.id, 'name', e.target.value)}
+                                className="bg-neutral-800 border-neutral-700 text-white h-9"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-[11px] uppercase tracking-wide text-neutral-400">Description</Label>
+                              <Input
+                                value={draft.description ?? ''}
+                                onChange={(e) => updatePlanDraft(plan.id, 'description', e.target.value)}
+                                className="bg-neutral-800 border-neutral-700 text-neutral-200 h-9"
+                                placeholder="Optional description"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 space-y-3">
+                            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Pricing</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Original Price</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={showBlankForZero(draft.original_price)}
+                                  onChange={(e) => updatePlanPricingDraft(plan.id, 'original_price', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Current Price</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={showBlankForZero(draft.price)}
+                                  onChange={(e) => updatePlanPricingDraft(plan.id, 'price', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Discount %</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={showBlankForZero(draft.discount_percent)}
+                                  onChange={(e) => updatePlanPricingDraft(plan.id, 'discount_percent', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Discount Label</Label>
+                                <Input
+                                  type="text"
+                                  value={draft.discount_label ?? ''}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'discount_label', e.target.value)}
+                                  disableAutoSanitize
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                  placeholder="Example: 20% OFF"
+                                />
+                              </div>
+                            </div>
+                            <div className="text-xs text-neutral-400">
+                              Preview: {showOldPrice ? `Rs. ${money(oldPrice)} -> ` : ''}Rs. {money(nowPrice)}
+                              {showPercent ? ` (${discountPercent}% OFF)` : ''}
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 space-y-3">
+                            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Lead Limits</p>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Daily</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={draft.daily_limit ?? 0}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'daily_limit', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Weekly</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={draft.weekly_limit ?? 0}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'weekly_limit', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Yearly</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={draft.yearly_limit ?? 0}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'yearly_limit', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Duration (days)</Label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  value={draft.duration_days ?? 365}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'duration_days', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 space-y-3">
+                            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Coverage Limits</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">States</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={draft.states_limit ?? 0}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'states_limit', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Cities</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={draft.cities_limit ?? 0}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'cities_limit', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                />
+                              </div>
+                            </div>
+                            <div className="text-xs text-neutral-500">
+                              Vendor card preview: Up to {Number(draft.states_limit || 0)} states and Up to {Number(draft.cities_limit || 0)} cities
+                            </div>
+                          </div>
+
+                          <div className="rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 space-y-3">
+                            <p className="text-[11px] uppercase tracking-wide text-neutral-400">Badge & Visibility</p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Badge Label</Label>
+                                <Input
+                                  value={draft.badge_label ?? ''}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'badge_label', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                  placeholder="Badge label"
+                                />
+                              </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Badge Variant</Label>
+                                <Select
+                                  value={draft.badge_variant || 'neutral'}
+                                  onValueChange={(value) => updatePlanDraft(plan.id, 'badge_variant', value)}
+                                >
+                                  <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white h-9">
+                                    <SelectValue placeholder="Badge variant" />
+                                  </SelectTrigger>
+                                  <SelectContent className="bg-neutral-800 border-neutral-700 text-white">
+                                    {PLAN_BADGE_VARIANTS.map((variant) => (
+                                      <SelectItem key={variant} value={variant}>
+                                        {variant}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={draft.is_active === true}
+                                onCheckedChange={(checked) => updatePlanDraft(plan.id, 'is_active', checked)}
+                              />
+                              <span className="text-sm text-neutral-300">
+                                {draft.is_active ? 'Plan is visible to vendors' : 'Plan is hidden from vendors'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end">
+                            <Button
+                              size="sm"
+                              onClick={() => savePlan(plan.id)}
+                              disabled={saving || savingAllPlans || deletingSelectedPlans}
+                              className="bg-emerald-700 hover:bg-emerald-600 w-full sm:w-auto"
+                            >
+                              {saving ? (
+                                <RefreshCw className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Save className="h-4 w-4 mr-1" />
+                              )}
+                              {saving ? '' : 'Save Changes'}
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="finance" className="space-y-4">
             <div className="flex justify-end">
               <Button
@@ -1512,6 +2411,212 @@ export default function SuperAdminDashboard() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={planCreateOpen} onOpenChange={setPlanCreateOpen}>
+        <DialogContent className="bg-neutral-900 border-neutral-800 text-white max-w-[96vw] sm:max-w-3xl max-h-[88vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Create Subscription Plan</DialogTitle>
+            <DialogDescription className="text-neutral-400">
+              Add a new vendor plan. Existing plans stay unchanged.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={createPlan} className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label className="text-neutral-300">Plan Name</Label>
+              <Input
+                value={newPlanForm.name}
+                onChange={(e) => setNewPlanForm((prev) => ({ ...prev, name: e.target.value }))}
+                className="bg-neutral-800 border-neutral-700"
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-neutral-300">Description</Label>
+              <Input
+                value={newPlanForm.description}
+                onChange={(e) => setNewPlanForm((prev) => ({ ...prev, description: e.target.value }))}
+                className="bg-neutral-800 border-neutral-700"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Current Price</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={showBlankForZero(newPlanForm.price)}
+                  onChange={(e) => updateNewPlanPricing('price', e.target.value)}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Original Price (old)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={showBlankForZero(newPlanForm.original_price)}
+                  onChange={(e) => updateNewPlanPricing('original_price', e.target.value)}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Discount %</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={showBlankForZero(newPlanForm.discount_percent)}
+                  onChange={(e) => updateNewPlanPricing('discount_percent', e.target.value)}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Discount Label</Label>
+                <Input
+                  type="text"
+                  value={newPlanForm.discount_label}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, discount_label: e.target.value }))}
+                  disableAutoSanitize
+                  className="bg-neutral-800 border-neutral-700"
+                  placeholder="Example: 20% OFF"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Daily</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={newPlanForm.daily_limit}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, daily_limit: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Weekly</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={newPlanForm.weekly_limit}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, weekly_limit: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Yearly</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={newPlanForm.yearly_limit}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, yearly_limit: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">States</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={newPlanForm.states_limit}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, states_limit: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Cities</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={newPlanForm.cities_limit}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, cities_limit: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Duration (days)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={newPlanForm.duration_days}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, duration_days: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Badge Label</Label>
+                <Input
+                  value={newPlanForm.badge_label}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, badge_label: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                  placeholder="Example: Most Popular"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Badge Variant</Label>
+                <Select
+                  value={newPlanForm.badge_variant}
+                  onValueChange={(value) => setNewPlanForm((prev) => ({ ...prev, badge_variant: value }))}
+                >
+                  <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white">
+                    <SelectValue placeholder="Badge variant" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-neutral-800 border-neutral-700 text-white">
+                    {PLAN_BADGE_VARIANTS.map((variant) => (
+                      <SelectItem key={variant} value={variant}>
+                        {variant}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2 rounded-md border border-neutral-700 px-3 py-2 h-10">
+                <Switch
+                  checked={newPlanForm.is_active === true}
+                  onCheckedChange={(checked) => setNewPlanForm((prev) => ({ ...prev, is_active: checked }))}
+                />
+                <span className="text-sm text-neutral-200">Plan Active</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="border-neutral-700 text-neutral-300 w-full sm:w-auto"
+                onClick={() => setPlanCreateOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" className="bg-blue-600 hover:bg-blue-700 w-full sm:w-auto" disabled={planCreating}>
+                {planCreating ? (
+                  <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4 mr-2" />
+                )}
+                Create Plan
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
+

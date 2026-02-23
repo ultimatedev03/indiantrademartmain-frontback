@@ -30,6 +30,13 @@ const postOtp = async (action, payload, fallbackMessage) => {
     throw new Error(data?.error || fallbackMessage);
   }
 
+  if (import.meta.env.DEV && data?.debug_otp) {
+    // Local fallback visibility for register/verify flows when SMTP auth is unavailable.
+    // Never returned in production mode.
+    // eslint-disable-next-line no-console
+    console.info('[OTP][DEV_FALLBACK] debug_otp:', data.debug_otp);
+  }
+
   return data;
 };
 

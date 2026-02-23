@@ -68,3 +68,15 @@
 .gradient-professional {
   @apply bg-gradient-to-r from-slate-900 via-blue-900 to-slate-900;
 }
+
+/* Hide browser spinner controls for number inputs globally */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

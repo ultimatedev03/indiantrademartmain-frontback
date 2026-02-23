@@ -324,63 +324,132 @@ router.get("/audit-logs", async (req, res) => {
  */
 router.get("/vendors", async (req, res) => {
   try {
-    const { data: vendors, error } = await supabase
+    const rawSearch = String(req.query?.search || "").trim();
+    const search = rawSearch.replace(/,/g, " ").trim();
+    const kycRaw = String(req.query?.kyc || req.query?.kyc_status || "all").trim();
+    const activeRaw = String(req.query?.active || req.query?.status || "all").trim();
+    const parsedLimit = Number(req.query?.limit);
+    const parsedOffset = Number(req.query?.offset);
+    const MAX_VENDOR_LIMIT = 1000;
+    const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, MAX_VENDOR_LIMIT)
+      : MAX_VENDOR_LIMIT;
+    const safeOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0
+      ? parsedOffset
+      : 0;
+
+    let vendorQuery = supabase
       .from("vendors")
       .select(
-        "id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active"
+        "id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active",
+        { count: "exact" }
       )
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(safeOffset, safeOffset + safeLimit - 1);
 
-    if (error)
+    const kyc = kycRaw.toUpperCase();
+    if (kyc && kyc !== "ALL") {
+      vendorQuery = vendorQuery.eq("kyc_status", kyc);
+    }
+
+    const active = activeRaw.toLowerCase();
+    if (active === "active") {
+      vendorQuery = vendorQuery.neq("is_active", false);
+    } else if (active === "inactive" || active === "terminated" || active === "suspended") {
+      vendorQuery = vendorQuery.eq("is_active", false);
+    }
+
+    if (search) {
+      vendorQuery = vendorQuery.or(
+        `company_name.ilike.%${search}%,owner_name.ilike.%${search}%,vendor_id.ilike.%${search}%,email.ilike.%${search}%`
+      );
+    }
+
+    const { data: vendors, error, count } = await vendorQuery;
+    if (error) {
       return res.status(500).json({ success: false, error: error.message });
+    }
 
-    // product counts
-    const { data: pRows, error: pErr } = await supabase
-      .from("products")
-      .select("vendor_id");
-
-    if (pErr)
-      return res.status(500).json({ success: false, error: pErr.message });
-
+    const vendorIds = (vendors || []).map((v) => v.id).filter(Boolean);
+    const chunk = (arr, size = 120) => {
+      const out = [];
+      for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+      return out;
+    };
     const countMap = {};
-    (pRows || []).forEach((r) => {
-      if (!r.vendor_id) return;
-      countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
-    });
+    if (vendorIds.length) {
+      for (const ids of chunk(vendorIds)) {
+        const { data: pRows, error: pErr } = await supabase
+          .from("products")
+          .select("vendor_id")
+          .in("vendor_id", ids);
 
-    // subscriptions + plans
-    const { data: subs, error: sErr } = await supabase
-      .from("vendor_plan_subscriptions")
-      .select("vendor_id, plan_id, status, start_date, end_date")
-      .order("start_date", { ascending: false });
+        if (pErr) {
+          return res.status(500).json({ success: false, error: pErr.message });
+        }
 
-    if (sErr)
-      return res.status(500).json({ success: false, error: sErr.message });
+        (pRows || []).forEach((r) => {
+          if (!r.vendor_id) return;
+          countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
+        });
+      }
+    }
 
-    const activeSubByVendor = {};
-    (subs || []).forEach((s) => {
-      if (!s.vendor_id) return;
-      if (activeSubByVendor[s.vendor_id]) return;
-      if (isActiveSub(s)) activeSubByVendor[s.vendor_id] = s;
-    });
-
-    const planIds = Array.from(
-      new Set(Object.values(activeSubByVendor).map((x) => x.plan_id).filter(Boolean))
-    );
-
+    let activeSubByVendor = {};
     let planMap = {};
-    if (planIds.length) {
-      const { data: plans, error: pErr2 } = await supabase
-        .from("vendor_plans")
-        .select("id, name, price")
-        .in("id", planIds);
 
-      if (pErr2)
-        return res.status(500).json({ success: false, error: pErr2.message });
+    if (vendorIds.length) {
+      const subRows = [];
+      for (const ids of chunk(vendorIds)) {
+        const { data: subs, error: sErr } = await supabase
+          .from("vendor_plan_subscriptions")
+          .select("vendor_id, plan_id, status, start_date, end_date")
+          .in("vendor_id", ids)
+          .order("start_date", { ascending: false });
 
-      (plans || []).forEach((p) => {
-        planMap[p.id] = p;
+        if (sErr) {
+          return res.status(500).json({ success: false, error: sErr.message });
+        }
+        if (Array.isArray(subs) && subs.length) subRows.push(...subs);
+      }
+
+      subRows.sort(
+        (a, b) =>
+          new Date(b?.start_date || 0).getTime() - new Date(a?.start_date || 0).getTime()
+      );
+
+      activeSubByVendor = {};
+      (subRows || []).forEach((s) => {
+        if (!s.vendor_id) return;
+        if (activeSubByVendor[s.vendor_id]) return;
+        if (isActiveSub(s)) activeSubByVendor[s.vendor_id] = s;
       });
+
+      const planIds = Array.from(
+        new Set(
+          Object.values(activeSubByVendor)
+            .map((x) => x?.plan_id)
+            .filter(Boolean)
+        )
+      );
+
+      if (planIds.length) {
+        planMap = {};
+        for (const ids of chunk(planIds)) {
+          const { data: plans, error: pErr2 } = await supabase
+            .from("vendor_plans")
+            .select("id, name, price")
+            .in("id", ids);
+
+          if (pErr2) {
+            return res.status(500).json({ success: false, error: pErr2.message });
+          }
+
+          (plans || []).forEach((p) => {
+            planMap[p.id] = p;
+          });
+        }
+      }
     }
 
     const result = (vendors || []).map((v) => {
@@ -390,12 +459,23 @@ router.get("/vendors", async (req, res) => {
         ...v,
         product_count: countMap[v.id] || 0,
         package: plan
-          ? { plan_id: plan.id, plan_name: plan.name, price: plan.price, end_date: sub?.end_date || null }
+          ? {
+              plan_id: plan.id,
+              plan_name: plan.name,
+              price: plan.price,
+              end_date: sub?.end_date || null,
+            }
           : { plan_id: null, plan_name: "FREE", price: 0, end_date: null },
       };
     });
 
-    return res.json({ success: true, vendors: result });
+    return res.json({
+      success: true,
+      vendors: result,
+      total: Number.isFinite(count) ? count : result.length,
+      limit: safeLimit,
+      offset: safeOffset,
+    });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

@@ -903,48 +903,118 @@ export async function handler(event) {
     // GET /vendors  (with product_count + plan)
     // -------------------------
     if (event.httpMethod === "GET" && tail[0] === "vendors" && tail.length === 1) {
-      const { data: vendors, error: vErr } = await supabase
-        .from("vendors")
-        .select("id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active")
-        .order("created_at", { ascending: false });
+      const queryParams = event.queryStringParameters || {};
+      const rawSearch = String(queryParams.search || "").trim();
+      const search = rawSearch.replace(/,/g, " ").trim();
+      const kycRaw = String(queryParams.kyc || queryParams.kyc_status || "all").trim();
+      const activeRaw = String(queryParams.active || queryParams.status || "all").trim();
+      const parsedLimit = Number(queryParams.limit);
+      const parsedOffset = Number(queryParams.offset);
+      const MAX_VENDOR_LIMIT = 1000;
+      const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, MAX_VENDOR_LIMIT)
+        : MAX_VENDOR_LIMIT;
+      const safeOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0
+        ? parsedOffset
+        : 0;
 
+      let vendorQuery = supabase
+        .from("vendors")
+        .select(
+          "id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active",
+          { count: "exact" }
+        )
+        .order("created_at", { ascending: false })
+        .range(safeOffset, safeOffset + safeLimit - 1);
+
+      const kyc = kycRaw.toUpperCase();
+      if (kyc && kyc !== "ALL") {
+        vendorQuery = vendorQuery.eq("kyc_status", kyc);
+      }
+
+      const active = activeRaw.toLowerCase();
+      if (active === "active") {
+        vendorQuery = vendorQuery.neq("is_active", false);
+      } else if (active === "inactive" || active === "terminated" || active === "suspended") {
+        vendorQuery = vendorQuery.eq("is_active", false);
+      }
+
+      if (search) {
+        vendorQuery = vendorQuery.or(
+          `company_name.ilike.%${search}%,owner_name.ilike.%${search}%,vendor_id.ilike.%${search}%,email.ilike.%${search}%`
+        );
+      }
+
+      const { data: vendors, error: vErr, count } = await vendorQuery;
       if (vErr) return fail("Failed to fetch vendors", vErr.message);
 
-      // product counts
-      const { data: pRows } = await supabase.from("products").select("vendor_id");
+      const vendorIds = (vendors || []).map((v) => v.id).filter(Boolean);
+      const chunk = (arr, size = 120) => {
+        const out = [];
+        for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+        return out;
+      };
       const countMap = {};
-      (pRows || []).forEach((r) => {
-        if (!r.vendor_id) return;
-        countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
-      });
+      if (vendorIds.length) {
+        for (const ids of chunk(vendorIds)) {
+          const { data: pRows } = await supabase
+            .from("products")
+            .select("vendor_id")
+            .in("vendor_id", ids);
+          (pRows || []).forEach((r) => {
+            if (!r.vendor_id) return;
+            countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
+          });
+        }
+      }
 
-      // subscriptions + plans
-      const { data: subs } = await supabase
-        .from("vendor_plan_subscriptions")
-        .select("vendor_id, plan_id, status, start_date, end_date")
-        .order("start_date", { ascending: false });
-
-      const activeSubByVendor = {};
-      (subs || []).forEach((s) => {
-        if (!s.vendor_id) return;
-        if (activeSubByVendor[s.vendor_id]) return;
-        if (isActiveSub(s)) activeSubByVendor[s.vendor_id] = s;
-      });
-
-      const planIds = Array.from(
-        new Set(Object.values(activeSubByVendor).map((x) => x.plan_id).filter(Boolean))
-      );
-
+      let activeSubByVendor = {};
       let planMap = {};
-      if (planIds.length) {
-        const { data: plans } = await supabase
-          .from("vendor_plans")
-          .select("id, name, price")
-          .in("id", planIds);
 
-        (plans || []).forEach((p) => {
-          planMap[p.id] = p;
+      if (vendorIds.length) {
+        const subRows = [];
+        for (const ids of chunk(vendorIds)) {
+          const { data: subs } = await supabase
+            .from("vendor_plan_subscriptions")
+            .select("vendor_id, plan_id, status, start_date, end_date")
+            .in("vendor_id", ids)
+            .order("start_date", { ascending: false });
+          if (Array.isArray(subs) && subs.length) subRows.push(...subs);
+        }
+
+        subRows.sort(
+          (a, b) =>
+            new Date(b?.start_date || 0).getTime() - new Date(a?.start_date || 0).getTime()
+        );
+
+        activeSubByVendor = {};
+        (subRows || []).forEach((s) => {
+          if (!s.vendor_id) return;
+          if (activeSubByVendor[s.vendor_id]) return;
+          if (isActiveSub(s)) activeSubByVendor[s.vendor_id] = s;
         });
+
+        const planIds = Array.from(
+          new Set(
+            Object.values(activeSubByVendor)
+              .map((x) => x?.plan_id)
+              .filter(Boolean)
+          )
+        );
+
+        if (planIds.length) {
+          planMap = {};
+          for (const ids of chunk(planIds)) {
+            const { data: plans } = await supabase
+              .from("vendor_plans")
+              .select("id, name, price")
+              .in("id", ids);
+
+            (plans || []).forEach((p) => {
+              planMap[p.id] = p;
+            });
+          }
+        }
       }
 
       const result = (vendors || []).map((v) => {
@@ -959,7 +1029,13 @@ export async function handler(event) {
         };
       });
 
-      return ok({ success: true, vendors: result });
+      return ok({
+        success: true,
+        vendors: result,
+        total: Number.isFinite(count) ? count : result.length,
+        limit: safeLimit,
+        offset: safeOffset,
+      });
     }
 
     // -------------------------

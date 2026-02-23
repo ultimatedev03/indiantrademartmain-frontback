@@ -28,6 +28,243 @@ const clampLimit = (limit, fallback = 200, max = 1000) => {
   return Math.min(Math.floor(n), max);
 };
 
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
+const toNonNegativeNumber = (value, fallback = 0) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return n;
+};
+
+const toPositiveInteger = (value, fallback = 1) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return Math.max(1, Math.floor(n));
+};
+
+const toNonNegativeInteger = (value, fallback = 0) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.max(0, Math.floor(n));
+};
+
+const normalizeObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) return { ...value };
+  return {};
+};
+
+const buildPlanFeatures = (existingFeatures, payload = {}) => {
+  const base = normalizeObject(existingFeatures);
+  const incoming = normalizeObject(payload?.features);
+  const baseCoverage = normalizeObject(base.coverage);
+  const incomingCoverage = normalizeObject(incoming.coverage);
+  const next = {
+    ...base,
+    ...incoming,
+  };
+
+  const hasPricingInput =
+    hasOwn(payload, 'original_price') ||
+    hasOwn(payload, 'discount_percent') ||
+    hasOwn(payload, 'discount_label');
+
+  if (hasPricingInput) {
+    const pricing = {
+      ...normalizeObject(base.pricing),
+      ...normalizeObject(incoming.pricing),
+    };
+
+    if (hasOwn(payload, 'original_price')) {
+      pricing.original_price = toNonNegativeNumber(payload.original_price, 0);
+    }
+    if (hasOwn(payload, 'discount_percent')) {
+      pricing.discount_percent = Math.max(0, Math.min(100, toNonNegativeNumber(payload.discount_percent, 0)));
+    }
+    if (hasOwn(payload, 'discount_label')) {
+      pricing.discount_label = String(payload.discount_label || '').trim();
+    }
+
+    next.pricing = pricing;
+  }
+
+  const hasBadgeInput = hasOwn(payload, 'badge_label') || hasOwn(payload, 'badge_variant');
+  if (hasBadgeInput) {
+    const badge = {
+      ...normalizeObject(base.badge),
+      ...normalizeObject(incoming.badge),
+    };
+    if (hasOwn(payload, 'badge_label')) badge.label = String(payload.badge_label || '').trim();
+    if (hasOwn(payload, 'badge_variant')) badge.variant = String(payload.badge_variant || '').trim() || 'neutral';
+    next.badge = badge;
+  }
+
+  const resolveCoverageLimit = (key) => {
+    if (hasOwn(payload, key)) return toNonNegativeInteger(payload[key], 0);
+    if (hasOwn(incoming, key)) return toNonNegativeInteger(incoming[key], 0);
+    if (hasOwn(incomingCoverage, key)) return toNonNegativeInteger(incomingCoverage[key], 0);
+    if (hasOwn(baseCoverage, key)) return toNonNegativeInteger(baseCoverage[key], 0);
+    if (hasOwn(base, key)) return toNonNegativeInteger(base[key], 0);
+    return undefined;
+  };
+
+  const statesLimit = resolveCoverageLimit('states_limit');
+  const citiesLimit = resolveCoverageLimit('cities_limit');
+
+  if (statesLimit !== undefined || citiesLimit !== undefined) {
+    const coverage = {
+      ...baseCoverage,
+      ...incomingCoverage,
+    };
+    if (statesLimit !== undefined) coverage.states_limit = statesLimit;
+    if (citiesLimit !== undefined) coverage.cities_limit = citiesLimit;
+    next.coverage = coverage;
+
+    // Keep flat keys for backward compatibility with older vendor UIs.
+    if (statesLimit !== undefined) next.states_limit = statesLimit;
+    if (citiesLimit !== undefined) next.cities_limit = citiesLimit;
+  }
+
+  return next;
+};
+
+const isMissingVendorPlanColumnError = (error, columnName) => {
+  const col = String(columnName || '').trim().toLowerCase();
+  if (!col) return false;
+
+  const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  const mentionsColumn =
+    text.includes(`'${col}'`) ||
+    text.includes(`"${col}"`) ||
+    text.includes(`column "${col}"`) ||
+    text.includes(`column '${col}'`);
+  const mentionsTable =
+    text.includes(`'vendor_plans'`) ||
+    text.includes(`"vendor_plans"`) ||
+    text.includes('relation "vendor_plans"') ||
+    text.includes("relation 'vendor_plans'");
+  const missingSignal = text.includes('schema cache') || text.includes('does not exist');
+
+  return mentionsColumn && mentionsTable && missingSignal;
+};
+
+const insertVendorPlanWithFallback = async (supabase, payload) => {
+  const first = await supabase
+    .from('vendor_plans')
+    .insert([payload])
+    .select('*')
+    .maybeSingle();
+
+  if (!first?.error || !hasOwn(payload, 'description')) {
+    return first;
+  }
+
+  if (!isMissingVendorPlanColumnError(first.error, 'description')) {
+    return first;
+  }
+
+  const retryPayload = { ...payload };
+  delete retryPayload.description;
+
+  const retry = await supabase
+    .from('vendor_plans')
+    .insert([retryPayload])
+    .select('*')
+    .maybeSingle();
+
+  if (!retry?.error && retry?.data) {
+    retry.data.description = String(payload.description || '');
+  }
+  return retry;
+};
+
+const updateVendorPlanWithFallback = async (supabase, planId, updates) => {
+  const first = await supabase
+    .from('vendor_plans')
+    .update(updates)
+    .eq('id', planId)
+    .select('*')
+    .maybeSingle();
+
+  if (!first?.error || !hasOwn(updates, 'description')) {
+    return first;
+  }
+
+  if (!isMissingVendorPlanColumnError(first.error, 'description')) {
+    return first;
+  }
+
+  const retryUpdates = { ...updates };
+  delete retryUpdates.description;
+
+  if (Object.keys(retryUpdates).length === 0) {
+    return {
+      data: null,
+      error: {
+        message:
+          'Plan description is not supported by current DB schema. Apply latest migration to enable it.',
+      },
+    };
+  }
+
+  const retry = await supabase
+    .from('vendor_plans')
+    .update(retryUpdates)
+    .eq('id', planId)
+    .select('*')
+    .maybeSingle();
+
+  if (!retry?.error && retry?.data) {
+    retry.data.description = String(updates.description || '');
+  }
+  return retry;
+};
+
+const syncActivePlanQuota = async (supabase, planId, limits) => {
+  if (!planId) return;
+
+  const { data: subscriptions, error: subError } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('vendor_id')
+    .eq('plan_id', planId)
+    .eq('status', 'ACTIVE');
+
+  if (subError) throw new Error(subError.message);
+
+  const vendorIds = Array.from(
+    new Set(
+      (subscriptions || [])
+        .map((row) => row?.vendor_id)
+        .filter(Boolean)
+    )
+  );
+  if (!vendorIds.length) return;
+
+  const { error: quotaError } = await supabase
+    .from('vendor_lead_quota')
+    .update({
+      plan_id: planId,
+      daily_limit: toNonNegativeInteger(limits?.daily_limit, 0),
+      weekly_limit: toNonNegativeInteger(limits?.weekly_limit, 0),
+      yearly_limit: toNonNegativeInteger(limits?.yearly_limit, 0),
+      updated_at: nowIso(),
+    })
+    .in('vendor_id', vendorIds);
+
+  if (quotaError) throw new Error(quotaError.message);
+};
+
 const getSupabase = () => {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -677,6 +914,219 @@ export const handler = async (event) => {
         },
       });
       return json(200, { success: true, vendor });
+    }
+
+    if (event.httpMethod === 'GET' && tail[0] === 'plans' && tail.length === 1) {
+      const query = event.queryStringParameters || {};
+      const includeInactive = query.include_inactive !== 'false';
+      const limit = clampLimit(query.limit, 200, 1000);
+
+      let planQuery = supabase
+        .from('vendor_plans')
+        .select('*')
+        .order('price', { ascending: true })
+        .order('name', { ascending: true })
+        .limit(limit);
+
+      if (!includeInactive) {
+        planQuery = planQuery.eq('is_active', true);
+      }
+
+      const { data, error } = await planQuery;
+      if (error) return json(500, { success: false, error: error.message });
+
+      await writeAuditLog(supabase, {
+        actor,
+        action: 'VENDOR_PLANS_VIEWED',
+        entityType: 'vendor_plans',
+        details: {
+          include_inactive: includeInactive,
+          count: data?.length || 0,
+        },
+      });
+
+      return json(200, { success: true, plans: data || [] });
+    }
+
+    if (event.httpMethod === 'POST' && tail[0] === 'plans' && tail.length === 1) {
+      const name = String(body?.name || '').trim();
+      if (!name) return json(400, { success: false, error: 'name is required' });
+
+      const payload = {
+        name,
+        price: toNonNegativeNumber(body?.price, 0),
+        daily_limit: toNonNegativeInteger(body?.daily_limit, 0),
+        weekly_limit: toNonNegativeInteger(body?.weekly_limit, 0),
+        yearly_limit: toNonNegativeInteger(body?.yearly_limit, 0),
+        duration_days: toPositiveInteger(body?.duration_days, 365),
+        is_active: body?.is_active !== false,
+        features: buildPlanFeatures({}, body),
+      };
+
+      if (hasOwn(body, 'description')) {
+        payload.description = String(body?.description || '').trim();
+      }
+
+      const { data, error } = await insertVendorPlanWithFallback(supabase, payload);
+
+      if (error) return json(500, { success: false, error: error.message });
+
+      await writeAuditLog(supabase, {
+        actor,
+        action: 'VENDOR_PLAN_CREATED',
+        entityType: 'vendor_plans',
+        entityId: data?.id || null,
+        details: {
+          name: payload.name,
+          price: payload.price,
+          daily_limit: payload.daily_limit,
+          weekly_limit: payload.weekly_limit,
+          yearly_limit: payload.yearly_limit,
+          duration_days: payload.duration_days,
+          is_active: payload.is_active,
+        },
+      });
+
+      return json(200, { success: true, plan: data || payload });
+    }
+
+    if (event.httpMethod === 'PUT' && tail[0] === 'plans' && tail[1] && tail.length === 2) {
+      const planId = tail[1];
+      const { data: existing, error: existingError } = await supabase
+        .from('vendor_plans')
+        .select('*')
+        .eq('id', planId)
+        .maybeSingle();
+
+      if (existingError) return json(500, { success: false, error: existingError.message });
+      if (!existing) return json(404, { success: false, error: 'Plan not found' });
+
+      const updates = {};
+      if (hasOwn(body, 'name')) updates.name = String(body?.name || '').trim();
+      if (hasOwn(body, 'description')) updates.description = String(body?.description || '').trim();
+      if (hasOwn(body, 'price')) updates.price = toNonNegativeNumber(body?.price, 0);
+      if (hasOwn(body, 'daily_limit')) updates.daily_limit = toNonNegativeInteger(body?.daily_limit, 0);
+      if (hasOwn(body, 'weekly_limit')) updates.weekly_limit = toNonNegativeInteger(body?.weekly_limit, 0);
+      if (hasOwn(body, 'yearly_limit')) updates.yearly_limit = toNonNegativeInteger(body?.yearly_limit, 0);
+      if (hasOwn(body, 'duration_days')) updates.duration_days = toPositiveInteger(body?.duration_days, 365);
+      if (hasOwn(body, 'is_active')) updates.is_active = body?.is_active === true;
+
+      const hasFeatureUpdate =
+        hasOwn(body, 'features') ||
+        hasOwn(body, 'original_price') ||
+        hasOwn(body, 'discount_percent') ||
+        hasOwn(body, 'discount_label') ||
+        hasOwn(body, 'badge_label') ||
+        hasOwn(body, 'badge_variant') ||
+        hasOwn(body, 'states_limit') ||
+        hasOwn(body, 'cities_limit');
+
+      if (hasFeatureUpdate) {
+        updates.features = buildPlanFeatures(existing.features, body);
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return json(400, { success: false, error: 'No valid fields provided to update' });
+      }
+
+      const { data, error } = await updateVendorPlanWithFallback(supabase, planId, updates);
+      if (error) return json(500, { success: false, error: error.message });
+
+      if (hasOwn(updates, 'daily_limit') || hasOwn(updates, 'weekly_limit') || hasOwn(updates, 'yearly_limit')) {
+        await syncActivePlanQuota(supabase, planId, {
+          daily_limit: data?.daily_limit ?? existing.daily_limit ?? 0,
+          weekly_limit: data?.weekly_limit ?? existing.weekly_limit ?? 0,
+          yearly_limit: data?.yearly_limit ?? existing.yearly_limit ?? 0,
+        });
+      }
+
+      await writeAuditLog(supabase, {
+        actor,
+        action: 'VENDOR_PLAN_UPDATED',
+        entityType: 'vendor_plans',
+        entityId: planId,
+        details: updates,
+      });
+
+      return json(200, { success: true, plan: data || null });
+    }
+
+    if (event.httpMethod === 'DELETE' && tail[0] === 'plans' && tail[1] && tail.length === 2) {
+      const planId = tail[1];
+
+      const { data: existing, error: existingError } = await supabase
+        .from('vendor_plans')
+        .select('*')
+        .eq('id', planId)
+        .maybeSingle();
+
+      if (existingError) return json(500, { success: false, error: existingError.message });
+      if (!existing) return json(404, { success: false, error: 'Plan not found' });
+
+      const [
+        { count: activeSubscriptionCount, error: activeSubError },
+        { count: subscriptionHistoryCount, error: subHistoryError },
+        { count: paymentHistoryCount, error: paymentHistoryError },
+      ] = await Promise.all([
+        supabase
+          .from('vendor_plan_subscriptions')
+          .select('id', { head: true, count: 'exact' })
+          .eq('plan_id', planId)
+          .eq('status', 'ACTIVE'),
+        supabase
+          .from('vendor_plan_subscriptions')
+          .select('id', { head: true, count: 'exact' })
+          .eq('plan_id', planId),
+        supabase
+          .from('vendor_payments')
+          .select('id', { head: true, count: 'exact' })
+          .eq('plan_id', planId),
+      ]);
+
+      if (activeSubError || subHistoryError || paymentHistoryError) {
+        return json(500, {
+          success: false,
+          error:
+            activeSubError?.message ||
+            subHistoryError?.message ||
+            paymentHistoryError?.message ||
+            'Failed to validate plan dependencies',
+        });
+      }
+
+      if ((activeSubscriptionCount || 0) > 0) {
+        return json(400, {
+          success: false,
+          error: 'Plan has active vendor subscriptions. Disable it instead of deleting.',
+        });
+      }
+
+      if ((subscriptionHistoryCount || 0) > 0 || (paymentHistoryCount || 0) > 0) {
+        return json(400, {
+          success: false,
+          error: 'Plan has subscription/payment history. Keep it inactive instead of deleting.',
+        });
+      }
+
+      const { error: deleteError } = await supabase
+        .from('vendor_plans')
+        .delete()
+        .eq('id', planId);
+
+      if (deleteError) return json(500, { success: false, error: deleteError.message });
+
+      await writeAuditLog(supabase, {
+        actor,
+        action: 'VENDOR_PLAN_DELETED',
+        entityType: 'vendor_plans',
+        entityId: planId,
+        details: {
+          name: existing.name || null,
+          price: Number(existing.price || 0),
+        },
+      });
+
+      return json(200, { success: true, planId });
     }
 
     if (event.httpMethod === 'GET' && tail[0] === 'finance' && tail[1] === 'summary') {

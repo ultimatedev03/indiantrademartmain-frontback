@@ -38,6 +38,63 @@ const formatINR = (v) => {
   const n = Number(v || 0);
   return n.toLocaleString('en-IN');
 };
+
+const asObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const getPlanDisplayPricing = (plan) => {
+  const nowPrice = Number(plan?.price || 0);
+  const features = asObject(plan?.features);
+  const pricing = asObject(features?.pricing);
+
+  const configuredOriginalPrice = Number(pricing.original_price || 0);
+  const configuredDiscountPercent = Number(pricing.discount_percent || 0);
+
+  let originalPrice = configuredOriginalPrice;
+  let discountPercent = Number.isFinite(configuredDiscountPercent)
+    ? Math.max(0, Math.min(100, configuredDiscountPercent))
+    : 0;
+
+  if ((!Number.isFinite(originalPrice) || originalPrice <= nowPrice) && discountPercent > 0 && discountPercent < 100) {
+    originalPrice = Number(((nowPrice * 100) / (100 - discountPercent)).toFixed(2));
+  }
+
+  if (!Number.isFinite(originalPrice) || originalPrice <= nowPrice) {
+    originalPrice = 0;
+  }
+
+  if ((!discountPercent || discountPercent <= 0) && originalPrice > nowPrice && originalPrice > 0) {
+    discountPercent = Number((((originalPrice - nowPrice) / originalPrice) * 100).toFixed(2));
+  }
+
+  const discountLabel = String(pricing.discount_label || '').trim();
+
+  return {
+    nowPrice,
+    originalPrice,
+    discountPercent,
+    discountLabel,
+  };
+};
+
+const getDiscountTag = (pricing) => {
+  const label = String(pricing?.discountLabel || '').trim();
+  if (label) return label;
+  const percent = Number(pricing?.discountPercent || 0);
+  if (percent > 0) return `${Math.round(percent)}% OFF`;
+  return '';
+};
+
 const normalizeCouponCode = (value) =>
   String(value || '')
     .toUpperCase()
@@ -107,12 +164,12 @@ const Services = () => {
   }, [plans]);
 
   const parsePlanMeta = (plan) => {
-    const f = plan?.features;
+    const rawFeatures = plan?.features;
 
-    if (Array.isArray(f)) {
+    if (Array.isArray(rawFeatures)) {
       return {
         badge: { label: plan.name, variant: 'neutral' },
-        highlights: f.map(String),
+        highlights: rawFeatures.map(String),
         visibility: [],
         leads: [],
         support: [],
@@ -121,7 +178,8 @@ const Services = () => {
       };
     }
 
-    if (!f || typeof f !== 'object') {
+    const f = asObject(rawFeatures);
+    if (Object.keys(f).length === 0) {
       return {
         badge: { label: plan.name, variant: 'neutral' },
         highlights: [],
@@ -141,8 +199,11 @@ const Services = () => {
     const coverage = [];
 
     // Coverage
-    if (typeof f.states_limit === 'number') coverage.push(`Up to ${f.states_limit} states`);
-    if (typeof f.cities_limit === 'number') coverage.push(`Up to ${f.cities_limit} cities`);
+    const coverageMeta = asObject(f.coverage);
+    const statesLimit = Number(coverageMeta.states_limit ?? f.states_limit);
+    const citiesLimit = Number(coverageMeta.cities_limit ?? f.cities_limit);
+    if (Number.isFinite(statesLimit) && statesLimit >= 0) coverage.push(`Up to ${Math.floor(statesLimit)} states`);
+    if (Number.isFinite(citiesLimit) && citiesLimit >= 0) coverage.push(`Up to ${Math.floor(citiesLimit)} cities`);
 
     // Visibility
     if (f.listing?.highlight) visibility.push('Highlighted listing');
@@ -316,8 +377,9 @@ const Services = () => {
             .eq('id', currentSub.id);
         }
 
+        const durationDays = Math.max(1, Number(plan.duration_days || 365));
         const startDate = new Date();
-        const endDate = new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000);
+        const endDate = new Date(startDate.getTime() + durationDays * 24 * 60 * 60 * 1000);
 
         await supabase.from('vendor_plan_subscriptions').insert({
           vendor_id: vendorId,
@@ -325,7 +387,7 @@ const Services = () => {
           start_date: startDate.toISOString(),
           end_date: endDate.toISOString(),
           status: 'ACTIVE',
-          plan_duration_days: 365,
+          plan_duration_days: durationDays,
           auto_renewal_enabled: false,
           renewal_notification_sent: false
         });
@@ -623,6 +685,10 @@ const Services = () => {
   const selected = selectedPlan ? buildGroups(selectedPlan) : null;
   const selectedIsCurrent = selectedPlan && currentSub?.plan_id === selectedPlan.id;
   const selectedIsPopular = selectedPlan && selectedPlan.id === mostPopularPlanId;
+  const selectedPricing = selectedPlan
+    ? getPlanDisplayPricing(selectedPlan)
+    : { nowPrice: 0, originalPrice: 0, discountPercent: 0, discountLabel: '' };
+  const selectedDiscountTag = getDiscountTag(selectedPricing);
 
   if (!plans.length && !loading && !fatalError) {
     return (
@@ -721,6 +787,8 @@ const Services = () => {
         {plans.map((plan) => {
           const isCurrent = currentSub?.plan_id === plan.id;
           const isPopular = plan.id === mostPopularPlanId;
+          const pricing = getPlanDisplayPricing(plan);
+          const discountTag = getDiscountTag(pricing);
 
           const { meta, keyBenefits } = buildGroups(plan);
           const badge = meta.badge || {};
@@ -781,10 +849,20 @@ const Services = () => {
 
                 <div className="mt-3 flex items-end justify-between">
                   <div>
+                    {pricing.originalPrice > pricing.nowPrice ? (
+                      <div className="text-xs text-slate-400 line-through">
+                        ₹{formatINR(pricing.originalPrice)}
+                      </div>
+                    ) : null}
                     <div className="text-2xl font-extrabold text-slate-900">
-                      ₹{formatINR(plan.price)}
+                      ₹{formatINR(pricing.nowPrice)}
                       <span className="text-xs font-medium text-slate-500">/year</span>
                     </div>
+                    {discountTag ? (
+                      <div className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        {discountTag}
+                      </div>
+                    ) : null}
                     <div className="text-[12px] text-slate-500 mt-1">Tap card to view full details</div>
                   </div>
                 </div>
@@ -890,10 +968,20 @@ const Services = () => {
                       <div className="text-xs uppercase tracking-[0.15em] text-white/70 font-semibold">
                         Annual Billing
                       </div>
+                      {selectedPricing.originalPrice > selectedPricing.nowPrice ? (
+                        <div className="text-xs text-white/60 line-through">
+                          ₹{formatINR(selectedPricing.originalPrice)}
+                        </div>
+                      ) : null}
                       <div className="text-3xl font-extrabold leading-tight">
-                        ₹{formatINR(selectedPlan.price)}
+                        ₹{formatINR(selectedPricing.nowPrice)}
                         <span className="text-sm font-medium text-white/80"> / year</span>
                       </div>
+                      {selectedDiscountTag ? (
+                        <div className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          {selectedDiscountTag}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="flex items-center gap-2 text-sm">
                         <span className="px-3 py-1 rounded-full border border-white/30 bg-white/10 font-semibold text-xs">
@@ -1017,10 +1105,22 @@ const Services = () => {
                     </div>
 
                     <div className="rounded-2xl bg-white border px-3.5 py-3 shadow-[inset_0_1px_10px_rgba(15,23,42,0.05)] space-y-2">
+                      {selectedPricing.originalPrice > selectedPricing.nowPrice ? (
+                        <div className="flex justify-between text-xs text-slate-400 leading-tight">
+                          <span>Old price</span>
+                          <span className="line-through">₹{formatINR(selectedPricing.originalPrice)}</span>
+                        </div>
+                      ) : null}
                       <div className="flex justify-between text-sm text-slate-700 leading-tight">
                         <span>Plan price</span>
-                        <span className="font-semibold text-slate-800">₹{formatINR(selectedPlan.price)}</span>
+                        <span className="font-semibold text-slate-800">₹{formatINR(selectedPricing.nowPrice)}</span>
                       </div>
+                      {selectedDiscountTag ? (
+                        <div className="flex justify-between text-sm text-emerald-700 font-semibold">
+                          <span>Offer</span>
+                          <span>{selectedDiscountTag}</span>
+                        </div>
+                      ) : null}
                       {couponCode.trim() ? (
                         <div className="flex justify-between text-sm text-amber-700 font-semibold">
                           <span>Coupon {couponCode.trim().toUpperCase()}</span>
@@ -1034,7 +1134,7 @@ const Services = () => {
                       )}
                       <div className="border-t pt-2.5 flex justify-between text-base font-bold text-slate-900">
                         <span>Payable now</span>
-                        <span>₹{formatINR(selectedPlan.price)}</span>
+                        <span>₹{formatINR(selectedPricing.nowPrice)}</span>
                       </div>
                       {couponCode.trim() && (
                         <div className="text-[11px] text-amber-700 text-right">Final amount updates after validation</div>

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { normalizeEmail } from '../lib/auth.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
+import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
 
 const router = express.Router();
 
@@ -946,16 +947,6 @@ async function insertNotification(payload = {}) {
   if (error) throw error;
 }
 
-const LEAD_CONSUMPTION_STATUS_BY_CODE = {
-  INVALID_INPUT: 400,
-  LEAD_NOT_FOUND: 404,
-  LEAD_UNAVAILABLE: 409,
-  LEAD_NOT_PURCHASABLE: 409,
-  LEAD_CAP_REACHED: 409,
-  SUBSCRIPTION_INACTIVE: 403,
-  PAID_REQUIRED: 402,
-};
-
 const normalizeLeadConsumptionMode = (value) => {
   const mode = String(value || '').trim().toUpperCase();
   if (mode === 'USE_WEEKLY') return 'USE_WEEKLY';
@@ -973,34 +964,13 @@ const parseLeadPriceNumber = (value, fallback = 0) => {
 };
 
 async function consumeLeadForVendor({ vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) {
-  const { data, error } = await supabase.rpc('consume_vendor_lead', {
-    p_vendor_id: vendorId,
-    p_lead_id: leadId,
-    p_mode: mode,
-    p_purchase_price: purchasePrice,
+  return consumeLeadForVendorWithCompat({
+    supabase,
+    vendorId,
+    leadId,
+    mode,
+    purchasePrice,
   });
-
-  if (error) {
-    throw new Error(error.message || 'Lead consumption failed');
-  }
-
-  const result = data && typeof data === 'object' ? data : {};
-  if (!result.success) {
-    const code = String(result.code || 'CONSUMPTION_FAILED').trim().toUpperCase();
-    const statusCode = LEAD_CONSUMPTION_STATUS_BY_CODE[code] || 400;
-    return {
-      success: false,
-      statusCode,
-      code,
-      error: result.error || 'Lead consumption failed',
-      payload: result,
-    };
-  }
-
-  return {
-    success: true,
-    payload: result,
-  };
 }
 
 // ✅ Current vendor profile (auth-required)

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -101,43 +101,26 @@ export default function Vendors() {
     [terminationReason]
   );
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/vendors`);
+      const params = new URLSearchParams();
+      const trimmedSearch = searchTerm.trim();
+      if (trimmedSearch) params.set("search", trimmedSearch);
+      if (filterKyc !== "all") params.set("kyc", filterKyc);
+      if (filterActive !== "all") params.set("active", filterActive);
+      params.set("limit", "1000");
+
+      const queryString = params.toString();
+      const url = queryString
+        ? `${ADMIN_API_BASE}/vendors?${queryString}`
+        : `${ADMIN_API_BASE}/vendors`;
+
+      const res = await fetchWithCsrf(url);
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
 
-      let list = data.vendors || [];
-
-      if (filterKyc !== "all") {
-        const map = {
-          pending: "PENDING",
-          submitted: "SUBMITTED",
-          approved: "APPROVED",
-          rejected: "REJECTED",
-        };
-        const want = map[filterKyc] || filterKyc.toUpperCase();
-        list = list.filter((v) => norm(v.kyc_status) === want);
-      }
-
-      if (filterActive !== "all") {
-        const want = filterActive === "active";
-        list = list.filter((v) => (v.is_active !== false) === want);
-      }
-
-      const t = searchTerm.trim().toLowerCase();
-      if (t) {
-        list = list.filter(
-          (v) =>
-            v.company_name?.toLowerCase().includes(t) ||
-            v.owner_name?.toLowerCase().includes(t) ||
-            v.vendor_id?.toLowerCase().includes(t) ||
-            v.email?.toLowerCase().includes(t)
-        );
-      }
-
-      setVendors(list);
+      setVendors(Array.isArray(data.vendors) ? data.vendors : []);
     } catch (e) {
       console.error(e);
       toast({
@@ -148,12 +131,14 @@ export default function Vendors() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [ADMIN_API_BASE, filterActive, filterKyc, searchTerm, toast]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterKyc, filterActive]);
+    const timer = setTimeout(() => {
+      load();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   const total = useMemo(() => vendors.length, [vendors]);
 

@@ -80,9 +80,10 @@ const CoverageSettings = () => {
     if (typeof f === 'string') {
       try { f = JSON.parse(f); } catch (_) { f = {}; }
     }
+    const coverage = (f && typeof f.coverage === 'object' && f.coverage) || {};
     return {
-      states: Number(f.states_limit || DEFAULT_LIMITS.states),
-      cities: Number(f.cities_limit || DEFAULT_LIMITS.cities),
+      states: Number(coverage.states_limit ?? f.states_limit ?? DEFAULT_LIMITS.states),
+      cities: Number(coverage.cities_limit ?? f.cities_limit ?? DEFAULT_LIMITS.cities),
       categories: Number(f.categories_limit || DEFAULT_LIMITS.categories),
     };
   };

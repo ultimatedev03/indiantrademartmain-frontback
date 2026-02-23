@@ -15,12 +15,27 @@ const Input = React.forwardRef(
       type,
       onChange,
       onInput,
+      onWheel,
       disableAutoSanitize = false,
       maxLength,
       ...props
     },
     ref
   ) => {
+    const localRef = React.useRef(null)
+
+    const setInputRef = React.useCallback(
+      (node) => {
+        localRef.current = node
+        if (typeof ref === "function") {
+          ref(node)
+        } else if (ref) {
+          ref.current = node
+        }
+      },
+      [ref]
+    )
+
     const inputKind = React.useMemo(
       () =>
         detectInputKind({
@@ -71,6 +86,35 @@ const Input = React.forwardRef(
       [applySanitize, onInput]
     )
 
+    React.useEffect(() => {
+      if (type !== "number") return undefined
+      const node = localRef.current
+      if (!node) return undefined
+
+      const preventWheelNumberChange = (event) => {
+        if (document.activeElement === node) {
+          event.preventDefault()
+          node.blur()
+        }
+      }
+
+      node.addEventListener("wheel", preventWheelNumberChange, { passive: false })
+      return () => {
+        node.removeEventListener("wheel", preventWheelNumberChange)
+      }
+    }, [type])
+
+    const handleWheel = React.useCallback(
+      (event) => {
+        if (type === "number" && document.activeElement === event.currentTarget) {
+          event.preventDefault()
+          event.currentTarget.blur()
+        }
+        onWheel?.(event)
+      },
+      [onWheel, type]
+    )
+
     const resolvedMaxLength =
       maxLength ?? (!disableAutoSanitize ? maxLengthByKind[inputKind] : undefined)
 
@@ -81,10 +125,11 @@ const Input = React.forwardRef(
           "flex h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-base md:text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
           className
         )}
-        ref={ref}
+        ref={setInputRef}
         maxLength={resolvedMaxLength}
         onChange={handleChange}
         onInput={handleInput}
+        onWheel={handleWheel}
         {...props}
       />
     )

@@ -144,7 +144,9 @@ async function assertUserActive(user) {
       .maybeSingle();
 
     if (!vendor) return { ok: false, error: 'Vendor profile not found' };
-    if (vendor && vendor.is_active === false) return { ok: false, error: 'Vendor account is inactive' };
+    // Suspended/terminated vendors are allowed to login.
+    // UI + protected routes enforce restricted access (support/logout only).
+    return { ok: true };
   }
 
   if (role === 'BUYER') {
@@ -161,7 +163,10 @@ async function assertUserActive(user) {
       )
       .maybeSingle();
 
-    if (buyer && buyer.is_active === false) return { ok: false, error: 'Buyer account is inactive' };
+    // Suspended/terminated buyers are allowed to login.
+    // Buyer portal route guards will restrict them to support/tickets pages.
+    if (!buyer) return { ok: true };
+    return { ok: true };
   }
 
   if (['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE', 'SUPERADMIN'].includes(role)) {
