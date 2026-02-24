@@ -8,6 +8,7 @@ import nodemailer from 'nodemailer';
 import { writeAuditLog } from '../lib/audit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
+import { applyReferralRewardAfterPayment, getReferralOfferForVendor } from '../lib/referralProgram.js';
 
 const router = express.Router();
 
@@ -194,6 +195,9 @@ router.post('/initiate', async (req, res) => {
     let discountAmount = 0;
     let netAmount = baseAmount;
     let coupon = null;
+    let offerType = null;
+    let offerCode = null;
+    let referralId = null;
 
     if (coupon_code) {
       const { data: cpn, error: couponErr } = await supabase
@@ -229,6 +233,39 @@ router.post('/initiate', async (req, res) => {
       discountAmount = Math.max(0, Math.min(discountAmount, baseAmount));
       netAmount = Math.max(0, baseAmount - discountAmount);
       coupon = cpn;
+      offerType = 'COUPON';
+      offerCode = coupon_code;
+    }
+
+    // Referral offer (auto-applied when vendor is linked by referral code)
+    let referralOffer = null;
+    try {
+      referralOffer = await getReferralOfferForVendor({ vendor, plan }, supabase);
+    } catch (refErr) {
+      console.warn('[payment/initiate] referral offer lookup failed:', refErr?.message || refErr);
+    }
+
+    if (referralOffer?.discount_amount > 0) {
+      const refDiscount = Number(referralOffer.discount_amount || 0);
+      const allowStack = Boolean(referralOffer?.settings?.allow_coupon_stack);
+
+      if (allowStack && coupon) {
+        discountAmount = Math.max(0, Math.min(baseAmount, discountAmount + refDiscount));
+        netAmount = Math.max(0, baseAmount - discountAmount);
+        offerType = 'COUPON+REFERRAL';
+        offerCode = `${coupon_code}+${referralOffer.offer_code || ''}`;
+        referralId = referralOffer.referral_id || null;
+      } else if (refDiscount > discountAmount) {
+        discountAmount = refDiscount;
+        netAmount = Math.max(0, baseAmount - discountAmount);
+        offerType = 'REFERRAL';
+        offerCode = referralOffer.offer_code || null;
+        referralId = referralOffer.referral_id || null;
+      } else if (!offerType) {
+        offerType = 'REFERRAL';
+        offerCode = referralOffer.offer_code || null;
+        referralId = referralOffer.referral_id || null;
+      }
     }
 
     const amount = Math.max(1, Math.round(netAmount * 100)); // paise, min 1 to keep Razorpay happy
@@ -247,6 +284,9 @@ router.post('/initiate', async (req, res) => {
         vendor_email: vendor.email,
         vendor_name: vendor.company_name,
         coupon_code,
+        offer_type: offerType || null,
+        offer_code: offerCode || null,
+        referral_id: referralId || null,
       },
     };
 
@@ -266,6 +306,9 @@ router.post('/initiate', async (req, res) => {
         net_amount: netAmount,
         discount_amount: discountAmount,
         coupon_code: coupon_code || null,
+        offer_type: offerType || null,
+        offer_code: offerCode || null,
+        referral_id: referralId || null,
       },
     });
   } catch (error) {
@@ -315,10 +358,13 @@ router.post('/verify', async (req, res) => {
       return res.status(404).json({ error: 'Vendor or plan not found' });
     }
 
-    // Coupon re-validation
+    // Coupon + referral offer re-validation
     let discountAmount = 0;
     let netAmount = Number(plan.price || 0);
     let coupon = null;
+    let offerType = null;
+    let offerCode = null;
+    let referralId = null;
 
     if (coupon_code) {
       const { data: cpn } = await supabase
@@ -344,7 +390,40 @@ router.post('/verify', async (req, res) => {
           discountAmount = Math.max(0, Math.min(discountAmount, Number(plan.price || 0)));
           netAmount = Math.max(0, Number(plan.price || 0) - discountAmount);
           coupon = cpn;
+          offerType = 'COUPON';
+          offerCode = coupon_code;
         }
+      }
+    }
+
+    let referralOffer = null;
+    try {
+      referralOffer = await getReferralOfferForVendor({ vendor, plan }, supabase);
+    } catch (refErr) {
+      console.warn('[payment/verify] referral offer lookup failed:', refErr?.message || refErr);
+    }
+
+    if (referralOffer?.discount_amount > 0) {
+      const refDiscount = Number(referralOffer.discount_amount || 0);
+      const allowStack = Boolean(referralOffer?.settings?.allow_coupon_stack);
+      if (allowStack && coupon) {
+        const baseAmount = Number(plan.price || 0);
+        discountAmount = Math.max(0, Math.min(baseAmount, discountAmount + refDiscount));
+        netAmount = Math.max(0, baseAmount - discountAmount);
+        offerType = 'COUPON+REFERRAL';
+        offerCode = `${coupon_code}+${referralOffer.offer_code || ''}`;
+        referralId = referralOffer.referral_id || null;
+      } else if (refDiscount > discountAmount) {
+        const baseAmount = Number(plan.price || 0);
+        discountAmount = Math.max(0, Math.min(baseAmount, refDiscount));
+        netAmount = Math.max(0, baseAmount - discountAmount);
+        offerType = 'REFERRAL';
+        offerCode = referralOffer.offer_code || null;
+        referralId = referralOffer.referral_id || null;
+      } else if (!offerType) {
+        offerType = 'REFERRAL';
+        offerCode = referralOffer.offer_code || null;
+        referralId = referralOffer.referral_id || null;
       }
     }
 
@@ -383,7 +462,7 @@ router.post('/verify', async (req, res) => {
       plan,
       amount: plan.price,
       discount_amount: discountAmount,
-      coupon_code: coupon_code || null,
+      coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
       tax: 0,
       totalAmount: netAmount,
       paymentMethod: 'Razorpay',
@@ -408,7 +487,10 @@ router.post('/verify', async (req, res) => {
           transaction_id: payment_id,
           payment_date: new Date(),
           invoice_url: invoicePdf,
-          coupon_code: coupon_code || null,
+          coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
+          offer_type: offerType || null,
+          offer_code: offerCode || null,
+          referral_id: referralId || null,
         },
       ])
       .select()
@@ -416,7 +498,7 @@ router.post('/verify', async (req, res) => {
 
     if (paymentError) {
       console.error('Payment record error:', paymentError);
-    } else if (coupon) {
+    } else if (coupon && String(offerType || '').includes('COUPON')) {
       await supabase
         .from('vendor_plan_coupons')
         .update({ used_count: (coupon.used_count || 0) + 1 })
@@ -431,6 +513,23 @@ router.post('/verify', async (req, res) => {
           net_amount: netAmount,
         },
       ]);
+    }
+
+    let referralRewardResult = null;
+    if (!paymentError && payment?.id) {
+      try {
+        referralRewardResult = await applyReferralRewardAfterPayment(
+          {
+            referredVendorId: vendor_id,
+            plan,
+            paymentRow: payment,
+            netAmount,
+          },
+          supabase
+        );
+      } catch (refRewardErr) {
+        console.warn('[payment/verify] referral reward apply failed:', refRewardErr?.message || refRewardErr);
+      }
     }
 
     if (!paymentError && payment) {
@@ -455,7 +554,10 @@ router.post('/verify', async (req, res) => {
           amount: plan.price,
           discount_amount: discountAmount,
           net_amount: netAmount,
-          coupon_code: coupon_code || null,
+          coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
+          offer_type: offerType || null,
+          offer_code: offerCode || null,
+          referral_id: referralId || null,
         },
       });
     }
@@ -502,6 +604,7 @@ router.post('/verify', async (req, res) => {
       message: 'Payment verified and subscription activated',
       subscription,
       payment,
+      referral_reward: referralRewardResult || null,
     });
   } catch (error) {
     console.error('Payment verification error:', error);

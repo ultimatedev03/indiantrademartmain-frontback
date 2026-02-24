@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   MapPin,
   FolderKanban,
+  Wallet,
   X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -24,6 +25,7 @@ const navigation = [
   { name: 'Products', href: '/vendor/products', icon: Package },
   { name: 'Buy Leads', href: '/vendor/leads', icon: ShoppingCart },
   { name: 'Proposals', href: '/vendor/proposals', icon: FileText },
+  { name: 'Referrals', href: '/vendor/referrals', icon: Wallet },
   { name: 'Plan Business Preferences', href: '/vendor/coverage', icon: MapPin },
   { name: 'Collections', href: '/vendor/collections', icon: FolderKanban },
   { name: 'Photos & Docs', href: '/vendor/photos-docs', icon: Image },

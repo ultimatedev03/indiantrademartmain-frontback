@@ -51,7 +51,7 @@ import {
   Package,
 } from 'lucide-react';
 
-const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
+const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE'];
 const NOTICE_VARIANTS = ['info', 'warning', 'critical'];
 const PLAN_BADGE_VARIANTS = ['neutral', 'green', 'blue', 'purple', 'gold', 'diamond', 'slate'];
 
@@ -107,6 +107,10 @@ const roleToDepartment = (role) => {
       return 'Support';
     case 'SALES':
       return 'Sales';
+    case 'MANAGER':
+      return 'Sales';
+    case 'VP':
+      return 'Sales Leadership';
     case 'DATA_ENTRY':
     case 'DATAENTRY':
       return 'Operations';

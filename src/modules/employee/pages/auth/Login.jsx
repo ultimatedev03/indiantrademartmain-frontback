@@ -44,6 +44,10 @@ const Login = () => {
           navigate('/employee/support/dashboard');
         } else if (user.role === 'SALES') {
           navigate('/employee/sales/dashboard');
+        } else if (user.role === 'MANAGER') {
+          navigate('/employee/manager/dashboard');
+        } else if (user.role === 'VP') {
+          navigate('/employee/vp/dashboard');
         } else {
           navigate('/');
         }

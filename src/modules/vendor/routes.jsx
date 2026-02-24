@@ -23,6 +23,7 @@ const ForgotPassword = lazy(() => import('@/shared/pages/ForgotPassword'));
 const VendorAnalytics = lazy(() => import('@/modules/vendor/pages/Analytics'));
 const CoverageSettings = lazy(() => import('@/modules/vendor/pages/CoverageSettings'));
 const Collections = lazy(() => import('@/modules/vendor/pages/Collections'));
+const VendorReferrals = lazy(() => import('@/modules/vendor/pages/Referrals'));
 
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
@@ -76,6 +77,7 @@ export const VendorRoutes = () => {
           <Route path="photos-docs" element={<PhotosDocs />} />
           <Route path="analytics" element={<VendorAnalytics />} />
           <Route path="subscriptions" element={<VendorServices />} />
+          <Route path="referrals" element={<VendorReferrals />} />
           <Route path="coverage" element={<CoverageSettings />} />
           <Route path="collections" element={<Collections />} />
         </Route>

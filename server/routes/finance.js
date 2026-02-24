@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { writeAuditLog } from '../lib/audit.js';
 import { requireEmployeeRoles } from '../middleware/requireEmployeeRoles.js';
+import { getReferralSettings } from '../lib/referralProgram.js';
 
 const router = express.Router();
 
@@ -36,6 +37,14 @@ const normalizePlanScopeId = (planScope) => {
   if (isGlobalScopeValue(token)) return null;
   return token;
 };
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const asUpper = (value) => String(value || '').trim().toUpperCase();
 
 async function resolveVendorScopeId(vendorRef) {
   const ref = normalizeScopeToken(vendorRef);
@@ -394,4 +403,426 @@ router.delete('/coupons/:id', async (req, res) => {
     return res.status(500).json({ success: false, error: e.message });
   }
 });
+
+// Referral program ---------------------------------------------------
+
+// GET /api/finance/referrals/settings
+router.get('/referrals/settings', async (_req, res) => {
+  try {
+    const settings = await getReferralSettings(supabase);
+
+    const [{ data: rules, error: rulesErr }, { data: plans, error: plansErr }] = await Promise.all([
+      supabase
+        .from('referral_plan_rules')
+        .select('*')
+        .order('updated_at', { ascending: false }),
+      supabase
+        .from('vendor_plans')
+        .select('id, name, price, is_active')
+        .order('price', { ascending: true }),
+    ]);
+
+    if (rulesErr) return res.status(500).json({ success: false, error: rulesErr.message });
+    if (plansErr) return res.status(500).json({ success: false, error: plansErr.message });
+
+    return res.json({
+      success: true,
+      data: {
+        settings,
+        rules: rules || [],
+        plans: plans || [],
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to load referral settings' });
+  }
+});
+
+// PUT /api/finance/referrals/settings
+router.put('/referrals/settings', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const update = {
+      is_enabled: Boolean(payload.is_enabled),
+      first_paid_plan_only: payload.first_paid_plan_only !== false,
+      allow_coupon_stack: Boolean(payload.allow_coupon_stack),
+      min_plan_amount: Math.max(0, Number(payload.min_plan_amount || 0)),
+      min_cashout_amount: Math.max(0, Number(payload.min_cashout_amount || 0)),
+      reward_hold_days: Math.max(0, Math.trunc(Number(payload.reward_hold_days || 0))),
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('referral_program_settings')
+      .upsert([{ config_key: 'GLOBAL', ...update }], { onConflict: 'config_key' })
+      .select('*')
+      .single();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'REFERRAL_SETTINGS_UPDATED',
+      entityType: 'referral_program_settings',
+      entityId: 'GLOBAL',
+      details: update,
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to update settings' });
+  }
+});
+
+// PUT /api/finance/referrals/plan-rules/:planId
+router.put('/referrals/plan-rules/:planId', async (req, res) => {
+  try {
+    const planId = String(req.params.planId || '').trim();
+    if (!looksLikeUuid(planId)) {
+      return res.status(400).json({ success: false, error: 'Invalid plan id' });
+    }
+
+    const {
+      is_enabled = true,
+      discount_type = 'PERCENT',
+      discount_value = 0,
+      discount_cap = null,
+      reward_type = 'PERCENT',
+      reward_value = 0,
+      reward_cap = null,
+      valid_from = null,
+      valid_to = null,
+    } = req.body || {};
+
+    const normalizedDiscountType = asUpper(discount_type);
+    const normalizedRewardType = asUpper(reward_type);
+    if (!['PERCENT', 'FLAT'].includes(normalizedDiscountType)) {
+      return res.status(400).json({ success: false, error: 'discount_type must be PERCENT or FLAT' });
+    }
+    if (!['PERCENT', 'FLAT'].includes(normalizedRewardType)) {
+      return res.status(400).json({ success: false, error: 'reward_type must be PERCENT or FLAT' });
+    }
+
+    const dValue = Number(discount_value || 0);
+    const rValue = Number(reward_value || 0);
+    if (!Number.isFinite(dValue) || dValue < 0) {
+      return res.status(400).json({ success: false, error: 'discount_value must be >= 0' });
+    }
+    if (!Number.isFinite(rValue) || rValue < 0) {
+      return res.status(400).json({ success: false, error: 'reward_value must be >= 0' });
+    }
+    if (normalizedDiscountType === 'PERCENT' && dValue > 100) {
+      return res.status(400).json({ success: false, error: 'discount percent cannot exceed 100' });
+    }
+    if (normalizedRewardType === 'PERCENT' && rValue > 100) {
+      return res.status(400).json({ success: false, error: 'reward percent cannot exceed 100' });
+    }
+
+    const payload = {
+      plan_id: planId,
+      is_enabled: Boolean(is_enabled),
+      discount_type: normalizedDiscountType,
+      discount_value: dValue,
+      discount_cap: toNumberOrNull(discount_cap),
+      reward_type: normalizedRewardType,
+      reward_value: rValue,
+      reward_cap: toNumberOrNull(reward_cap),
+      valid_from: valid_from || null,
+      valid_to: valid_to || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('referral_plan_rules')
+      .upsert([payload], { onConflict: 'plan_id' })
+      .select('*')
+      .single();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'REFERRAL_PLAN_RULE_UPSERTED',
+      entityType: 'referral_plan_rules',
+      entityId: data?.id || null,
+      details: payload,
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to update referral rule' });
+  }
+});
+
+// GET /api/finance/referrals/cashouts
+router.get('/referrals/cashouts', async (req, res) => {
+  try {
+    const status = asUpper(req.query.status || '');
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit || 200)));
+
+    let query = supabase
+      .from('vendor_referral_cashout_requests')
+      .select('*, vendor:vendors(id, vendor_id, company_name, owner_name, email, phone)')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (status) query = query.eq('status', status);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, data: data || [] });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to load cashouts' });
+  }
+});
+
+const revertCashoutAmount = async ({ requestRow, actorUserId }) => {
+  const vendorId = requestRow.vendor_id;
+  const amount = Number(requestRow.requested_amount || 0);
+  if (!vendorId || amount <= 0) return;
+
+  const { data: wallet, error: walletErr } = await supabase
+    .from('vendor_referral_wallets')
+    .select('*')
+    .eq('vendor_id', vendorId)
+    .maybeSingle();
+  if (walletErr) throw new Error(walletErr.message || 'Failed to load wallet');
+
+  const current = wallet || {
+    vendor_id: vendorId,
+    available_balance: 0,
+    pending_balance: 0,
+    lifetime_earned: 0,
+    lifetime_paid_out: 0,
+  };
+
+  const nextAvailable = Number(current.available_balance || 0) + amount;
+  const { error: upErr } = await supabase
+    .from('vendor_referral_wallets')
+    .upsert(
+      [
+        {
+          vendor_id: vendorId,
+          available_balance: nextAvailable,
+          pending_balance: Number(current.pending_balance || 0),
+          lifetime_earned: Number(current.lifetime_earned || 0),
+          lifetime_paid_out: Number(current.lifetime_paid_out || 0),
+          updated_at: new Date().toISOString(),
+        },
+      ],
+      { onConflict: 'vendor_id' }
+    );
+  if (upErr) throw new Error(upErr.message || 'Failed to update wallet balance');
+
+  const referenceKey = `cashout_revert:${requestRow.id}`;
+  const { error: ledgerErr } = await supabase.from('vendor_referral_wallet_ledger').insert([
+    {
+      vendor_id: vendorId,
+      cashout_request_id: requestRow.id,
+      entry_type: 'CASHOUT_REVERT',
+      amount,
+      status: 'COMPLETED',
+      reference_key: referenceKey,
+      meta: {
+        actor_user_id: actorUserId || null,
+      },
+      created_at: new Date().toISOString(),
+    },
+  ]);
+
+  if (ledgerErr) {
+    const msg = String(ledgerErr.message || '').toLowerCase();
+    if (!msg.includes('duplicate') && !msg.includes('unique')) {
+      throw new Error(ledgerErr.message || 'Failed to write cashout revert ledger');
+    }
+  }
+};
+
+// POST /api/finance/referrals/cashouts/:id/approve
+router.post('/referrals/cashouts/:id/approve', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!looksLikeUuid(id)) return res.status(400).json({ success: false, error: 'Invalid cashout id' });
+
+    const { data: row, error: rowErr } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (rowErr) return res.status(500).json({ success: false, error: rowErr.message });
+    if (!row) return res.status(404).json({ success: false, error: 'Cashout request not found' });
+    if (!['REQUESTED', 'APPROVED'].includes(asUpper(row.status))) {
+      return res.status(400).json({ success: false, error: `Cannot approve cashout in status ${row.status}` });
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .update({
+        status: 'APPROVED',
+        approved_by_user_id: req.actor?.id || null,
+        approved_at: new Date().toISOString(),
+        notes: normalizeScopeToken(req.body?.notes) || row.notes || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'REFERRAL_CASHOUT_APPROVED',
+      entityType: 'vendor_referral_cashout_requests',
+      entityId: id,
+      details: {
+        vendor_id: row.vendor_id,
+        amount: row.requested_amount,
+      },
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to approve cashout' });
+  }
+});
+
+// POST /api/finance/referrals/cashouts/:id/reject
+router.post('/referrals/cashouts/:id/reject', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!looksLikeUuid(id)) return res.status(400).json({ success: false, error: 'Invalid cashout id' });
+    const rejectionReason = normalizeScopeToken(req.body?.rejection_reason || 'Rejected by finance');
+
+    const { data: row, error: rowErr } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (rowErr) return res.status(500).json({ success: false, error: rowErr.message });
+    if (!row) return res.status(404).json({ success: false, error: 'Cashout request not found' });
+    if (!['REQUESTED', 'APPROVED'].includes(asUpper(row.status))) {
+      return res.status(400).json({ success: false, error: `Cannot reject cashout in status ${row.status}` });
+    }
+
+    await revertCashoutAmount({ requestRow: row, actorUserId: req.actor?.id || null });
+
+    const { data, error } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .update({
+        status: 'REJECTED',
+        rejection_reason: rejectionReason || null,
+        approved_by_user_id: req.actor?.id || null,
+        approved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'REFERRAL_CASHOUT_REJECTED',
+      entityType: 'vendor_referral_cashout_requests',
+      entityId: id,
+      details: {
+        vendor_id: row.vendor_id,
+        amount: row.requested_amount,
+        rejection_reason: rejectionReason,
+      },
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to reject cashout' });
+  }
+});
+
+// POST /api/finance/referrals/cashouts/:id/mark-paid
+router.post('/referrals/cashouts/:id/mark-paid', async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!looksLikeUuid(id)) return res.status(400).json({ success: false, error: 'Invalid cashout id' });
+
+    const utr = normalizeScopeToken(req.body?.utr_number || '');
+    const receiptUrl = normalizeScopeToken(req.body?.receipt_url || '');
+    const notes = normalizeScopeToken(req.body?.notes || '');
+
+    if (!utr) return res.status(400).json({ success: false, error: 'utr_number is required' });
+
+    const { data: row, error: rowErr } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+    if (rowErr) return res.status(500).json({ success: false, error: rowErr.message });
+    if (!row) return res.status(404).json({ success: false, error: 'Cashout request not found' });
+    if (asUpper(row.status) !== 'APPROVED') {
+      return res.status(400).json({ success: false, error: 'Cashout must be APPROVED before mark-paid' });
+    }
+
+    const { data: wallet, error: walletErr } = await supabase
+      .from('vendor_referral_wallets')
+      .select('*')
+      .eq('vendor_id', row.vendor_id)
+      .maybeSingle();
+    if (walletErr) return res.status(500).json({ success: false, error: walletErr.message });
+
+    const nextPaidOut = Number(wallet?.lifetime_paid_out || 0) + Number(row.requested_amount || 0);
+    const { error: walletUpdateErr } = await supabase
+      .from('vendor_referral_wallets')
+      .upsert(
+        [
+          {
+            vendor_id: row.vendor_id,
+            available_balance: Number(wallet?.available_balance || 0),
+            pending_balance: Number(wallet?.pending_balance || 0),
+            lifetime_earned: Number(wallet?.lifetime_earned || 0),
+            lifetime_paid_out: nextPaidOut,
+            updated_at: new Date().toISOString(),
+          },
+        ],
+        { onConflict: 'vendor_id' }
+      );
+    if (walletUpdateErr) return res.status(500).json({ success: false, error: walletUpdateErr.message });
+
+    const { data, error } = await supabase
+      .from('vendor_referral_cashout_requests')
+      .update({
+        status: 'PAID',
+        paid_by_user_id: req.actor?.id || null,
+        paid_at: new Date().toISOString(),
+        utr_number: utr,
+        receipt_url: receiptUrl || null,
+        notes: notes || row.notes || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'REFERRAL_CASHOUT_MARKED_PAID',
+      entityType: 'vendor_referral_cashout_requests',
+      entityId: id,
+      details: {
+        vendor_id: row.vendor_id,
+        amount: row.requested_amount,
+        utr_number: utr,
+        receipt_url: receiptUrl || null,
+      },
+    });
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to mark cashout paid' });
+  }
+});
+
 export default router;

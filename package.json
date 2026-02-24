@@ -8,6 +8,7 @@
     "dev:client": "vite --host :: --port 3000",
     "dev:server": "node server/server.js",
     "dev:all": "node tools/devAll.js",
+    "import:territory-postal": "node tools/import-territory-postal.js",
     "generate:sitemaps": "node tools/generateSitemap.js",
     "build": "npm run generate:sitemaps && node tools/generate-llms.js && vite build && node tools/prerender-seo.js",
     "preview": "vite preview --host :: --port 3000",

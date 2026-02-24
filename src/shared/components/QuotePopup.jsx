@@ -212,24 +212,24 @@ const QuotePopup = () => {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 transition={{ duration: 0.2 }}
-                className="relative bg-white rounded-lg shadow-2xl overflow-hidden border border-gray-200 w-[90%] md:w-[500px] z-[9999]"
+                className="relative bg-white rounded-lg shadow-2xl border border-gray-200 w-[92%] sm:w-[86%] md:w-[460px] max-h-[88vh] z-[9999]"
             >
                 <button 
                     onClick={handleClose}
-                    className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 transition-colors z-10 p-1 hover:bg-gray-100 rounded-full"
+                    className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 transition-colors z-10 p-1 hover:bg-gray-100 rounded-full"
                 >
-                    <X className="h-5 w-5" />
+                    <X className="h-4 w-4" />
                 </button>
 
-                <div className="p-6 md:p-8">
-                    <div className="mb-6">
-                        <h2 className="text-2xl font-bold text-gray-900">Get a Quote</h2>
-                        <p className="text-gray-500 mt-2 text-sm">Tell us what you need, and we'll help you get quotes</p>
+                <div className="p-4 sm:p-5 md:p-6 overflow-y-auto max-h-[88vh]">
+                    <div className="mb-4">
+                        <h2 className="text-xl md:text-2xl font-bold text-gray-900">Get a Quote</h2>
+                        <p className="text-gray-500 mt-1 text-xs sm:text-sm">Tell us what you need, and we'll help you get quotes</p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="space-y-4">
+                    <form onSubmit={handleSubmit} className="space-y-3">
                         <div className="space-y-1.5">
-                            <Label htmlFor="productName" className="text-xs font-bold uppercase text-gray-500">
+                            <Label htmlFor="productName" className="text-[11px] font-bold uppercase text-gray-500">
                                 Product Name <span className="text-red-500">*</span>
                             </Label>
                             <Input 
@@ -242,9 +242,9 @@ const QuotePopup = () => {
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
-                                <Label htmlFor="quantity" className="text-xs font-bold uppercase text-gray-500">
+                                <Label htmlFor="quantity" className="text-[11px] font-bold uppercase text-gray-500">
                                     Quantity <span className="text-red-500">*</span>
                                 </Label>
                                 <Input 
@@ -258,7 +258,7 @@ const QuotePopup = () => {
                                 />
                             </div>
                             <div className="space-y-1.5">
-                                <Label htmlFor="unit" className="text-xs font-bold uppercase text-gray-500">
+                                <Label htmlFor="unit" className="text-[11px] font-bold uppercase text-gray-500">
                                     Unit <span className="text-red-500">*</span>
                                 </Label>
                                 <Input 
@@ -273,7 +273,7 @@ const QuotePopup = () => {
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label htmlFor="email" className="text-xs font-bold uppercase text-gray-500">
+                            <Label htmlFor="email" className="text-[11px] font-bold uppercase text-gray-500">
                                 Email <span className="text-red-500">*</span>
                             </Label>
                             <Input 
@@ -288,7 +288,7 @@ const QuotePopup = () => {
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label htmlFor="phone" className="text-xs font-bold uppercase text-gray-500">
+                            <Label htmlFor="phone" className="text-[11px] font-bold uppercase text-gray-500">
                                 Phone <span className="text-red-500">*</span>
                             </Label>
                             <div className="flex">
@@ -308,9 +308,9 @@ const QuotePopup = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-2 gap-3">
                             <div className="space-y-1.5">
-                                <Label htmlFor="state" className="text-xs font-bold uppercase text-gray-500">
+                                <Label htmlFor="state" className="text-[11px] font-bold uppercase text-gray-500">
                                     State <span className="text-red-500">*</span>
                                 </Label>
                                 <select
@@ -319,7 +319,7 @@ const QuotePopup = () => {
                                     onChange={handleStateChange}
                                     required
                                     disabled={loadingLocations}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003D82] text-sm"
+                                    className="w-full h-10 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003D82] text-sm"
                                 >
                                     <option value="">Select State</option>
                                     {states.map(state => (
@@ -330,7 +330,7 @@ const QuotePopup = () => {
                                 </select>
                             </div>
                             <div className="space-y-1.5">
-                                <Label htmlFor="city" className="text-xs font-bold uppercase text-gray-500">
+                                <Label htmlFor="city" className="text-[11px] font-bold uppercase text-gray-500">
                                     City <span className="text-red-500">*</span>
                                 </Label>
                                 <select
@@ -339,7 +339,7 @@ const QuotePopup = () => {
                                     onChange={handleCityChange}
                                     required
                                     disabled={!formData.stateId || cities.length === 0}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003D82] text-sm"
+                                    className="w-full h-10 px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#003D82] text-sm"
                                 >
                                     <option value="">Select City</option>
                                     {cities.map(city => (
@@ -352,7 +352,7 @@ const QuotePopup = () => {
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label htmlFor="description" className="text-xs font-bold uppercase text-gray-500">
+                            <Label htmlFor="description" className="text-[11px] font-bold uppercase text-gray-500">
                                 Description
                             </Label>
                             <textarea
@@ -368,7 +368,7 @@ const QuotePopup = () => {
 
                         <Button 
                             type="submit" 
-                            className="w-full bg-[#003D82] hover:bg-[#002a5c] text-white font-bold h-11 mt-2"
+                            className="w-full bg-[#003D82] hover:bg-[#002a5c] text-white font-bold h-10 mt-1"
                             disabled={loading}
                         >
                             {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}

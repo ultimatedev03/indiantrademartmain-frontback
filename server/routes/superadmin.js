@@ -23,6 +23,8 @@ const EMPLOYEE_ALLOWED_ROLES = [
   'DATA_ENTRY',
   'SUPPORT',
   'SALES',
+  'MANAGER',
+  'VP',
   'FINANCE',
 ];
 

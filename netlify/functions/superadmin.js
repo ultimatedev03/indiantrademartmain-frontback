@@ -745,7 +745,7 @@ export const handler = async (event) => {
       if (!fullName || !email || !password) {
         return json(400, { success: false, error: 'full_name, email and password are required' });
       }
-      const allowedRoles = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
+      const allowedRoles = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE'];
       if (!allowedRoles.includes(role)) {
         return json(400, { success: false, error: `Invalid role. Allowed roles: ${allowedRoles.join(', ')}` });
       }

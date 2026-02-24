@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
-import { IndianRupee, Percent } from 'lucide-react';
+import { IndianRupee, Percent, RefreshCw } from 'lucide-react';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const number = (v) => Number(v || 0);
@@ -25,10 +25,62 @@ const fmt = (d) => {
   return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
+const toLocalDateTime = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const toIsoOrNull = (value) => {
+  if (!value) return null;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+};
+
+const fmtDateTime = (d) => {
+  if (!d) return '-';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('en-IN');
+};
+
+const defaultReferralSettings = {
+  is_enabled: false,
+  first_paid_plan_only: true,
+  allow_coupon_stack: false,
+  min_plan_amount: 0,
+  min_cashout_amount: 500,
+  reward_hold_days: 0,
+};
+
+const defaultRuleDraft = {
+  is_enabled: true,
+  discount_type: 'PERCENT',
+  discount_value: 0,
+  discount_cap: '',
+  reward_type: 'PERCENT',
+  reward_value: 0,
+  reward_cap: '',
+  valid_from: '',
+  valid_to: '',
+};
+
 const AdminFinance = () => {
   const [payments, setPayments] = useState([]);
   const [coupons, setCoupons] = useState([]);
   const [plans, setPlans] = useState([]);
+  const [referralPlans, setReferralPlans] = useState([]);
+  const [referralSettings, setReferralSettings] = useState(defaultReferralSettings);
+  const [ruleDrafts, setRuleDrafts] = useState({});
+  const [cashouts, setCashouts] = useState([]);
+  const [cashoutStatus, setCashoutStatus] = useState('ALL');
+  const [ruleSaving, setRuleSaving] = useState({});
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [cashoutActionLoading, setCashoutActionLoading] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     code: '',
@@ -40,24 +92,74 @@ const AdminFinance = () => {
     expires_at: '',
   });
 
-  const fetchData = async () => {
-    setLoading(true);
+  const ruleFromApi = (row) => ({
+    is_enabled: row?.is_enabled !== false,
+    discount_type: row?.discount_type || 'PERCENT',
+    discount_value: Number(row?.discount_value || 0),
+    discount_cap: row?.discount_cap === null || row?.discount_cap === undefined ? '' : Number(row?.discount_cap),
+    reward_type: row?.reward_type || 'PERCENT',
+    reward_value: Number(row?.reward_value || 0),
+    reward_cap: row?.reward_cap === null || row?.reward_cap === undefined ? '' : Number(row?.reward_cap),
+    valid_from: toLocalDateTime(row?.valid_from),
+    valid_to: toLocalDateTime(row?.valid_to),
+  });
+
+  const fetchData = async (scope = 'ALL', initial = false) => {
+    if (initial) setLoading(true);
+    else setRefreshing(true);
     try {
-      const [payRes, cpnRes, planRes] = await Promise.all([
+      const statusQuery =
+        scope && scope !== 'ALL' ? `?status=${encodeURIComponent(scope)}` : '';
+      const [payRes, cpnRes, planRes, refRes, cashRes] = await Promise.all([
         fetchWithCsrf('/api/finance/payments'),
         fetchWithCsrf('/api/finance/coupons'),
         fetchWithCsrf('/api/payment/plans'),
+        fetchWithCsrf('/api/finance/referrals/settings'),
+        fetchWithCsrf(`/api/finance/referrals/cashouts${statusQuery}`),
       ]);
       const payJson = await payRes.json();
       const cpnJson = await cpnRes.json();
       const planJson = await planRes.json();
+      const refJson = await refRes.json();
+      const cashJson = await cashRes.json();
       if (payJson.success) setPayments(payJson.data || []);
       if (cpnJson.success) setCoupons(cpnJson.data || []);
       if (planJson.success) setPlans(planJson.data || []);
+
+      if (refJson.success) {
+        const incomingSettings = refJson.data?.settings || defaultReferralSettings;
+        const incomingPlans = refJson.data?.plans || [];
+        const rules = refJson.data?.rules || [];
+        const ruleMap = rules.reduce((acc, item) => {
+          if (item?.plan_id) acc[item.plan_id] = item;
+          return acc;
+        }, {});
+
+        setReferralSettings({
+          is_enabled: Boolean(incomingSettings.is_enabled),
+          first_paid_plan_only: incomingSettings.first_paid_plan_only !== false,
+          allow_coupon_stack: Boolean(incomingSettings.allow_coupon_stack),
+          min_plan_amount: Number(incomingSettings.min_plan_amount || 0),
+          min_cashout_amount: Number(incomingSettings.min_cashout_amount || 0),
+          reward_hold_days: Number(incomingSettings.reward_hold_days || 0),
+        });
+        setReferralPlans(incomingPlans);
+        setRuleDrafts(
+          incomingPlans.reduce((acc, plan) => {
+            acc[plan.id] = ruleFromApi(ruleMap[plan.id] || defaultRuleDraft);
+            return acc;
+          }, {})
+        );
+      }
+
+      if (cashJson.success) {
+        setCashouts(cashJson.data || []);
+      }
     } catch (e) {
       toast({ title: 'Error', description: 'Failed to load finance data', variant: 'destructive' });
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false);
+      else setRefreshing(false);
     }
   };
 
@@ -69,21 +171,25 @@ const AdminFinance = () => {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed');
       toast({ title: 'Deleted', description: 'Coupon removed' });
-      fetchData();
+      fetchData(cashoutStatus, false);
     } catch (e) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
     }
   };
 
   useEffect(() => {
-    fetchData();
+    fetchData('ALL', true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const kpis = useMemo(() => {
     const gross = payments.reduce((s, p) => s + number(p.amount), 0);
     const net = payments.reduce((s, p) => s + number(p.net_amount ?? p.amount), 0);
-    return { gross, net };
-  }, [payments]);
+    const pendingCashouts = cashouts
+      .filter((row) => ['REQUESTED', 'APPROVED'].includes(String(row.status || '').toUpperCase()))
+      .reduce((s, row) => s + number(row.requested_amount), 0);
+    return { gross, net, pendingCashouts };
+  }, [payments, cashouts]);
 
   const createCoupon = async () => {
     try {
@@ -145,9 +251,132 @@ const AdminFinance = () => {
       if (!json.success) throw new Error(json.error || 'Failed');
       toast({ title: 'Coupon created', description: payload.code });
       setForm((prev) => ({ ...prev, code: '', value: '', max_uses: '', vendor_id: '' }));
-      fetchData();
+      fetchData(cashoutStatus, false);
     } catch (e) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const setRuleValue = (planId, key, value) => {
+    setRuleDrafts((prev) => ({
+      ...prev,
+      [planId]: {
+        ...(prev[planId] || defaultRuleDraft),
+        [key]: value,
+      },
+    }));
+  };
+
+  const saveReferralSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      const payload = {
+        is_enabled: Boolean(referralSettings.is_enabled),
+        first_paid_plan_only: Boolean(referralSettings.first_paid_plan_only),
+        allow_coupon_stack: Boolean(referralSettings.allow_coupon_stack),
+        min_plan_amount: Math.max(0, Number(referralSettings.min_plan_amount || 0)),
+        min_cashout_amount: Math.max(0, Number(referralSettings.min_cashout_amount || 0)),
+        reward_hold_days: Math.max(0, Number(referralSettings.reward_hold_days || 0)),
+      };
+
+      const res = await fetchWithCsrf('/api/finance/referrals/settings', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed');
+
+      toast({ title: 'Saved', description: 'Referral settings updated' });
+      fetchData(cashoutStatus, false);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const savePlanRule = async (planId) => {
+    const rule = ruleDrafts[planId];
+    if (!rule) return;
+
+    setRuleSaving((prev) => ({ ...prev, [planId]: true }));
+    try {
+      const discountValue = Number(rule.discount_value || 0);
+      const rewardValue = Number(rule.reward_value || 0);
+
+      if (rule.discount_type === 'PERCENT' && discountValue > 100) {
+        throw new Error('Discount percent cannot exceed 100');
+      }
+      if (rule.reward_type === 'PERCENT' && rewardValue > 100) {
+        throw new Error('Reward percent cannot exceed 100');
+      }
+
+      const payload = {
+        is_enabled: Boolean(rule.is_enabled),
+        discount_type: rule.discount_type,
+        discount_value: Math.max(0, discountValue),
+        discount_cap: rule.discount_cap === '' ? null : Math.max(0, Number(rule.discount_cap || 0)),
+        reward_type: rule.reward_type,
+        reward_value: Math.max(0, rewardValue),
+        reward_cap: rule.reward_cap === '' ? null : Math.max(0, Number(rule.reward_cap || 0)),
+        valid_from: toIsoOrNull(rule.valid_from),
+        valid_to: toIsoOrNull(rule.valid_to),
+      };
+
+      const res = await fetchWithCsrf(`/api/finance/referrals/plan-rules/${planId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed');
+
+      toast({ title: 'Saved', description: 'Plan referral rule updated' });
+      fetchData(cashoutStatus, false);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setRuleSaving((prev) => ({ ...prev, [planId]: false }));
+    }
+  };
+
+  const runCashoutAction = async (row, action) => {
+    if (!row?.id) return;
+    setCashoutActionLoading((prev) => ({ ...prev, [row.id]: true }));
+    try {
+      let endpoint = '';
+      let payload = {};
+      if (action === 'approve') {
+        endpoint = `/api/finance/referrals/cashouts/${row.id}/approve`;
+        const notes = window.prompt('Approval note (optional):', '') || '';
+        payload = { notes: notes.trim() || null };
+      } else if (action === 'reject') {
+        endpoint = `/api/finance/referrals/cashouts/${row.id}/reject`;
+        const reason = window.prompt('Rejection reason:', '') || '';
+        if (!reason.trim()) throw new Error('Rejection reason is required');
+        payload = { rejection_reason: reason.trim() };
+      } else if (action === 'paid') {
+        endpoint = `/api/finance/referrals/cashouts/${row.id}/mark-paid`;
+        const utr = window.prompt('UTR Number:', '') || '';
+        if (!utr.trim()) throw new Error('UTR number is required');
+        const receiptUrl = window.prompt('Receipt URL (optional):', '') || '';
+        payload = { utr_number: utr.trim(), receipt_url: receiptUrl.trim() || null };
+      } else {
+        throw new Error('Invalid action');
+      }
+
+      const res = await fetchWithCsrf(endpoint, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed');
+
+      toast({ title: 'Updated', description: `Cashout ${action} successful` });
+      fetchData(cashoutStatus, false);
+    } catch (error) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    } finally {
+      setCashoutActionLoading((prev) => ({ ...prev, [row.id]: false }));
     }
   };
 
@@ -159,6 +388,8 @@ const AdminFinance = () => {
       'discount',
       'net',
       'coupon',
+      'offer_type',
+      'offer_code',
       'payment_date',
       'transaction',
     ];
@@ -170,6 +401,8 @@ const AdminFinance = () => {
         number(p.discount_amount || 0),
         number(p.net_amount ?? p.amount),
         p.coupon_code || '',
+        p.offer_type || '',
+        p.offer_code || '',
         p.payment_date || '',
         p.transaction_id || '',
       ].join(',')
@@ -189,14 +422,19 @@ const AdminFinance = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-neutral-900">Finance</h1>
-          <p className="text-sm text-neutral-500">Payments overview and coupon management</p>
+          <p className="text-sm text-neutral-500">Payments, coupons, referral controls, and cashout workflow</p>
         </div>
-        <Button variant="outline" onClick={fetchData} disabled={loading}>
+        <Button
+          variant="outline"
+          onClick={() => fetchData(cashoutStatus, false)}
+          disabled={loading || refreshing}
+        >
+          {refreshing ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
           Refresh
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader>
             <CardTitle>Total Gross</CardTitle>
@@ -213,6 +451,15 @@ const AdminFinance = () => {
           <CardContent className="text-3xl font-semibold flex items-center gap-2">
             <IndianRupee className="h-5 w-5" />
             {kpis.net.toLocaleString('en-IN')}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Pending Cashout</CardTitle>
+          </CardHeader>
+          <CardContent className="text-3xl font-semibold flex items-center gap-2">
+            <IndianRupee className="h-5 w-5" />
+            {kpis.pendingCashouts.toLocaleString('en-IN')}
           </CardContent>
         </Card>
       </div>
@@ -236,6 +483,7 @@ const AdminFinance = () => {
                 <TableHead>Discount</TableHead>
                 <TableHead>Net</TableHead>
                 <TableHead>Coupon</TableHead>
+                <TableHead>Offer</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Txn</TableHead>
               </TableRow>
@@ -249,6 +497,9 @@ const AdminFinance = () => {
                   <TableCell>{number(p.discount_amount || 0) > 0 ? `₹ ${number(p.discount_amount).toLocaleString('en-IN')}` : '-'}</TableCell>
                   <TableCell>₹ {number(p.net_amount ?? p.amount).toLocaleString('en-IN')}</TableCell>
                   <TableCell>{p.coupon_code || '-'}</TableCell>
+                  <TableCell className="text-xs">
+                    {p.offer_type || '-'}{p.offer_code ? ` (${p.offer_code})` : ''}
+                  </TableCell>
                   <TableCell>{fmt(p.payment_date)}</TableCell>
                   <TableCell className="text-xs break-all">{p.transaction_id || '-'}</TableCell>
                 </TableRow>
@@ -368,6 +619,278 @@ const AdminFinance = () => {
                   </TableCell>
                 </TableRow>
               ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Referral Program Controls</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={referralSettings.is_enabled}
+                onChange={(e) => setReferralSettings((prev) => ({ ...prev, is_enabled: e.target.checked }))}
+              />
+              Program Enabled
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={referralSettings.first_paid_plan_only}
+                onChange={(e) =>
+                  setReferralSettings((prev) => ({ ...prev, first_paid_plan_only: e.target.checked }))
+                }
+              />
+              First Paid Plan Only
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={referralSettings.allow_coupon_stack}
+                onChange={(e) => setReferralSettings((prev) => ({ ...prev, allow_coupon_stack: e.target.checked }))}
+              />
+              Allow Stack With Coupon
+            </label>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label>Minimum Plan Amount (₹)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={referralSettings.min_plan_amount}
+                onChange={(e) => setReferralSettings((prev) => ({ ...prev, min_plan_amount: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Minimum Cashout Amount (₹)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={referralSettings.min_cashout_amount}
+                onChange={(e) => setReferralSettings((prev) => ({ ...prev, min_cashout_amount: e.target.value }))}
+              />
+            </div>
+            <div>
+              <Label>Reward Hold Days</Label>
+              <Input
+                type="number"
+                min="0"
+                value={referralSettings.reward_hold_days}
+                onChange={(e) => setReferralSettings((prev) => ({ ...prev, reward_hold_days: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <Button onClick={saveReferralSettings} disabled={settingsSaving}>
+            {settingsSaving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
+            Save Referral Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Referral Rules By Plan</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {referralPlans.map((plan) => {
+            const rule = ruleDrafts[plan.id] || defaultRuleDraft;
+            const saving = Boolean(ruleSaving[plan.id]);
+            return (
+              <div key={plan.id} className="border rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-semibold">{plan.name}</div>
+                    <div className="text-xs text-neutral-500">Plan price: ₹{number(plan.price).toLocaleString('en-IN')}</div>
+                  </div>
+                  <label className="text-sm flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={rule.is_enabled}
+                      onChange={(e) => setRuleValue(plan.id, 'is_enabled', e.target.checked)}
+                    />
+                    Rule Enabled
+                  </label>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Referred Vendor Discount</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Select value={rule.discount_type} onValueChange={(v) => setRuleValue(plan.id, 'discount_type', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PERCENT">Percent</SelectItem>
+                          <SelectItem value="FLAT">Flat</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={rule.discount_value}
+                        onChange={(e) => setRuleValue(plan.id, 'discount_value', e.target.value)}
+                        placeholder="Value"
+                      />
+                      <Input
+                        type="number"
+                        min="0"
+                        value={rule.discount_cap}
+                        onChange={(e) => setRuleValue(plan.id, 'discount_cap', e.target.value)}
+                        placeholder="Cap"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium">Referrer Reward</div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <Select value={rule.reward_type} onValueChange={(v) => setRuleValue(plan.id, 'reward_type', v)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PERCENT">Percent</SelectItem>
+                          <SelectItem value="FLAT">Flat</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={rule.reward_value}
+                        onChange={(e) => setRuleValue(plan.id, 'reward_value', e.target.value)}
+                        placeholder="Value"
+                      />
+                      <Input
+                        type="number"
+                        min="0"
+                        value={rule.reward_cap}
+                        onChange={(e) => setRuleValue(plan.id, 'reward_cap', e.target.value)}
+                        placeholder="Cap"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <Label>Valid From</Label>
+                    <Input
+                      type="datetime-local"
+                      value={rule.valid_from}
+                      onChange={(e) => setRuleValue(plan.id, 'valid_from', e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label>Valid To</Label>
+                    <Input
+                      type="datetime-local"
+                      value={rule.valid_to}
+                      onChange={(e) => setRuleValue(plan.id, 'valid_to', e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <Button onClick={() => savePlanRule(plan.id)} disabled={saving}>
+                  {saving ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Save {plan.name} Rule
+                </Button>
+              </div>
+            );
+          })}
+          {referralPlans.length === 0 ? (
+            <div className="text-sm text-neutral-500">No plans found for referral rules.</div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex items-center justify-between">
+          <CardTitle>Referral Cashout Queue</CardTitle>
+          <div className="w-[200px]">
+            <Select
+              value={cashoutStatus}
+              onValueChange={(value) => {
+                setCashoutStatus(value);
+                fetchData(value, false);
+              }}
+            >
+              <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All</SelectItem>
+                <SelectItem value="REQUESTED">Requested</SelectItem>
+                <SelectItem value="APPROVED">Approved</SelectItem>
+                <SelectItem value="PAID">Paid</SelectItem>
+                <SelectItem value="REJECTED">Rejected</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent className="overflow-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vendor</TableHead>
+                <TableHead>Amount</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Requested</TableHead>
+                <TableHead>Approved</TableHead>
+                <TableHead>Paid</TableHead>
+                <TableHead>UTR</TableHead>
+                <TableHead>Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {cashouts.map((row) => {
+                const status = String(row.status || '').toUpperCase();
+                const busy = Boolean(cashoutActionLoading[row.id]);
+                return (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <div>{row.vendor?.company_name || row.vendor?.owner_name || row.vendor_id}</div>
+                      <div className="text-xs text-neutral-500">{row.vendor?.vendor_id || row.vendor?.email || '-'}</div>
+                    </TableCell>
+                    <TableCell>₹ {number(row.requested_amount).toLocaleString('en-IN')}</TableCell>
+                    <TableCell>
+                      <Badge variant={status === 'PAID' ? 'default' : 'secondary'}>{status}</Badge>
+                    </TableCell>
+                    <TableCell className="text-xs">{fmtDateTime(row.created_at)}</TableCell>
+                    <TableCell className="text-xs">{fmtDateTime(row.approved_at)}</TableCell>
+                    <TableCell className="text-xs">{fmtDateTime(row.paid_at)}</TableCell>
+                    <TableCell className="text-xs">{row.utr_number || '-'}</TableCell>
+                    <TableCell>
+                      <div className="flex gap-2">
+                        {(status === 'REQUESTED' || status === 'APPROVED') ? (
+                          <Button size="sm" variant="outline" onClick={() => runCashoutAction(row, 'approve')} disabled={busy}>
+                            {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Approve'}
+                          </Button>
+                        ) : null}
+                        {(status === 'REQUESTED' || status === 'APPROVED') ? (
+                          <Button size="sm" variant="destructive" onClick={() => runCashoutAction(row, 'reject')} disabled={busy}>
+                            {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Reject'}
+                          </Button>
+                        ) : null}
+                        {status === 'APPROVED' ? (
+                          <Button size="sm" onClick={() => runCashoutAction(row, 'paid')} disabled={busy}>
+                            {busy ? <RefreshCw className="h-4 w-4 animate-spin" /> : 'Mark Paid'}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {cashouts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-neutral-500">
+                    No cashout requests found
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         </CardContent>

@@ -61,7 +61,9 @@ const EmployeeLayout = ({ allowedRole }) => {
     const roleRoutes = {
       'DATA_ENTRY': '/employee/dataentry/dashboard',
       'SUPPORT': '/employee/support/dashboard',
-      'SALES': '/employee/sales/dashboard'
+      'SALES': '/employee/sales/dashboard',
+      'MANAGER': '/employee/manager/dashboard',
+      'VP': '/employee/vp/dashboard'
     };
     const target = roleRoutes[user.role] || '/employee/login';
     if (location.pathname !== target && !location.pathname.startsWith(roleRoutes[user.role])) {
@@ -136,6 +138,22 @@ const EmployeeLayout = ({ allowedRole }) => {
               <SidebarLink to="/employee/sales/dashboard" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
               <SidebarLink to="/employee/sales/leads" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Lead Management</SidebarLink>
               <SidebarLink to="/employee/sales/pricing-rules" icon={Tag} onNavigate={() => setIsSidebarOpen(false)}>Pricing Rules</SidebarLink>
+            </>
+          )}
+
+          {user.role === 'MANAGER' && (
+            <>
+              <SidebarLink to="/employee/manager/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
+              <SidebarLink to="/employee/manager/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Team Territory</SidebarLink>
+              <SidebarLink to="/employee/manager/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
+            </>
+          )}
+
+          {user.role === 'VP' && (
+            <>
+              <SidebarLink to="/employee/vp/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
+              <SidebarLink to="/employee/vp/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Manager Allocation</SidebarLink>
+              <SidebarLink to="/employee/vp/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
             </>
           )}
         </nav>

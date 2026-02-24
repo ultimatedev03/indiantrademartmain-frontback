@@ -16,10 +16,12 @@ import financeRoutes from './routes/finance.js';
 import chatbotRoutes from './routes/chatbot.js';
 import superadminRoutes from './routes/superadmin.js';
 import employeeRoutes from './routes/employee.js';
+import territoryRoutes from './routes/territory.js';
 import categoryRequestRoutes from './routes/categoryRequests.js';
 import notificationRoutes from './routes/notifications.js';
 import authRoutes from './routes/auth.js';
 import vendorProfileRoutes from './routes/vendorProfile.js';
+import referralRoutes from './routes/referrals.js';
 import { subdomainMiddleware, subdomainRedirectMiddleware, getSubdomainAwareCORS } from './middleware/subdomainMiddleware.js';
 import { initializeSubscriptionCronJobs } from './lib/subscriptionCronJobs.js';
 import { ensureDevAdmin } from './lib/devBootstrap.js';
@@ -120,8 +122,10 @@ app.use('/api/finance', financeRoutes);
 app.use('/api/chat', chatbotRoutes);
 app.use('/api/superadmin', superadminRoutes);
 app.use('/api/employee', employeeRoutes);
+app.use('/api/territory', territoryRoutes);
 app.use('/api/category-requests', categoryRequestRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/referrals', referralRoutes);
 
 // Initialize subscription monitoring cron jobs
 initializeSubscriptionCronJobs();

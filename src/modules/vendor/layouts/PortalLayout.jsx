@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart, User as UserIcon, Check, Ban, MapPin, FolderKanban, MessageSquare
+  BarChart, User as UserIcon, Check, Ban, MapPin, FolderKanban, MessageSquare, Wallet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -144,6 +144,7 @@ const PortalLayout = () => {
     { icon: MessageSquare, label: 'Messages', path: 'messages' },
     { icon: BarChart, label: 'Analytics', path: 'analytics' },
     { icon: Boxes, label: 'Subscriptions', path: 'subscriptions' },
+    { icon: Wallet, label: 'Referrals', path: 'referrals' },
     { icon: MapPin, label: 'Plan Business Preferences', path: 'coverage' },
     { icon: FolderKanban, label: 'Collections', path: 'collections' },
     { icon: HelpCircle, label: 'Support', path: 'support' },
@@ -373,6 +374,10 @@ const PortalLayout = () => {
 
                   <DropdownMenuItem onClick={() => navigate(resolvePath('settings', 'vendor'))}>
                     <Settings className="mr-2 h-4 w-4" /> Settings
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={() => navigate(resolvePath('referrals', 'vendor'))}>
+                    <Wallet className="mr-2 h-4 w-4" /> Referrals
                   </DropdownMenuItem>
 
                   <DropdownMenuSeparator />
