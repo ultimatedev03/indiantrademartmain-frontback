@@ -144,6 +144,43 @@ const verifyAuthToken = (token) => {
 const normalizeText = (value) => String(value || '').trim();
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeRole = (value) => String(value || '').trim().toUpperCase();
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '');
+
+const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
+
+const normalizeScope = (value) => String(value || '').trim();
+
+const isGlobalScope = (value) => {
+  const scope = normalizeScope(value);
+  if (!scope) return true;
+  return GLOBAL_SCOPE_TOKENS.has(scope.toUpperCase());
+};
+
+const equalsIgnoreCase = (a, b) =>
+  normalizeScope(a).toLowerCase() === normalizeScope(b).toLowerCase();
+
+const isCouponVendorApplicable = (couponVendorScope, vendor) => {
+  if (isGlobalScope(couponVendorScope)) return true;
+  if (!vendor) return false;
+
+  const scope = normalizeScope(couponVendorScope);
+  const candidates = [vendor.id, vendor.vendor_id, vendor.email].filter(Boolean);
+  return candidates.some((candidate) => equalsIgnoreCase(scope, candidate));
+};
+
+const isCouponPlanApplicable = (couponPlanScope, plan) => {
+  if (isGlobalScope(couponPlanScope)) return true;
+  if (!plan) return false;
+
+  const scope = normalizeScope(couponPlanScope);
+  const candidates = [plan.id, plan.name].filter(Boolean);
+  return candidates.some((candidate) => equalsIgnoreCase(scope, candidate));
+};
 
 const parseCurrencyAmount = (value, fallback = 50) => {
   const n = Number(value);
@@ -408,7 +445,7 @@ export const handler = async (event) => {
         return json(400, { error: 'Invalid plan price' });
       }
 
-      const coupon_code = normalizeText(body?.coupon_code).toUpperCase();
+      const coupon_code = normalizeCouponCode(body?.coupon_code);
       let discountAmount = 0;
       let netAmount = baseAmount;
 
@@ -426,8 +463,12 @@ export const handler = async (event) => {
         if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) {
           return json(400, { error: 'Coupon usage limit reached' });
         }
-        if (cpn.vendor_id && cpn.vendor_id !== vendor_id) return json(400, { error: 'Coupon not valid for this vendor' });
-        if (cpn.plan_id && cpn.plan_id !== plan_id) return json(400, { error: 'Coupon not valid for this plan' });
+        if (!isCouponVendorApplicable(cpn.vendor_id, vendor)) {
+          return json(400, { error: 'Coupon not valid for this vendor' });
+        }
+        if (!isCouponPlanApplicable(cpn.plan_id, plan)) {
+          return json(400, { error: 'Coupon not valid for this plan' });
+        }
 
         if (cpn.discount_type === 'PERCENT') {
           discountAmount = (baseAmount * Number(cpn.value)) / 100;
@@ -477,7 +518,7 @@ export const handler = async (event) => {
     // POST /api/payment/verify
     if (event.httpMethod === 'POST' && action === 'verify') {
       const { order_id, payment_id, signature, vendor_id, plan_id } = body;
-      const coupon_code = normalizeText(body?.coupon_code).toUpperCase();
+      const coupon_code = normalizeCouponCode(body?.coupon_code);
 
       if (!order_id || !payment_id || !signature || !vendor_id || !plan_id) {
         return json(400, { error: 'Missing required fields' });
@@ -530,8 +571,8 @@ export const handler = async (event) => {
           const now = new Date();
           const okUsage = !cpn.max_uses || cpn.max_uses === 0 || cpn.used_count < cpn.max_uses;
           const okExpiry = !cpn.expires_at || new Date(cpn.expires_at) >= now;
-          const okVendor = !cpn.vendor_id || cpn.vendor_id === vendor_id;
-          const okPlan = !cpn.plan_id || cpn.plan_id === plan_id;
+          const okVendor = isCouponVendorApplicable(cpn.vendor_id, vendor);
+          const okPlan = isCouponPlanApplicable(cpn.plan_id, plan);
           if (okUsage && okExpiry && okVendor && okPlan) {
             if (cpn.discount_type === 'PERCENT') {
               discountAmount = (Number(plan.price || 0) * Number(cpn.value)) / 100;

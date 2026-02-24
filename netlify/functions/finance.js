@@ -21,6 +21,74 @@ const getSupabase = () => {
   });
 };
 
+const COUPON_CODE_REGEX = /^[A-Z0-9_-]+$/;
+const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
+
+const looksLikeUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '').trim()
+  );
+
+const normalizeCouponCode = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/[^A-Z0-9_-]/g, '');
+
+const normalizeScopeToken = (value) => String(value || '').trim();
+
+const isGlobalScopeValue = (value) => {
+  const token = normalizeScopeToken(value);
+  if (!token) return true;
+  return GLOBAL_SCOPE_TOKENS.has(token.toUpperCase());
+};
+
+const normalizePlanScopeId = (planScope) => {
+  const token = normalizeScopeToken(planScope);
+  if (isGlobalScopeValue(token)) return null;
+  return token;
+};
+
+async function resolveVendorScopeId(supabase, vendorRef) {
+  const ref = normalizeScopeToken(vendorRef);
+  if (isGlobalScopeValue(ref)) return null;
+
+  if (looksLikeUuid(ref)) {
+    const { data: byId, error: byIdError } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('id', ref)
+      .maybeSingle();
+    if (byIdError) throw new Error(byIdError.message || 'Failed to validate vendor UUID');
+    if (byId?.id) return byId.id;
+  }
+
+  const { data: byPublicId, error: byPublicIdError } = await supabase
+    .from('vendors')
+    .select('id')
+    .ilike('vendor_id', ref)
+    .limit(2);
+  if (byPublicIdError) throw new Error(byPublicIdError.message || 'Failed to resolve vendor');
+  if ((byPublicId || []).length === 1) return byPublicId[0].id;
+  if ((byPublicId || []).length > 1) {
+    throw new Error('Multiple vendors matched this vendor ID. Use vendor UUID.');
+  }
+
+  const { data: byEmail, error: byEmailError } = await supabase
+    .from('vendors')
+    .select('id')
+    .ilike('email', ref)
+    .limit(2);
+  if (byEmailError) throw new Error(byEmailError.message || 'Failed to resolve vendor');
+  if ((byEmail || []).length === 1) return byEmail[0].id;
+  if ((byEmail || []).length > 1) {
+    throw new Error('Multiple vendors matched this email. Use vendor UUID.');
+  }
+
+  throw new Error('Vendor not found. Enter vendor UUID, vendor code, or vendor email.');
+}
+
 const parseRoute = (path = '') => {
   const parts = path.split('/').filter(Boolean);
   const idx = parts.lastIndexOf('finance');
@@ -87,22 +155,62 @@ export const handler = async (event) => {
     if (event.httpMethod === 'GET' && action === 'coupons') {
       const { data, error } = await supabase.from('vendor_plan_coupons').select('*').order('created_at', { ascending: false });
       if (error) return json(500, { success: false, error: error.message });
-      return json(200, { success: true, data: data || [] });
+      const normalized = (data || []).map((row) => ({
+        ...row,
+        plan_id: normalizePlanScopeId(row?.plan_id),
+        vendor_id: isGlobalScopeValue(row?.vendor_id) ? null : row?.vendor_id || null,
+      }));
+      return json(200, { success: true, data: normalized });
     }
 
     // POST /api/finance/coupons
     if (event.httpMethod === 'POST' && action === 'coupons') {
       const body = event.body ? JSON.parse(event.body) : {};
       const { code, discount_type, value, plan_id = null, vendor_id = null, max_uses = 0, expires_at = null, is_active = true } = body;
-      if (!code || !discount_type || !value) return json(400, { success: false, error: 'code, discount_type, value are required' });
+
+      const normalizedCode = normalizeCouponCode(code);
+      const normalizedDiscountType = String(discount_type || '').trim().toUpperCase();
+      const numericValue = Number(value);
+      const numericMaxUses = Number(max_uses || 0);
+
+      if (!normalizedCode || !normalizedDiscountType || value === undefined || value === null || value === '') {
+        return json(400, { success: false, error: 'code, discount_type, value are required' });
+      }
+      if (!COUPON_CODE_REGEX.test(normalizedCode)) {
+        return json(400, {
+          success: false,
+          error: 'Coupon code must use letters, numbers, hyphen, or underscore only',
+        });
+      }
+      if (!['PERCENT', 'FLAT'].includes(normalizedDiscountType)) {
+        return json(400, { success: false, error: 'discount_type must be PERCENT or FLAT' });
+      }
+      if (!Number.isFinite(numericValue) || numericValue <= 0) {
+        return json(400, { success: false, error: 'value must be a number greater than 0' });
+      }
+      if (normalizedDiscountType === 'PERCENT' && numericValue > 100) {
+        return json(400, { success: false, error: 'Percent coupon value cannot exceed 100' });
+      }
+      if (!Number.isFinite(numericMaxUses) || numericMaxUses < 0) {
+        return json(400, { success: false, error: 'max_uses must be 0 or more' });
+      }
+
+      const normalizedExpiresAt = expires_at ? new Date(expires_at) : null;
+      if (normalizedExpiresAt && Number.isNaN(normalizedExpiresAt.getTime())) {
+        return json(400, { success: false, error: 'expires_at must be a valid date/time' });
+      }
+
+      const resolvedVendorId = await resolveVendorScopeId(supabase, vendor_id);
+      const normalizedPlanId = normalizePlanScopeId(plan_id);
+
       const payload = {
-        code: String(code).toUpperCase(),
-        discount_type: String(discount_type).toUpperCase(),
-        value,
-        plan_id,
-        vendor_id,
-        max_uses,
-        expires_at,
+        code: normalizedCode,
+        discount_type: normalizedDiscountType,
+        value: numericValue,
+        plan_id: normalizedPlanId,
+        vendor_id: resolvedVendorId,
+        max_uses: Math.trunc(numericMaxUses),
+        expires_at: normalizedExpiresAt ? normalizedExpiresAt.toISOString() : null,
         is_active,
         created_at: new Date().toISOString(),
       };
