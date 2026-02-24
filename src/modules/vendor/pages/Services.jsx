@@ -747,7 +747,7 @@ const Services = () => {
               Buy Leads
             </Button>
             <div className="bg-slate-50 text-slate-700 text-xs border border-dashed rounded-lg px-3 py-2 w-full sm:w-auto text-center sm:text-left">
-              Tap a card for full details/coupon. <span className="font-semibold">Upgrade</span> starts payment directly.
+              Tap a card or <span className="font-semibold">Upgrade</span> to open plan details and apply coupon before payment.
             </div>
 
             <Button
@@ -929,10 +929,10 @@ const Services = () => {
                   variant={isCurrent ? 'outline' : 'default'}
                   disabled={isCurrent}
                   onClick={(e) => {
-                    // Upgrade button should be the only trigger for payment checkout
+                    // Upgrade opens details modal first so coupon can be applied before checkout.
                     e.preventDefault();
                     e.stopPropagation();
-                    if (!isCurrent) handleSubscribe(plan);
+                    if (!isCurrent) openPlanDetails(plan);
                   }}
                 >
                   {isCurrent ? 'Active Plan' : 'Upgrade'}
