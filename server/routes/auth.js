@@ -79,6 +79,28 @@ const sanitizeFilename = (name) =>
     .replace(/^_+/, '')
     .slice(0, 120) || 'avatar';
 
+const formatRuntimeError = (error) => {
+  const raw = String(error?.message || error || '').trim();
+  if (!raw) return 'Unknown error';
+  if (raw.startsWith('<!DOCTYPE html') || raw.startsWith('<html')) {
+    return 'Upstream SSL/network error';
+  }
+  return raw.replace(/\s+/g, ' ').slice(0, 320);
+};
+
+const isTransientUpstreamError = (error) => {
+  const text = String(error?.message || error || '').toLowerCase();
+  return (
+    text.includes('fetch failed') ||
+    text.includes('network') ||
+    text.includes('ssl') ||
+    text.includes('tls') ||
+    text.includes('handshake') ||
+    text.includes('cloudflare') ||
+    text.includes('error 52')
+  );
+};
+
 const parseBuyerProfileInput = (body = {}) => ({
   company_name: optionalText(pickFirstDefined(body.company_name, body.companyName)),
   state_id: optionalId(pickFirstDefined(body.state_id, body.stateId)),
@@ -169,7 +191,7 @@ async function assertUserActive(user) {
     return { ok: true };
   }
 
-  if (['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE', 'SUPERADMIN'].includes(role)) {
+  if (['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE', 'SUPERADMIN'].includes(role)) {
     const { data: emp } = await supabase
       .from('employees')
       .select('status')
@@ -861,7 +883,13 @@ router.get('/me', async (req, res) => {
 
     return res.json({ user: payload, buyer: buyerProfile || null });
   } catch (error) {
-    console.error('[Auth] Me failed:', error?.message || error);
+    const formattedError = formatRuntimeError(error);
+    const isTransient = isTransientUpstreamError(error);
+    if (isTransient) {
+      console.warn('[Auth] Me temporary upstream failure:', formattedError);
+      return res.status(503).json({ error: 'Auth service temporarily unavailable. Please retry.' });
+    }
+    console.error('[Auth] Me failed:', formattedError);
     return res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
@@ -889,7 +917,16 @@ router.get('/buyer/profile', requireAuth({ roles: ['BUYER'] }), async (req, res)
       user: buildAuthUserPayload(user),
     });
   } catch (error) {
-    console.error('[Auth] Buyer profile failed:', error?.message || error);
+    const formattedError = formatRuntimeError(error);
+    const isTransient = isTransientUpstreamError(error);
+    if (isTransient) {
+      console.warn('[Auth] Buyer profile temporary upstream failure:', formattedError);
+      return res.status(503).json({
+        success: false,
+        error: 'Buyer profile service temporarily unavailable. Please retry.',
+      });
+    }
+    console.error('[Auth] Buyer profile failed:', formattedError);
     return res.status(500).json({ success: false, error: 'Failed to fetch buyer profile' });
   }
 });

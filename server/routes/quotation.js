@@ -546,6 +546,150 @@ async function resolveProposalParticipantUserIds(proposal = {}) {
   return participantIds;
 }
 
+const DEFAULT_CHAT_BLOCK_STATUS = Object.freeze({
+  blocked_by_me: false,
+  blocked_me: false,
+  can_message: true,
+  counterpart_user_id: null,
+});
+let hasWarnedMissingChatBlocks = false;
+
+const warnMissingChatBlocksOnce = () => {
+  if (hasWarnedMissingChatBlocks) return;
+  hasWarnedMissingChatBlocks = true;
+  console.warn('chat_blocks relation missing while reading block status (run migration: 20260224_chat_blocks_safe.sql)');
+};
+
+const isMissingChatBlocksRelation = (error) => {
+  const code = String(error?.code || '').trim().toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || '').toLowerCase();
+  const hint = String(error?.hint || '').toLowerCase();
+  const payload = `${message} ${details} ${hint}`.trim();
+
+  if (code === '42P01' || code === 'PGRST204' || code === 'PGRST205') return true;
+  if (!payload.includes('chat_blocks')) return false;
+  return (
+    payload.includes('does not exist') ||
+    payload.includes('schema cache') ||
+    payload.includes('could not find the table')
+  );
+};
+
+const resolveCounterpartUserIdForProposal = (participants = {}, actorPublicUserId = '') => {
+  const actorUserId = String(actorPublicUserId || '').trim();
+  if (!actorUserId) return null;
+
+  const buyerUserId = String(participants?.buyer_user_id || '').trim();
+  const vendorUserId = String(participants?.vendor_user_id || '').trim();
+
+  if (buyerUserId && buyerUserId !== actorUserId) return buyerUserId;
+  if (vendorUserId && vendorUserId !== actorUserId) return vendorUserId;
+  return null;
+};
+
+async function resolveChatBlockStatusForProposal(proposal = {}, actorPublicUserId = '') {
+  const actorUserId = String(actorPublicUserId || '').trim();
+  if (!actorUserId) {
+    return { ...DEFAULT_CHAT_BLOCK_STATUS };
+  }
+
+  const participants = await resolveProposalParticipantUserIds(proposal);
+  const counterpartUserId = resolveCounterpartUserIdForProposal(participants, actorUserId);
+  if (!counterpartUserId) {
+    return { ...DEFAULT_CHAT_BLOCK_STATUS };
+  }
+
+  const filter = `and(blocker_user_id.eq.${actorUserId},blocked_user_id.eq.${counterpartUserId}),and(blocker_user_id.eq.${counterpartUserId},blocked_user_id.eq.${actorUserId})`;
+  const { data, error } = await supabase
+    .from('chat_blocks')
+    .select('blocker_user_id, blocked_user_id')
+    .or(filter);
+
+  if (error) {
+    if (isMissingChatBlocksRelation(error)) {
+      warnMissingChatBlocksOnce();
+      return {
+        ...DEFAULT_CHAT_BLOCK_STATUS,
+        counterpart_user_id: counterpartUserId,
+      };
+    }
+    throw new Error(error.message || 'Failed to load chat block status');
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  const blockedByMe = rows.some(
+    (row) =>
+      String(row?.blocker_user_id || '').trim() === actorUserId &&
+      String(row?.blocked_user_id || '').trim() === counterpartUserId
+  );
+  const blockedMe = rows.some(
+    (row) =>
+      String(row?.blocker_user_id || '').trim() === counterpartUserId &&
+      String(row?.blocked_user_id || '').trim() === actorUserId
+  );
+
+  return {
+    blocked_by_me: blockedByMe,
+    blocked_me: blockedMe,
+    can_message: !(blockedByMe || blockedMe),
+    counterpart_user_id: counterpartUserId,
+  };
+}
+
+async function applyChatBlockActionForProposal({ proposal = {}, actorPublicUserId = '', action = 'block' } = {}) {
+  const actorUserId = String(actorPublicUserId || '').trim();
+  if (!actorUserId) {
+    throw new Error('User profile not found for messaging');
+  }
+
+  const participants = await resolveProposalParticipantUserIds(proposal);
+  const counterpartUserId = resolveCounterpartUserIdForProposal(participants, actorUserId);
+  if (!counterpartUserId) {
+    throw new Error('Counterpart user not found for this chat');
+  }
+
+  const safeAction = String(action || '').trim().toLowerCase();
+
+  if (safeAction === 'block') {
+    const { error } = await supabase
+      .from('chat_blocks')
+      .upsert(
+        [
+          {
+            blocker_user_id: actorUserId,
+            blocked_user_id: counterpartUserId,
+          },
+        ],
+        { onConflict: 'blocker_user_id,blocked_user_id', ignoreDuplicates: true }
+      );
+
+    if (error) {
+      if (isMissingChatBlocksRelation(error)) {
+        throw new Error('Chat block feature is unavailable. Please run the latest migration.');
+      }
+      throw new Error(error.message || 'Failed to block user');
+    }
+  } else if (safeAction === 'unblock') {
+    const { error } = await supabase
+      .from('chat_blocks')
+      .delete()
+      .eq('blocker_user_id', actorUserId)
+      .eq('blocked_user_id', counterpartUserId);
+
+    if (error) {
+      if (isMissingChatBlocksRelation(error)) {
+        throw new Error('Chat block feature is unavailable. Please run the latest migration.');
+      }
+      throw new Error(error.message || 'Failed to unblock user');
+    }
+  } else {
+    throw new Error('Invalid block action');
+  }
+
+  return resolveChatBlockStatusForProposal(proposal, actorUserId);
+}
+
 async function canActorAccessProposalMessages(user = {}, proposal = {}) {
   const [buyer, vendor] = await Promise.all([
     resolveBuyerForUser(user),
@@ -862,6 +1006,88 @@ router.get('/unread-count', requireAuth(), async (req, res) => {
 });
 
 // GET /api/quotation/:proposalId/messages
+router.get('/:proposalId/block-status', requireAuth(), async (req, res) => {
+  try {
+    const proposalId = String(req.params?.proposalId || '').trim();
+    if (!proposalId) {
+      return res.status(400).json({ success: false, error: 'Invalid proposal id' });
+    }
+
+    const proposal = await resolveProposalForMessaging(proposalId);
+    if (!proposal) {
+      return res.status(404).json({ success: false, error: 'Proposal not found' });
+    }
+
+    const access = await canActorAccessProposalMessages(req.user, proposal);
+    if (!access.isAllowed) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
+    const actorPublicUserId = await resolvePublicUserIdForActor(req.user);
+    if (!actorPublicUserId) {
+      return res.status(403).json({ success: false, error: 'User profile not found for messaging' });
+    }
+
+    const blockStatus = await resolveChatBlockStatusForProposal(proposal, actorPublicUserId);
+    return res.json({ success: true, block_status: blockStatus });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to load block status' });
+  }
+});
+
+// POST /api/quotation/:proposalId/block
+router.post('/:proposalId/block', requireAuth(), async (req, res) => {
+  try {
+    const proposalId = String(req.params?.proposalId || '').trim();
+    if (!proposalId) {
+      return res.status(400).json({ success: false, error: 'Invalid proposal id' });
+    }
+
+    const action = String(req.body?.action || '').trim().toLowerCase();
+    if (action !== 'block' && action !== 'unblock') {
+      return res.status(400).json({ success: false, error: 'Invalid block action' });
+    }
+
+    const proposal = await resolveProposalForMessaging(proposalId);
+    if (!proposal) {
+      return res.status(404).json({ success: false, error: 'Proposal not found' });
+    }
+
+    const access = await canActorAccessProposalMessages(req.user, proposal);
+    if (!access.isAllowed) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
+
+    const actorPublicUserId = await resolvePublicUserIdForActor(req.user);
+    if (!actorPublicUserId) {
+      return res.status(403).json({ success: false, error: 'User profile not found for messaging' });
+    }
+
+    const blockStatus = await applyChatBlockActionForProposal({
+      proposal,
+      actorPublicUserId,
+      action,
+    });
+
+    return res.json({
+      success: true,
+      action,
+      block_status: blockStatus,
+    });
+  } catch (e) {
+    const safeMessage = e?.message || 'Failed to update block status';
+    if (String(safeMessage).toLowerCase().includes('chat block feature is unavailable')) {
+      return res.status(503).json({
+        success: false,
+        error: safeMessage,
+        code: 'CHAT_BLOCKS_UNAVAILABLE',
+      });
+    }
+    return res.status(500).json({ success: false, error: e.message || 'Failed to update block status' });
+  }
+});
+
+// GET /api/quotation/:proposalId/messages
 router.get('/:proposalId/messages', requireAuth(), async (req, res) => {
   try {
     const proposalId = String(req.params?.proposalId || '').trim();
@@ -897,6 +1123,7 @@ router.get('/:proposalId/messages', requireAuth(), async (req, res) => {
       markRead: true,
     });
     const participants = await resolveProposalParticipantUserIds(proposal);
+    const blockStatus = await resolveChatBlockStatusForProposal(proposal, actorPublicUserId);
 
     const normalizedMessages = (ackedRows || []).map((row) =>
       normalizeMessageRow(row, actorPublicUserId, actorRole)
@@ -912,6 +1139,7 @@ router.get('/:proposalId/messages', requireAuth(), async (req, res) => {
       actor_user_id: actorPublicUserId,
       participants,
       messages: normalizedMessages,
+      block_status: blockStatus,
     });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to load messages' });
@@ -948,6 +1176,18 @@ router.post('/:proposalId/messages', requireAuth(), async (req, res) => {
     const actorRole = resolveActorMessagingRole(access, req.user);
     if (!actorPublicUserId) {
       return res.status(403).json({ success: false, error: 'User profile not found for messaging' });
+    }
+
+    const blockStatus = await resolveChatBlockStatusForProposal(proposal, actorPublicUserId);
+    if (!blockStatus.can_message) {
+      return res.status(403).json({
+        success: false,
+        error: blockStatus.blocked_by_me
+          ? 'You blocked this user. Unblock to send messages.'
+          : 'You cannot message this user because they blocked you.',
+        code: 'CHAT_BLOCKED',
+        block_status: blockStatus,
+      });
     }
 
     const storedMessage = buildStoredMessageText(messageText, {}, { edited: false });

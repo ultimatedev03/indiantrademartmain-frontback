@@ -59,6 +59,24 @@ const Verify = () => {
     getEmail();
   }, [location, navigate]);
 
+  // If vendor is already verified, do not keep user on verify page.
+  useEffect(() => {
+    const redirectIfAlreadyVerified = async () => {
+      try {
+        const me = await vendorApi.auth.me();
+        const isVerified =
+          me?.is_verified === true || me?.isVerified === true || Boolean(me?.verified_at || me?.verifiedAt);
+        if (isVerified) {
+          navigate('/vendor/dashboard', { replace: true });
+        }
+      } catch {
+        // Ignore and allow normal verify flow.
+      }
+    };
+
+    redirectIfAlreadyVerified();
+  }, [navigate]);
+
   // ✅ Countdown timer
   useEffect(() => {
     if (timer <= 0) return;

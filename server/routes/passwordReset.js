@@ -120,7 +120,7 @@ router.post('/verify-email', async (req, res) => {
         found: true,
         role: 'BUYER',
         email: emailLower,
-        message: 'Buyer account found'
+        message: 'Email verified successfully'
       });
 
     } else if (role === 'VENDOR') {
@@ -149,7 +149,7 @@ router.post('/verify-email', async (req, res) => {
         found: true,
         role: 'VENDOR',
         email: emailLower,
-        message: 'Vendor account found'
+        message: 'Email verified successfully'
       });
 
     } else {

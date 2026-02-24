@@ -77,10 +77,6 @@ const roleToDepartment = (role) => {
       return "Support";
     case "SALES":
       return "Sales";
-    case "MANAGER":
-      return "Sales";
-    case "VP":
-      return "Sales Leadership";
     case "DATA_ENTRY":
     case "DATAENTRY":
       return "Operations";
@@ -338,8 +334,6 @@ const Staff = () => {
                       <SelectItem value="DATA_ENTRY">Data Entry</SelectItem>
                       <SelectItem value="FINANCE">Finance</SelectItem>
                       <SelectItem value="SALES">Sales</SelectItem>
-                      <SelectItem value="MANAGER">Manager</SelectItem>
-                      <SelectItem value="VP">VP</SelectItem>
                       <SelectItem value="SUPPORT">Support</SelectItem>
                       <SelectItem value="HR">HR</SelectItem>
                       <SelectItem value="ADMIN">Admin</SelectItem>

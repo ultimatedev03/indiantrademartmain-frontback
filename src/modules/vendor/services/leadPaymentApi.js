@@ -29,6 +29,14 @@ const normalizeLeadPrice = (lead) => {
   return 50;
 };
 
+const normalizePurchaseMode = (value) => {
+  const mode = String(value || '').trim().toUpperCase();
+  if (mode === 'USE_WEEKLY') return 'USE_WEEKLY';
+  if (mode === 'BUY_EXTRA') return 'BUY_EXTRA';
+  if (mode === 'PAID') return 'PAID';
+  return 'AUTO';
+};
+
 const ensureRazorpayLoaded = () => {
   if (typeof window === 'undefined') {
     return Promise.reject(new Error('Payment is available only in browser'));
@@ -117,38 +125,48 @@ const openCheckoutAndVerify = async ({ order, keyId, leadId }) =>
   });
 
 export const leadPaymentApi = {
-  purchaseLead: async (lead) => {
+  purchaseLead: async (lead, options = {}) => {
     const leadId = String(lead?.id || '').trim();
     if (!leadId) throw new Error('Lead not found');
 
     const leadPrice = normalizeLeadPrice(lead);
+    const mode = normalizePurchaseMode(options?.mode);
+    const forcePaid = mode === 'BUY_EXTRA' || mode === 'PAID' || options?.forcePaid === true;
+    const allowPaidFallback =
+      options?.allowPaidFallback !== false && mode === 'AUTO';
 
-    // Always try backend auto-consumption first (daily/weekly included path).
-    try {
-      const consumePayload = await leadsMarketplaceApi.purchaseLead(leadId, {
-        mode: 'AUTO',
-        amount: leadPrice,
-      });
-      const payload = {
-        success: true,
-        ...consumePayload,
-        purchase: consumePayload?.purchase || null,
-        payment_skipped: true,
-      };
-      emitLeadPurchasedEvent({ lead_id: leadId, purchase: payload?.purchase || null });
-      return payload;
-    } catch (error) {
-      const code = String(error?.code || error?.payload?.code || '').trim().toUpperCase();
-      const status = Number(error?.status || 0);
-      const paidRequired = status === 402 || code === 'PAID_REQUIRED';
+    // Included consumption path (AUTO / USE_WEEKLY)
+    if (!forcePaid) {
+      try {
+        const consumePayload = await leadsMarketplaceApi.purchaseLead(leadId, {
+          mode,
+          amount: leadPrice,
+        });
+        const payload = {
+          success: true,
+          ...consumePayload,
+          purchase: consumePayload?.purchase || null,
+          payment_skipped: true,
+        };
+        emitLeadPurchasedEvent({ lead_id: leadId, purchase: payload?.purchase || null });
+        return payload;
+      } catch (error) {
+        const code = String(error?.code || error?.payload?.code || '').trim().toUpperCase();
+        const status = Number(error?.status || 0);
+        const paidRequired = status === 402 || code === 'PAID_REQUIRED';
 
-      // Non-402 errors should not silently switch to payment.
-      if (!paidRequired) throw error;
+        // Non-402 errors should not silently switch to payment.
+        if (!paidRequired) throw error;
 
-      // If API asks for paid but lead has no payable amount, bubble the error.
-      if (leadPrice <= 0) throw error;
+        // Explicit weekly mode should never auto-switch to paid.
+        if (!allowPaidFallback) throw error;
+
+        // If API asks for paid but lead has no payable amount, bubble the error.
+        if (leadPrice <= 0) throw error;
+      }
     }
 
+    // Paid extra path (explicit BUY_EXTRA/PAID or AUTO fallback after PAID_REQUIRED)
     const initRes = await fetchWithCsrf(apiUrl('/api/payment/lead/initiate'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

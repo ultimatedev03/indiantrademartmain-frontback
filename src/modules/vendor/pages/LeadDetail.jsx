@@ -52,6 +52,21 @@ const formatINR = (v) => {
   return n.toLocaleString('en-IN');
 };
 
+const LEAD_STATUS_OPTIONS = ['ACTIVE', 'VIEWED', 'CLOSED'];
+const LEAD_STATUS_LABEL_MAP = {
+  ACTIVE: 'Active',
+  VIEWED: 'Viewed',
+  CLOSED: 'Closed',
+};
+
+const toLeadStatus = (value, fallback = 'ACTIVE') => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (LEAD_STATUS_OPTIONS.includes(normalized)) return normalized;
+  return fallback;
+};
+
+const formatLeadStatusLabel = (value) => LEAD_STATUS_LABEL_MAP[toLeadStatus(value)];
+
 
 // Combine images from product_images table + products.images jsonb
 const getProductImageUrls = (p) => {
@@ -161,6 +176,83 @@ const LeadDetail = () => {
   const [purchasing, setPurchasing] = useState(false);
   const [isPurchased, setIsPurchased] = useState(false);
   const [contactStats, setContactStats] = useState({ total: 0, calls: 0, emails: 0, whatsapp: 0 });
+  const [statusHistory, setStatusHistory] = useState([]);
+  const [statusValue, setStatusValue] = useState('ACTIVE');
+  const [statusNote, setStatusNote] = useState('');
+  const [statusLoading, setStatusLoading] = useState(false);
+  const [statusSaving, setStatusSaving] = useState(false);
+
+  const loadLeadStatusHistory = async (leadId, fallbackStatus = 'ACTIVE') => {
+    const normalizedLeadId = String(leadId || '').trim();
+    if (!normalizedLeadId) {
+      setStatusHistory([]);
+      setStatusValue('ACTIVE');
+      return 'ACTIVE';
+    }
+
+    setStatusLoading(true);
+    try {
+      const payload = await leadApi.getStatusHistory(normalizedLeadId);
+      const resolvedStatus = toLeadStatus(payload?.current_status, fallbackStatus);
+      setStatusHistory(Array.isArray(payload?.history) ? payload.history : []);
+      setStatusValue(resolvedStatus);
+      return resolvedStatus;
+    } catch (error) {
+      const statusCode = Number(error?.status || 0);
+      if (statusCode === 403 || statusCode === 404) {
+        setStatusHistory([]);
+        const resolvedStatus = toLeadStatus(fallbackStatus, 'ACTIVE');
+        setStatusValue(resolvedStatus);
+        return resolvedStatus;
+      }
+      if (statusCode === 503) {
+        toast({
+          title: 'Status history unavailable',
+          description: error?.message || 'Run latest migration to enable lead lifecycle history.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: 'Failed to load lead lifecycle',
+          description: error?.message || 'Please try again',
+          variant: 'destructive',
+        });
+      }
+      setStatusHistory([]);
+      const resolvedStatus = toLeadStatus(fallbackStatus, 'ACTIVE');
+      setStatusValue(resolvedStatus);
+      return resolvedStatus;
+    } finally {
+      setStatusLoading(false);
+    }
+  };
+
+  const markLeadViewedSilently = async (leadId, currentStatus) => {
+    const normalizedLeadId = String(leadId || '').trim();
+    if (!normalizedLeadId) return;
+
+    const normalizedCurrent = toLeadStatus(currentStatus, 'ACTIVE');
+    if (normalizedCurrent !== 'ACTIVE') return;
+
+    try {
+      const payload = await leadApi.updateLifecycleStatus(normalizedLeadId, {
+        status: 'VIEWED',
+        note: null,
+      });
+
+      const nextStatus = toLeadStatus(payload?.current_status || payload?.lead_status, 'VIEWED');
+      setStatusValue(nextStatus);
+      if (Array.isArray(payload?.history) && payload.history[0]) {
+        setStatusHistory((prev) => [payload.history[0], ...(Array.isArray(prev) ? prev : [])]);
+      }
+      setLead((prev) => (prev ? { ...prev, lead_status: nextStatus } : prev));
+    } catch (error) {
+      const statusCode = Number(error?.status || 0);
+      if (statusCode !== 503 && statusCode !== 403 && statusCode !== 404) {
+        console.warn('Failed to auto-mark lead as viewed:', error?.message || error);
+      }
+    }
+  };
 
   const loadLead = async () => {
     setLoading(true);
@@ -252,6 +344,18 @@ const LeadDetail = () => {
         __productCover,
       });
       setIsPurchased(isPurchasedFlag);
+      const initialStatus = toLeadStatus(
+        leadData?.lead_status,
+        String(leadData?.status || '').toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE'
+      );
+      setStatusValue(initialStatus);
+      setStatusNote('');
+      if (source === 'Direct' || isPurchasedFlag) {
+        const resolvedStatus = await loadLeadStatusHistory(leadData?.id, initialStatus);
+        await markLeadViewedSilently(leadData?.id, resolvedStatus);
+      } else {
+        setStatusHistory([]);
+      }
 
       // contact stats
       try {
@@ -415,6 +519,54 @@ const LeadDetail = () => {
     }
   };
 
+  const handleSaveLeadStatus = async () => {
+    if (!lead?.id) return;
+    const nextStatus = toLeadStatus(statusValue, 'ACTIVE');
+
+    setStatusSaving(true);
+    try {
+      const payload = await leadApi.updateLifecycleStatus(lead.id, {
+        status: nextStatus,
+        note: statusNote,
+      });
+
+      setStatusValue(toLeadStatus(payload?.current_status || payload?.lead_status, nextStatus));
+      if (Array.isArray(payload?.history) && payload.history[0]) {
+        setStatusHistory((prev) => [payload.history[0], ...(Array.isArray(prev) ? prev : [])]);
+      } else {
+        await loadLeadStatusHistory(lead.id, nextStatus);
+      }
+      setLead((prev) =>
+        prev
+          ? {
+              ...prev,
+              lead_status: payload?.lead_status || nextStatus,
+              status:
+                nextStatus === 'CLOSED'
+                  ? 'CLOSED'
+                  : prev?.__source === 'Direct'
+                    ? 'AVAILABLE'
+                    : prev?.status,
+            }
+          : prev
+      );
+      setStatusNote('');
+
+      toast({
+        title: 'Lead lifecycle updated',
+        description: `Status changed to ${formatLeadStatusLabel(nextStatus)}.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Failed to update status',
+        description: error?.message || 'Please try again',
+        variant: 'destructive',
+      });
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <Button
@@ -543,6 +695,78 @@ const LeadDetail = () => {
           </p>
         </CardContent>
       </Card>
+
+      {(isPurchased || isDirect) ? (
+        <Card className="border bg-white">
+          <CardHeader className="pb-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-lg">Lead Lifecycle</CardTitle>
+              <Badge variant="outline">{formatLeadStatusLabel(statusValue)}</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)_140px] gap-3 items-start">
+              <select
+                className="h-10 rounded-md border px-3 text-sm"
+                value={statusValue}
+                onChange={(e) => setStatusValue(toLeadStatus(e.target.value, 'ACTIVE'))}
+                disabled={statusSaving}
+              >
+                {LEAD_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {formatLeadStatusLabel(option)}
+                  </option>
+                ))}
+              </select>
+
+              <textarea
+                value={statusNote}
+                onChange={(e) => setStatusNote(e.target.value)}
+                placeholder="Optional note (e.g. buyer called, quote shared, closed)"
+                className="min-h-[40px] rounded-md border px-3 py-2 text-sm"
+                maxLength={800}
+                disabled={statusSaving}
+              />
+
+              <Button
+                onClick={handleSaveLeadStatus}
+                disabled={statusSaving || statusLoading}
+                className="w-full md:w-auto"
+              >
+                {statusSaving ? 'Saving...' : 'Save Status'}
+              </Button>
+            </div>
+
+            <div className="rounded-md border bg-gray-50 p-3">
+              <div className="text-xs font-semibold text-gray-600 mb-2">Status Timeline</div>
+              {statusLoading ? (
+                <div className="text-sm text-gray-500">Loading lifecycle...</div>
+              ) : statusHistory.length ? (
+                <div className="space-y-2">
+                  {statusHistory.map((row) => {
+                    const at = safeDate(row?.created_at);
+                    return (
+                      <div key={row?.id || `${row?.status}-${row?.created_at}`} className="rounded border bg-white p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <Badge variant="secondary">{formatLeadStatusLabel(row?.status)}</Badge>
+                          <span className="text-xs text-gray-500">
+                            {at ? formatDateTime(at) : '-'}
+                          </span>
+                        </div>
+                        {row?.note ? (
+                          <p className="mt-1 text-sm text-gray-700 whitespace-pre-line">{row.note}</p>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-sm text-gray-500">No lifecycle updates yet.</div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* Buyer Information */}
       <Card className="border bg-white">

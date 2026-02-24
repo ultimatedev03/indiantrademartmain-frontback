@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,7 +10,6 @@ import { Loader2, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { otpService } from '@/services/otpService';
-import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 // ✅ Logo component
 import Logo from '@/shared/components/Logo';
@@ -47,7 +46,6 @@ const Steps = ({ currentStep }) => (
 
 const VendorRegister = () => {
   const navigate = useNavigate();
-  const location = useLocation();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [cityLoading, setCityLoading] = useState(false);
@@ -69,23 +67,12 @@ const VendorRegister = () => {
     cityId: '',
     stateName: '',
     cityName: '',
-    referralCode: '',
     otp: '',
   });
 
   useEffect(() => {
     loadStates();
   }, []);
-
-  useEffect(() => {
-    const params = new URLSearchParams(location.search || '');
-    const incomingRef = String(params.get('ref') || params.get('referral') || '').trim().toUpperCase();
-    if (!incomingRef) return;
-    setFormData((prev) => ({
-      ...prev,
-      referralCode: prev.referralCode || incomingRef,
-    }));
-  }, [location.search]);
 
   useEffect(() => {
     if (step === 3 && timer > 0) {
@@ -271,23 +258,6 @@ const VendorRegister = () => {
 
       if (authData.session) {
         await supabase.auth.setSession(authData.session);
-      }
-
-      if (formData.referralCode.trim()) {
-        try {
-          const linkRes = await fetchWithCsrf('/api/referrals/link', {
-            method: 'POST',
-            body: JSON.stringify({
-              referral_code: formData.referralCode.trim().toUpperCase(),
-            }),
-          });
-          const linkJson = await linkRes.json().catch(() => ({}));
-          if (!linkRes.ok || !linkJson?.success) {
-            console.warn('Referral link skipped:', linkJson?.error || linkRes.status);
-          }
-        } catch (linkErr) {
-          console.warn('Referral link request failed:', linkErr?.message || linkErr);
-        }
       }
 
       try {
@@ -481,23 +451,6 @@ const VendorRegister = () => {
               <div className="space-y-2">
                 <Label>Email Address *</Label>
                 <Input required type="email" value={formData.email} onChange={(e) => setFormData({ ...formData, email: e.target.value })} />
-              </div>
-
-              <div className="space-y-2">
-                <Label>Referral Code (Optional)</Label>
-                <Input
-                  value={formData.referralCode}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      referralCode: String(e.target.value || '')
-                        .toUpperCase()
-                        .replace(/[^A-Z0-9]/g, '')
-                        .slice(0, 20),
-                    })
-                  }
-                  placeholder="Enter referral code"
-                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { setDefaultResultOrder } from 'dns';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -15,7 +16,68 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+try {
+  // Helps in environments where IPv6 handshake intermittently fails.
+  setDefaultResultOrder('ipv4first');
+} catch {
+  // ignore for older runtimes
+}
+
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]);
+const MAX_FETCH_RETRIES = Math.max(1, Number(process.env.SUPABASE_FETCH_RETRIES || 3));
+const FETCH_RETRY_DELAY_MS = Math.max(50, Number(process.env.SUPABASE_FETCH_RETRY_DELAY_MS || 250));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableNetworkError = (error) => {
+  const message = String(error?.message || error || '').toLowerCase();
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  if (['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED'].includes(code)) {
+    return true;
+  }
+  return (
+    message.includes('fetch failed') ||
+    message.includes('socket hang up') ||
+    message.includes('network error') ||
+    message.includes('tls') ||
+    message.includes('ssl') ||
+    message.includes('handshake') ||
+    message.includes('terminated')
+  );
+};
+
+const resilientFetch = async (input, init) => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_FETCH_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      if (!RETRYABLE_HTTP_STATUS.has(response.status) || attempt >= MAX_FETCH_RETRIES) {
+        return response;
+      }
+      try {
+        response.body?.cancel?.();
+      } catch {
+        // no-op
+      }
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableNetworkError(error) || attempt >= MAX_FETCH_RETRIES) throw error;
+    }
+
+    await sleep(FETCH_RETRY_DELAY_MS * attempt);
+  }
+  throw lastError || new Error('Supabase fetch failed');
+};
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: {
+    fetch: resilientFetch,
+  },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
 
 const isMissingColumnError = (err) => {
   if (!err) return false;

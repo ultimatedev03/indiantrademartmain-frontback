@@ -72,6 +72,55 @@ const getVendorId = async () => {
   return vendorByEmail.id;
 };
 
+const getVendorCandidateIds = async () => {
+  const { data: { user }, error: uErr } = await supabase.auth.getUser();
+  if (uErr) throw uErr;
+  if (!user) throw new Error('Not authenticated');
+
+  const vendorIds = new Set();
+  const userId = String(user.id || '').trim();
+  const email = String(user.email || '').toLowerCase().trim();
+
+  if (userId) {
+    const { data: byUserRows, error: byUserError } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (byUserError) {
+      console.warn('Vendor candidate lookup by user_id failed:', byUserError?.message || byUserError);
+    }
+    (byUserRows || []).forEach((row) => {
+      const id = String(row?.id || '').trim();
+      if (id) vendorIds.add(id);
+    });
+  }
+
+  if (email) {
+    const { data: byEmailRows, error: byEmailError } = await supabase
+      .from('vendors')
+      .select('id')
+      .ilike('email', email)
+      .order('updated_at', { ascending: false });
+
+    if (byEmailError) {
+      console.warn('Vendor candidate lookup by email failed:', byEmailError?.message || byEmailError);
+    }
+    (byEmailRows || []).forEach((row) => {
+      const id = String(row?.id || '').trim();
+      if (id) vendorIds.add(id);
+    });
+  }
+
+  if (!vendorIds.size) {
+    const fallbackId = await getVendorId();
+    if (fallbackId) vendorIds.add(String(fallbackId));
+  }
+
+  return Array.from(vendorIds);
+};
+
 // Helper for ID Generation
 const generateRandomString = (length, chars) => {
   let result = '';
@@ -225,11 +274,12 @@ const pickPreferredBuyerName = (...values) => {
 };
 
 const toBuyerMeta = (buyer = {}) => ({
+  id: String(buyer?.id || '').trim() || null,
   user_id: String(buyer?.user_id || '').trim() || null,
   full_name: normalizeTextValue(buyer?.full_name || buyer?.company_name) || null,
   company_name: normalizeTextValue(buyer?.company_name) || null,
   email: normalizeEmailValue(buyer?.email) || null,
-  phone: normalizeTextValue(buyer?.phone) || null,
+  phone: normalizeTextValue(buyer?.phone || buyer?.mobile_number || buyer?.mobile) || null,
   avatar_url: normalizeTextValue(buyer?.avatar_url) || null,
   is_active: typeof buyer?.is_active === 'boolean' ? buyer.is_active : null,
 });
@@ -247,7 +297,7 @@ const enrichProposalBuyerMeta = async (rows = []) => {
     if (proposalIds.length) {
       const { data: leads, error: leadError } = await supabase
         .from('leads')
-        .select('proposal_id, buyer_id, buyer_name, buyer_email, buyer_phone, company_name, created_at')
+        .select('id, proposal_id, buyer_id, buyer_name, buyer_email, buyer_phone, company_name, created_at')
         .in('proposal_id', proposalIds)
         .order('created_at', { ascending: false });
 
@@ -256,6 +306,32 @@ const enrichProposalBuyerMeta = async (rows = []) => {
           const key = String(lead?.proposal_id || '').trim();
           if (!key || leadByProposalId.has(key)) return;
           leadByProposalId.set(key, lead);
+        });
+      }
+    }
+
+    const leadIds = Array.from(
+      new Set(
+        Array.from(leadByProposalId.values())
+          .map((lead) => String(lead?.id || '').trim())
+          .filter(Boolean)
+      )
+    );
+    const vendorIds = Array.from(
+      new Set(list.map((row) => String(row?.vendor_id || '').trim()).filter(Boolean))
+    );
+    const purchasedLeadIdSet = new Set();
+    if (leadIds.length && vendorIds.length) {
+      const { data: purchases, error: purchaseError } = await supabase
+        .from('lead_purchases')
+        .select('lead_id')
+        .in('lead_id', leadIds)
+        .in('vendor_id', vendorIds);
+
+      if (!purchaseError && Array.isArray(purchases)) {
+        purchases.forEach((purchase) => {
+          const leadId = String(purchase?.lead_id || '').trim();
+          if (leadId) purchasedLeadIdSet.add(leadId);
         });
       }
     }
@@ -319,10 +395,12 @@ const enrichProposalBuyerMeta = async (rows = []) => {
     return list.map((row) => {
       const proposalKey = String(row?.id || '').trim();
       const lead = leadByProposalId.get(proposalKey) || {};
+      const leadId = String(lead?.id || '').trim();
       const rowBuyerId = String(row?.buyer_id || '').trim();
       const leadBuyerId = String(lead?.buyer_id || '').trim();
       const rowBuyerEmail = normalizeEmailValue(row?.buyer_email || row?.buyers?.email);
       const leadBuyerEmail = normalizeEmailValue(lead?.buyer_email);
+      const isContactUnlocked = Boolean(leadId && purchasedLeadIdSet.has(leadId));
 
       const fromId = buyerById.get(rowBuyerId) || buyerById.get(leadBuyerId) || null;
       const fromEmail = buyerByEmail.get(rowBuyerEmail) || buyerByEmail.get(leadBuyerEmail) || null;
@@ -365,6 +443,13 @@ const enrichProposalBuyerMeta = async (rows = []) => {
         currentBuyer?.avatar_url,
         row?.buyer_avatar
       );
+      const mergedBuyerId = pickFirstTextValue(
+        fromId?.id,
+        fromEmail?.id,
+        currentBuyer?.id,
+        rowBuyerId,
+        leadBuyerId
+      );
       const mergedUserId = pickFirstTextValue(
         fromId?.user_id,
         fromEmail?.user_id,
@@ -372,6 +457,7 @@ const enrichProposalBuyerMeta = async (rows = []) => {
       );
 
       const buyerMeta = {
+        id: mergedBuyerId || null,
         user_id: mergedUserId || null,
         full_name: mergedName || null,
         company_name: mergedCompany || null,
@@ -394,11 +480,16 @@ const enrichProposalBuyerMeta = async (rows = []) => {
 
       return {
         ...row,
+        lead_id: row?.lead_id || leadId || null,
+        buyer_id: mergedBuyerId || row?.buyer_id || lead?.buyer_id || null,
+        buyer_user_id: mergedUserId || row?.buyer_user_id || null,
         buyer_name: mergedName || row?.buyer_name || null,
         buyer_email: mergedEmail || row?.buyer_email || null,
         buyer_phone: mergedPhone || row?.buyer_phone || null,
         company_name: mergedCompany || row?.company_name || null,
         buyer_avatar: mergedAvatar || row?.buyer_avatar || null,
+        is_contact_unlocked: isContactUnlocked,
+        details_unlocked: isContactUnlocked,
         buyers: hasBuyerMeta ? buyerMeta : row?.buyers || null,
       };
     });
@@ -2001,7 +2092,7 @@ export const vendorApi = {
       const vendorId = await getVendorId();
       let { data, error } = await supabase
         .from('proposals')
-        .select('*, buyers(full_name, email, phone, company_name)')
+        .select('*, buyers(id, user_id, full_name, email, phone, mobile_number, mobile, company_name, avatar_url, is_active)')
         .eq('vendor_id', vendorId)
         .eq('id', id)
         .maybeSingle();
@@ -2025,13 +2116,17 @@ export const vendorApi = {
         console.warn('[vendorApi.proposals.delete] backend delete failed, falling back:', e?.message || e);
       }
 
-      const vendorId = await getVendorId();
-      const { error } = await supabase
+      const vendorIds = await getVendorCandidateIds();
+      const { data: deletedRows, error } = await supabase
         .from('proposals')
         .delete()
         .eq('id', id)
-        .eq('vendor_id', vendorId);
+        .in('vendor_id', vendorIds)
+        .select('id');
       if (error) throw error;
+      if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+        throw new Error('Proposal not found or already deleted');
+      }
       return true;
     }
   },

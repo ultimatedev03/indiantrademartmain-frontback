@@ -6,7 +6,7 @@ import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = express.Router();
 
-const SALES_ROLES = new Set(['SALES', 'MANAGER', 'VP', 'ADMIN', 'SUPERADMIN']);
+const SALES_ROLES = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
 const CATEGORY_IMAGE_BUCKET = 'avatars';
 const CATEGORY_IMAGE_LEVELS = new Set(['head', 'sub', 'micro']);
 const CATEGORY_TABLE_BY_LEVEL = {

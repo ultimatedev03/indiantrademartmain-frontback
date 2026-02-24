@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useToast } from '@/components/ui/use-toast';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -192,6 +193,151 @@ const isPlaceholderBuyerLabel = (value) => {
     normalized === 'unknown' ||
     normalized === 'unknown buyer'
   );
+};
+
+const normalizeBuyerEmailForConversation = (value) => String(value || '').trim().toLowerCase();
+
+const pickConversationText = (...values) => {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
+};
+
+const pickConversationName = (...values) => {
+  let fallback = '';
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (!text) continue;
+    if (!fallback) fallback = text;
+    if (!isPlaceholderBuyerLabel(text)) return text;
+  }
+  return fallback;
+};
+
+const mergeBuyerMetaForConversation = (current = {}, incoming = {}) => {
+  const merged = {
+    ...incoming,
+    ...current,
+    id: pickConversationText(current?.id, incoming?.id) || null,
+    user_id: pickConversationText(current?.user_id, incoming?.user_id) || null,
+    full_name: pickConversationName(
+      current?.full_name,
+      incoming?.full_name,
+      current?.company_name,
+      incoming?.company_name
+    ) || null,
+    company_name: pickConversationText(current?.company_name, incoming?.company_name) || null,
+    email: pickConversationText(current?.email, incoming?.email).toLowerCase() || null,
+    phone: pickConversationText(
+      current?.phone,
+      current?.mobile_number,
+      current?.mobile,
+      incoming?.phone,
+      incoming?.mobile_number,
+      incoming?.mobile
+    ) || null,
+    avatar_url: pickConversationText(current?.avatar_url, incoming?.avatar_url) || null,
+    verification_badge: pickConversationText(current?.verification_badge, incoming?.verification_badge) || null,
+    kyc_status: pickConversationText(current?.kyc_status, incoming?.kyc_status) || null,
+  };
+
+  const currentIsActive = typeof current?.is_active === 'boolean' ? current.is_active : null;
+  const incomingIsActive = typeof incoming?.is_active === 'boolean' ? incoming.is_active : null;
+  const currentIsVerified = typeof current?.is_verified === 'boolean' ? current.is_verified : null;
+  const incomingIsVerified = typeof incoming?.is_verified === 'boolean' ? incoming.is_verified : null;
+
+  merged.is_active = currentIsActive === null ? incomingIsActive : currentIsActive;
+  merged.is_verified = currentIsVerified === null ? incomingIsVerified : currentIsVerified;
+
+  return merged;
+};
+
+const mergeConversationRowWithHydratedProposal = (row = {}, proposal = {}) => {
+  if (!proposal || typeof proposal !== 'object') return row;
+
+  const mergedBuyerMeta = mergeBuyerMetaForConversation(row?.buyers || {}, proposal?.buyers || {});
+
+  const mergedBuyerName = pickConversationName(
+    row?.buyer_name,
+    proposal?.buyer_name,
+    mergedBuyerMeta?.full_name,
+    mergedBuyerMeta?.company_name
+  );
+  const mergedBuyerEmail = pickConversationText(
+    row?.buyer_email,
+    proposal?.buyer_email,
+    mergedBuyerMeta?.email
+  ).toLowerCase();
+  const mergedBuyerPhone = pickConversationText(
+    row?.buyer_phone,
+    row?.buyer_mobile,
+    proposal?.buyer_phone,
+    proposal?.buyer_mobile,
+    mergedBuyerMeta?.phone
+  );
+  const mergedBuyerCompany = pickConversationText(
+    row?.company_name,
+    proposal?.company_name,
+    mergedBuyerMeta?.company_name
+  );
+  const mergedBuyerAvatar = pickConversationText(
+    row?.buyer_avatar,
+    proposal?.buyer_avatar,
+    mergedBuyerMeta?.avatar_url
+  );
+
+  const hasBuyerMeta = Object.values(mergedBuyerMeta).some(
+    (value) => value !== null && value !== undefined && String(value).trim() !== ''
+  );
+
+  return {
+    ...proposal,
+    ...row,
+    buyer_id: pickConversationText(row?.buyer_id, proposal?.buyer_id, mergedBuyerMeta?.id) || null,
+    buyer_user_id: pickConversationText(row?.buyer_user_id, proposal?.buyer_user_id, mergedBuyerMeta?.user_id) || null,
+    buyer_name: mergedBuyerName || null,
+    buyer_email: mergedBuyerEmail || null,
+    buyer_phone: mergedBuyerPhone || null,
+    company_name: mergedBuyerCompany || null,
+    buyer_avatar: mergedBuyerAvatar || null,
+    buyers: hasBuyerMeta ? mergedBuyerMeta : row?.buyers || proposal?.buyers || null,
+  };
+};
+
+const buildBuyerConversationKey = (row = {}) => {
+  const buyerUserId = String(
+    row?.buyers?.user_id ||
+    row?.buyer_user_id ||
+    row?.buyers?.id ||
+    row?.buyer_id ||
+    ''
+  ).trim();
+  if (buyerUserId) return `user:${buyerUserId}`;
+
+  const buyerEmail = normalizeBuyerEmailForConversation(resolveBuyerEmail(row));
+  if (buyerEmail) return `email:${buyerEmail}`;
+
+  const buyerPhone = String(
+    row?.buyers?.phone ||
+    row?.buyers?.mobile_number ||
+    row?.buyers?.mobile ||
+    row?.buyer_phone ||
+    row?.buyer_mobile ||
+    row?.phone ||
+    ''
+  ).replace(/\D+/g, '');
+  if (buyerPhone) return `phone:${buyerPhone}`;
+
+  const nameSeedRaw = String(resolveBuyerName(row) || '').trim().toLowerCase();
+  const nameSeed = isPlaceholderBuyerLabel(nameSeedRaw) ? '' : nameSeedRaw;
+  const companySeed = String(resolveBuyerCompany(row) || '').trim().toLowerCase();
+  const fallbackSeed = [nameSeed, companySeed].filter(Boolean).join('|');
+  if (fallbackSeed) return `name:${fallbackSeed}`;
+
+  const proposalId = String(row?.id || '').trim();
+  return proposalId ? `proposal:${proposalId}` : 'proposal:unknown';
 };
 
 const MESSAGE_MARKERS = {
@@ -405,8 +551,37 @@ const resolvePresenceEntry = (presenceMap = {}, { userIds = [], emails = [] } = 
   return null;
 };
 
+const DEFAULT_CHAT_BLOCK_STATUS = Object.freeze({
+  blocked_by_me: false,
+  blocked_me: false,
+  can_message: true,
+  counterpart_user_id: null,
+});
+
+const normalizeChatBlockStatus = (value) => {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_CHAT_BLOCK_STATUS };
+  }
+
+  const blockedByMe = Boolean(value?.blocked_by_me);
+  const blockedMe = Boolean(value?.blocked_me);
+  const inferredCanMessage = !(blockedByMe || blockedMe);
+  const canMessage =
+    typeof value?.can_message === 'boolean'
+      ? value.can_message && inferredCanMessage
+      : inferredCanMessage;
+
+  return {
+    blocked_by_me: blockedByMe,
+    blocked_me: blockedMe,
+    can_message: canMessage,
+    counterpart_user_id: String(value?.counterpart_user_id || '').trim() || null,
+  };
+};
+
 const Messages = () => {
   const { portalPresenceByUserId } = useAuth();
+  const { toast } = useToast();
   const [conversations, setConversations] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -420,10 +595,13 @@ const Messages = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editingProposalId, setEditingProposalId] = useState('');
   const [editingText, setEditingText] = useState('');
   const [savingMessageId, setSavingMessageId] = useState(null);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [deletingConversationId, setDeletingConversationId] = useState(null);
+  const [blockStatus, setBlockStatus] = useState(() => ({ ...DEFAULT_CHAT_BLOCK_STATUS }));
+  const [blockActionLoading, setBlockActionLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -507,6 +685,15 @@ const Messages = () => {
   );
   const participantStatusText = isParticipantTyping ? 'Typing...' : (isParticipantOnline ? 'Online' : 'Offline');
   const selectedAvatarDotClass = isParticipantOnline ? 'bg-emerald-500' : 'bg-gray-300';
+  const isMessagingBlocked = blockStatus?.can_message === false;
+  const blockedNoticeText = blockStatus?.blocked_by_me
+    ? 'You blocked this buyer. Unblock to send messages.'
+    : blockStatus?.blocked_me
+      ? 'This buyer has blocked you. Messaging is disabled.'
+      : '';
+  const messagePlaceholderText = isMessagingBlocked
+    ? (blockStatus?.blocked_by_me ? 'Unblock this buyer to send messages' : 'Messaging unavailable for this chat')
+    : 'Type a message...';
 
   const mergeBuyerIdentityForProposal = useCallback((proposalIdInput, candidate = {}) => {
     const proposalId = String(proposalIdInput || '').trim();
@@ -600,6 +787,7 @@ const Messages = () => {
 
     return items;
   }, [messages]);
+
 
   const scrollMessagesToBottom = useCallback((behavior = 'smooth') => {
     const el = messageListRef.current;
@@ -718,9 +906,12 @@ const Messages = () => {
 
   useEffect(() => {
     setEditingMessageId(null);
+    setEditingProposalId('');
     setEditingText('');
     setSavingMessageId(null);
     setDeletingMessageId(null);
+    setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
+    setBlockActionLoading(false);
     setContextMenu(null);
   }, [selectedChatId]);
 
@@ -831,16 +1022,96 @@ const Messages = () => {
         if (!uniqueById.has(row.id)) uniqueById.set(row.id, row);
       });
 
-      const sortedRows = Array.from(uniqueById.values()).sort((a, b) => {
+      let sortedRows = Array.from(uniqueById.values()).sort((a, b) => {
         const aTs = new Date(a?.created_at || 0).getTime();
         const bTs = new Date(b?.created_at || 0).getTime();
         return bTs - aTs;
       });
 
-      setConversations(sortedRows);
+      const weakIdentityProposalIds = sortedRows
+        .filter((row) => {
+          const proposalId = String(row?.id || '').trim();
+          if (!proposalId) return false;
+          return buildBuyerConversationKey(row).startsWith('proposal:');
+        })
+        .map((row) => String(row?.id || '').trim());
+
+      if (weakIdentityProposalIds.length > 0) {
+        const hydratedByProposalId = new Map();
+        const hydratedEntries = await Promise.allSettled(
+          weakIdentityProposalIds.map(async (proposalId) => {
+            const proposal = await vendorApi.proposals.get(proposalId);
+            return { proposalId, proposal };
+          })
+        );
+
+        hydratedEntries.forEach((entry) => {
+          if (entry.status !== 'fulfilled') return;
+          const proposalId = String(entry.value?.proposalId || '').trim();
+          const proposal = entry.value?.proposal;
+          if (!proposalId || !proposal) return;
+          hydratedByProposalId.set(proposalId, proposal);
+        });
+
+        if (hydratedByProposalId.size > 0) {
+          sortedRows = sortedRows.map((row) => {
+            const proposalId = String(row?.id || '').trim();
+            if (!proposalId) return row;
+            const hydrated = hydratedByProposalId.get(proposalId);
+            if (!hydrated) return row;
+            return mergeConversationRowWithHydratedProposal(row, hydrated);
+          });
+        }
+      }
+
+      const groupedByBuyer = new Map();
+      sortedRows.forEach((row) => {
+        const proposalId = String(row?.id || '').trim();
+        if (!proposalId) return;
+
+        const key = buildBuyerConversationKey(row);
+        const existing = groupedByBuyer.get(key);
+        if (!existing) {
+          groupedByBuyer.set(key, {
+            key,
+            primaryProposalId: proposalId,
+            proposalIds: [proposalId],
+            row,
+          });
+          return;
+        }
+
+        if (!existing.proposalIds.includes(proposalId)) {
+          existing.proposalIds.push(proposalId);
+        }
+
+        const existingTs = new Date(existing.row?.created_at || 0).getTime();
+        const incomingTs = new Date(row?.created_at || 0).getTime();
+        if (incomingTs > existingTs) {
+          existing.primaryProposalId = proposalId;
+          existing.row = row;
+        }
+      });
+
+      const groupedRows = Array.from(groupedByBuyer.values())
+        .sort((a, b) => {
+          const aTs = new Date(a?.row?.created_at || 0).getTime();
+          const bTs = new Date(b?.row?.created_at || 0).getTime();
+          return bTs - aTs;
+        })
+        .map((entry) => ({
+          ...entry.row,
+          id: entry.primaryProposalId,
+          primary_proposal_id: entry.primaryProposalId,
+          proposal_ids: Array.from(new Set(entry.proposalIds)),
+          buyer_group_key: entry.key,
+          proposal_count: entry.proposalIds.length,
+        }));
+
+      setConversations(groupedRows);
       setBuyerIdentityByProposalId((prev) => {
         const next = { ...prev };
-        sortedRows.forEach((row) => {
+        groupedRows.forEach((row) => {
           const proposalId = String(row?.id || '').trim();
           if (!proposalId) return;
           const name = String(resolveBuyerName(row) || '').trim();
@@ -870,17 +1141,25 @@ const Messages = () => {
         return next;
       });
       setSelectedChatId((prev) => {
-        if (prev && sortedRows.some((row) => row.id === prev)) return prev;
-        return sortedRows[0]?.id || null;
+        if (prev && groupedRows.some((row) => row.id === prev)) return prev;
+        return groupedRows[0]?.id || null;
       });
-      acknowledgeDelivered(sortedRows.map((row) => row.id));
+      acknowledgeDelivered(
+        groupedRows.flatMap((row) =>
+          Array.isArray(row?.proposal_ids) && row.proposal_ids.length ? row.proposal_ids : [row?.id]
+        )
+      );
 
-      const hydrationTargets = sortedRows
+      const hydrationTargets = groupedRows
         .map((row) => ({
           proposalId: String(row?.id || '').trim(),
           fallbackUserId: String(row?.buyers?.user_id || '').trim(),
+          needsHydration:
+            buildBuyerConversationKey(row).startsWith('proposal:') ||
+            isPlaceholderBuyerLabel(resolveBuyerName(row)) ||
+            !String(resolveBuyerEmail(row) || '').trim(),
         }))
-        .filter((item) => item.proposalId);
+        .filter((item) => item.proposalId && item.needsHydration);
 
       void Promise.allSettled(
         hydrationTargets.map(async (item) => {
@@ -898,30 +1177,91 @@ const Messages = () => {
     }
   };
 
-  const fetchMessages = async (proposalId, { silent = false } = {}) => {
-    if (!proposalId) {
+  const fetchMessages = async (proposalId, { silent = false, proposalIds: proposalIdsInput = [] } = {}) => {
+    const fallbackProposalId = String(proposalId || '').trim();
+    const proposalIds = Array.from(
+      new Set(
+        (proposalIdsInput?.length ? proposalIdsInput : [fallbackProposalId])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (!proposalIds.length) {
       setMessages([]);
+      setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
       return;
     }
 
     if (!silent) setLoadingMessages(true);
     try {
-      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/messages`), {
-        cache: 'no-store',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
-      const responseActorId = String(json?.actor_user_id || '').trim();
+      const results = await Promise.allSettled(
+        proposalIds.map(async (id) => {
+          const res = await fetchWithCsrf(apiUrl(`/api/quotation/${id}/messages`), {
+            cache: 'no-store',
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
+          return { proposalId: id, json };
+        })
+      );
+
+      const successful = results
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value);
+
+      if (!successful.length) {
+        const firstError = results.find((result) => result.status === 'rejected');
+        throw firstError?.reason || new Error('Failed to load messages');
+      }
+
+      const responseActorId =
+        successful.map((item) => String(item?.json?.actor_user_id || '').trim()).find(Boolean) || '';
       if (responseActorId) {
         setActorMessageUserId(responseActorId);
       }
-      setParticipantUserId(String(json?.participants?.buyer_user_id || '').trim());
-      const incoming = Array.isArray(json?.messages) ? json.messages : [];
+
+      const responseBlockStatus =
+        successful.map((item) => item?.json?.block_status).find((value) => value && typeof value === 'object') || null;
+      setBlockStatus(normalizeChatBlockStatus(responseBlockStatus));
+
+      const participantId =
+        successful
+          .map((item) => String(item?.json?.participants?.buyer_user_id || '').trim())
+          .find(Boolean) || '';
+      setParticipantUserId(participantId);
+
       const actorId = responseActorId || resolvedActorUserId;
-      setMessages(incoming.map((row) => normalizeMessageRow(row, actorId, 'vendor')));
+      const merged = successful
+        .flatMap((item) => {
+          const incoming = Array.isArray(item?.json?.messages) ? item.json.messages : [];
+          return incoming.map((row) => ({
+            ...row,
+            proposal_id: String(row?.proposal_id || item.proposalId || '').trim() || null,
+          }));
+        })
+        .sort((a, b) => {
+          const aTs = new Date(a?.created_at || a?.updated_at || 0).getTime();
+          const bTs = new Date(b?.created_at || b?.updated_at || 0).getTime();
+          return aTs - bTs;
+        });
+
+      const deduped = [];
+      const seen = new Set();
+      merged.forEach((row) => {
+        const messageId = String(row?.id || '').trim();
+        if (messageId && seen.has(messageId)) return;
+        if (messageId) seen.add(messageId);
+        deduped.push(row);
+      });
+
+      setMessages(deduped.map((row) => normalizeMessageRow(row, actorId, 'vendor')));
     } catch (error) {
       console.error('Error loading proposal messages:', error);
-      if (!silent) setMessages([]);
+      if (!silent) {
+        setMessages([]);
+        setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
+      }
     } finally {
       if (!silent) setLoadingMessages(false);
     }
@@ -937,6 +1277,15 @@ const Messages = () => {
 
     let active = true;
     let fallbackPollId = null;
+    const activeProposalIds = Array.from(
+      new Set(
+        ((Array.isArray(selectedChat?.proposal_ids) && selectedChat.proposal_ids.length)
+          ? selectedChat.proposal_ids
+          : [selectedChatId])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
     const presenceKey =
       String(resolvedActorUserId || '').trim() ||
       `vendor-${selectedChatId}-${Date.now()}`;
@@ -944,7 +1293,7 @@ const Messages = () => {
       if (!active || syncInFlightRef.current) return;
       syncInFlightRef.current = true;
       try {
-        await fetchMessages(selectedChatId, { silent: true });
+        await fetchMessages(selectedChatId, { silent: true, proposalIds: activeProposalIds });
       } finally {
         syncInFlightRef.current = false;
       }
@@ -954,68 +1303,60 @@ const Messages = () => {
       syncMessages();
     }, 1200);
 
-    fetchMessages(selectedChatId);
+    fetchMessages(selectedChatId, { proposalIds: activeProposalIds });
 
-    const channel = supabase
-      .channel(`proposal-chat-${selectedChatId}`, {
-        config: { presence: { key: presenceKey } },
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const row = payload?.new;
-          if (!row?.id) return;
-          const normalized = normalizeMessageRow(row, resolvedActorUserId, 'vendor');
-          setMessages((prev) => {
-            if (prev.some((item) => item.id === row.id)) return prev;
-            return [...prev, normalized];
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const row = payload?.new;
-          if (!row?.id) return;
-          const normalized = normalizeMessageRow(row, resolvedActorUserId, 'vendor');
-          setMessages((prev) => {
-            const idx = prev.findIndex((item) => item.id === row.id);
-            if (idx === -1) return [...prev, normalized];
-            const next = [...prev];
-            next[idx] = normalized;
-            return next;
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const deletedId = payload?.old?.id || payload?.new?.id;
-          if (!deletedId) return;
-          setMessages((prev) => prev.filter((item) => item.id !== deletedId));
-        }
-      )
+    let channel = supabase.channel(`proposal-chat-${selectedChatId}`, {
+      config: { presence: { key: presenceKey } },
+    });
+
+    const attachProposalEvent = (event, handler) => {
+      activeProposalIds.forEach((proposalId) => {
+        channel = channel.on(
+          'postgres_changes',
+          {
+            event,
+            schema: 'public',
+            table: 'proposal_messages',
+            filter: `proposal_id=eq.${proposalId}`,
+          },
+          handler
+        );
+      });
+    };
+
+    attachProposalEvent('INSERT', (payload) => {
+      if (!active) return;
+      const row = payload?.new;
+      if (!row?.id) return;
+      const normalized = normalizeMessageRow(row, resolvedActorUserId, 'vendor');
+      setMessages((prev) => {
+        if (prev.some((item) => item.id === row.id)) return prev;
+        return [...prev, normalized];
+      });
+    });
+
+    attachProposalEvent('UPDATE', (payload) => {
+      if (!active) return;
+      const row = payload?.new;
+      if (!row?.id) return;
+      const normalized = normalizeMessageRow(row, resolvedActorUserId, 'vendor');
+      setMessages((prev) => {
+        const idx = prev.findIndex((item) => item.id === row.id);
+        if (idx === -1) return [...prev, normalized];
+        const next = [...prev];
+        next[idx] = normalized;
+        return next;
+      });
+    });
+
+    attachProposalEvent('DELETE', (payload) => {
+      if (!active) return;
+      const deletedId = payload?.old?.id || payload?.new?.id;
+      if (!deletedId) return;
+      setMessages((prev) => prev.filter((item) => item.id !== deletedId));
+    });
+
+    channel = channel
       .on('presence', { event: 'sync' }, () => {
         if (!active) return;
         const state = channel.presenceState();
@@ -1062,11 +1403,11 @@ const Messages = () => {
       if (fallbackPollId) clearInterval(fallbackPollId);
       supabase.removeChannel(channel);
     };
-  }, [selectedChatId, resolvedActorUserId]);
+  }, [selectedChatId, selectedChat, resolvedActorUserId]);
 
   const handleSend = async () => {
     const trimmed = newMessage.trim();
-    if (!trimmed || !selectedChatId || sending) return;
+    if (!trimmed || !selectedChatId || sending || isMessagingBlocked || blockActionLoading) return;
 
     if (typingTimerRef.current) {
       clearTimeout(typingTimerRef.current);
@@ -1081,7 +1422,12 @@ const Messages = () => {
         body: JSON.stringify({ message: trimmed }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to send message');
+      if (!res.ok) {
+        if (json?.block_status) {
+          setBlockStatus(normalizeChatBlockStatus(json.block_status));
+        }
+        throw new Error(json?.error || 'Failed to send message');
+      }
 
       if (json?.message?.id) {
         const normalized = normalizeMessageRow(json.message, resolvedActorUserId, 'vendor');
@@ -1090,31 +1436,82 @@ const Messages = () => {
           return [...prev, normalized];
         });
       } else {
-        await fetchMessages(selectedChatId, { silent: true });
+        await fetchMessages(selectedChatId, { silent: true, proposalIds: selectedChat?.proposal_ids || [] });
       }
       setNewMessage('');
     } catch (error) {
       console.error('Failed to send vendor message:', error);
+      toast({
+        title: 'Send failed',
+        description: error?.message || 'Unable to send message',
+        variant: 'destructive',
+      });
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    const proposalId = String(selectedChatId || '').trim();
+    if (!proposalId || blockActionLoading) return;
+
+    const action = blockStatus?.blocked_by_me ? 'unblock' : 'block';
+    setBlockActionLoading(true);
+    try {
+      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/block`), {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || `Failed to ${action} chat`);
+
+      setBlockStatus(normalizeChatBlockStatus(json?.block_status));
+
+      if (action === 'block') {
+        if (typingTimerRef.current) {
+          clearTimeout(typingTimerRef.current);
+          typingTimerRef.current = null;
+        }
+        trackTypingPresence(false);
+        setNewMessage('');
+      }
+
+      toast({
+        title: action === 'block' ? 'Buyer blocked' : 'Buyer unblocked',
+        description:
+          action === 'block'
+            ? 'Messaging is disabled for this chat until you unblock.'
+            : 'Messaging is enabled again for this chat.',
+      });
+    } catch (error) {
+      console.error('Failed to update block status:', error);
+      toast({
+        title: 'Action failed',
+        description: error?.message || 'Unable to update chat block status',
+        variant: 'destructive',
+      });
+    } finally {
+      setBlockActionLoading(false);
     }
   };
 
   const startEditing = (msg) => {
     if (!msg?.id || !msg?.is_me) return;
     setEditingMessageId(msg.id);
+    setEditingProposalId(String(msg?.proposal_id || selectedChatId || '').trim());
     setEditingText(String(msg?.message || ''));
   };
 
   const cancelEditing = () => {
     setEditingMessageId(null);
+    setEditingProposalId('');
     setEditingText('');
     setSavingMessageId(null);
   };
 
   const handleEditMessage = async () => {
     const messageId = String(editingMessageId || '').trim();
-    const proposalId = String(selectedChatId || '').trim();
+    const proposalId = String(editingProposalId || selectedChatId || '').trim();
     const updatedText = editingText.trim();
     if (!proposalId || !messageId || !updatedText) return;
 
@@ -1131,7 +1528,7 @@ const Messages = () => {
         const normalized = normalizeMessageRow(json.message, resolvedActorUserId, 'vendor');
         setMessages((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
       } else {
-        await fetchMessages(proposalId, { silent: true });
+        await fetchMessages(proposalId, { silent: true, proposalIds: selectedChat?.proposal_ids || [] });
       }
       cancelEditing();
     } catch (error) {
@@ -1157,8 +1554,14 @@ const Messages = () => {
       if (editingMessageId === targetMessageId) {
         cancelEditing();
       }
+      toast({ title: 'Message deleted' });
     } catch (error) {
       console.error('Failed to delete vendor message:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete message',
+        variant: 'destructive',
+      });
     } finally {
       setDeletingMessageId(null);
     }
@@ -1167,21 +1570,48 @@ const Messages = () => {
   const handleDeleteConversation = async (proposalIdInput) => {
     const proposalId = String(proposalIdInput || '').trim();
     if (!proposalId || deletingConversationId) return;
+    const conversation = conversations.find((item) => String(item?.id || '').trim() === proposalId);
+    const proposalIds = Array.from(
+      new Set(
+        (Array.isArray(conversation?.proposal_ids) && conversation.proposal_ids.length
+          ? conversation.proposal_ids
+          : [proposalId]
+        )
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
 
     setDeletingConversationId(proposalId);
     try {
-      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/messages`), {
-        method: 'DELETE',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to delete chat');
+      for (const targetProposalId of proposalIds) {
+        const res = await fetchWithCsrf(apiUrl(`/api/quotation/${targetProposalId}/messages`), {
+          method: 'DELETE',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || 'Failed to delete chat');
+      }
 
       if (String(selectedChatId || '').trim() === proposalId) {
         setMessages([]);
         cancelEditing();
       }
+
+      await loadConversations();
+      toast({
+        title: 'Chat deleted',
+        description:
+          proposalIds.length > 1
+            ? `${proposalIds.length} linked proposal chats were removed.`
+            : 'Conversation removed successfully.',
+      });
     } catch (error) {
       console.error('Failed to delete vendor conversation:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete chat',
+        variant: 'destructive',
+      });
     } finally {
       setDeletingConversationId(null);
     }
@@ -1259,6 +1689,12 @@ const Messages = () => {
                   const conversationEmail = identity?.email || resolveBuyerEmail(chat);
                   const conversationAvatar = identity?.avatar || resolveBuyerAvatar(chat);
                   const conversationCompany = identity?.company || resolveBuyerCompany(chat);
+                  const proposalCount =
+                    Array.isArray(chat?.proposal_ids) && chat.proposal_ids.length ? chat.proposal_ids.length : 1;
+                  const conversationSummaryBase =
+                    conversationCompany || chat?.product_name || chat?.title || 'Proposal conversation';
+                  const conversationSummary =
+                    proposalCount > 1 ? `${conversationSummaryBase} • ${proposalCount} proposals` : conversationSummaryBase;
                   const conversationPresenceIdentity = {
                     userIds: [
                       String(identity?.userId || '').trim(),
@@ -1334,7 +1770,7 @@ const Messages = () => {
                             <span className="text-[10px] text-gray-400 shrink-0">{safeDate(chat?.created_at)}</span>
                           </div>
                           <p className="text-xs text-gray-500 truncate">
-                            {conversationCompany || chat?.product_name || chat?.title || 'Proposal conversation'}
+                            {conversationSummary}
                           </p>
                         </div>
                       </div>
@@ -1383,6 +1819,29 @@ const Messages = () => {
                   <p className={`text-xs ${isParticipantTyping ? 'text-[#003D82]' : 'text-gray-500'}`}>
                     {participantStatusText}
                   </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={blockStatus?.blocked_by_me ? 'outline' : 'destructive'}
+                    onClick={handleToggleBlock}
+                    disabled={blockActionLoading}
+                    className={
+                      blockStatus?.blocked_by_me
+                        ? 'h-8 px-3 text-xs'
+                        : 'h-8 px-3 text-xs bg-red-600 text-white hover:bg-red-700'
+                    }
+                  >
+                    {blockActionLoading ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Updating
+                      </span>
+                    ) : blockStatus?.blocked_by_me ? (
+                      'Unblock'
+                    ) : (
+                      'Block'
+                    )}
+                  </Button>
                 </div>
               </div>
 
@@ -1426,6 +1885,7 @@ const Messages = () => {
                             setContextMenu({
                               type: 'message',
                               messageId: msg.id,
+                              proposalId: String(msg?.proposal_id || selectedChatId || '').trim(),
                               x: event.clientX,
                               y: event.clientY,
                             });
@@ -1490,24 +1950,30 @@ const Messages = () => {
                 )}
               </div>
 
-              <div className="p-4 bg-white border-t flex gap-2">
-                <Input
-                  value={newMessage}
-                  onChange={handleMessageInputChange}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSend();
-                  }}
-                  placeholder="Type a message..."
-                  className="flex-1 h-11"
-                />
-                <Button
-                  onClick={handleSend}
-                  size="icon"
-                  className="h-11 w-11 bg-[#003D82] hover:bg-[#003D82]/90"
-                  disabled={sending}
-                >
-                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </Button>
+              <div className="p-4 bg-white border-t space-y-2">
+                {isMessagingBlocked ? (
+                  <p className="text-xs text-red-600">{blockedNoticeText}</p>
+                ) : null}
+                <div className="flex gap-2">
+                  <Input
+                    value={newMessage}
+                    onChange={handleMessageInputChange}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSend();
+                    }}
+                    placeholder={messagePlaceholderText}
+                    className="flex-1 h-11"
+                    disabled={sending || isMessagingBlocked || blockActionLoading}
+                  />
+                  <Button
+                    onClick={handleSend}
+                    size="icon"
+                    className="h-11 w-11 bg-[#003D82] hover:bg-[#003D82]/90"
+                    disabled={sending || isMessagingBlocked || blockActionLoading}
+                  >
+                    {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
               </div>
 
               {contextMenu && contextMenuStyle ? (
@@ -1554,7 +2020,7 @@ const Messages = () => {
                         type="button"
                         className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-red-600 hover:bg-red-50"
                         onClick={() => {
-                          requestDeleteMessage(contextMenu.messageId, selectedChatId);
+                          requestDeleteMessage(contextMenu.messageId, contextMenu.proposalId || selectedChatId);
                           setContextMenu(null);
                         }}
                       >

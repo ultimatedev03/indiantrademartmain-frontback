@@ -78,12 +78,15 @@ const getPlanDisplayPricing = (plan) => {
   }
 
   const discountLabel = String(pricing.discount_label || '').trim();
+  const rawExtraLeadPrice = Number(pricing.extra_lead_price || 0);
+  const extraLeadPrice = Number.isFinite(rawExtraLeadPrice) && rawExtraLeadPrice > 0 ? rawExtraLeadPrice : 0;
 
   return {
     nowPrice,
     originalPrice,
     discountPercent,
     discountLabel,
+    extraLeadPrice,
   };
 };
 
@@ -687,7 +690,7 @@ const Services = () => {
   const selectedIsPopular = selectedPlan && selectedPlan.id === mostPopularPlanId;
   const selectedPricing = selectedPlan
     ? getPlanDisplayPricing(selectedPlan)
-    : { nowPrice: 0, originalPrice: 0, discountPercent: 0, discountLabel: '' };
+    : { nowPrice: 0, originalPrice: 0, discountPercent: 0, discountLabel: '', extraLeadPrice: 0 };
   const selectedDiscountTag = getDiscountTag(selectedPricing);
 
   if (!plans.length && !loading && !fatalError) {
@@ -744,7 +747,7 @@ const Services = () => {
               Buy Leads
             </Button>
             <div className="bg-slate-50 text-slate-700 text-xs border border-dashed rounded-lg px-3 py-2 w-full sm:w-auto text-center sm:text-left">
-              Coupon? Tap <span className="font-semibold">Upgrade</span> on a plan to add it during checkout.
+              Tap a card for full details/coupon. <span className="font-semibold">Upgrade</span> starts payment directly.
             </div>
 
             <Button
@@ -803,7 +806,11 @@ const Services = () => {
               key={plan.id}
               role="button"
               tabIndex={0}
-              onClick={() => openPlanDetails(plan)}
+              onClick={(e) => {
+                // Guard: interactive children (like Upgrade button) must not trigger card handler
+                if (e.target?.closest?.('[data-plan-action]')) return;
+                openPlanDetails(plan);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') openPlanDetails(plan);
               }}
@@ -863,6 +870,11 @@ const Services = () => {
                         {discountTag}
                       </div>
                     ) : null}
+                    {pricing.extraLeadPrice > 0 ? (
+                      <div className="mt-1 text-[11px] font-medium text-slate-600">
+                        Extra lead: ₹{formatINR(pricing.extraLeadPrice)} / lead
+                      </div>
+                    ) : null}
                     <div className="text-[12px] text-slate-500 mt-1">Tap card to view full details</div>
                   </div>
                 </div>
@@ -909,6 +921,7 @@ const Services = () => {
 
               <CardFooter className="pt-1">
                 <Button
+                  data-plan-action="upgrade"
                   className={cx(
                     'w-full rounded-xl h-10 font-semibold',
                     isCurrent ? 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50' : ''
@@ -916,9 +929,10 @@ const Services = () => {
                   variant={isCurrent ? 'outline' : 'default'}
                   disabled={isCurrent}
                   onClick={(e) => {
-                    // ✅ button click pe card modal open na ho
+                    // Upgrade button should be the only trigger for payment checkout
+                    e.preventDefault();
                     e.stopPropagation();
-                    if (!isCurrent) openPlanDetails(plan);
+                    if (!isCurrent) handleSubscribe(plan);
                   }}
                 >
                   {isCurrent ? 'Active Plan' : 'Upgrade'}
@@ -1016,6 +1030,11 @@ const Services = () => {
                       </div>
                     ))}
                   </div>
+                  {selectedPricing.extraLeadPrice > 0 ? (
+                    <div className="text-[11px] text-slate-600 font-medium text-right">
+                      Extra lead price: ₹{formatINR(selectedPricing.extraLeadPrice)} / lead
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* highlights full */}

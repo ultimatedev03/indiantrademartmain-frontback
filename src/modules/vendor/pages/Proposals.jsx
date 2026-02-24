@@ -1,13 +1,112 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { quotationApi } from '@/modules/vendor/services/quotationApi';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Loader2, Calendar, User, FileText, Plus, Trash2 } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { toast } from '@/components/ui/use-toast';
+import { Calendar, Clock3, Loader2, Plus, Trash2, User } from 'lucide-react';
+
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '-';
+  return parsed.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+};
+
+const formatMoney = (value) => {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return new Intl.NumberFormat('en-IN', {
+    maximumFractionDigits: 0,
+  }).format(num);
+};
+
+const getServiceName = (proposal = {}) =>
+  proposal?.product_name ||
+  proposal?.service_name ||
+  proposal?.title ||
+  'Untitled service';
+
+const getCounterpartyName = (proposal = {}) =>
+  proposal?.buyers?.full_name ||
+  proposal?.buyer_name ||
+  proposal?.buyers?.company_name ||
+  proposal?.buyer_email ||
+  'Customer';
+
+const getCounterpartyEmail = (proposal = {}) =>
+  proposal?.buyers?.email || proposal?.buyer_email || null;
+
+const getCounterpartyPhone = (proposal = {}) =>
+  proposal?.buyers?.phone || proposal?.buyer_phone || null;
+
+const getCounterpartyCompany = (proposal = {}) =>
+  proposal?.buyers?.company_name || proposal?.company_name || null;
+
+const isContactUnlocked = (proposal = {}) => {
+  if (typeof proposal?.is_contact_unlocked === 'boolean') return proposal.is_contact_unlocked;
+  if (typeof proposal?.details_unlocked === 'boolean') return proposal.details_unlocked;
+  if (typeof proposal?.lead_unlocked === 'boolean') return proposal.lead_unlocked;
+  return Boolean(
+    proposal?.lead_purchase_id ||
+      proposal?.is_purchased === true ||
+      String(proposal?.lead_status || '').toUpperCase() === 'PURCHASED'
+  );
+};
+
+const maskText = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => {
+      if (part.length <= 1) return '*';
+      return `${part.slice(0, 1)}${'*'.repeat(Math.max(part.length - 1, 2))}`;
+    })
+    .join(' ');
+};
+
+const maskEmail = (value) => {
+  const email = String(value || '').trim();
+  if (!email || !email.includes('@')) return '';
+  const [localPartRaw, domainRaw] = email.split('@');
+  const localPart = String(localPartRaw || '');
+  const domain = String(domainRaw || '');
+  const domainParts = domain.split('.');
+  const domainName = String(domainParts[0] || '');
+  const domainSuffix = domainParts.length > 1 ? `.${domainParts.slice(1).join('.')}` : '';
+
+  const maskedLocal =
+    localPart.length <= 2
+      ? `${localPart.slice(0, 1)}*`
+      : `${localPart.slice(0, 2)}${'*'.repeat(Math.max(localPart.length - 2, 3))}`;
+  const maskedDomain =
+    domainName.length <= 2
+      ? `${domainName.slice(0, 1)}*`
+      : `${domainName.slice(0, 2)}${'*'.repeat(Math.max(domainName.length - 2, 3))}`;
+  return `${maskedLocal}@${maskedDomain}${domainSuffix}`;
+};
+
+const maskPhone = (value) => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const digits = text.replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.length <= 4) return `${digits.slice(0, 1)}${'*'.repeat(Math.max(digits.length - 1, 2))}`;
+  return `${digits.slice(0, 2)}${'*'.repeat(Math.max(digits.length - 4, 4))}${digits.slice(-2)}`;
+};
 
 const Proposals = () => {
   const navigate = useNavigate();
@@ -18,6 +117,7 @@ const Proposals = () => {
   });
   const [proposals, setProposals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState('');
   const [detailOpen, setDetailOpen] = useState(false);
   const [selected, setSelected] = useState(null);
 
@@ -27,240 +127,324 @@ const Proposals = () => {
     setActiveTab((prev) => (prev === nextTab ? prev : nextTab));
   }, [location.search]);
 
-  useEffect(() => {
-    loadProposals();
-  }, [activeTab]);
-
-  const loadProposals = async () => {
+  const loadProposals = useCallback(async () => {
     setLoading(true);
     try {
-       let data = [];
-       if (activeTab === 'sent') {
-         try {
-           data = await quotationApi.getSentQuotations();
-         } catch {
-           data = [];
-         }
-         if (!Array.isArray(data) || data.length === 0) {
-           data = await vendorApi.proposals.list(activeTab);
-         }
-       } else {
-         data = await vendorApi.proposals.list(activeTab);
-       }
-       setProposals(Array.isArray(data) ? data : []);
-    } catch (e) {
-       console.error(e);
-       setProposals([]);
+      let data = await vendorApi.proposals.list(activeTab);
+
+      // Keep quotation endpoint as fallback for older deployments.
+      if (activeTab === 'sent' && (!Array.isArray(data) || data.length === 0)) {
+        try {
+          const fallbackRows = await quotationApi.getSentQuotations();
+          if (Array.isArray(fallbackRows) && fallbackRows.length > 0) {
+            data = fallbackRows;
+          }
+        } catch {
+          // no-op fallback
+        }
+      }
+
+      setProposals(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error('Failed to load proposals:', error);
+      setProposals([]);
+      toast({
+        title: 'Unable to load proposals',
+        description: error?.message || 'Please try again.',
+        variant: 'destructive',
+      });
     } finally {
-       setLoading(false);
+      setLoading(false);
     }
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    loadProposals();
+  }, [loadProposals]);
 
   const openDetail = async (id) => {
     try {
       const data = await vendorApi.proposals.get(id);
       setSelected(data);
       setDetailOpen(true);
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error('Failed to load proposal details:', error);
+      toast({
+        title: 'Unable to open details',
+        description: error?.message || 'Please refresh and try again.',
+        variant: 'destructive',
+      });
     }
   };
 
   const handleDelete = async (id) => {
-    const ok = window.confirm('Delete this quotation?');
+    if (!id) return;
+
+    const target = proposals.find((row) => row?.id === id) || selected || {};
+    const serviceName = getServiceName(target);
+    const ok = window.confirm(`Delete quotation for "${serviceName}"? This action cannot be undone.`);
     if (!ok) return;
+
+    setDeletingId(String(id));
     try {
       await vendorApi.proposals.delete(id);
-      setDetailOpen(false);
-      setSelected(null);
-      loadProposals();
-    } catch (e) {
-      console.error(e);
+      setProposals((prev) => prev.filter((row) => row?.id !== id));
+      if (String(selected?.id || '') === String(id)) {
+        setDetailOpen(false);
+        setSelected(null);
+      }
+      toast({
+        title: 'Quotation deleted',
+        description: 'The quotation has been removed successfully.',
+      });
+    } catch (error) {
+      console.error('Failed to delete quotation:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete this quotation.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingId('');
     }
   };
 
-  const selectedBuyerName =
-    selected?.buyers?.full_name ||
-    selected?.buyer_name ||
-    selected?.buyer_email ||
-    'Customer';
-  const selectedBuyerCompany =
-    selected?.buyers?.company_name ||
-    selected?.company_name ||
-    null;
-  const selectedBuyerEmail =
-    selected?.buyers?.email ||
-    selected?.buyer_email ||
-    null;
-  const selectedBuyerPhone =
-    selected?.buyers?.phone ||
-    selected?.buyer_phone ||
-    null;
-  const selectedBuyerLocation =
-    selected?.buyers?.location ||
-    [selected?.city, selected?.state].filter(Boolean).join(', ') ||
-    selected?.location ||
-    null;
+  const selectedDirection = useMemo(() => {
+    const hasBuyerEmail = Boolean(String(selected?.buyer_email || '').trim());
+    return hasBuyerEmail ? 'sent' : 'received';
+  }, [selected]);
+
+  const selectedCounterpartyName = getCounterpartyName(selected || {});
+  const selectedCounterpartyCompany = getCounterpartyCompany(selected || {});
+  const selectedCounterpartyEmail = getCounterpartyEmail(selected || {});
+  const selectedCounterpartyPhone = getCounterpartyPhone(selected || {});
+  const selectedDetailsUnlocked = isContactUnlocked(selected || {});
+  const selectedAmount = formatMoney(selected?.quotation_amount || selected?.budget);
+  const selectedCreatedAt = selected?.created_at || selected?.updated_at || null;
+  const selectedService = getServiceName(selected || {});
+  const selectedNameValue = selectedDetailsUnlocked
+    ? selectedCounterpartyName || 'Customer'
+    : maskText(selectedCounterpartyName) || 'Hidden';
+  const selectedCompanyValue = selectedDetailsUnlocked
+    ? selectedCounterpartyCompany || 'N/A'
+    : selectedCounterpartyCompany
+      ? maskText(selectedCounterpartyCompany)
+      : 'Hidden';
+  const selectedEmailValue = selectedDetailsUnlocked
+    ? selectedCounterpartyEmail || 'N/A'
+    : selectedCounterpartyEmail
+      ? maskEmail(selectedCounterpartyEmail)
+      : 'Hidden';
+  const selectedPhoneValue = selectedDetailsUnlocked
+    ? selectedCounterpartyPhone || 'N/A'
+    : selectedCounterpartyPhone
+      ? maskPhone(selectedCounterpartyPhone)
+      : 'Hidden';
+
+  const renderCard = (proposal, type) => {
+    const id = String(proposal?.id || '');
+    const service = getServiceName(proposal);
+    const counterparty = getCounterpartyName(proposal);
+    const detailsUnlocked = isContactUnlocked(proposal);
+    const counterpartyDisplay = detailsUnlocked ? counterparty : maskText(counterparty) || 'Customer';
+    const amount = formatMoney(proposal?.quotation_amount || proposal?.budget);
+    const quantity = proposal?.quantity ? String(proposal.quantity) : null;
+    const createdAt = proposal?.created_at || proposal?.updated_at || null;
+    const actionDateLabel = type === 'sent' ? 'Sent at' : 'Received at';
+    const subtitleText =
+      type === 'sent'
+        ? `Sent to ${counterpartyDisplay}`
+        : `Requested by ${counterpartyDisplay}`;
+
+    return (
+      <Card key={id} className="border-neutral-200 hover:shadow-md transition-shadow">
+        <CardContent className="p-5 md:p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-lg font-semibold text-[#003D82]">{service}</h3>
+                <Badge variant="secondary">{proposal?.status || (type === 'sent' ? 'SENT' : 'PENDING')}</Badge>
+                <Badge variant="outline">{detailsUnlocked ? 'Details unlocked' : 'Details masked'}</Badge>
+              </div>
+
+              <p className="text-sm text-neutral-600">{subtitleText}</p>
+
+              <div className="flex flex-wrap items-center gap-2 text-xs md:text-sm">
+                <Badge variant="outline">Service: {service}</Badge>
+                {amount ? <Badge variant="outline">Amount: INR {amount}</Badge> : null}
+                {quantity ? <Badge variant="outline">Qty: {quantity}</Badge> : null}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-500 md:text-sm">
+                <div className="flex items-center gap-1">
+                  <Calendar className="h-3.5 w-3.5" />
+                  <span>{actionDateLabel}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Clock3 className="h-3.5 w-3.5" />
+                  <span>{formatDateTime(createdAt)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 md:justify-end">
+              <Button onClick={() => openDetail(proposal?.id)}>View Details</Button>
+              <Button
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50"
+                onClick={() => handleDelete(proposal?.id)}
+                disabled={deletingId === id}
+              >
+                {deletingId === id ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4 mr-1" />
+                )}
+                Delete
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="space-y-6">
-       <div className="flex justify-between items-center">
-          <div>
-             <h1 className="text-2xl font-bold text-gray-900">My Proposals</h1>
-             <p className="text-gray-500">Manage your sent and received quotations</p>
-          </div>
-          <Button className="bg-[#003D82]" onClick={() => navigate('/vendor/proposals/send')}>
-             <Plus className="mr-2 h-4 w-4" /> Send Quotation
-          </Button>
-       </div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">My Proposals</h1>
+          <p className="text-gray-500">Manage your sent and received quotations</p>
+        </div>
+        <Button className="bg-[#003D82]" onClick={() => navigate('/vendor/proposals/send')}>
+          <Plus className="mr-2 h-4 w-4" /> Send Quotation
+        </Button>
+      </div>
 
-       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
-             <TabsTrigger value="received">Received Requests</TabsTrigger>
-             <TabsTrigger value="sent">Sent Quotations</TabsTrigger>
-          </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 max-w-[420px]">
+          <TabsTrigger value="received">Received Requests</TabsTrigger>
+          <TabsTrigger value="sent">Sent Quotations</TabsTrigger>
+        </TabsList>
 
-          <TabsContent value="received" className="space-y-4 mt-6">
-             {loading ? <div className="flex justify-center p-8"><Loader2 className="animate-spin"/></div> : 
-               proposals.length === 0 ? <div className="text-center p-8 border rounded bg-white text-gray-500">No proposals found.</div> :
-               proposals.map(prop => (
-                 <Card key={prop.id} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-6">
-                       <div className="flex justify-between items-start">
-                          <div>
-                             <h3 className="font-bold text-lg text-[#003D82] mb-1">{prop.title}</h3>
-                             <div className="text-sm text-gray-500 mb-4">
-                                Requested by <span className="font-medium text-gray-800">{prop.buyers?.full_name || prop.buyer_name || prop.buyer_email || 'Buyer'}</span> on {new Date(prop.created_at).toLocaleDateString()}
-                             </div>
-                             <div className="flex gap-2">
-                                <Badge variant="secondary">{prop.status}</Badge>
-                                {prop.budget && <Badge variant="outline">Budget: ₹{prop.budget}</Badge>}
-                             </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button onClick={() => openDetail(prop.id)}>View Details</Button>
-                            <Button variant="outline" className="text-red-600 border-red-200" onClick={() => handleDelete(prop.id)}>
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                       </div>
-                    </CardContent>
-                 </Card>
-               ))
-             }
-          </TabsContent>
-          
-           <TabsContent value="sent" className="space-y-4 mt-6">
-             {loading ? <div className="flex justify-center p-8"><Loader2 className="animate-spin"/></div> : 
-               proposals.length === 0 ? <div className="text-center p-8 border rounded bg-white text-gray-500">No sent quotations yet. Create quotations to send to buyers.</div> :
-               proposals.map(prop => (
-                 <Card key={prop.id} className="hover:shadow-md transition-shadow">
-                    <CardContent className="p-6">
-                       <div className="flex justify-between items-start">
-                          <div>
-                             <h3 className="font-bold text-lg text-[#003D82] mb-1">{prop.title}</h3>
-                             <div className="text-sm text-gray-500 mb-4">
-                               Sent to <span className="font-medium text-gray-800">{prop.buyers?.full_name || prop.buyer_name || prop.buyer_email || 'Customer'}</span> on {new Date(prop.created_at).toLocaleDateString()}
-                             </div>
-                             <div className="flex gap-2">
-                                <Badge variant="secondary">{prop.status || 'PENDING'}</Badge>
-                                {(prop.quotation_amount || prop.budget) && <Badge variant="outline">₹{prop.quotation_amount || prop.budget}</Badge>}
-                                {prop.quantity && <Badge variant="outline">Qty: {prop.quantity}</Badge>}
-                             </div>
-                          </div>
-                          <div className="flex gap-2">
-                            <Button onClick={() => openDetail(prop.id)}>View Details</Button>
-                            <Button variant="outline" className="text-red-600 border-red-200" onClick={() => handleDelete(prop.id)}>
-                              <Trash2 className="h-4 w-4 mr-1" />
-                              Delete
-                            </Button>
-                          </div>
-                       </div>
-                    </CardContent>
-                 </Card>
-               ))
-             }
-          </TabsContent>
+        <TabsContent value="received" className="space-y-4 mt-6">
+          {loading ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : proposals.length === 0 ? (
+            <div className="text-center p-8 border rounded bg-white text-gray-500">
+              No received requests found.
+            </div>
+          ) : (
+            proposals.map((proposal) => renderCard(proposal, 'received'))
+          )}
+        </TabsContent>
+
+        <TabsContent value="sent" className="space-y-4 mt-6">
+          {loading ? (
+            <div className="flex justify-center p-8">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : proposals.length === 0 ? (
+            <div className="text-center p-8 border rounded bg-white text-gray-500">
+              No sent quotations yet. Use "Send Quotation" to share your offer.
+            </div>
+          ) : (
+            proposals.map((proposal) => renderCard(proposal, 'sent'))
+          )}
+        </TabsContent>
       </Tabs>
 
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{selected?.title || 'Proposal Details'}</DialogTitle>
+            <DialogTitle>{selectedService}</DialogTitle>
             <DialogDescription>
-              Sent on {selected?.created_at ? new Date(selected.created_at).toLocaleString() : ''}
+              {selectedDirection === 'sent' ? 'Sent on' : 'Received on'} {formatDateTime(selectedCreatedAt)}
             </DialogDescription>
           </DialogHeader>
+
           <div className="space-y-4 text-sm">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="flex items-start gap-2 text-neutral-700">
-                <User className="h-4 w-4 mt-0.5" />
-                <div className="space-y-1">
-                  <div className="font-semibold text-neutral-900">{selectedBuyerName}</div>
-                  {selectedBuyerCompany && (
-                    <div className="text-xs text-neutral-500">Company: {selectedBuyerCompany}</div>
-                  )}
-                  {selectedBuyerEmail ? (
-                    <div className="text-xs text-neutral-600">Email: {selectedBuyerEmail}</div>
-                  ) : null}
-                  {selectedBuyerPhone ? (
-                    <div className="text-xs text-neutral-600">Phone: {selectedBuyerPhone}</div>
-                  ) : null}
-                  {selectedBuyerLocation ? (
-                    <div className="text-xs text-neutral-600">Location: {selectedBuyerLocation}</div>
-                  ) : null}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-lg border p-3 bg-neutral-50">
+                <div className="flex items-center gap-2 text-neutral-700">
+                  <User className="h-4 w-4" />
+                  <span className="font-semibold text-neutral-900">{selectedNameValue}</span>
+                </div>
+                <div className="mt-2 space-y-1 text-xs text-neutral-600">
+                  <div>Company: {selectedCompanyValue}</div>
+                  <div>Email: {selectedEmailValue}</div>
+                  <div>Contact: {selectedPhoneValue}</div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1 text-neutral-700">
-                <div className="flex gap-2 items-center">
+              <div className="rounded-lg border p-3 bg-neutral-50 space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{selected?.status || 'PENDING'}</Badge>
-                  {(selected?.quotation_amount || selected?.budget) && (
-                    <Badge variant="outline">₹{selected?.quotation_amount || selected?.budget}</Badge>
-                  )}
+                  {selectedAmount ? <Badge variant="outline">INR {selectedAmount}</Badge> : null}
                 </div>
-                {selected?.product_name && (
-                  <div className="text-xs text-neutral-600">Product: {selected.product_name}</div>
-                )}
-                {selected?.quantity && (
+                <div className="text-xs text-neutral-600">Service: {selectedService}</div>
+                {selected?.quantity ? (
                   <div className="text-xs text-neutral-600">Quantity: {selected.quantity}</div>
-                )}
-                {selected?.required_by_date && (
+                ) : null}
+                {selected?.required_by_date ? (
                   <div className="text-xs text-neutral-600">
-                    Required by: {new Date(selected.required_by_date).toLocaleDateString()}
+                    Required by: {formatDateTime(selected.required_by_date)}
                   </div>
-                )}
+                ) : null}
+                <div className={`text-xs ${selectedDetailsUnlocked ? 'text-green-700' : 'text-amber-700'}`}>
+                  {selectedDetailsUnlocked
+                    ? 'Contact details unlocked after lead purchase.'
+                    : 'Contact details are masked until lead purchase.'}
+                </div>
               </div>
             </div>
 
-            {selected?.description && (
+            {selected?.description ? (
               <div className="border rounded-lg p-3 text-neutral-700 bg-neutral-50">
                 {selected.description}
               </div>
+            ) : (
+              <div className="border rounded-lg p-3 text-neutral-500 bg-neutral-50">
+                No additional notes shared.
+              </div>
             )}
           </div>
-          <div className="flex justify-between items-center gap-2">
-            <div className="flex gap-2">
-              {(selected?.buyers?.email || selected?.buyer_email) && (
+
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div className="flex items-center gap-2">
+              {selectedDetailsUnlocked && selectedCounterpartyEmail ? (
                 <Button
                   variant="outline"
                   onClick={() => {
-                    const email = selected?.buyers?.email || selected?.buyer_email;
-                    const subject = encodeURIComponent(`Regarding proposal: ${selected?.title || ''}`);
+                    const subject = encodeURIComponent(`Regarding quotation: ${selectedService}`);
                     const body = encodeURIComponent(selected?.description || '');
-                    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+                    window.location.href = `mailto:${selectedCounterpartyEmail}?subject=${subject}&body=${body}`;
                   }}
                 >
                   Share via Email
                 </Button>
-              )}
+              ) : null}
             </div>
-            <Button variant="outline" onClick={() => setDetailOpen(false)}>Close</Button>
-            <Button variant="destructive" onClick={() => handleDelete(selected?.id)}>
-              <Trash2 className="h-4 w-4 mr-1" />
-              Delete
-            </Button>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" onClick={() => setDetailOpen(false)}>
+                Close
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => handleDelete(selected?.id)}
+                disabled={deletingId === String(selected?.id || '')}
+              >
+                {deletingId === String(selected?.id || '') ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Trash2 className="h-4 w-4 mr-1" />
+                )}
+                Delete
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

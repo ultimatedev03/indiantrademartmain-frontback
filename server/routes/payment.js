@@ -8,7 +8,6 @@ import nodemailer from 'nodemailer';
 import { writeAuditLog } from '../lib/audit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
-import { applyReferralRewardAfterPayment, getReferralOfferForVendor } from '../lib/referralProgram.js';
 
 const router = express.Router();
 
@@ -60,6 +59,51 @@ const parseCurrencyAmount = (value, fallback = 50) => {
   return Math.max(0, n);
 };
 
+const asObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const getPlanExtraLeadPrice = (plan) => {
+  const features = asObject(plan?.features);
+  const pricing = asObject(features?.pricing);
+  return parseCurrencyAmount(pricing?.extra_lead_price, 0);
+};
+
+const resolvePaidLeadPrice = (lead, plan) => {
+  const configuredPrice = getPlanExtraLeadPrice(plan);
+  if (configuredPrice > 0) return configuredPrice;
+  return parseCurrencyAmount(lead?.price, 50);
+};
+
+const isMissingPlanFeaturesColumn = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  if (code === '42703') return true;
+  const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return message.includes('features') && message.includes('vendor_plans');
+};
+
+const isMissingRelationError = (error, relationName) => {
+  const msg = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const normalizedRelation = String(relationName || '').toLowerCase();
+  if (code === '42P01') return true;
+  if (!normalizedRelation) return false;
+  return (
+    (msg.includes('relation') && msg.includes(normalizedRelation) && msg.includes('does not exist')) ||
+    (msg.includes('table') && msg.includes(normalizedRelation) && msg.includes('not found')) ||
+    (msg.includes(normalizedRelation) && msg.includes('schema cache'))
+  );
+};
+
 async function consumeLeadForVendor({ vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) {
   return consumeLeadForVendorWithCompat({
     supabase,
@@ -87,6 +131,34 @@ async function getActiveVendorSubscription(vendorId) {
 
   const active = (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso);
   return active || null;
+}
+
+async function fetchVendorPlanForPricing(planId) {
+  if (!planId) return null;
+
+  const full = await supabase
+    .from('vendor_plans')
+    .select('id, name, price, features')
+    .eq('id', planId)
+    .maybeSingle();
+
+  if (!full?.error) return full?.data || null;
+  if (!isMissingPlanFeaturesColumn(full.error)) {
+    console.warn('Failed to fetch vendor plan pricing meta:', full.error?.message || full.error);
+    return null;
+  }
+
+  const fallback = await supabase
+    .from('vendor_plans')
+    .select('id, name, price')
+    .eq('id', planId)
+    .maybeSingle();
+
+  if (fallback?.error) {
+    console.warn('Failed to fetch vendor plan fallback pricing meta:', fallback.error?.message || fallback.error);
+    return null;
+  }
+  return fallback?.data || null;
 }
 
 async function resolveVendorForAuthUser(user = {}) {
@@ -195,9 +267,6 @@ router.post('/initiate', async (req, res) => {
     let discountAmount = 0;
     let netAmount = baseAmount;
     let coupon = null;
-    let offerType = null;
-    let offerCode = null;
-    let referralId = null;
 
     if (coupon_code) {
       const { data: cpn, error: couponErr } = await supabase
@@ -233,39 +302,6 @@ router.post('/initiate', async (req, res) => {
       discountAmount = Math.max(0, Math.min(discountAmount, baseAmount));
       netAmount = Math.max(0, baseAmount - discountAmount);
       coupon = cpn;
-      offerType = 'COUPON';
-      offerCode = coupon_code;
-    }
-
-    // Referral offer (auto-applied when vendor is linked by referral code)
-    let referralOffer = null;
-    try {
-      referralOffer = await getReferralOfferForVendor({ vendor, plan }, supabase);
-    } catch (refErr) {
-      console.warn('[payment/initiate] referral offer lookup failed:', refErr?.message || refErr);
-    }
-
-    if (referralOffer?.discount_amount > 0) {
-      const refDiscount = Number(referralOffer.discount_amount || 0);
-      const allowStack = Boolean(referralOffer?.settings?.allow_coupon_stack);
-
-      if (allowStack && coupon) {
-        discountAmount = Math.max(0, Math.min(baseAmount, discountAmount + refDiscount));
-        netAmount = Math.max(0, baseAmount - discountAmount);
-        offerType = 'COUPON+REFERRAL';
-        offerCode = `${coupon_code}+${referralOffer.offer_code || ''}`;
-        referralId = referralOffer.referral_id || null;
-      } else if (refDiscount > discountAmount) {
-        discountAmount = refDiscount;
-        netAmount = Math.max(0, baseAmount - discountAmount);
-        offerType = 'REFERRAL';
-        offerCode = referralOffer.offer_code || null;
-        referralId = referralOffer.referral_id || null;
-      } else if (!offerType) {
-        offerType = 'REFERRAL';
-        offerCode = referralOffer.offer_code || null;
-        referralId = referralOffer.referral_id || null;
-      }
     }
 
     const amount = Math.max(1, Math.round(netAmount * 100)); // paise, min 1 to keep Razorpay happy
@@ -284,9 +320,6 @@ router.post('/initiate', async (req, res) => {
         vendor_email: vendor.email,
         vendor_name: vendor.company_name,
         coupon_code,
-        offer_type: offerType || null,
-        offer_code: offerCode || null,
-        referral_id: referralId || null,
       },
     };
 
@@ -306,9 +339,6 @@ router.post('/initiate', async (req, res) => {
         net_amount: netAmount,
         discount_amount: discountAmount,
         coupon_code: coupon_code || null,
-        offer_type: offerType || null,
-        offer_code: offerCode || null,
-        referral_id: referralId || null,
       },
     });
   } catch (error) {
@@ -358,13 +388,10 @@ router.post('/verify', async (req, res) => {
       return res.status(404).json({ error: 'Vendor or plan not found' });
     }
 
-    // Coupon + referral offer re-validation
+    // Coupon re-validation
     let discountAmount = 0;
     let netAmount = Number(plan.price || 0);
     let coupon = null;
-    let offerType = null;
-    let offerCode = null;
-    let referralId = null;
 
     if (coupon_code) {
       const { data: cpn } = await supabase
@@ -390,40 +417,7 @@ router.post('/verify', async (req, res) => {
           discountAmount = Math.max(0, Math.min(discountAmount, Number(plan.price || 0)));
           netAmount = Math.max(0, Number(plan.price || 0) - discountAmount);
           coupon = cpn;
-          offerType = 'COUPON';
-          offerCode = coupon_code;
         }
-      }
-    }
-
-    let referralOffer = null;
-    try {
-      referralOffer = await getReferralOfferForVendor({ vendor, plan }, supabase);
-    } catch (refErr) {
-      console.warn('[payment/verify] referral offer lookup failed:', refErr?.message || refErr);
-    }
-
-    if (referralOffer?.discount_amount > 0) {
-      const refDiscount = Number(referralOffer.discount_amount || 0);
-      const allowStack = Boolean(referralOffer?.settings?.allow_coupon_stack);
-      if (allowStack && coupon) {
-        const baseAmount = Number(plan.price || 0);
-        discountAmount = Math.max(0, Math.min(baseAmount, discountAmount + refDiscount));
-        netAmount = Math.max(0, baseAmount - discountAmount);
-        offerType = 'COUPON+REFERRAL';
-        offerCode = `${coupon_code}+${referralOffer.offer_code || ''}`;
-        referralId = referralOffer.referral_id || null;
-      } else if (refDiscount > discountAmount) {
-        const baseAmount = Number(plan.price || 0);
-        discountAmount = Math.max(0, Math.min(baseAmount, refDiscount));
-        netAmount = Math.max(0, baseAmount - discountAmount);
-        offerType = 'REFERRAL';
-        offerCode = referralOffer.offer_code || null;
-        referralId = referralOffer.referral_id || null;
-      } else if (!offerType) {
-        offerType = 'REFERRAL';
-        offerCode = referralOffer.offer_code || null;
-        referralId = referralOffer.referral_id || null;
       }
     }
 
@@ -462,7 +456,7 @@ router.post('/verify', async (req, res) => {
       plan,
       amount: plan.price,
       discount_amount: discountAmount,
-      coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
+      coupon_code: coupon_code || null,
       tax: 0,
       totalAmount: netAmount,
       paymentMethod: 'Razorpay',
@@ -487,10 +481,7 @@ router.post('/verify', async (req, res) => {
           transaction_id: payment_id,
           payment_date: new Date(),
           invoice_url: invoicePdf,
-          coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
-          offer_type: offerType || null,
-          offer_code: offerCode || null,
-          referral_id: referralId || null,
+          coupon_code: coupon_code || null,
         },
       ])
       .select()
@@ -498,7 +489,7 @@ router.post('/verify', async (req, res) => {
 
     if (paymentError) {
       console.error('Payment record error:', paymentError);
-    } else if (coupon && String(offerType || '').includes('COUPON')) {
+    } else if (coupon) {
       await supabase
         .from('vendor_plan_coupons')
         .update({ used_count: (coupon.used_count || 0) + 1 })
@@ -513,23 +504,6 @@ router.post('/verify', async (req, res) => {
           net_amount: netAmount,
         },
       ]);
-    }
-
-    let referralRewardResult = null;
-    if (!paymentError && payment?.id) {
-      try {
-        referralRewardResult = await applyReferralRewardAfterPayment(
-          {
-            referredVendorId: vendor_id,
-            plan,
-            paymentRow: payment,
-            netAmount,
-          },
-          supabase
-        );
-      } catch (refRewardErr) {
-        console.warn('[payment/verify] referral reward apply failed:', refRewardErr?.message || refRewardErr);
-      }
     }
 
     if (!paymentError && payment) {
@@ -554,10 +528,7 @@ router.post('/verify', async (req, res) => {
           amount: plan.price,
           discount_amount: discountAmount,
           net_amount: netAmount,
-          coupon_code: coupon && String(offerType || '').includes('COUPON') ? coupon_code : null,
-          offer_type: offerType || null,
-          offer_code: offerCode || null,
-          referral_id: referralId || null,
+          coupon_code: coupon_code || null,
         },
       });
     }
@@ -604,7 +575,6 @@ router.post('/verify', async (req, res) => {
       message: 'Payment verified and subscription activated',
       subscription,
       payment,
-      referral_reward: referralRewardResult || null,
     });
   } catch (error) {
     console.error('Payment verification error:', error);
@@ -637,6 +607,7 @@ router.post('/lead/initiate', requireAuth({ roles: ['VENDOR'] }), async (req, re
     if (!activeSubscription) {
       return res.status(403).json({ error: 'No active subscription plan' });
     }
+    const activePlan = await fetchVendorPlanForPricing(activeSubscription?.plan_id);
 
     const { data: lead, error: leadError } = await supabase
       .from('leads')
@@ -688,7 +659,7 @@ router.post('/lead/initiate', requireAuth({ roles: ['VENDOR'] }), async (req, re
       return res.status(409).json({ error: 'This lead has reached maximum 5 vendors limit' });
     }
 
-    const leadPrice = parseCurrencyAmount(lead?.price, 50);
+    const leadPrice = resolvePaidLeadPrice(lead, activePlan);
     if (leadPrice <= 0) {
       return res.status(400).json({ error: 'Invalid lead price for online payment' });
     }
@@ -703,12 +674,13 @@ router.post('/lead/initiate', requireAuth({ roles: ['VENDOR'] }), async (req, re
       currency: 'INR',
       receipt,
       payment_capture: 1,
-      notes: {
-        lead_id: leadId,
-        vendor_id: vendor.id,
-        vendor_email: vendor.email || '',
-      },
-    });
+        notes: {
+          lead_id: leadId,
+          vendor_id: vendor.id,
+          plan_id: activeSubscription?.plan_id || '',
+          vendor_email: vendor.email || '',
+        },
+      });
 
     return res.json({
       success: true,
@@ -722,6 +694,7 @@ router.post('/lead/initiate', requireAuth({ roles: ['VENDOR'] }), async (req, re
         vendor_email: vendor.email || '',
         lead_title: lead?.title || lead?.product_name || 'Lead Purchase',
         lead_price: leadPrice,
+        lead_price_source: getPlanExtraLeadPrice(activePlan) > 0 ? 'PLAN_EXTRA_LEAD_PRICE' : 'LEAD_PRICE',
       },
     });
   } catch (error) {
@@ -777,7 +750,14 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
       return res.status(409).json({ error: 'Lead no longer available' });
     }
 
-    const purchaseAmount = parseCurrencyAmount(lead?.price, 50);
+    let purchaseAmount = parseCurrencyAmount(lead?.price, 50);
+    try {
+      const activeSubscription = await getActiveVendorSubscription(vendor.id);
+      const activePlan = await fetchVendorPlanForPricing(activeSubscription?.plan_id);
+      purchaseAmount = resolvePaidLeadPrice(lead, activePlan);
+    } catch (priceResolveError) {
+      console.warn('Failed to resolve paid lead price from plan:', priceResolveError?.message || priceResolveError);
+    }
     const consumeResult = await consumeLeadForVendor({
       vendorId: vendor.id,
       leadId,
@@ -827,6 +807,28 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
       });
     } catch (auditErr) {
       console.warn('Lead purchase audit log failed:', auditErr?.message || auditErr);
+    }
+
+    try {
+      if (!wasExistingPurchase && purchaseRow?.id) {
+        const { error: historyError } = await supabase.from('lead_status_history').insert([
+          {
+            lead_id: leadId,
+            vendor_id: vendor.id,
+            lead_purchase_id: purchaseRow.id,
+            status: 'ACTIVE',
+            note: 'Lead purchased via paid extra',
+            source: 'PURCHASE',
+            created_by: req.user?.id || null,
+            created_at: purchaseDatetime,
+          },
+        ]);
+        if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
+          console.warn('Paid lead purchase history insert failed:', historyError?.message || historyError);
+        }
+      }
+    } catch (historyInsertError) {
+      console.warn('Paid lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
     }
 
     return res.json({

@@ -141,6 +141,64 @@ async function resolveVendorForUser(user) {
   return vendor;
 }
 
+async function resolveVendorIdsForUser(user = {}) {
+  const userId = String(user?.id || '').trim();
+  const email = normalizeEmail(user?.email || '');
+  const vendorIds = new Set();
+
+  if (userId) {
+    const { data: byUserRows, error: byUserError } = await supabase
+      .from('vendors')
+      .select('id')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+
+    if (byUserError) throw new Error(byUserError.message || 'Failed to resolve vendor profile');
+    (byUserRows || []).forEach((row) => {
+      const id = String(row?.id || '').trim();
+      if (id) vendorIds.add(id);
+    });
+  }
+
+  if (email) {
+    const { data: byEmailRows, error: byEmailError } = await supabase
+      .from('vendors')
+      .select('id')
+      .ilike('email', email)
+      .order('updated_at', { ascending: false });
+
+    if (byEmailError) throw new Error(byEmailError.message || 'Failed to resolve vendor profile');
+    (byEmailRows || []).forEach((row) => {
+      const id = String(row?.id || '').trim();
+      if (id) vendorIds.add(id);
+    });
+  }
+
+  return Array.from(vendorIds);
+}
+
+async function resolveActiveSubscriptionForVendor(vendorId) {
+  const normalizedVendorId = String(vendorId || '').trim();
+  if (!normalizedVendorId) return null;
+
+  const nowIso = new Date().toISOString();
+  const { data: rows, error } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('id, vendor_id, plan_id, status, start_date, end_date')
+    .eq('vendor_id', normalizedVendorId)
+    .eq('status', 'ACTIVE')
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .order('start_date', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: false })
+    .limit(10);
+
+  if (error) {
+    throw new Error(error.message || 'Failed to validate subscription');
+  }
+
+  return (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso) || null;
+}
+
 async function resolveBuyerId(userId) {
   if (!userId) return null;
   const { data: buyer } = await supabase
@@ -613,10 +671,11 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
     )
   );
   const activeVendorUserId = String(options?.vendorUserId || '').trim();
+  const optionVendorIds = Array.isArray(options?.vendorIds) ? options.vendorIds : [];
   const vendorIds = Array.from(
     new Set(
-      list
-        .map((row) => String(row?.vendor_id || '').trim())
+      [...optionVendorIds, ...list.map((row) => row?.vendor_id)]
+        .map((value) => String(value || '').trim())
         .filter(Boolean)
     )
   );
@@ -784,7 +843,7 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
   if (proposalIds.length) {
     const { data: leads, error: leadError } = await supabase
       .from('leads')
-      .select('proposal_id, buyer_id, buyer_name, buyer_email, buyer_phone, company_name, city, state, location, created_at')
+      .select('id, proposal_id, buyer_id, buyer_name, buyer_email, buyer_phone, company_name, city, state, location, created_at')
       .in('proposal_id', proposalIds)
       .order('created_at', { ascending: false });
 
@@ -801,6 +860,7 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
             : city || state || String(lead?.location || '').trim() || null;
 
         leadBuyerMap.set(key, {
+          lead_id: lead?.id || null,
           buyer_id: lead?.buyer_id || null,
           full_name: lead?.buyer_name || null,
           company_name: lead?.company_name || null,
@@ -847,13 +907,43 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
   await hydrateBuyerMapByEmails(leadBuyerEmails);
   await hydrateUserNameByEmails(leadBuyerEmails);
 
-  return list.map((row) => ({
-    ...row,
-    buyers: (() => {
+  const leadIdsForUnlock = Array.from(
+    new Set(
+      Array.from(leadBuyerMap.values())
+        .map((row) => String(row?.lead_id || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const purchasedLeadIdSet = new Set();
+  if (leadIdsForUnlock.length && vendorIds.length) {
+    const { data: purchases, error: purchasesError } = await supabase
+      .from('lead_purchases')
+      .select('lead_id')
+      .in('lead_id', leadIdsForUnlock)
+      .in('vendor_id', vendorIds);
+
+    if (!purchasesError && Array.isArray(purchases)) {
+      purchases.forEach((purchase) => {
+        const leadId = String(purchase?.lead_id || '').trim();
+        if (leadId) purchasedLeadIdSet.add(leadId);
+      });
+    }
+  }
+
+  return list.map((row) => {
+    const proposalKey = String(row?.id || '').trim();
+    const leadMeta = leadBuyerMap.get(proposalKey) || {};
+    const leadId = String(leadMeta?.lead_id || '').trim();
+    const isContactUnlocked = Boolean(leadId && purchasedLeadIdSet.has(leadId));
+
+    return {
+      ...row,
+      lead_id: row?.lead_id || leadId || null,
+      is_contact_unlocked: isContactUnlocked,
+      details_unlocked: isContactUnlocked,
+      buyers: (() => {
       const idKey = String(row?.buyer_id || '').trim();
-      const proposalKey = String(row?.id || '').trim();
       const rowEmailKey = normalizeEmailValue(row?.buyer_email);
-      const leadMeta = leadBuyerMap.get(proposalKey) || {};
       const leadEmailKey = normalizeEmailValue(leadMeta?.email);
       const proposalBuyerUserId = String(proposalBuyerUserMap.get(proposalKey) || '').trim();
 
@@ -931,8 +1021,9 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
       );
 
       return hasAnyValue ? merged : null;
-    })(),
-  }));
+      })(),
+    };
+  });
 }
 
 async function insertNotification(payload = {}) {
@@ -945,6 +1036,81 @@ async function insertNotification(payload = {}) {
     ({ error } = await supabase.from('notifications').insert([fallbackPayload]));
   }
   if (error) throw error;
+}
+
+const normalizeConsumptionType = (value) => String(value || '').trim().toUpperCase();
+
+const buildQuotaExhaustedAlerts = ({ remaining, consumptionType }) => {
+  const type = normalizeConsumptionType(consumptionType);
+  const daily = Math.max(0, Number(remaining?.daily || 0));
+  const weekly = Math.max(0, Number(remaining?.weekly || 0));
+  const yearly = Math.max(0, Number(remaining?.yearly || 0));
+  const included = type === 'DAILY_INCLUDED' || type === 'WEEKLY_INCLUDED';
+  const alerts = [];
+
+  if (type === 'DAILY_INCLUDED' && daily <= 0) {
+    alerts.push({
+      type: 'LEAD_DAILY_EXHAUSTED',
+      title: 'Daily Lead Quota Exhausted',
+      message: 'Daily included leads are exhausted. Use weekly quota or buy extra leads.',
+    });
+  }
+  if (included && weekly <= 0) {
+    alerts.push({
+      type: 'LEAD_WEEKLY_EXHAUSTED',
+      title: 'Weekly Lead Quota Exhausted',
+      message: 'Weekly included leads are exhausted. Buy extra leads to continue.',
+    });
+  }
+  if (included && yearly <= 0) {
+    alerts.push({
+      type: 'LEAD_YEARLY_EXHAUSTED',
+      title: 'Yearly Lead Quota Exhausted',
+      message: 'Yearly included leads are exhausted for this plan period. Buy extra leads to continue.',
+    });
+  }
+
+  return alerts;
+};
+
+async function notifyQuotaExhausted({ userId, remaining, consumptionType }) {
+  if (!userId) return;
+
+  const alerts = buildQuotaExhaustedAlerts({ remaining, consumptionType });
+  if (!alerts.length) return;
+
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const dayStartIso = dayStart.toISOString();
+
+  for (const alert of alerts) {
+    try {
+      const { count, error: countError } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('type', alert.type)
+        .gte('created_at', dayStartIso);
+
+      if (countError) {
+        console.warn('Failed to check quota notification dedupe:', countError?.message || countError);
+        continue;
+      }
+      if ((count || 0) > 0) continue;
+
+      await insertNotification({
+        user_id: userId,
+        type: alert.type,
+        title: alert.title,
+        message: alert.message,
+        link: '/vendor/leads',
+        is_read: false,
+        created_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn('Failed to send quota exhausted notification:', error?.message || error);
+    }
+  }
 }
 
 const normalizeLeadConsumptionMode = (value) => {
@@ -962,6 +1128,86 @@ const parseLeadPriceNumber = (value, fallback = 0) => {
   if (Number.isFinite(parsed)) return Math.max(0, parsed);
   return Math.max(0, Number(fallback) || 0);
 };
+
+const VENDOR_LEAD_STATUS_VALUES = ['ACTIVE', 'VIEWED', 'CLOSED'];
+const VENDOR_LEAD_STATUS_SET = new Set(VENDOR_LEAD_STATUS_VALUES);
+
+const normalizeVendorLeadStatus = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!VENDOR_LEAD_STATUS_SET.has(normalized)) return null;
+  return normalized;
+};
+
+const normalizeLeadStatusNote = (value, maxLen = 800) => {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return text.slice(0, maxLen);
+};
+
+const isMissingRelationError = (error, relationName) => {
+  const msg = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const normalizedRelation = String(relationName || '').toLowerCase();
+  if (code === '42P01') return true;
+  if (!normalizedRelation) return false;
+  return (
+    (msg.includes('relation') && msg.includes(normalizedRelation) && msg.includes('does not exist')) ||
+    (msg.includes('table') && msg.includes(normalizedRelation) && msg.includes('not found')) ||
+    (msg.includes(normalizedRelation) && msg.includes('schema cache'))
+  );
+};
+
+const inferFallbackLeadStatus = (lead = {}) => {
+  const normalized = String(lead?.status || '').trim().toUpperCase();
+  if (normalized === 'CLOSED') return 'CLOSED';
+  if (normalized === 'VIEWED') return 'VIEWED';
+  return 'ACTIVE';
+};
+
+async function resolveVendorLeadAccess({ vendorId, leadId }) {
+  const { data: lead, error: leadError } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('id', leadId)
+    .maybeSingle();
+
+  if (leadError) throw new Error(leadError.message || 'Failed to fetch lead');
+  if (!lead) return { lead: null, purchase: null, isDirect: false, isVisibleMarketplaceLead: false };
+
+  const isDirect = String(lead?.vendor_id || '').trim() === String(vendorId || '').trim();
+
+  const { data: purchaseRows, error: purchaseError } = await supabase
+    .from('lead_purchases')
+    .select(
+      'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+    )
+    .eq('vendor_id', vendorId)
+    .eq('lead_id', leadId)
+    .order('purchase_datetime', { ascending: false })
+    .limit(1);
+
+  if (purchaseError) throw new Error(purchaseError.message || 'Failed to validate lead purchase');
+  const purchase = Array.isArray(purchaseRows) && purchaseRows.length ? purchaseRows[0] : null;
+
+  let isVisibleMarketplaceLead = false;
+  if (!isDirect && !purchase) {
+    const leadStatus = String(lead?.status || '').toUpperCase();
+    const isMarketplace = !lead?.vendor_id && ['AVAILABLE', 'PURCHASED'].includes(leadStatus);
+    if (isMarketplace) {
+      const { count: purchaseCount, error: countError } = await supabase
+        .from('lead_purchases')
+        .select('id', { count: 'exact', head: true })
+        .eq('lead_id', leadId);
+
+      if (countError) {
+        throw new Error(countError.message || 'Failed to validate lead capacity');
+      }
+      isVisibleMarketplaceLead = (purchaseCount || 0) < 5;
+    }
+  }
+
+  return { lead, purchase, isDirect, isVisibleMarketplaceLead };
+}
 
 async function consumeLeadForVendor({ vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) {
   return consumeLeadForVendorWithCompat({
@@ -1387,6 +1633,16 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
+    const activeSubscription = await resolveActiveSubscriptionForVendor(vendor.id);
+    if (!activeSubscription) {
+      return res.json({
+        success: true,
+        leads: [],
+        subscription_required: true,
+        message: 'Active subscription required to access marketplace leads.',
+      });
+    }
+
     const maxVendorsPerLead = 5;
 
     const { data: marketplaceRows, error: rowsError } = await supabase
@@ -1480,6 +1736,14 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
     const fallbackAmount = parseLeadPriceNumber(lead?.price, 50);
     const requestedAmount = parseLeadPriceNumber(req.body?.amount, fallbackAmount);
 
+    if (mode === 'BUY_EXTRA' || mode === 'PAID') {
+      return res.status(402).json({
+        success: false,
+        code: 'PAID_REQUIRED',
+        error: 'Paid extra lead purchase must be completed via payment gateway.',
+      });
+    }
+
     const consumeResult = await consumeLeadForVendor({
       vendorId: vendor.id,
       leadId,
@@ -1525,9 +1789,38 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
           is_read: false,
           created_at: new Date().toISOString(),
         });
+        await notifyQuotaExhausted({
+          userId: vendorUserId,
+          remaining,
+          consumptionType: responseConsumptionType,
+        });
       }
     } catch (notifError) {
       console.warn('Lead purchase notification failed:', notifError?.message || notifError);
+    }
+
+    try {
+      if (!wasExistingPurchase && purchaseRow?.id) {
+        const purchaseStatus =
+          normalizeVendorLeadStatus(payload?.lead_status || purchaseRow?.lead_status) || 'ACTIVE';
+        const { error: historyError } = await supabase.from('lead_status_history').insert([
+          {
+            lead_id: leadId,
+            vendor_id: vendor.id,
+            lead_purchase_id: purchaseRow.id,
+            status: purchaseStatus,
+            note: 'Lead purchased',
+            source: 'PURCHASE',
+            created_by: req.user?.id || null,
+            created_at: purchaseDatetime,
+          },
+        ]);
+        if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
+          console.warn('Lead purchase history insert failed:', historyError?.message || historyError);
+        }
+      }
+    } catch (historyInsertError) {
+      console.warn('Lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
     }
 
     return res.status(wasExistingPurchase ? 200 : 201).json({
@@ -1636,6 +1929,209 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
   }
 });
 
+router.get('/me/leads/:leadId/status-history', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params?.leadId || '').trim();
+    if (!leadId) {
+      return res.status(400).json({ success: false, error: 'Invalid lead id' });
+    }
+
+    const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+      vendorId: vendor.id,
+      leadId,
+    });
+
+    if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+    if (!isDirect && !purchase) {
+      return res.status(403).json({
+        success: false,
+        error: 'Lead status history is available only for purchased or direct leads',
+      });
+    }
+
+    const { data: historyRows, error: historyError } = await supabase
+      .from('lead_status_history')
+      .select('id, lead_id, vendor_id, lead_purchase_id, status, note, source, created_by, created_at')
+      .eq('lead_id', leadId)
+      .eq('vendor_id', vendor.id)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(200);
+
+    if (historyError) {
+      if (isMissingRelationError(historyError, 'lead_status_history')) {
+        return res.status(503).json({
+          success: false,
+          code: 'LEAD_STATUS_HISTORY_UNAVAILABLE',
+          error: 'Lead status history feature is unavailable. Please run the latest migration.',
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: historyError.message || 'Failed to fetch lead status history',
+      });
+    }
+
+    const latestHistoryStatus = normalizeVendorLeadStatus(historyRows?.[0]?.status);
+    const currentStatus =
+      normalizeVendorLeadStatus(purchase?.lead_status) ||
+      latestHistoryStatus ||
+      inferFallbackLeadStatus(lead);
+
+    return res.json({
+      success: true,
+      lead_id: leadId,
+      current_status: currentStatus,
+      is_direct: isDirect,
+      is_purchased: Boolean(purchase),
+      history: historyRows || [],
+    });
+  } catch (e) {
+    return res.status(500).json({
+      success: false,
+      error: e.message || 'Failed to fetch lead status history',
+    });
+  }
+});
+
+router.post('/me/leads/:leadId/status', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params?.leadId || '').trim();
+    if (!leadId) {
+      return res.status(400).json({ success: false, error: 'Invalid lead id' });
+    }
+
+    const status = normalizeVendorLeadStatus(req.body?.status);
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${VENDOR_LEAD_STATUS_VALUES.join(', ')}`,
+      });
+    }
+    const note = normalizeLeadStatusNote(req.body?.note);
+
+    const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+      vendorId: vendor.id,
+      leadId,
+    });
+
+    if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+    if (!isDirect && !purchase) {
+      return res.status(403).json({
+        success: false,
+        error: 'Lead status can be updated only for purchased or direct leads',
+      });
+    }
+
+    const currentKnownStatus =
+      normalizeVendorLeadStatus(purchase?.lead_status) || inferFallbackLeadStatus(lead);
+    if (currentKnownStatus === status && !note) {
+      return res.json({
+        success: true,
+        lead_id: leadId,
+        lead_status: status,
+        current_status: status,
+        purchase: purchase || null,
+        history: [],
+        unchanged: true,
+      });
+    }
+
+    const nowIso = new Date().toISOString();
+    let updatedPurchase = purchase || null;
+
+    if (purchase?.id) {
+      const { data: purchaseRow, error: purchaseUpdateError } = await supabase
+        .from('lead_purchases')
+        .update({ lead_status: status })
+        .eq('id', purchase.id)
+        .eq('vendor_id', vendor.id)
+        .eq('lead_id', leadId)
+        .select(
+          'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+        )
+        .maybeSingle();
+
+      if (purchaseUpdateError) {
+        return res.status(500).json({
+          success: false,
+          error: purchaseUpdateError.message || 'Failed to update lead status',
+        });
+      }
+      updatedPurchase = purchaseRow || updatedPurchase;
+    } else if (isDirect) {
+      const mappedLeadStatus = status === 'CLOSED' ? 'CLOSED' : 'AVAILABLE';
+      const { error: directUpdateError } = await supabase
+        .from('leads')
+        .update({ status: mappedLeadStatus })
+        .eq('id', leadId)
+        .eq('vendor_id', vendor.id);
+
+      if (directUpdateError) {
+        return res.status(500).json({
+          success: false,
+          error: directUpdateError.message || 'Failed to update direct lead status',
+        });
+      }
+    }
+
+    const historyInsert = {
+      lead_id: leadId,
+      vendor_id: vendor.id,
+      lead_purchase_id: updatedPurchase?.id || null,
+      status,
+      note,
+      source: updatedPurchase?.id ? 'PURCHASE' : 'DIRECT',
+      created_by: req.user?.id || null,
+      created_at: nowIso,
+    };
+
+    const { data: historyRow, error: historyError } = await supabase
+      .from('lead_status_history')
+      .insert([historyInsert])
+      .select('id, lead_id, vendor_id, lead_purchase_id, status, note, source, created_by, created_at')
+      .maybeSingle();
+
+    if (historyError) {
+      if (isMissingRelationError(historyError, 'lead_status_history')) {
+        return res.status(503).json({
+          success: false,
+          code: 'LEAD_STATUS_HISTORY_UNAVAILABLE',
+          error: 'Lead status history feature is unavailable. Please run the latest migration.',
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        error: historyError.message || 'Failed to store lead status history',
+      });
+    }
+
+    return res.json({
+      success: true,
+      lead_id: leadId,
+      lead_status: status,
+      current_status: status,
+      purchase: updatedPurchase,
+      history: historyRow ? [historyRow] : [],
+    });
+  } catch (e) {
+    return res.status(500).json({
+      success: false,
+      error: e.message || 'Failed to update lead status',
+    });
+  }
+});
+
 router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
     const vendor = await resolveVendorForUser(req.user);
@@ -1729,15 +2225,15 @@ router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => 
 
 router.get('/me/proposals', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
-    const vendor = await resolveVendorForUser(req.user);
-    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
     const type = String(req.query?.type || 'received').toLowerCase();
 
     const { data: proposals, error } = await supabase
       .from('proposals')
       .select('*')
-      .eq('vendor_id', vendor.id)
+      .in('vendor_id', vendorIds)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -1746,6 +2242,7 @@ router.get('/me/proposals', requireAuth({ roles: ['VENDOR'] }), async (req, res)
 
     const enriched = await attachBuyerMetaToProposals(proposals || [], {
       vendorUserId: req.user?.id || '',
+      vendorIds,
     });
     const withType = enriched.map((row) => {
       const hasBuyerEmail = Boolean(String(row?.buyer_email || '').trim());
@@ -1770,8 +2267,8 @@ router.get('/me/proposals', requireAuth({ roles: ['VENDOR'] }), async (req, res)
 
 router.get('/me/proposals/:proposalId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
-    const vendor = await resolveVendorForUser(req.user);
-    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
     const { proposalId } = req.params;
     if (!isValidId(proposalId)) {
@@ -1782,7 +2279,7 @@ router.get('/me/proposals/:proposalId', requireAuth({ roles: ['VENDOR'] }), asyn
       .from('proposals')
       .select('*')
       .eq('id', proposalId)
-      .eq('vendor_id', vendor.id)
+      .in('vendor_id', vendorIds)
       .maybeSingle();
 
     if (error) return res.status(500).json({ success: false, error: error.message });
@@ -1790,6 +2287,7 @@ router.get('/me/proposals/:proposalId', requireAuth({ roles: ['VENDOR'] }), asyn
 
     const [enriched] = await attachBuyerMetaToProposals([proposal], {
       vendorUserId: req.user?.id || '',
+      vendorIds,
     });
     return res.json({ success: true, proposal: enriched || proposal });
   } catch (e) {
@@ -1799,22 +2297,26 @@ router.get('/me/proposals/:proposalId', requireAuth({ roles: ['VENDOR'] }), asyn
 
 router.delete('/me/proposals/:proposalId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
-    const vendor = await resolveVendorForUser(req.user);
-    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
     const { proposalId } = req.params;
     if (!isValidId(proposalId)) {
       return res.status(400).json({ success: false, error: 'Invalid proposal id' });
     }
 
-    const { error } = await supabase
+    const { data: deletedRows, error } = await supabase
       .from('proposals')
       .delete()
       .eq('id', proposalId)
-      .eq('vendor_id', vendor.id);
+      .in('vendor_id', vendorIds)
+      .select('id');
 
     if (error) return res.status(500).json({ success: false, error: error.message });
-    return res.json({ success: true });
+    if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Proposal not found or already deleted' });
+    }
+    return res.json({ success: true, deleted_count: deletedRows.length });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

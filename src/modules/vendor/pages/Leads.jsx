@@ -8,6 +8,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   MapPin,
   Calendar,
   Search,
@@ -110,6 +118,67 @@ const getLeadMeta = (lead) => {
   return { title, location, city, state, category, product, createdAt, isRecommended };
 };
 
+const LEAD_LIFECYCLE_VALUES = ["ACTIVE", "VIEWED", "CLOSED"];
+
+const normalizeLifecycleStatus = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (LEAD_LIFECYCLE_VALUES.includes(normalized)) return normalized;
+  return "";
+};
+
+const deriveLifecycleStatus = (lead = {}, row = {}) => {
+  const purchaseStatus = normalizeLifecycleStatus(row?.lead_status || lead?.lead_status);
+  if (purchaseStatus) return purchaseStatus;
+
+  const fallback = String(row?.status || lead?.status || "").trim().toUpperCase();
+  if (fallback === "CLOSED") return "CLOSED";
+  if (fallback === "VIEWED") return "VIEWED";
+  return "ACTIVE";
+};
+
+const lifecycleLabel = (status) => {
+  const normalized = normalizeLifecycleStatus(status) || "ACTIVE";
+  if (normalized === "VIEWED") return "Viewed";
+  if (normalized === "CLOSED") return "Closed";
+  return "Active";
+};
+
+const lifecycleBadgeClass = (status) => {
+  const normalized = normalizeLifecycleStatus(status) || "ACTIVE";
+  if (normalized === "CLOSED") return "bg-red-50 text-red-700 border-red-200";
+  if (normalized === "VIEWED") return "bg-amber-50 text-amber-700 border-amber-200";
+  return "bg-emerald-50 text-emerald-700 border-emerald-200";
+};
+
+const formatConsumptionType = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (normalized === "DAILY_INCLUDED") return "Daily Included";
+  if (normalized === "WEEKLY_INCLUDED") return "Weekly Included";
+  if (normalized === "PAID_EXTRA") return "Paid Extra";
+  return "";
+};
+
+const asObject = (value) => {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === "object" && !Array.isArray(value) ? value : {};
+};
+
+const getPlanExtraLeadPrice = (plan) => {
+  const features = asObject(plan?.features);
+  const pricing = asObject(features?.pricing);
+  const value = Number(pricing?.extra_lead_price ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+};
+
 const topNFromCountMap = (map, n = 8) =>
   [...map.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -164,6 +233,10 @@ const Leads = () => {
 
   const [activeTab, setActiveTab] = useState("marketplace");
   const [marketplaceLeads, setMarketplaceLeads] = useState([]);
+  const [marketplaceInfo, setMarketplaceInfo] = useState({
+    subscription_required: false,
+    message: "",
+  });
   const [myLeads, setMyLeads] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -184,11 +257,16 @@ const Leads = () => {
     categories: {},
     locations: {},
     source: "all",
+    lifecycleStatus: "all",
     sort: "recent_bought",
   });
 
   const [stats, setStats] = useState(null);
   const [purchasing, setPurchasing] = useState({});
+  const [purchaseChoiceDialog, setPurchaseChoiceDialog] = useState({
+    open: false,
+    lead: null,
+  });
 
   // Stats panel positioning (my_leads / desktop)
   const statsColRef = useRef(null);
@@ -355,6 +433,7 @@ const Leads = () => {
       // fetch quota (limits + used)
       let quota = null;
       let planLimits = { daily_limit: 0, weekly_limit: 0, yearly_limit: 0 };
+      let planExtraLeadPrice = 0;
       try {
         const sub = await vendorApi.subscriptions.getCurrent();
         if (sub?.plan) {
@@ -363,6 +442,7 @@ const Leads = () => {
             weekly_limit: sub.plan.weekly_limit || 0,
             yearly_limit: sub.plan.yearly_limit || 0,
           };
+          planExtraLeadPrice = getPlanExtraLeadPrice(sub.plan);
         }
         quota = await vendorApi.leadQuota.get();
       } catch (err) {
@@ -383,6 +463,7 @@ const Leads = () => {
         weeklyLimit: quota?.weekly_limit ?? planLimits.weekly_limit ?? 0,
         yearlyUsed: Number.isFinite(quotaYearlyUsed) ? Math.max(quotaYearlyUsed, yearly) : yearly,
         yearlyLimit: quota?.yearly_limit ?? planLimits.yearly_limit ?? 0,
+        extraLeadPrice: planExtraLeadPrice,
       });
     } catch (error) {
       console.error("Failed to load stats:", error);
@@ -410,12 +491,20 @@ const Leads = () => {
           return;
         }
 
-        const available = await leadApi.marketplace.listAvailable();
+        const marketplacePayload = await leadApi.marketplace.listAvailable({ withMeta: true });
+        const available = Array.isArray(marketplacePayload?.leads)
+          ? marketplacePayload.leads
+          : [];
         if (requestId !== leadsRequestRef.current) return;
-        setMarketplaceLeads(Array.isArray(available) ? available : []);
+        setMarketplaceLeads(available);
+        setMarketplaceInfo({
+          subscription_required: Boolean(marketplacePayload?.subscription_required),
+          message: String(marketplacePayload?.message || "").trim(),
+        });
       } catch (error) {
         console.error(error);
         if (requestId !== leadsRequestRef.current) return;
+        setMarketplaceInfo({ subscription_required: false, message: "" });
         // Keep already visible leads on transient failure; only show toast.
         toast({ title: "Failed to load leads", variant: "destructive" });
       } finally {
@@ -432,18 +521,34 @@ const Leads = () => {
     return requestPromise;
   };
 
-  const handlePurchaseLead = async (leadId) => {
+  const executeLeadPurchase = async (lead, options = {}) => {
+    const leadId = String(lead?.id || "").trim();
+    if (!leadId) return;
+
     setPurchasing((prev) => ({ ...prev, [leadId]: true }));
     try {
-      const lead = marketplaceLeads.find((l) => l.id === leadId);
-      if (!lead) throw new Error("Lead not found");
+      const payload = await leadPaymentApi.purchaseLead(lead, options);
+      const consumptionLabel = formatConsumptionType(payload?.consumption_type);
+      const remaining = payload?.remaining || {};
+      const remainingSummary =
+        Number.isFinite(Number(remaining?.daily)) ||
+        Number.isFinite(Number(remaining?.weekly)) ||
+        Number.isFinite(Number(remaining?.yearly))
+          ? `Remaining - Daily ${Math.max(0, Number(remaining?.daily || 0))}, Weekly ${Math.max(
+              0,
+              Number(remaining?.weekly || 0)
+            )}, Yearly ${Math.max(0, Number(remaining?.yearly || 0))}`
+          : "";
 
-      await leadPaymentApi.purchaseLead(lead);
-
-      toast({ title: "Lead purchased successfully!", description: "Buyer details unlocked." });
+      toast({
+        title: "Lead purchased successfully!",
+        description: [consumptionLabel ? `Mode: ${consumptionLabel}` : "", remainingSummary]
+          .filter(Boolean)
+          .join(" | ") || "Buyer details unlocked.",
+      });
 
       setMarketplaceLeads((prev) => (prev || []).filter((l) => l?.id !== leadId));
-
+      setPurchaseChoiceDialog({ open: false, lead: null });
       await loadStats();
     } catch (error) {
       toast({
@@ -454,6 +559,26 @@ const Leads = () => {
     } finally {
       setPurchasing((prev) => ({ ...prev, [leadId]: false }));
     }
+  };
+
+  const handlePurchaseLead = async (leadId) => {
+    const lead = marketplaceLeads.find((l) => String(l?.id || "") === String(leadId || ""));
+    if (!lead) {
+      toast({
+        title: "Lead not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const shouldAskPurchaseMode = quotaRemaining.daily <= 0;
+
+    if (shouldAskPurchaseMode) {
+      setPurchaseChoiceDialog({ open: true, lead });
+      return;
+    }
+
+    await executeLeadPurchase(lead, { mode: "AUTO" });
   };
 
   const normalizedMarketplaceLeads = useMemo(() => {
@@ -542,6 +667,7 @@ const Leads = () => {
       categories: {},
       locations: {},
       source: "all",
+      lifecycleStatus: "all",
       sort: "recent_bought",
     });
   };
@@ -631,14 +757,17 @@ const Leads = () => {
     const from = myFilters.fromDate ? new Date(`${myFilters.fromDate}T00:00:00`) : null;
     const to = myFilters.toDate ? new Date(`${myFilters.toDate}T23:59:59`) : null;
     const sourceFilter = String(myFilters.source || "all").toLowerCase();
+    const lifecycleFilter = normalizeLifecycleStatus(myFilters.lifecycleStatus);
 
     let rows = normalizedMyLeads.filter(({ __raw, __lead, __purchaseDate }) => {
       const m = getLeadMeta(__lead);
       const pDate = safeDate(__purchaseDate);
       const rowSource = String(__raw?.source || __lead?.source || "").toLowerCase();
+      const rowLifecycleStatus = deriveLifecycleStatus(__lead, __raw);
 
       if (sourceFilter === "purchased" && rowSource !== "purchased") return false;
       if (sourceFilter === "direct" && rowSource !== "direct") return false;
+      if (lifecycleFilter && rowLifecycleStatus !== lifecycleFilter) return false;
 
       if (from && (!pDate || pDate < from)) return false;
       if (to && (!pDate || pDate > to)) return false;
@@ -671,11 +800,61 @@ const Leads = () => {
     (myFilters.fromDate ? 1 : 0) +
     (myFilters.toDate ? 1 : 0) +
     (anySelected(myFilters.categories) ? 1 : 0) +
-    (anySelected(myFilters.locations) ? 1 : 0);
+    (anySelected(myFilters.locations) ? 1 : 0) +
+    (String(myFilters.lifecycleStatus || "all").toLowerCase() !== "all" ? 1 : 0);
+
+  const quotaRemaining = useMemo(() => {
+    const dailyLimit = Number(stats?.dailyLimit || 0);
+    const weeklyLimit = Number(stats?.weeklyLimit || 0);
+    const yearlyLimit = Number(stats?.yearlyLimit || 0);
+    const dailyUsed = Number(stats?.dailyUsed || 0);
+    const weeklyUsed = Number(stats?.weeklyUsed || 0);
+    const yearlyUsed = Number(stats?.yearlyUsed || 0);
+
+    return {
+      daily: Math.max(0, dailyLimit - dailyUsed),
+      weekly: Math.max(0, weeklyLimit - weeklyUsed),
+      yearly: Math.max(0, yearlyLimit - yearlyUsed),
+      dailyLimit: Math.max(0, dailyLimit),
+      weeklyLimit: Math.max(0, weeklyLimit),
+      yearlyLimit: Math.max(0, yearlyLimit),
+    };
+  }, [stats]);
 
   const handleViewDetails = (leadId) => {
     if (!leadId) return;
     navigate(`/vendor/leads/${leadId}`);
+  };
+
+  const choiceLeadId = String(purchaseChoiceDialog?.lead?.id || "");
+  const choiceBusy = Boolean(choiceLeadId && purchasing?.[choiceLeadId]);
+  const canUseWeeklyIncluded = quotaRemaining.weekly > 0 && quotaRemaining.yearly > 0;
+  const configuredExtraLeadPrice = Number(stats?.extraLeadPrice || 0);
+  const dialogLeadBasePrice = Number(purchaseChoiceDialog?.lead?.price || 50);
+  const dialogExtraLeadPrice =
+    Number.isFinite(configuredExtraLeadPrice) && configuredExtraLeadPrice > 0
+      ? configuredExtraLeadPrice
+      : dialogLeadBasePrice;
+
+  const handleUseWeeklyIncluded = async () => {
+    if (!purchaseChoiceDialog?.lead) return;
+    if (!canUseWeeklyIncluded) {
+      toast({
+        title: "Weekly quota unavailable",
+        description: "Weekly included leads are exhausted. Please buy extra lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+    await executeLeadPurchase(purchaseChoiceDialog.lead, {
+      mode: "USE_WEEKLY",
+      allowPaidFallback: false,
+    });
+  };
+
+  const handleBuyExtraLead = async () => {
+    if (!purchaseChoiceDialog?.lead) return;
+    await executeLeadPurchase(purchaseChoiceDialog.lead, { mode: "BUY_EXTRA", forcePaid: true });
   };
 
   return (
@@ -938,6 +1117,56 @@ const Leads = () => {
                       <span>Direct Leads</span>
                     </label>
                   </div>
+
+                  <div className="mt-3 pt-3 border-t">
+                    <div className="font-semibold text-sm text-gray-800 mb-2">Lifecycle</div>
+                    <div className="flex flex-col gap-2">
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="radio"
+                          name="lifecycleStatus"
+                          checked={myFilters.lifecycleStatus === "all"}
+                          onChange={() =>
+                            setMyFilters((p) => ({ ...p, lifecycleStatus: "all" }))
+                          }
+                        />
+                        <span>All</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="radio"
+                          name="lifecycleStatus"
+                          checked={myFilters.lifecycleStatus === "ACTIVE"}
+                          onChange={() =>
+                            setMyFilters((p) => ({ ...p, lifecycleStatus: "ACTIVE" }))
+                          }
+                        />
+                        <span>Active</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="radio"
+                          name="lifecycleStatus"
+                          checked={myFilters.lifecycleStatus === "VIEWED"}
+                          onChange={() =>
+                            setMyFilters((p) => ({ ...p, lifecycleStatus: "VIEWED" }))
+                          }
+                        />
+                        <span>Viewed</span>
+                      </label>
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="radio"
+                          name="lifecycleStatus"
+                          checked={myFilters.lifecycleStatus === "CLOSED"}
+                          onChange={() =>
+                            setMyFilters((p) => ({ ...p, lifecycleStatus: "CLOSED" }))
+                          }
+                        />
+                        <span>Closed</span>
+                      </label>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="rounded-md border bg-gray-50 p-3">
@@ -1035,10 +1264,44 @@ const Leads = () => {
         </Card>
 
         <TabsContent value="marketplace" className="mt-2 space-y-2">
+          <Card className="border bg-white">
+            <CardContent className="p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline">Daily Left: {quotaRemaining.daily}</Badge>
+                <Badge variant="outline">Weekly Left: {quotaRemaining.weekly}</Badge>
+                <Badge variant="outline">Yearly Left: {quotaRemaining.yearly}</Badge>
+                {configuredExtraLeadPrice > 0 ? (
+                  <Badge variant="outline">
+                    Extra Lead Price: ₹{configuredExtraLeadPrice.toLocaleString("en-IN")}
+                  </Badge>
+                ) : null}
+                {quotaRemaining.daily <= 0 && quotaRemaining.weekly > 0 ? (
+                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200">
+                    Daily exhausted: choose Weekly Included or Buy Extra
+                  </Badge>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+
           {loading ? (
             <div className="p-8 text-center text-gray-500">Loading...</div>
           ) : filteredMarketplaceLeads.length === 0 ? (
-            <div className="p-8 text-center border rounded bg-white">No new leads available</div>
+            <div className="p-8 text-center border rounded bg-white space-y-3">
+              {marketplaceInfo?.subscription_required ? (
+                <>
+                  <div className="font-semibold text-gray-900">Subscription Required</div>
+                  <div className="text-sm text-gray-600">
+                    {marketplaceInfo?.message || "Activate an active plan to access marketplace leads."}
+                  </div>
+                  <Button onClick={() => navigate("/vendor/subscriptions")}>
+                    Go to Subscription Plans
+                  </Button>
+                </>
+              ) : (
+                <div>No new leads available</div>
+              )}
+            </div>
           ) : (
             filteredMarketplaceLeads.map(({ __lead }) => (
               <LeadCard
@@ -1108,6 +1371,58 @@ const Leads = () => {
           </div>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={purchaseChoiceDialog.open}
+        onOpenChange={(open) =>
+          setPurchaseChoiceDialog((prev) => ({
+            open,
+            lead: open ? prev.lead : null,
+          }))
+        }
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Choose Lead Purchase Mode</DialogTitle>
+            <DialogDescription>
+              {canUseWeeklyIncluded
+                ? "Daily included leads are exhausted. You can use weekly included quota or buy this lead as paid extra."
+                : "Included daily/weekly quota is exhausted. Buy this lead as paid extra."}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-md border bg-gray-50 p-3 text-sm space-y-1">
+            <div className="font-semibold text-gray-900 truncate">
+              {purchaseChoiceDialog?.lead?.title ||
+                purchaseChoiceDialog?.lead?.product_name ||
+                "Selected Lead"}
+            </div>
+            <div className="text-gray-600">
+              Buy Extra Price: ₹{Number(dialogExtraLeadPrice || 0).toLocaleString("en-IN")}
+            </div>
+            <div className="text-xs text-gray-600">
+              Remaining - Daily {quotaRemaining.daily}, Weekly {quotaRemaining.weekly}, Yearly {quotaRemaining.yearly}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={handleUseWeeklyIncluded}
+              disabled={choiceBusy || !canUseWeeklyIncluded}
+            >
+              {choiceBusy ? "Processing..." : "Use Weekly Included"}
+            </Button>
+            <Button
+              className="bg-[#00A699] hover:bg-[#00857A]"
+              onClick={handleBuyExtraLead}
+              disabled={choiceBusy}
+            >
+              {choiceBusy ? "Opening Payment..." : "Buy Extra Lead"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
@@ -1154,13 +1469,8 @@ const LeadCard = ({
         : consumptionTypeRaw === "PAID_EXTRA"
           ? "Paid Extra"
           : "";
-  const leadStatusRaw = String(purchaseInfo?.lead_status || "")
-    .trim()
-    .toUpperCase();
-  const leadStatusLabel =
-    leadStatusRaw === "ACTIVE" || leadStatusRaw === "VIEWED" || leadStatusRaw === "CLOSED"
-      ? leadStatusRaw
-      : "";
+  const lifecycleStatus = deriveLifecycleStatus(lead, purchaseInfo);
+  const leadStatusLabel = lifecycleLabel(lifecycleStatus);
   const subscriptionPlanName =
     purchaseInfo?.subscription_plan_name || purchaseInfo?.plan_name || "";
 
@@ -1260,6 +1570,14 @@ const LeadCard = ({
                   Budget: ₹{lead.budget?.toLocaleString?.() || lead.budget}
                 </div>
               ) : null}
+              {(isPurchased || isDirect) ? (
+                <Badge
+                  variant="outline"
+                  className={`text-[11px] px-2 py-0.5 ${lifecycleBadgeClass(lifecycleStatus)}`}
+                >
+                  {leadStatusLabel}
+                </Badge>
+              ) : null}
             </div>
           </div>
 
@@ -1305,7 +1623,7 @@ const LeadCard = ({
                     Type: {consumptionTypeLabel}
                   </div>
                 ) : null}
-                {isPurchased && leadStatusLabel ? (
+                {(isPurchased || isDirect) && leadStatusLabel ? (
                   <div className="text-[11px] text-green-800">
                     Status: {leadStatusLabel}
                   </div>

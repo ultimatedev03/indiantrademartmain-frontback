@@ -89,10 +89,29 @@ const VendorLogin = () => {
         return;
       }
 
-      if (!vendor.is_verified) {
-        toast({ title: "Account Unverified", description: "Redirecting to verification...", variant: "warning" });
-        navigate('/vendor/verify', { state: { email: formData.email } });
-        return;
+      const isVendorExplicitlyUnverified =
+        vendor?.is_verified === false || vendor?.isVerified === false;
+      if (isVendorExplicitlyUnverified) {
+        try {
+          await vendorApi.updateVendorVerification(authData.user.id, true);
+          vendor = { ...vendor, is_verified: true, isVerified: true, is_active: true, isActive: true };
+        } catch {
+          try {
+            // Fallback for legacy rows where user_id linkage is stale.
+            const normalizedEmail = String(formData.email || '').trim().toLowerCase();
+            await supabase
+              .from('vendors')
+              .update({
+                is_verified: true,
+                is_active: true,
+                verified_at: new Date().toISOString(),
+              })
+              .ilike('email', normalizedEmail);
+            vendor = { ...vendor, is_verified: true, isVerified: true, is_active: true, isActive: true };
+          } catch {
+            // If self-heal fails, continue login without OTP redirect.
+          }
+        }
       }
 
       // 3. Stamp role metadata to help route guards

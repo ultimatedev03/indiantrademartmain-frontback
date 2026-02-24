@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { setDefaultResultOrder } from 'dns';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
@@ -23,11 +24,102 @@ if (!fs.existsSync(templatePath)) {
 }
 
 const templateHtml = fs.readFileSync(templatePath, 'utf8');
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+try {
+  // Helps in environments where IPv6 handshake intermittently fails.
+  setDefaultResultOrder('ipv4first');
+} catch {
+  // ignore for older runtimes
+}
+
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 530]);
+const MAX_FETCH_RETRIES = Math.max(1, Number(process.env.SUPABASE_FETCH_RETRIES || 3));
+const FETCH_RETRY_DELAY_MS = Math.max(50, Number(process.env.SUPABASE_FETCH_RETRY_DELAY_MS || 250));
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const isRetryableNetworkError = (error) => {
+  const message = String(error?.message || error || '').toLowerCase();
+  const code = String(error?.code || error?.cause?.code || '').toUpperCase();
+  if (['ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND', 'ECONNREFUSED'].includes(code)) {
+    return true;
+  }
+  return (
+    message.includes('fetch failed') ||
+    message.includes('socket hang up') ||
+    message.includes('network error') ||
+    message.includes('tls') ||
+    message.includes('ssl') ||
+    message.includes('handshake') ||
+    message.includes('terminated')
+  );
+};
+
+const resilientFetch = async (input, init) => {
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_FETCH_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(input, init);
+      if (!RETRYABLE_HTTP_STATUS.has(response.status) || attempt >= MAX_FETCH_RETRIES) {
+        return response;
+      }
+      try {
+        response.body?.cancel?.();
+      } catch {
+        // no-op
+      }
+    } catch (error) {
+      lastError = error;
+      if (!isRetryableNetworkError(error) || attempt >= MAX_FETCH_RETRIES) throw error;
+    }
+
+    await sleep(FETCH_RETRY_DELAY_MS * attempt);
+  }
+  throw lastError || new Error('Supabase fetch failed');
+};
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  global: {
+    fetch: resilientFetch,
+  },
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
+  },
+});
 
 const isMissingColumnError = (err) => {
   if (!err) return false;
   return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
+};
+
+const isTransientSupabaseError = (err) => {
+  const blob = String(
+    [err?.message, err?.details, err?.hint, err?.code].filter(Boolean).join(' ')
+  ).toLowerCase();
+  return (
+    blob.includes('terminated') ||
+    blob.includes('fetch failed') ||
+    blob.includes('network') ||
+    blob.includes('ssl') ||
+    blob.includes('tls') ||
+    blob.includes('handshake') ||
+    blob.includes('timed out') ||
+    blob.includes('timeout') ||
+    blob.includes('socket')
+  );
+};
+
+const withSupabaseRetry = async (label, runner, maxAttempts = Math.max(2, MAX_FETCH_RETRIES)) => {
+  let lastRes = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const res = await runner();
+    lastRes = res;
+    if (!res?.error) return res;
+    if (!isTransientSupabaseError(res.error) || attempt >= maxAttempts) return res;
+    await sleep(FETCH_RETRY_DELAY_MS * attempt);
+  }
+  return lastRes;
 };
 
 const escapeHtml = (value) =>
@@ -144,20 +236,26 @@ const DIRECTORY_SEO = {
 };
 
 const fetchHeads = async () => {
-  let res = await supabase
-    .from('head_categories')
-    .select('id, name, slug, description, meta_tags, keywords');
+  let res = await withSupabaseRetry('head_categories/full', () =>
+    supabase
+      .from('head_categories')
+      .select('id, name, slug, description, meta_tags, keywords')
+  );
 
   if (res.error && isMissingColumnError(res.error)) {
-    res = await supabase
-      .from('head_categories')
-      .select('id, name, slug, description');
+    res = await withSupabaseRetry('head_categories/description', () =>
+      supabase
+        .from('head_categories')
+        .select('id, name, slug, description')
+    );
   }
 
   if (res.error && isMissingColumnError(res.error)) {
-    res = await supabase
-      .from('head_categories')
-      .select('id, name, slug');
+    res = await withSupabaseRetry('head_categories/basic', () =>
+      supabase
+        .from('head_categories')
+        .select('id, name, slug')
+    );
   }
 
   if (res.error) {
@@ -169,20 +267,26 @@ const fetchHeads = async () => {
 };
 
 const fetchSubs = async () => {
-  let res = await supabase
-    .from('sub_categories')
-    .select('id, name, slug, description, meta_tags, keywords, head_categories!inner(id, name, slug)');
+  let res = await withSupabaseRetry('sub_categories/full', () =>
+    supabase
+      .from('sub_categories')
+      .select('id, name, slug, description, meta_tags, keywords, head_categories!inner(id, name, slug)')
+  );
 
   if (res.error && isMissingColumnError(res.error)) {
-    res = await supabase
-      .from('sub_categories')
-      .select('id, name, slug, description, head_categories!inner(id, name, slug)');
+    res = await withSupabaseRetry('sub_categories/description', () =>
+      supabase
+        .from('sub_categories')
+        .select('id, name, slug, description, head_categories!inner(id, name, slug)')
+    );
   }
 
   if (res.error && isMissingColumnError(res.error)) {
-    res = await supabase
-      .from('sub_categories')
-      .select('id, name, slug, head_categories!inner(id, name, slug)');
+    res = await withSupabaseRetry('sub_categories/basic', () =>
+      supabase
+        .from('sub_categories')
+        .select('id, name, slug, head_categories!inner(id, name, slug)')
+    );
   }
 
   if (res.error) {
@@ -194,11 +298,13 @@ const fetchSubs = async () => {
 };
 
 const fetchMicros = async () => {
-  const res = await supabase
-    .from('micro_categories')
-    .select(
-      'id, name, slug, sub_categories!inner(id, name, slug, head_categories!inner(id, name, slug))'
-    );
+  const res = await withSupabaseRetry('micro_categories/basic', () =>
+    supabase
+      .from('micro_categories')
+      .select(
+        'id, name, slug, sub_categories!inner(id, name, slug, head_categories!inner(id, name, slug))'
+      )
+  );
 
   if (res.error) {
     console.warn('Micro categories fetch failed:', res.error);
@@ -213,16 +319,20 @@ const fetchMicroMetaMap = async (ids) => {
   const chunks = chunkArray(ids, 100);
 
   for (const chunk of chunks) {
-    let res = await supabase
-      .from('micro_category_meta')
-      .select('micro_categories, meta_tags, description, keywords')
-      .in('micro_categories', chunk);
+    let res = await withSupabaseRetry('micro_category_meta/full', () =>
+      supabase
+        .from('micro_category_meta')
+        .select('micro_categories, meta_tags, description, keywords')
+        .in('micro_categories', chunk)
+    );
 
     if (res.error && isMissingColumnError(res.error)) {
-      res = await supabase
-        .from('micro_category_meta')
-        .select('micro_categories, meta_tags, description')
-        .in('micro_categories', chunk);
+      res = await withSupabaseRetry('micro_category_meta/description', () =>
+        supabase
+          .from('micro_category_meta')
+          .select('micro_categories, meta_tags, description')
+          .in('micro_categories', chunk)
+      );
     }
 
     if (res.error) {
@@ -236,6 +346,26 @@ const fetchMicroMetaMap = async (ids) => {
   }
 
   return map;
+};
+
+const deriveHeadsFromSubs = (subs = []) => {
+  const map = new Map();
+  (subs || []).forEach((sub) => {
+    const head = sub?.head_categories;
+    const slug = String(head?.slug || '').trim();
+    if (!slug) return;
+    const key = String(head?.id || slug).trim();
+    if (map.has(key)) return;
+    map.set(key, {
+      id: head?.id || key,
+      name: head?.name || slug,
+      slug,
+      description: null,
+      meta_tags: null,
+      keywords: null,
+    });
+  });
+  return Array.from(map.values());
 };
 
 const run = async () => {
@@ -253,7 +383,13 @@ const run = async () => {
     canonical: `${BASE_URL}/directory`,
   });
 
-  const [heads, subs, micros] = await Promise.all([fetchHeads(), fetchSubs(), fetchMicros()]);
+  let [heads, subs, micros] = await Promise.all([fetchHeads(), fetchSubs(), fetchMicros()]);
+  if ((!heads || heads.length === 0) && Array.isArray(subs) && subs.length > 0) {
+    heads = deriveHeadsFromSubs(subs);
+    console.warn(
+      `Head categories fetch unavailable. Derived ${heads.length} head routes from sub-categories fallback.`
+    );
+  }
   const microMetaMap = await fetchMicroMetaMap(micros.map((m) => m.id).filter(Boolean));
 
   heads.forEach((head) => {

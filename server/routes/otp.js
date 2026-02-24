@@ -187,11 +187,19 @@ const deliverOtpEmail = async (email, otp) => {
   }
 };
 
-const buildSuccessResponse = ({ otp, delivery, message }) => {
+const getRemainingSeconds = (expiresAt) => {
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (!Number.isFinite(expiresAtMs)) return OTP_TTL_SECONDS;
+  const remainingMs = expiresAtMs - Date.now();
+  return Math.max(0, Math.ceil(remainingMs / 1000));
+};
+
+const buildSuccessResponse = ({ otp, expiresAt, delivery, message }) => {
   const payload = {
     success: true,
     message,
-    expiresIn: OTP_TTL_SECONDS,
+    expiresIn: getRemainingSeconds(expiresAt),
+    expiresAt,
   };
 
   if (delivery?.usedFallback) {
@@ -231,7 +239,7 @@ const upsertOtpForEmail = async (email) => {
     throw new Error('Failed to generate OTP');
   }
 
-  return otp;
+  return { otp, expiresAt };
 };
 
 // POST /api/otp/request - Request OTP
@@ -242,11 +250,12 @@ router.post('/request', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    const otp = await upsertOtpForEmail(email);
+    const { otp, expiresAt } = await upsertOtpForEmail(email);
     const delivery = await deliverOtpEmail(email, otp);
 
     return res.json(buildSuccessResponse({
       otp,
+      expiresAt,
       delivery,
       message: delivery.usedFallback
         ? 'OTP generated (dev fallback mode)'
@@ -311,11 +320,12 @@ router.post('/resend', async (req, res) => {
       return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    const otp = await upsertOtpForEmail(email);
+    const { otp, expiresAt } = await upsertOtpForEmail(email);
     const delivery = await deliverOtpEmail(email, otp);
 
     return res.json(buildSuccessResponse({
       otp,
+      expiresAt,
       delivery,
       message: delivery.usedFallback
         ? 'New OTP generated (dev fallback mode)'

@@ -146,14 +146,16 @@ const EmployeeLayout = ({ allowedRole }) => {
           {user.role === 'MANAGER' && (
             <>
               <SidebarLink to="/employee/manager/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
-              <SidebarLink to="/employee/manager/territory-engagements" icon={MapPin} onNavigate={() => setIsSidebarOpen(false)}>Territory Engagements</SidebarLink>
+              <SidebarLink to="/employee/manager/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Team Territory</SidebarLink>
+              <SidebarLink to="/employee/manager/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
             </>
           )}
 
           {user.role === 'VP' && (
             <>
               <SidebarLink to="/employee/vp/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
-              <SidebarLink to="/employee/vp/territory-engagements" icon={MapPin} onNavigate={() => setIsSidebarOpen(false)}>Territory Engagements</SidebarLink>
+              <SidebarLink to="/employee/vp/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Manager Allocation</SidebarLink>
+              <SidebarLink to="/employee/vp/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
             </>
           )}
         </nav>

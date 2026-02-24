@@ -307,6 +307,39 @@ const resolveVendorForUser = async (user) => {
   return selected || null;
 };
 
+const resolveVendorIdsForUser = async (user = {}) => {
+  const userId = String(user?.id || '').trim();
+  const email = String(user?.email || '').trim().toLowerCase();
+  const candidates = await listVendorCandidatesForUser({ userId, email });
+  return Array.from(
+    new Set(
+      (candidates || [])
+        .map((row) => String(row?.id || '').trim())
+        .filter(Boolean)
+    )
+  );
+};
+
+const resolveActiveSubscriptionForVendor = async (vendorId) => {
+  const normalizedVendorId = String(vendorId || '').trim();
+  if (!normalizedVendorId) return null;
+
+  const nowIso = new Date().toISOString();
+  const { data: rows, error } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('id, vendor_id, plan_id, status, start_date, end_date')
+    .eq('vendor_id', normalizedVendorId)
+    .eq('status', 'ACTIVE')
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .order('start_date', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: false })
+    .limit(10);
+
+  if (error) throw new Error(error.message || 'Failed to validate subscription');
+
+  return (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso) || null;
+};
+
 const resolveBuyerId = async (userId) => {
   if (!userId) return null;
   const { data: buyer } = await supabase
@@ -401,12 +434,20 @@ const toBuyerSummary = (row = {}) => ({
   kyc_status: pickFirstText(row?.kyc_status) || null,
 });
 
-const enrichProposalRows = async (rows = []) => {
+const enrichProposalRows = async (rows = [], options = {}) => {
   const list = Array.isArray(rows) ? rows : [];
   if (!list.length) return [];
 
   const proposalIds = Array.from(
     new Set(list.map((row) => String(row?.id || '').trim()).filter(Boolean))
+  );
+  const optionVendorIds = Array.isArray(options?.vendorIds) ? options.vendorIds : [];
+  const vendorIds = Array.from(
+    new Set(
+      [...optionVendorIds, ...list.map((row) => row?.vendor_id)]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
   );
   const buyerIds = Array.from(
     new Set(list.map((row) => String(row?.buyer_id || '').trim()).filter(Boolean))
@@ -440,6 +481,29 @@ const enrichProposalRows = async (rows = []) => {
     }
   }
 
+  const leadIdsForUnlock = Array.from(
+    new Set(
+      Array.from(leadByProposalId.values())
+        .map((lead) => String(lead?.id || '').trim())
+        .filter(Boolean)
+    )
+  );
+  const purchasedLeadIdSet = new Set();
+  if (leadIdsForUnlock.length && vendorIds.length) {
+    const { data: purchases, error: purchasesError } = await supabase
+      .from('lead_purchases')
+      .select('lead_id')
+      .in('lead_id', leadIdsForUnlock)
+      .in('vendor_id', vendorIds);
+
+    if (!purchasesError && Array.isArray(purchases)) {
+      for (const purchase of purchases) {
+        const leadId = String(purchase?.lead_id || '').trim();
+        if (leadId) purchasedLeadIdSet.add(leadId);
+      }
+    }
+  }
+
   const buyerById = new Map();
   if (!buyersByIdRes?.error && Array.isArray(buyersByIdRes?.data)) {
     for (const buyer of buyersByIdRes.data) {
@@ -461,9 +525,11 @@ const enrichProposalRows = async (rows = []) => {
   return list.map((row) => {
     const proposalId = String(row?.id || '').trim();
     const leadMeta = leadByProposalId.get(proposalId) || null;
+    const leadId = String(leadMeta?.id || '').trim();
     const buyerId = String(row?.buyer_id || leadMeta?.buyer_id || '').trim();
     const buyerEmail = normalizeEmailValue(row?.buyer_email || leadMeta?.buyer_email);
     const buyer = buyerById.get(buyerId) || buyerByEmail.get(buyerEmail) || null;
+    const isContactUnlocked = Boolean(leadId && purchasedLeadIdSet.has(leadId));
 
     const mergedBuyerName = pickFirstText(
       row?.buyer_name,
@@ -487,11 +553,14 @@ const enrichProposalRows = async (rows = []) => {
 
     return {
       ...row,
+      lead_id: row?.lead_id || leadId || null,
       buyer_id: row?.buyer_id || leadMeta?.buyer_id || null,
       buyer_name: mergedBuyerName || null,
       buyer_email: mergedBuyerEmail || null,
       buyer_phone: mergedBuyerPhone || null,
       company_name: mergedCompanyName || null,
+      is_contact_unlocked: isContactUnlocked,
+      details_unlocked: isContactUnlocked,
       buyers: buyer || row?.buyers || null,
       proposal_type: mergedBuyerEmail ? 'sent' : 'received',
     };
@@ -512,6 +581,172 @@ const parseLeadPriceNumber = (value, fallback = 0) => {
   const parsed = Number(cleaned);
   if (Number.isFinite(parsed)) return Math.max(0, parsed);
   return Math.max(0, Number(fallback) || 0);
+};
+
+const insertNotification = async (payload = {}) => {
+  if (!payload?.user_id) return;
+
+  let { error } = await supabase.from('notifications').insert([payload]);
+  if (error && String(error?.message || '').toLowerCase().includes('reference_id')) {
+    const fallbackPayload = { ...payload };
+    delete fallbackPayload.reference_id;
+    ({ error } = await supabase.from('notifications').insert([fallbackPayload]));
+  }
+  if (error) throw error;
+};
+
+const normalizeConsumptionType = (value) => String(value || '').trim().toUpperCase();
+
+const buildQuotaExhaustedAlerts = ({ remaining, consumptionType }) => {
+  const type = normalizeConsumptionType(consumptionType);
+  const daily = Math.max(0, Number(remaining?.daily || 0));
+  const weekly = Math.max(0, Number(remaining?.weekly || 0));
+  const yearly = Math.max(0, Number(remaining?.yearly || 0));
+  const included = type === 'DAILY_INCLUDED' || type === 'WEEKLY_INCLUDED';
+  const alerts = [];
+
+  if (type === 'DAILY_INCLUDED' && daily <= 0) {
+    alerts.push({
+      type: 'LEAD_DAILY_EXHAUSTED',
+      title: 'Daily Lead Quota Exhausted',
+      message: 'Daily included leads are exhausted. Use weekly quota or buy extra leads.',
+    });
+  }
+  if (included && weekly <= 0) {
+    alerts.push({
+      type: 'LEAD_WEEKLY_EXHAUSTED',
+      title: 'Weekly Lead Quota Exhausted',
+      message: 'Weekly included leads are exhausted. Buy extra leads to continue.',
+    });
+  }
+  if (included && yearly <= 0) {
+    alerts.push({
+      type: 'LEAD_YEARLY_EXHAUSTED',
+      title: 'Yearly Lead Quota Exhausted',
+      message: 'Yearly included leads are exhausted for this plan period. Buy extra leads to continue.',
+    });
+  }
+
+  return alerts;
+};
+
+const notifyQuotaExhausted = async ({ userId, remaining, consumptionType }) => {
+  if (!userId) return;
+
+  const alerts = buildQuotaExhaustedAlerts({ remaining, consumptionType });
+  if (!alerts.length) return;
+
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const dayStartIso = dayStart.toISOString();
+
+  for (const alert of alerts) {
+    try {
+      const { count, error: countError } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .eq('type', alert.type)
+        .gte('created_at', dayStartIso);
+
+      if (countError) {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to check quota notification dedupe:', countError?.message || countError);
+        continue;
+      }
+      if ((count || 0) > 0) continue;
+
+      await insertNotification({
+        user_id: userId,
+        type: alert.type,
+        title: alert.title,
+        message: alert.message,
+        link: '/vendor/leads',
+        is_read: false,
+        created_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('Failed to send quota exhausted notification:', error?.message || error);
+    }
+  }
+};
+
+const VENDOR_LEAD_STATUS_VALUES = ['ACTIVE', 'VIEWED', 'CLOSED'];
+const VENDOR_LEAD_STATUS_SET = new Set(VENDOR_LEAD_STATUS_VALUES);
+
+const normalizeVendorLeadStatus = (value) => {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!VENDOR_LEAD_STATUS_SET.has(normalized)) return null;
+  return normalized;
+};
+
+const normalizeLeadStatusNote = (value, maxLen = 800) => {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return text.slice(0, maxLen);
+};
+
+const isMissingRelationError = (error, relationName) => {
+  const msg = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const normalizedRelation = String(relationName || '').toLowerCase();
+  if (code === '42P01') return true;
+  if (!normalizedRelation) return false;
+  return (
+    (msg.includes('relation') && msg.includes(normalizedRelation) && msg.includes('does not exist')) ||
+    (msg.includes('table') && msg.includes(normalizedRelation) && msg.includes('not found')) ||
+    (msg.includes(normalizedRelation) && msg.includes('schema cache'))
+  );
+};
+
+const inferFallbackLeadStatus = (lead = {}) => {
+  const normalized = String(lead?.status || '').trim().toUpperCase();
+  if (normalized === 'CLOSED') return 'CLOSED';
+  if (normalized === 'VIEWED') return 'VIEWED';
+  return 'ACTIVE';
+};
+
+const resolveVendorLeadAccess = async ({ vendorId, leadId }) => {
+  const { data: lead, error: leadError } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('id', leadId)
+    .maybeSingle();
+
+  if (leadError) throw new Error(leadError.message || 'Failed to fetch lead');
+  if (!lead) return { lead: null, purchase: null, isDirect: false, isVisibleMarketplaceLead: false };
+
+  const isDirect = String(lead?.vendor_id || '').trim() === String(vendorId || '').trim();
+
+  const { data: purchaseRows, error: purchaseError } = await supabase
+    .from('lead_purchases')
+    .select(
+      'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+    )
+    .eq('vendor_id', vendorId)
+    .eq('lead_id', leadId)
+    .order('purchase_datetime', { ascending: false })
+    .limit(1);
+
+  if (purchaseError) throw new Error(purchaseError.message || 'Failed to validate lead purchase');
+  const purchase = Array.isArray(purchaseRows) && purchaseRows.length ? purchaseRows[0] : null;
+
+  let isVisibleMarketplaceLead = false;
+  if (!isDirect && !purchase) {
+    const leadStatus = String(lead?.status || '').toUpperCase();
+    const isMarketplace = !lead?.vendor_id && ['AVAILABLE', 'PURCHASED'].includes(leadStatus);
+    if (isMarketplace) {
+      const { count: purchaseCount, error: countError } = await supabase
+        .from('lead_purchases')
+        .select('id', { count: 'exact', head: true })
+        .eq('lead_id', leadId);
+      if (countError) throw new Error(countError.message || 'Failed to validate lead capacity');
+      isVisibleMarketplaceLead = (purchaseCount || 0) < 5;
+    }
+  }
+
+  return { lead, purchase, isDirect, isVisibleMarketplaceLead };
 };
 
 const normalizeLeadFilterText = (value) =>
@@ -938,6 +1173,16 @@ export const handler = async (event) => {
         const vendor = await resolveVendorForUser(user);
         if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
 
+        const activeSubscription = await resolveActiveSubscriptionForVendor(vendor.id);
+        if (!activeSubscription) {
+          return ok(event, {
+            success: true,
+            leads: [],
+            subscription_required: true,
+            message: 'Active subscription required to access marketplace leads.',
+          });
+        }
+
         const maxVendorsPerLead = 5;
         const { data: marketplaceRows, error: rowsError } = await supabase
           .from('leads')
@@ -1009,20 +1254,20 @@ export const handler = async (event) => {
       // /me/proposals
       // -------------------------
       if (tail[1] === 'proposals') {
-        const vendor = await resolveVendorForUser(user);
-        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+        const vendorIds = await resolveVendorIdsForUser(user);
+        if (!vendorIds.length) return bad(event, 'Vendor profile not found', null, 404);
 
         if (event.httpMethod === 'GET' && tail.length === 2) {
           const type = String(event.queryStringParameters?.type || 'received').toLowerCase();
           const { data: proposals, error: listErr } = await supabase
             .from('proposals')
             .select('*')
-            .eq('vendor_id', vendor.id)
+            .in('vendor_id', vendorIds)
             .order('created_at', { ascending: false });
 
           if (listErr) return fail(event, listErr.message || 'Failed to fetch proposals');
 
-          const enrichedRows = await enrichProposalRows(proposals || []);
+          const enrichedRows = await enrichProposalRows(proposals || [], { vendorIds });
           const rowsWithType = enrichedRows.map((row) => {
             const hasBuyerEmail = Boolean(normalizeEmailValue(row?.buyer_email));
             return { ...row, proposal_type: hasBuyerEmail ? 'sent' : 'received' };
@@ -1046,13 +1291,13 @@ export const handler = async (event) => {
             .from('proposals')
             .select('*')
             .eq('id', proposalId)
-            .eq('vendor_id', vendor.id)
+            .in('vendor_id', vendorIds)
             .maybeSingle();
 
           if (proposalErr) return fail(event, proposalErr.message || 'Failed to fetch proposal');
           if (!proposal) return bad(event, 'Proposal not found', null, 404);
 
-          const [enrichedProposal] = await enrichProposalRows([proposal]);
+          const [enrichedProposal] = await enrichProposalRows([proposal], { vendorIds });
           return ok(event, { success: true, proposal: enrichedProposal || proposal });
         }
 
@@ -1060,14 +1305,18 @@ export const handler = async (event) => {
           const proposalId = String(tail[2] || '').trim();
           if (!proposalId) return bad(event, 'Invalid proposal id');
 
-          const { error: deleteErr } = await supabase
+          const { data: deletedRows, error: deleteErr } = await supabase
             .from('proposals')
             .delete()
             .eq('id', proposalId)
-            .eq('vendor_id', vendor.id);
+            .in('vendor_id', vendorIds)
+            .select('id');
 
           if (deleteErr) return fail(event, deleteErr.message || 'Failed to delete proposal');
-          return ok(event, { success: true });
+          if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+            return bad(event, 'Proposal not found or already deleted', null, 404);
+          }
+          return ok(event, { success: true, deleted_count: deletedRows.length });
         }
       }
 
@@ -1093,6 +1342,14 @@ export const handler = async (event) => {
         const mode = normalizeLeadConsumptionMode(body?.mode);
         const fallbackAmount = parseLeadPriceNumber(lead?.price, 50);
         const requestedAmount = parseLeadPriceNumber(body?.amount, fallbackAmount);
+
+        if (mode === 'BUY_EXTRA' || mode === 'PAID') {
+          return json(event, 402, {
+            success: false,
+            code: 'PAID_REQUIRED',
+            error: 'Paid extra lead purchase must be completed via payment gateway.',
+          });
+        }
 
         const consumeResult = await consumeLeadForVendor({
           vendorId: vendor.id,
@@ -1125,6 +1382,56 @@ export const handler = async (event) => {
           'PAID_EXTRA';
         const remaining = payload?.remaining || { daily: 0, weekly: 0, yearly: 0 };
 
+        try {
+          if (!wasExistingPurchase && purchaseRow?.id) {
+            const purchaseStatus =
+              normalizeVendorLeadStatus(payload?.lead_status || purchaseRow?.lead_status) || 'ACTIVE';
+            const { error: historyError } = await supabase.from('lead_status_history').insert([
+              {
+                lead_id: leadId,
+                vendor_id: vendor.id,
+                lead_purchase_id: purchaseRow.id,
+                status: purchaseStatus,
+                note: 'Lead purchased',
+                source: 'PURCHASE',
+                created_by: user?.id || null,
+                created_at: purchaseDatetime,
+              },
+            ]);
+            if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
+              // eslint-disable-next-line no-console
+              console.warn('Lead purchase history insert failed:', historyError?.message || historyError);
+            }
+          }
+        } catch (historyInsertError) {
+          // eslint-disable-next-line no-console
+          console.warn('Lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
+        }
+
+        try {
+          const vendorUserId = vendor?.user_id || null;
+          if (vendorUserId && !wasExistingPurchase) {
+            await insertNotification({
+              user_id: vendorUserId,
+              type: 'LEAD_PURCHASED',
+              title: 'Lead purchased',
+              message: `You purchased a lead${lead?.product_name ? ` for ${lead.product_name}` : ''}. Contact details are now available.`,
+              link: '/vendor/leads',
+              reference_id: purchaseRow?.id || leadId,
+              is_read: false,
+              created_at: new Date().toISOString(),
+            });
+            await notifyQuotaExhausted({
+              userId: vendorUserId,
+              remaining,
+              consumptionType: responseConsumptionType,
+            });
+          }
+        } catch (notifError) {
+          // eslint-disable-next-line no-console
+          console.warn('Lead purchase notification failed:', notifError?.message || notifError);
+        }
+
         return json(event, wasExistingPurchase ? 200 : 201, {
           success: true,
           existing_purchase: wasExistingPurchase,
@@ -1144,6 +1451,177 @@ export const handler = async (event) => {
             null,
           lead_status: payload?.lead_status || purchaseRow?.lead_status || 'ACTIVE',
           purchase: purchaseRow,
+        });
+      }
+
+      // -------------------------
+      // /me/leads/:leadId/status-history
+      // -------------------------
+      if (event.httpMethod === 'GET' && tail[1] === 'leads' && tail[3] === 'status-history') {
+        const vendor = await resolveVendorForUser(user);
+        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+
+        const leadId = String(tail[2] || '').trim();
+        if (!leadId) return bad(event, 'Invalid lead id');
+
+        const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+          vendorId: vendor.id,
+          leadId,
+        });
+
+        if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+          return bad(event, 'Lead not found', null, 404);
+        }
+        if (!isDirect && !purchase) {
+          return forbidden(event, 'Lead status history is available only for purchased or direct leads');
+        }
+
+        const { data: historyRows, error: historyError } = await supabase
+          .from('lead_status_history')
+          .select('id, lead_id, vendor_id, lead_purchase_id, status, note, source, created_by, created_at')
+          .eq('lead_id', leadId)
+          .eq('vendor_id', vendor.id)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(200);
+
+        if (historyError) {
+          if (isMissingRelationError(historyError, 'lead_status_history')) {
+            return json(event, 503, {
+              success: false,
+              code: 'LEAD_STATUS_HISTORY_UNAVAILABLE',
+              error: 'Lead status history feature is unavailable. Please run the latest migration.',
+            });
+          }
+          return fail(event, historyError.message || 'Failed to fetch lead status history');
+        }
+
+        const latestHistoryStatus = normalizeVendorLeadStatus(historyRows?.[0]?.status);
+        const currentStatus =
+          normalizeVendorLeadStatus(purchase?.lead_status) ||
+          latestHistoryStatus ||
+          inferFallbackLeadStatus(lead);
+
+        return ok(event, {
+          success: true,
+          lead_id: leadId,
+          current_status: currentStatus,
+          is_direct: isDirect,
+          is_purchased: Boolean(purchase),
+          history: historyRows || [],
+        });
+      }
+
+      // -------------------------
+      // /me/leads/:leadId/status
+      // -------------------------
+      if (event.httpMethod === 'POST' && tail[1] === 'leads' && tail[3] === 'status') {
+        const vendor = await resolveVendorForUser(user);
+        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+
+        const leadId = String(tail[2] || '').trim();
+        if (!leadId) return bad(event, 'Invalid lead id');
+
+        const body = readBody(event);
+        const status = normalizeVendorLeadStatus(body?.status);
+        if (!status) {
+          return bad(event, `Invalid status. Allowed: ${VENDOR_LEAD_STATUS_VALUES.join(', ')}`);
+        }
+        const note = normalizeLeadStatusNote(body?.note);
+
+        const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+          vendorId: vendor.id,
+          leadId,
+        });
+
+        if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+          return bad(event, 'Lead not found', null, 404);
+        }
+        if (!isDirect && !purchase) {
+          return forbidden(event, 'Lead status can be updated only for purchased or direct leads');
+        }
+
+        const currentKnownStatus =
+          normalizeVendorLeadStatus(purchase?.lead_status) || inferFallbackLeadStatus(lead);
+        if (currentKnownStatus === status && !note) {
+          return ok(event, {
+            success: true,
+            lead_id: leadId,
+            lead_status: status,
+            current_status: status,
+            purchase: purchase || null,
+            history: [],
+            unchanged: true,
+          });
+        }
+
+        const nowIso = new Date().toISOString();
+        let updatedPurchase = purchase || null;
+
+        if (purchase?.id) {
+          const { data: purchaseRow, error: purchaseUpdateError } = await supabase
+            .from('lead_purchases')
+            .update({ lead_status: status })
+            .eq('id', purchase.id)
+            .eq('vendor_id', vendor.id)
+            .eq('lead_id', leadId)
+            .select(
+              'id, purchase_date, purchase_datetime, amount, purchase_price, payment_status, consumption_type, lead_status, subscription_plan_name'
+            )
+            .maybeSingle();
+
+          if (purchaseUpdateError) {
+            return fail(event, purchaseUpdateError.message || 'Failed to update lead status');
+          }
+          updatedPurchase = purchaseRow || updatedPurchase;
+        } else if (isDirect) {
+          const mappedLeadStatus = status === 'CLOSED' ? 'CLOSED' : 'AVAILABLE';
+          const { error: directUpdateError } = await supabase
+            .from('leads')
+            .update({ status: mappedLeadStatus })
+            .eq('id', leadId)
+            .eq('vendor_id', vendor.id);
+
+          if (directUpdateError) {
+            return fail(event, directUpdateError.message || 'Failed to update direct lead status');
+          }
+        }
+
+        const historyInsert = {
+          lead_id: leadId,
+          vendor_id: vendor.id,
+          lead_purchase_id: updatedPurchase?.id || null,
+          status,
+          note,
+          source: updatedPurchase?.id ? 'PURCHASE' : 'DIRECT',
+          created_by: user?.id || null,
+          created_at: nowIso,
+        };
+
+        const { data: historyRow, error: historyError } = await supabase
+          .from('lead_status_history')
+          .insert([historyInsert])
+          .select('id, lead_id, vendor_id, lead_purchase_id, status, note, source, created_by, created_at')
+          .maybeSingle();
+
+        if (historyError) {
+          if (isMissingRelationError(historyError, 'lead_status_history')) {
+            return json(event, 503, {
+              success: false,
+              code: 'LEAD_STATUS_HISTORY_UNAVAILABLE',
+              error: 'Lead status history feature is unavailable. Please run the latest migration.',
+            });
+          }
+          return fail(event, historyError.message || 'Failed to store lead status history');
+        }
+
+        return ok(event, {
+          success: true,
+          lead_id: leadId,
+          lead_status: status,
+          current_status: status,
+          purchase: updatedPurchase,
+          history: historyRow ? [historyRow] : [],
         });
       }
 

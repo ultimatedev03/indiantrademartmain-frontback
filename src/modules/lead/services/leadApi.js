@@ -69,8 +69,25 @@ const calculateDaysLeft = (endDate) => {
 const isSubscriptionActive = (subscription) => {
   if (!subscription) return false;
   if (subscription.status !== 'ACTIVE') return false;
+  if (!subscription.end_date) return true;
   const daysLeft = calculateDaysLeft(subscription.end_date);
   return daysLeft > 0;
+};
+
+const getActiveVendorSubscription = async (vendorId) => {
+  const nowIso = new Date().toISOString();
+  const { data: rows, error } = await supabase
+    .from('vendor_plan_subscriptions')
+    .select('id, vendor_id, plan_id, status, start_date, end_date')
+    .eq('vendor_id', vendorId)
+    .eq('status', 'ACTIVE')
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .order('start_date', { ascending: false, nullsFirst: false })
+    .order('id', { ascending: false })
+    .limit(10);
+
+  if (error) throw error;
+  return (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso) || null;
 };
 
 // ------------ Lead filtering helpers ------------
@@ -352,6 +369,48 @@ export const leadApi = {
     throw new Error('Lead not found');
   },
 
+  getStatusHistory: async (id) => {
+    const leadId = String(id || '').trim();
+    if (!leadId) throw new Error('Lead id is required');
+
+    const payload = await fetchVendorJson(
+      `/api/vendors/me/leads/${encodeURIComponent(leadId)}/status-history`
+    );
+
+    return {
+      lead_id: payload?.lead_id || leadId,
+      current_status: payload?.current_status || 'ACTIVE',
+      history: Array.isArray(payload?.history) ? payload.history : [],
+      is_direct: Boolean(payload?.is_direct),
+      is_purchased: Boolean(payload?.is_purchased),
+    };
+  },
+
+  updateLifecycleStatus: async (id, { status, note } = {}) => {
+    const leadId = String(id || '').trim();
+    if (!leadId) throw new Error('Lead id is required');
+
+    const normalizedStatus = String(status || '').trim().toUpperCase();
+    if (!['ACTIVE', 'VIEWED', 'CLOSED'].includes(normalizedStatus)) {
+      throw new Error('Invalid status');
+    }
+
+    const noteText = String(note ?? '').trim();
+    const payload = await fetchVendorJson(
+      `/api/vendors/me/leads/${encodeURIComponent(leadId)}/status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: normalizedStatus,
+          note: noteText || null,
+        }),
+      }
+    );
+
+    return payload;
+  },
+
   create: async (leadData) => {
     const { data, error } = await supabase
       .from('leads')
@@ -592,16 +651,35 @@ export const leadApi = {
   // --- MARKETPLACE API (merged from leadsMarketplaceApi) ---
   marketplace: {
     // Get leads for marketplace (excludes direct leads with vendor_id and purchased leads)
-    listAvailable: async () => {
+    listAvailable: async (options = {}) => {
+      const withMeta = options && typeof options === 'object' && options.withMeta === true;
       // Preferred path: backend endpoint (stable + bypasses client-side RLS drift)
       try {
-        const { leads } = await fetchVendorJson('/api/vendors/me/marketplace-leads');
-        if (Array.isArray(leads)) return leads;
+        const response = await fetchVendorJson('/api/vendors/me/marketplace-leads');
+        const leads = Array.isArray(response?.leads) ? response.leads : [];
+        const subscriptionRequired = Boolean(response?.subscription_required);
+        const message = String(
+          response?.message ||
+            (subscriptionRequired ? 'Active subscription required to access marketplace leads.' : '')
+        ).trim();
+        if (withMeta) {
+          return { leads, subscription_required: subscriptionRequired, message };
+        }
+        return leads;
       } catch (e) {
         console.warn('[leadApi] /api/vendors/me/marketplace-leads failed, falling back:', e?.message || e);
       }
 
       const vendorId = await getVendorId();
+      const activeSubscription = await getActiveVendorSubscription(vendorId);
+      if (!isSubscriptionActive(activeSubscription)) {
+        const message = 'Active subscription required to access marketplace leads.';
+        if (withMeta) {
+          return { leads: [], subscription_required: true, message };
+        }
+        return [];
+      }
+
       const ctx = await loadVendorLeadContext(vendorId);
       const autoFilter = ctx.autoLeadFilter !== false;
       const shouldFilterCategory = autoFilter && (
@@ -734,11 +812,17 @@ export const leadApi = {
 
       // If filters are configured and they return zero, keep marketplace visible
       // by falling back to unfiltered eligible leads.
-      if (shouldFilterCategory || shouldFilterLocation || shouldFilterBudget) {
-        return filtered.length ? filtered : unpurchasedLeads;
-      }
+      const finalLeads =
+        shouldFilterCategory || shouldFilterLocation || shouldFilterBudget
+          ? filtered.length
+            ? filtered
+            : unpurchasedLeads
+          : unpurchasedLeads;
 
-      return unpurchasedLeads;
+      if (withMeta) {
+        return { leads: finalLeads, subscription_required: false, message: '' };
+      }
+      return finalLeads;
     },
 
     // Get buyer-created direct leads (seller receives directly from buyer, not marketplace)

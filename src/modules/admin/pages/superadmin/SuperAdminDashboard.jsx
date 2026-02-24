@@ -51,7 +51,7 @@ import {
   Package,
 } from 'lucide-react';
 
-const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE'];
+const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
 const NOTICE_VARIANTS = ['info', 'warning', 'critical'];
 const PLAN_BADGE_VARIANTS = ['neutral', 'green', 'blue', 'purple', 'gold', 'diamond', 'slate'];
 
@@ -107,10 +107,6 @@ const roleToDepartment = (role) => {
       return 'Support';
     case 'SALES':
       return 'Sales';
-    case 'MANAGER':
-      return 'Sales';
-    case 'VP':
-      return 'Sales Leadership';
     case 'DATA_ENTRY':
     case 'DATAENTRY':
       return 'Operations';
@@ -144,6 +140,7 @@ const getPlanPricingMeta = (plan) => {
   const discountPercent = Number(pricing.discount_percent || 0);
   const currentPrice = Number(plan?.price || 0);
   const configuredOriginal = Number(pricing.original_price || 0);
+  const configuredExtraLeadPrice = Number(pricing.extra_lead_price || 0);
 
   let originalPrice = configuredOriginal;
   if ((!Number.isFinite(originalPrice) || originalPrice <= 0) && discountPercent > 0 && discountPercent < 100) {
@@ -155,6 +152,10 @@ const getPlanPricingMeta = (plan) => {
     original_price: originalPrice,
     discount_percent: Number.isFinite(discountPercent) ? Math.max(0, Math.min(100, discountPercent)) : 0,
     discount_label: String(pricing.discount_label || '').trim(),
+    extra_lead_price:
+      Number.isFinite(configuredExtraLeadPrice) && configuredExtraLeadPrice >= 0
+        ? configuredExtraLeadPrice
+        : 0,
     badge_label: String(asObject(features?.badge)?.label || '').trim(),
     badge_variant: String(asObject(features?.badge)?.variant || 'neutral').trim() || 'neutral',
   };
@@ -190,6 +191,7 @@ const planToDraft = (plan) => {
     original_price: Number(pricing.original_price || 0),
     discount_percent: Number(pricing.discount_percent || 0),
     discount_label: pricing.discount_label,
+    extra_lead_price: Number(pricing.extra_lead_price || 0),
     badge_label: pricing.badge_label,
     badge_variant: pricing.badge_variant,
     states_limit: Number(coverage.states_limit || 0),
@@ -264,6 +266,7 @@ export default function SuperAdminDashboard() {
     original_price: 0,
     discount_percent: 0,
     discount_label: '',
+    extra_lead_price: 0,
     badge_label: '',
     badge_variant: 'neutral',
     states_limit: 0,
@@ -470,6 +473,7 @@ export default function SuperAdminDashboard() {
     original_price: Number(draft?.original_price || 0),
     discount_percent: Number(draft?.discount_percent || 0),
     discount_label: String(draft?.discount_label || '').trim(),
+    extra_lead_price: Number(draft?.extra_lead_price || 0),
     badge_label: String(draft?.badge_label || '').trim(),
     badge_variant: String(draft?.badge_variant || 'neutral').trim() || 'neutral',
     states_limit: Number(draft?.states_limit || 0),
@@ -583,6 +587,7 @@ export default function SuperAdminDashboard() {
       original_price: 0,
       discount_percent: 0,
       discount_label: '',
+      extra_lead_price: 0,
       badge_label: '',
       badge_variant: 'neutral',
       states_limit: 0,
@@ -1841,6 +1846,17 @@ export default function SuperAdminDashboard() {
                                   placeholder="Example: 20% OFF"
                                 />
                               </div>
+                              <div className="space-y-1">
+                                <Label className="text-[11px] text-neutral-500">Extra Lead Price</Label>
+                                <Input
+                                  type="number"
+                                  min="0"
+                                  value={showBlankForZero(draft.extra_lead_price)}
+                                  onChange={(e) => updatePlanDraft(plan.id, 'extra_lead_price', e.target.value)}
+                                  className="bg-neutral-800 border-neutral-700 text-white h-9"
+                                  placeholder="Applied when buying extra lead"
+                                />
+                              </div>
                             </div>
                             <div className="text-xs text-neutral-400">
                               Preview: {showOldPrice ? `Rs. ${money(oldPrice)} -> ` : ''}Rs. {money(nowPrice)}
@@ -2489,6 +2505,20 @@ export default function SuperAdminDashboard() {
                   disableAutoSanitize
                   className="bg-neutral-800 border-neutral-700"
                   placeholder="Example: 20% OFF"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="text-neutral-300">Extra Lead Price</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={showBlankForZero(newPlanForm.extra_lead_price)}
+                  onChange={(e) => setNewPlanForm((prev) => ({ ...prev, extra_lead_price: e.target.value }))}
+                  className="bg-neutral-800 border-neutral-700"
+                  placeholder="Applied when daily/weekly included quota is exhausted"
                 />
               </div>
             </div>

@@ -37,6 +37,8 @@ const isPurchasedLeadRow = (row = {}) => {
   return false;
 };
 
+const normalizeConsumptionType = (value) => String(value || '').trim().toUpperCase();
+
 const resolveVendor = async (sessionUser) => {
   const userId = String(sessionUser?.id || '').trim();
   const userEmail = String(sessionUser?.email || '').trim().toLowerCase();
@@ -128,6 +130,26 @@ const Analytics = () => {
         });
 
         const totalLeads = purchasedRows.length;
+        const purchaseTypeCounts = {
+          dailyIncluded: 0,
+          weeklyIncluded: 0,
+          paidExtra: 0,
+          unknown: 0,
+        };
+        const purchaseTypeByLeadId = new Map();
+
+        purchasedRows.forEach((row) => {
+          const leadId = String(row?.id || row?.lead_id || '').trim();
+          const type = normalizeConsumptionType(row?.consumption_type || row?.consumptionType);
+          if (type === 'DAILY_INCLUDED') purchaseTypeCounts.dailyIncluded += 1;
+          else if (type === 'WEEKLY_INCLUDED') purchaseTypeCounts.weeklyIncluded += 1;
+          else if (type === 'PAID_EXTRA') purchaseTypeCounts.paidExtra += 1;
+          else purchaseTypeCounts.unknown += 1;
+
+          if (leadId && !purchaseTypeByLeadId.has(leadId)) {
+            purchaseTypeByLeadId.set(leadId, type || 'UNKNOWN');
+          }
+        });
 
         // Contacts (distinct leads contacted)
         const { data: contacts, error: contactErr } = await supabase
@@ -155,6 +177,19 @@ const Analytics = () => {
             })
             .map((c) => c.lead_id)
         ).size;
+        let contactedDailyIncluded = 0;
+        let contactedWeeklyIncluded = 0;
+        let contactedPaidExtra = 0;
+        let contactedUnknown = 0;
+
+        for (const contactedLeadId of contactSet) {
+          const key = String(contactedLeadId || '').trim();
+          const type = purchaseTypeByLeadId.get(key);
+          if (type === 'DAILY_INCLUDED') contactedDailyIncluded += 1;
+          else if (type === 'WEEKLY_INCLUDED') contactedWeeklyIncluded += 1;
+          else if (type === 'PAID_EXTRA') contactedPaidExtra += 1;
+          else contactedUnknown += 1;
+        }
 
         // Proposals sent
         const { count: proposalsSent, error: proposalErr } = await supabase
@@ -177,6 +212,13 @@ const Analytics = () => {
           weeklyContacted,
           proposalsSent: proposalsSent || 0,
           trustScore: vendor.trust_score || 0,
+          purchaseTypeCounts,
+          contactedByPurchaseType: {
+            dailyIncluded: contactedDailyIncluded,
+            weeklyIncluded: contactedWeeklyIncluded,
+            paidExtra: contactedPaidExtra,
+            unknown: contactedUnknown,
+          },
         });
       } catch (error) {
         console.error('Failed to fetch analytics:', error);
@@ -300,6 +342,31 @@ const Analytics = () => {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-neutral-700">Lead Consumption Mix</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-neutral-700">
+            <div className="flex items-center justify-between">
+              <span>Daily Included</span>
+              <span className="font-semibold text-neutral-900">{stats.purchaseTypeCounts?.dailyIncluded || 0}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Weekly Included</span>
+              <span className="font-semibold text-neutral-900">{stats.purchaseTypeCounts?.weeklyIncluded || 0}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Paid Extra</span>
+              <span className="font-semibold text-neutral-900">{stats.purchaseTypeCounts?.paidExtra || 0}</span>
+            </div>
+            <div className="text-xs text-neutral-500 pt-1 border-t">
+              Contacted: Daily {stats.contactedByPurchaseType?.dailyIncluded || 0} | Weekly{' '}
+              {stats.contactedByPurchaseType?.weeklyIncluded || 0} | Extra{' '}
+              {stats.contactedByPurchaseType?.paidExtra || 0}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-sm font-semibold text-neutral-700">Performance Overview</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-neutral-600">
@@ -316,4 +383,3 @@ const Analytics = () => {
 };
 
 export default Analytics;
-

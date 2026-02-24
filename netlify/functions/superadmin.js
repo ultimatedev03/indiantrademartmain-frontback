@@ -78,7 +78,8 @@ const buildPlanFeatures = (existingFeatures, payload = {}) => {
   const hasPricingInput =
     hasOwn(payload, 'original_price') ||
     hasOwn(payload, 'discount_percent') ||
-    hasOwn(payload, 'discount_label');
+    hasOwn(payload, 'discount_label') ||
+    hasOwn(payload, 'extra_lead_price');
 
   if (hasPricingInput) {
     const pricing = {
@@ -94,6 +95,9 @@ const buildPlanFeatures = (existingFeatures, payload = {}) => {
     }
     if (hasOwn(payload, 'discount_label')) {
       pricing.discount_label = String(payload.discount_label || '').trim();
+    }
+    if (hasOwn(payload, 'extra_lead_price')) {
+      pricing.extra_lead_price = toNonNegativeNumber(payload.extra_lead_price, 0);
     }
 
     next.pricing = pricing;
@@ -745,7 +749,7 @@ export const handler = async (event) => {
       if (!fullName || !email || !password) {
         return json(400, { success: false, error: 'full_name, email and password are required' });
       }
-      const allowedRoles = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE'];
+      const allowedRoles = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
       if (!allowedRoles.includes(role)) {
         return json(400, { success: false, error: `Invalid role. Allowed roles: ${allowedRoles.join(', ')}` });
       }
@@ -984,6 +988,7 @@ export const handler = async (event) => {
           yearly_limit: payload.yearly_limit,
           duration_days: payload.duration_days,
           is_active: payload.is_active,
+          extra_lead_price: toNonNegativeNumber(payload?.features?.pricing?.extra_lead_price, 0),
         },
       });
 
@@ -1016,6 +1021,7 @@ export const handler = async (event) => {
         hasOwn(body, 'original_price') ||
         hasOwn(body, 'discount_percent') ||
         hasOwn(body, 'discount_label') ||
+        hasOwn(body, 'extra_lead_price') ||
         hasOwn(body, 'badge_label') ||
         hasOwn(body, 'badge_variant') ||
         hasOwn(body, 'states_limit') ||

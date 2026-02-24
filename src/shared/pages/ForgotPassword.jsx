@@ -24,6 +24,11 @@ const ForgotPassword = () => {
   const [otpExpiry, setOtpExpiry] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
 
+  const getOtpSeconds = (payload) => {
+    const value = Number(payload?.expiresIn);
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : 120;
+  };
+
   // OTP timer
   useEffect(() => {
     if (otpExpiry > 0) {
@@ -48,17 +53,17 @@ const ForgotPassword = () => {
     setLoading(true);
     try {
       // Check if email exists with the specified role
-      const data = await passwordResetApi.checkEmailByRole(email, role);
+      await passwordResetApi.checkEmailByRole(email, role);
 
       // Request OTP
-      await passwordResetApi.requestOTP(email);
+      const otpResponse = await passwordResetApi.requestOTP(email);
       
       toast({
         title: 'OTP Sent',
-        description: data.message || 'Check your email for the OTP code'
+        description: 'A 6-digit OTP has been sent to your email'
       });
 
-      setOtpExpiry(120); // 2 minutes
+      setOtpExpiry(getOtpSeconds(otpResponse));
       setStep(2);
     } catch (error) {
       toast({
@@ -79,6 +84,15 @@ const ForgotPassword = () => {
       toast({
         title: 'Invalid OTP',
         description: 'Please enter a valid 6-digit OTP',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    if (otpExpiry <= 0) {
+      toast({
+        title: 'OTP Expired',
+        description: 'Code expired. Please resend OTP and try again.',
         variant: 'destructive'
       });
       return;
@@ -109,14 +123,14 @@ const ForgotPassword = () => {
   const handleResendOtp = async () => {
     setLoading(true);
     try {
-      await passwordResetApi.resendOTP(email);
+      const resendResponse = await passwordResetApi.resendOTP(email);
       
       toast({
         title: 'OTP Resent',
         description: 'Check your email for the new OTP code'
       });
 
-      setOtpExpiry(120); // Reset timer to 2 minutes
+      setOtpExpiry(getOtpSeconds(resendResponse));
       setOtp('');
     } catch (error) {
       toast({
@@ -303,7 +317,7 @@ const ForgotPassword = () => {
                 onClick={handleResendOtp}
                 disabled={loading || otpExpiry > 60}
               >
-                {otpExpiry > 60 ? `Resend in ${Math.floor((otpExpiry - 60) / 10)}s` : 'Resend OTP'}
+                {otpExpiry > 60 ? `Resend in ${otpExpiry - 60}s` : 'Resend OTP'}
               </Button>
 
               <button

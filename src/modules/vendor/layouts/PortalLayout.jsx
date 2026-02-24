@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart, User as UserIcon, Check, Ban, MapPin, FolderKanban, MessageSquare, Wallet
+  BarChart, Wallet, User as UserIcon, Check, Ban, MapPin, FolderKanban, MessageSquare
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -374,10 +374,6 @@ const PortalLayout = () => {
 
                   <DropdownMenuItem onClick={() => navigate(resolvePath('settings', 'vendor'))}>
                     <Settings className="mr-2 h-4 w-4" /> Settings
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem onClick={() => navigate(resolvePath('referrals', 'vendor'))}>
-                    <Wallet className="mr-2 h-4 w-4" /> Referrals
                   </DropdownMenuItem>
 
                   <DropdownMenuSeparator />

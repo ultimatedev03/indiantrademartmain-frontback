@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { useToast } from '@/components/ui/use-toast';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -111,6 +112,24 @@ const isVendorVerified = (row) => {
   if (badge && badge !== 'unverified') return true;
   const kycStatus = String(row?.vendors?.kyc_status || '').trim().toUpperCase();
   return row?.vendors?.is_verified === true || kycStatus === 'APPROVED';
+};
+
+const normalizeVendorEmailForConversation = (value) => String(value || '').trim().toLowerCase();
+
+const buildVendorConversationKey = (row = {}) => {
+  const vendorUserId = String(row?.vendors?.user_id || row?.vendors?.id || row?.vendor_id || '').trim();
+  if (vendorUserId) return `user:${vendorUserId}`;
+
+  const vendorEmail = normalizeVendorEmailForConversation(resolveVendorEmail(row));
+  if (vendorEmail) return `email:${vendorEmail}`;
+
+  const companySeed = String(resolveVendorCompany(row) || '').trim().toLowerCase();
+  const ownerSeed = String(resolveVendorName(row) || '').trim().toLowerCase();
+  const fallbackSeed = [companySeed, ownerSeed].filter(Boolean).join('|');
+  if (fallbackSeed) return `name:${fallbackSeed}`;
+
+  const proposalId = String(row?.id || '').trim();
+  return proposalId ? `proposal:${proposalId}` : 'proposal:unknown';
 };
 
 const maskEmail = (value) => {
@@ -353,8 +372,37 @@ const resolvePresenceEntry = (presenceMap = {}, { userIds = [], emails = [] } = 
   return null;
 };
 
+const DEFAULT_CHAT_BLOCK_STATUS = Object.freeze({
+  blocked_by_me: false,
+  blocked_me: false,
+  can_message: true,
+  counterpart_user_id: null,
+});
+
+const normalizeChatBlockStatus = (value) => {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_CHAT_BLOCK_STATUS };
+  }
+
+  const blockedByMe = Boolean(value?.blocked_by_me);
+  const blockedMe = Boolean(value?.blocked_me);
+  const inferredCanMessage = !(blockedByMe || blockedMe);
+  const canMessage =
+    typeof value?.can_message === 'boolean'
+      ? value.can_message && inferredCanMessage
+      : inferredCanMessage;
+
+  return {
+    blocked_by_me: blockedByMe,
+    blocked_me: blockedMe,
+    can_message: canMessage,
+    counterpart_user_id: String(value?.counterpart_user_id || '').trim() || null,
+  };
+};
+
 const Messages = () => {
   const { portalPresenceByUserId } = useBuyerAuth();
+  const { toast } = useToast();
   const [conversations, setConversations] = useState([]);
   const [selectedChatId, setSelectedChatId] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -367,10 +415,13 @@ const Messages = () => {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editingProposalId, setEditingProposalId] = useState('');
   const [editingText, setEditingText] = useState('');
   const [savingMessageId, setSavingMessageId] = useState(null);
   const [deletingMessageId, setDeletingMessageId] = useState(null);
   const [deletingConversationId, setDeletingConversationId] = useState(null);
+  const [blockStatus, setBlockStatus] = useState(() => ({ ...DEFAULT_CHAT_BLOCK_STATUS }));
+  const [blockActionLoading, setBlockActionLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [contextMenu, setContextMenu] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -449,6 +500,15 @@ const Messages = () => {
   );
   const participantStatusText = isParticipantTyping ? 'Typing...' : (isParticipantOnline ? 'Online' : 'Offline');
   const selectedAvatarDotClass = isParticipantOnline ? 'bg-emerald-500' : 'bg-gray-300';
+  const isMessagingBlocked = blockStatus?.can_message === false;
+  const blockedNoticeText = blockStatus?.blocked_by_me
+    ? 'You blocked this vendor. Unblock to send messages.'
+    : blockStatus?.blocked_me
+      ? 'This vendor has blocked you. Messaging is disabled.'
+      : '';
+  const messagePlaceholderText = isMessagingBlocked
+    ? (blockStatus?.blocked_by_me ? 'Unblock this vendor to send messages' : 'Messaging unavailable for this chat')
+    : 'Type a message...';
 
   const messageItems = useMemo(() => {
     const items = [];
@@ -475,6 +535,7 @@ const Messages = () => {
 
     return items;
   }, [messages]);
+
 
   const scrollMessagesToBottom = useCallback((behavior = 'smooth') => {
     const el = messageListRef.current;
@@ -593,9 +654,12 @@ const Messages = () => {
 
   useEffect(() => {
     setEditingMessageId(null);
+    setEditingProposalId('');
     setEditingText('');
     setSavingMessageId(null);
     setDeletingMessageId(null);
+    setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
+    setBlockActionLoading(false);
     setContextMenu(null);
   }, [selectedChatId]);
 
@@ -659,12 +723,57 @@ const Messages = () => {
       const sorted = (Array.isArray(proposals) ? proposals : []).sort(
         (a, b) => new Date(b?.created_at || 0).getTime() - new Date(a?.created_at || 0).getTime()
       );
-      setConversations(sorted);
-      setSelectedChatId((prev) => {
-        if (prev && sorted.some((item) => item.id === prev)) return prev;
-        return sorted[0]?.id || null;
+
+      const groupedByVendor = new Map();
+      sorted.forEach((row) => {
+        const proposalId = String(row?.id || '').trim();
+        if (!proposalId) return;
+
+        const key = buildVendorConversationKey(row);
+        const existing = groupedByVendor.get(key);
+        if (!existing) {
+          groupedByVendor.set(key, {
+            key,
+            primaryProposalId: proposalId,
+            proposalIds: [proposalId],
+            row,
+          });
+          return;
+        }
+
+        if (!existing.proposalIds.includes(proposalId)) {
+          existing.proposalIds.push(proposalId);
+        }
+
+        const existingTs = new Date(existing.row?.created_at || 0).getTime();
+        const incomingTs = new Date(row?.created_at || 0).getTime();
+        if (incomingTs > existingTs) {
+          existing.primaryProposalId = proposalId;
+          existing.row = row;
+        }
       });
-      acknowledgeDelivered(sorted.map((item) => item.id));
+
+      const groupedRows = Array.from(groupedByVendor.values())
+        .sort((a, b) => new Date(b?.row?.created_at || 0).getTime() - new Date(a?.row?.created_at || 0).getTime())
+        .map((entry) => ({
+          ...entry.row,
+          id: entry.primaryProposalId,
+          primary_proposal_id: entry.primaryProposalId,
+          proposal_ids: Array.from(new Set(entry.proposalIds)),
+          vendor_group_key: entry.key,
+          proposal_count: entry.proposalIds.length,
+        }));
+
+      setConversations(groupedRows);
+      setSelectedChatId((prev) => {
+        if (prev && groupedRows.some((item) => item.id === prev)) return prev;
+        return groupedRows[0]?.id || null;
+      });
+      acknowledgeDelivered(
+        groupedRows.flatMap((item) =>
+          Array.isArray(item?.proposal_ids) && item.proposal_ids.length ? item.proposal_ids : [item?.id]
+        )
+      );
     } catch (error) {
       console.error('Error fetching chats:', error);
       setConversations([]);
@@ -674,30 +783,91 @@ const Messages = () => {
     }
   };
 
-  const fetchMessages = useCallback(async (proposalId, { silent = false } = {}) => {
-    if (!proposalId) {
+  const fetchMessages = useCallback(async (proposalId, { silent = false, proposalIds: proposalIdsInput = [] } = {}) => {
+    const fallbackProposalId = String(proposalId || '').trim();
+    const proposalIds = Array.from(
+      new Set(
+        (proposalIdsInput?.length ? proposalIdsInput : [fallbackProposalId])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    if (!proposalIds.length) {
       setMessages([]);
+      setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
       return;
     }
 
     if (!silent) setLoadingMessages(true);
     try {
-      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/messages`), {
-        cache: 'no-store',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
-      const responseActorId = String(json?.actor_user_id || '').trim();
+      const results = await Promise.allSettled(
+        proposalIds.map(async (id) => {
+          const res = await fetchWithCsrf(apiUrl(`/api/quotation/${id}/messages`), {
+            cache: 'no-store',
+          });
+          const json = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
+          return { proposalId: id, json };
+        })
+      );
+
+      const successful = results
+        .filter((result) => result.status === 'fulfilled')
+        .map((result) => result.value);
+
+      if (!successful.length) {
+        const firstError = results.find((result) => result.status === 'rejected');
+        throw firstError?.reason || new Error('Failed to load messages');
+      }
+
+      const responseActorId =
+        successful.map((item) => String(item?.json?.actor_user_id || '').trim()).find(Boolean) || '';
       if (responseActorId) {
         setActorMessageUserId(responseActorId);
       }
-      setParticipantUserId(String(json?.participants?.vendor_user_id || '').trim());
-      const incoming = Array.isArray(json?.messages) ? json.messages : [];
+
+      const responseBlockStatus =
+        successful.map((item) => item?.json?.block_status).find((value) => value && typeof value === 'object') || null;
+      setBlockStatus(normalizeChatBlockStatus(responseBlockStatus));
+
+      const participantId =
+        successful
+          .map((item) => String(item?.json?.participants?.vendor_user_id || '').trim())
+          .find(Boolean) || '';
+      setParticipantUserId(participantId);
+
       const actorId = responseActorId || resolvedActorUserId;
-      setMessages(incoming.map((row) => normalizeMessageRow(row, actorId, 'buyer')));
+      const merged = successful
+        .flatMap((item) => {
+          const incoming = Array.isArray(item?.json?.messages) ? item.json.messages : [];
+          return incoming.map((row) => ({
+            ...row,
+            proposal_id: String(row?.proposal_id || item.proposalId || '').trim() || null,
+          }));
+        })
+        .sort((a, b) => {
+          const aTs = new Date(a?.created_at || a?.updated_at || 0).getTime();
+          const bTs = new Date(b?.created_at || b?.updated_at || 0).getTime();
+          return aTs - bTs;
+        });
+
+      const deduped = [];
+      const seen = new Set();
+      merged.forEach((row) => {
+        const messageId = String(row?.id || '').trim();
+        if (messageId && seen.has(messageId)) return;
+        if (messageId) seen.add(messageId);
+        deduped.push(row);
+      });
+
+      setMessages(deduped.map((row) => normalizeMessageRow(row, actorId, 'buyer')));
     } catch (error) {
       console.error('Error loading messages:', error);
-      if (!silent) setMessages([]);
+      if (!silent) {
+        setMessages([]);
+        setBlockStatus({ ...DEFAULT_CHAT_BLOCK_STATUS });
+      }
     } finally {
       if (!silent) setLoadingMessages(false);
     }
@@ -713,6 +883,15 @@ const Messages = () => {
 
     let active = true;
     let fallbackPollId = null;
+    const activeProposalIds = Array.from(
+      new Set(
+        ((Array.isArray(selectedChat?.proposal_ids) && selectedChat.proposal_ids.length)
+          ? selectedChat.proposal_ids
+          : [selectedChatId])
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
     const presenceKey =
       String(resolvedActorUserId || '').trim() ||
       `buyer-${selectedChatId}-${Date.now()}`;
@@ -720,7 +899,7 @@ const Messages = () => {
       if (!active || syncInFlightRef.current) return;
       syncInFlightRef.current = true;
       try {
-        await fetchMessages(selectedChatId, { silent: true });
+        await fetchMessages(selectedChatId, { silent: true, proposalIds: activeProposalIds });
       } finally {
         syncInFlightRef.current = false;
       }
@@ -730,69 +909,60 @@ const Messages = () => {
       syncMessages();
     }, 1200);
 
-    fetchMessages(selectedChatId);
+    fetchMessages(selectedChatId, { proposalIds: activeProposalIds });
 
-    const channel = supabase
-      .channel(`proposal-chat-${selectedChatId}`, {
-        config: { presence: { key: presenceKey } },
-      })
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const row = payload?.new;
-          if (!row?.id) return;
-          const normalized = normalizeMessageRow(row, resolvedActorUserId, 'buyer');
-          setMessages((prev) => {
-            if (prev.some((item) => item.id === row.id)) return prev;
-            return [...prev, normalized];
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const row = payload?.new;
-          if (!row?.id) return;
-          const normalized = normalizeMessageRow(row, resolvedActorUserId, 'buyer');
-          setMessages((prev) => {
-            const idx = prev.findIndex((item) => item.id === row.id);
-            if (idx === -1) return [...prev, normalized];
-            const next = [...prev];
-            next[idx] = normalized;
-            return next;
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'DELETE',
-          schema: 'public',
-          table: 'proposal_messages',
-          filter: `proposal_id=eq.${selectedChatId}`,
-        },
-        (payload) => {
-          if (!active) return;
-          const deletedId = payload?.old?.id || payload?.new?.id;
-          if (!deletedId) return;
-          setMessages((prev) => prev.filter((item) => item.id !== deletedId));
-        }
-      )
-      .on('presence', { event: 'sync' }, () => {
+    let channel = supabase.channel(`proposal-chat-${selectedChatId}`, {
+      config: { presence: { key: presenceKey } },
+    });
+
+    const attachProposalEvent = (event, handler) => {
+      activeProposalIds.forEach((proposalId) => {
+        channel = channel.on(
+          'postgres_changes',
+          {
+            event,
+            schema: 'public',
+            table: 'proposal_messages',
+            filter: `proposal_id=eq.${proposalId}`,
+          },
+          handler
+        );
+      });
+    };
+
+    attachProposalEvent('INSERT', (payload) => {
+      if (!active) return;
+      const row = payload?.new;
+      if (!row?.id) return;
+      const normalized = normalizeMessageRow(row, resolvedActorUserId, 'buyer');
+      setMessages((prev) => {
+        if (prev.some((item) => item.id === row.id)) return prev;
+        return [...prev, normalized];
+      });
+    });
+
+    attachProposalEvent('UPDATE', (payload) => {
+      if (!active) return;
+      const row = payload?.new;
+      if (!row?.id) return;
+      const normalized = normalizeMessageRow(row, resolvedActorUserId, 'buyer');
+      setMessages((prev) => {
+        const idx = prev.findIndex((item) => item.id === row.id);
+        if (idx === -1) return [...prev, normalized];
+        const next = [...prev];
+        next[idx] = normalized;
+        return next;
+      });
+    });
+
+    attachProposalEvent('DELETE', (payload) => {
+      if (!active) return;
+      const deletedId = payload?.old?.id || payload?.new?.id;
+      if (!deletedId) return;
+      setMessages((prev) => prev.filter((item) => item.id !== deletedId));
+    });
+
+    channel = channel.on('presence', { event: 'sync' }, () => {
         if (!active) return;
         const state = channel.presenceState();
         const mapped = mapPresenceStateWithAliases(state);
@@ -838,11 +1008,11 @@ const Messages = () => {
       if (fallbackPollId) clearInterval(fallbackPollId);
       supabase.removeChannel(channel);
     };
-  }, [selectedChatId, fetchMessages, resolvedActorUserId]);
+  }, [selectedChatId, selectedChat, fetchMessages, resolvedActorUserId]);
 
   const handleSend = async () => {
     const text = newMessage.trim();
-    if (!text || !selectedChatId || sending) return;
+    if (!text || !selectedChatId || sending || isMessagingBlocked || blockActionLoading) return;
 
     if (typingTimerRef.current) {
       clearTimeout(typingTimerRef.current);
@@ -857,7 +1027,12 @@ const Messages = () => {
         body: JSON.stringify({ message: text }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to send message');
+      if (!res.ok) {
+        if (json?.block_status) {
+          setBlockStatus(normalizeChatBlockStatus(json.block_status));
+        }
+        throw new Error(json?.error || 'Failed to send message');
+      }
 
       if (json?.message?.id) {
         const normalized = normalizeMessageRow(json.message, resolvedActorUserId, 'buyer');
@@ -866,32 +1041,83 @@ const Messages = () => {
           return [...prev, normalized];
         });
       } else {
-        await fetchMessages(selectedChatId, { silent: true });
+        await fetchMessages(selectedChatId, { silent: true, proposalIds: selectedChat?.proposal_ids || [] });
       }
 
       setNewMessage('');
     } catch (error) {
       console.error('Failed to send:', error);
+      toast({
+        title: 'Send failed',
+        description: error?.message || 'Unable to send message',
+        variant: 'destructive',
+      });
     } finally {
       setSending(false);
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    const proposalId = String(selectedChatId || '').trim();
+    if (!proposalId || blockActionLoading) return;
+
+    const action = blockStatus?.blocked_by_me ? 'unblock' : 'block';
+    setBlockActionLoading(true);
+    try {
+      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/block`), {
+        method: 'POST',
+        body: JSON.stringify({ action }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error || `Failed to ${action} chat`);
+
+      setBlockStatus(normalizeChatBlockStatus(json?.block_status));
+
+      if (action === 'block') {
+        if (typingTimerRef.current) {
+          clearTimeout(typingTimerRef.current);
+          typingTimerRef.current = null;
+        }
+        trackTypingPresence(false);
+        setNewMessage('');
+      }
+
+      toast({
+        title: action === 'block' ? 'Vendor blocked' : 'Vendor unblocked',
+        description:
+          action === 'block'
+            ? 'Messaging is disabled for this chat until you unblock.'
+            : 'Messaging is enabled again for this chat.',
+      });
+    } catch (error) {
+      console.error('Failed to update block status:', error);
+      toast({
+        title: 'Action failed',
+        description: error?.message || 'Unable to update chat block status',
+        variant: 'destructive',
+      });
+    } finally {
+      setBlockActionLoading(false);
     }
   };
 
   const startEditing = (msg) => {
     if (!msg?.id || !msg?.is_me) return;
     setEditingMessageId(msg.id);
+    setEditingProposalId(String(msg?.proposal_id || selectedChatId || '').trim());
     setEditingText(String(msg?.message || ''));
   };
 
   const cancelEditing = () => {
     setEditingMessageId(null);
+    setEditingProposalId('');
     setEditingText('');
     setSavingMessageId(null);
   };
 
   const handleEditMessage = async () => {
     const messageId = String(editingMessageId || '').trim();
-    const proposalId = String(selectedChatId || '').trim();
+    const proposalId = String(editingProposalId || selectedChatId || '').trim();
     const updatedText = editingText.trim();
     if (!proposalId || !messageId || !updatedText) return;
 
@@ -908,7 +1134,7 @@ const Messages = () => {
         const normalized = normalizeMessageRow(json.message, resolvedActorUserId, 'buyer');
         setMessages((prev) => prev.map((item) => (item.id === normalized.id ? normalized : item)));
       } else {
-        await fetchMessages(proposalId, { silent: true });
+        await fetchMessages(proposalId, { silent: true, proposalIds: selectedChat?.proposal_ids || [] });
       }
       cancelEditing();
     } catch (error) {
@@ -934,8 +1160,14 @@ const Messages = () => {
       if (editingMessageId === targetMessageId) {
         cancelEditing();
       }
+      toast({ title: 'Message deleted' });
     } catch (error) {
       console.error('Failed to delete message:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete message',
+        variant: 'destructive',
+      });
     } finally {
       setDeletingMessageId(null);
     }
@@ -944,21 +1176,48 @@ const Messages = () => {
   const handleDeleteConversation = async (proposalIdInput) => {
     const proposalId = String(proposalIdInput || '').trim();
     if (!proposalId || deletingConversationId) return;
+    const conversation = conversations.find((item) => String(item?.id || '').trim() === proposalId);
+    const proposalIds = Array.from(
+      new Set(
+        (Array.isArray(conversation?.proposal_ids) && conversation.proposal_ids.length
+          ? conversation.proposal_ids
+          : [proposalId]
+        )
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+      )
+    );
 
     setDeletingConversationId(proposalId);
     try {
-      const res = await fetchWithCsrf(apiUrl(`/api/quotation/${proposalId}/messages`), {
-        method: 'DELETE',
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json?.error || 'Failed to delete chat');
+      for (const targetProposalId of proposalIds) {
+        const res = await fetchWithCsrf(apiUrl(`/api/quotation/${targetProposalId}/messages`), {
+          method: 'DELETE',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(json?.error || 'Failed to delete chat');
+      }
 
       if (String(selectedChatId || '').trim() === proposalId) {
         setMessages([]);
         cancelEditing();
       }
+
+      await fetchConversations();
+      toast({
+        title: 'Chat deleted',
+        description:
+          proposalIds.length > 1
+            ? `${proposalIds.length} linked proposal chats were removed.`
+            : 'Conversation removed successfully.',
+      });
     } catch (error) {
       console.error('Failed to delete conversation:', error);
+      toast({
+        title: 'Delete failed',
+        description: error?.message || 'Unable to delete chat',
+        variant: 'destructive',
+      });
     } finally {
       setDeletingConversationId(null);
     }
@@ -1042,6 +1301,11 @@ const Messages = () => {
                     const conversationName = resolveVendorName(chat);
                     const conversationEmail = resolveVendorEmail(chat);
                     const conversationAvatar = resolveVendorAvatar(chat);
+                    const proposalCount =
+                      Array.isArray(chat?.proposal_ids) && chat.proposal_ids.length ? chat.proposal_ids.length : 1;
+                    const conversationSummaryBase = chat?.product_name || chat?.title || 'Proposal conversation';
+                    const conversationSummary =
+                      proposalCount > 1 ? `${conversationSummaryBase} - ${proposalCount} proposals` : conversationSummaryBase;
                     const conversationPresenceIdentity = {
                       userIds: [
                         String(chat?.vendors?.user_id || '').trim(),
@@ -1098,7 +1362,7 @@ const Messages = () => {
                             <span className="font-semibold text-gray-900 text-sm truncate">{conversationName}</span>
                             <span className="text-[10px] text-gray-400 shrink-0">{safeDate(chat?.created_at)}</span>
                           </div>
-                          <p className="text-xs text-gray-500 truncate">{chat?.product_name || chat?.title || 'Proposal conversation'}</p>
+                          <p className="text-xs text-gray-500 truncate">{conversationSummary}</p>
                         </div>
                       </div>
                     );
@@ -1147,6 +1411,29 @@ const Messages = () => {
                 <p className={`text-xs ${isParticipantTyping ? 'text-[#003D82]' : 'text-gray-500'}`}>
                   {participantStatusText}
                 </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={blockStatus?.blocked_by_me ? 'outline' : 'destructive'}
+                  onClick={handleToggleBlock}
+                  disabled={blockActionLoading}
+                  className={
+                    blockStatus?.blocked_by_me
+                      ? 'h-8 px-3 text-xs'
+                      : 'h-8 px-3 text-xs bg-red-600 text-white hover:bg-red-700'
+                  }
+                >
+                  {blockActionLoading ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Updating
+                    </span>
+                  ) : blockStatus?.blocked_by_me ? (
+                    'Unblock'
+                  ) : (
+                    'Block'
+                  )}
+                </Button>
               </div>
             </div>
 
@@ -1190,6 +1477,7 @@ const Messages = () => {
                           setContextMenu({
                             type: 'message',
                             messageId: msg.id,
+                            proposalId: String(msg?.proposal_id || selectedChatId || '').trim(),
                             x: event.clientX,
                             y: event.clientY,
                           });
@@ -1252,17 +1540,28 @@ const Messages = () => {
               )}
             </div>
 
-            <div className="p-4 bg-white border-t flex gap-2">
-              <Input 
-                value={newMessage} 
-                onChange={handleMessageInputChange}
-                onKeyDown={e => e.key === 'Enter' && handleSend()}
-                placeholder="Type a message..." 
-                className="flex-1"
-              />
-              <Button onClick={handleSend} size="icon" className="bg-[#003D82]" disabled={sending}>
-                {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
+            <div className="p-4 bg-white border-t space-y-2">
+              {isMessagingBlocked ? (
+                <p className="text-xs text-red-600">{blockedNoticeText}</p>
+              ) : null}
+              <div className="flex gap-2">
+                <Input
+                  value={newMessage}
+                  onChange={handleMessageInputChange}
+                  onKeyDown={e => e.key === 'Enter' && handleSend()}
+                  placeholder={messagePlaceholderText}
+                  className="flex-1"
+                  disabled={sending || isMessagingBlocked || blockActionLoading}
+                />
+                <Button
+                  onClick={handleSend}
+                  size="icon"
+                  className="bg-[#003D82]"
+                  disabled={sending || isMessagingBlocked || blockActionLoading}
+                >
+                  {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
+              </div>
             </div>
 
             {contextMenu && contextMenuStyle ? (
@@ -1309,7 +1608,7 @@ const Messages = () => {
                       type="button"
                       className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm text-red-600 hover:bg-red-50"
                       onClick={() => {
-                        requestDeleteMessage(contextMenu.messageId, selectedChatId);
+                        requestDeleteMessage(contextMenu.messageId, contextMenu.proposalId || selectedChatId);
                         setContextMenu(null);
                       }}
                     >

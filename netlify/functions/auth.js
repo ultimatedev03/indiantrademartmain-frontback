@@ -523,7 +523,7 @@ const assertUserActive = async (user) => {
     return { ok: true };
   }
 
-  if (['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP', 'FINANCE', 'SUPERADMIN'].includes(role)) {
+  if (['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE', 'SUPERADMIN'].includes(role)) {
     const { data: emp } = await supabase
       .from('employees')
       .select('status')

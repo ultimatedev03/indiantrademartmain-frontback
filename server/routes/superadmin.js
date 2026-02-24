@@ -23,8 +23,6 @@ const EMPLOYEE_ALLOWED_ROLES = [
   'DATA_ENTRY',
   'SUPPORT',
   'SALES',
-  'MANAGER',
-  'VP',
   'FINANCE',
 ];
 
@@ -180,7 +178,8 @@ function buildPlanFeatures(existingFeatures, payload = {}) {
   const hasPricingInput =
     hasOwn(payload, 'original_price') ||
     hasOwn(payload, 'discount_percent') ||
-    hasOwn(payload, 'discount_label');
+    hasOwn(payload, 'discount_label') ||
+    hasOwn(payload, 'extra_lead_price');
 
   if (hasPricingInput) {
     const pricing = {
@@ -196,6 +195,9 @@ function buildPlanFeatures(existingFeatures, payload = {}) {
     }
     if (hasOwn(payload, 'discount_label')) {
       pricing.discount_label = String(payload.discount_label || '').trim();
+    }
+    if (hasOwn(payload, 'extra_lead_price')) {
+      pricing.extra_lead_price = toNonNegativeNumber(payload.extra_lead_price, 0);
     }
 
     next.pricing = pricing;
@@ -901,6 +903,7 @@ router.post('/plans', async (req, res) => {
         yearly_limit: payload.yearly_limit,
         duration_days: payload.duration_days,
         is_active: payload.is_active,
+        extra_lead_price: toNonNegativeNumber(payload?.features?.pricing?.extra_lead_price, 0),
       },
     });
 
@@ -946,6 +949,7 @@ router.put('/plans/:planId', async (req, res) => {
       hasOwn(req.body, 'original_price') ||
       hasOwn(req.body, 'discount_percent') ||
       hasOwn(req.body, 'discount_label') ||
+      hasOwn(req.body, 'extra_lead_price') ||
       hasOwn(req.body, 'badge_label') ||
       hasOwn(req.body, 'badge_variant') ||
       hasOwn(req.body, 'states_limit') ||

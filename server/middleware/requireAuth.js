@@ -24,8 +24,6 @@ const INTERNAL_ROLE_SET = new Set([
   'DATA_ENTRY',
   'SUPPORT',
   'SALES',
-  'MANAGER',
-  'VP',
   'FINANCE',
   'SUPERADMIN',
 ]);
