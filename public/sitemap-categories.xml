@@ -1,6 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
+    <loc>https://indiantrademart.com/directory/agro-waste</loc>
+    <lastmod>2026-02-23</lastmod>
+    <priority>0.7</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://indiantrademart.com/directory/animal-feed</loc>
+    <lastmod>2026-02-23</lastmod>
+    <priority>0.7</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
     <loc>https://indiantrademart.com/directory/varnishes</loc>
     <lastmod>2026-02-23</lastmod>
     <priority>0.7</priority>
@@ -806,12 +818,6 @@
   </url>
   <url>
     <loc>https://indiantrademart.com/directory/hydrological-survey</loc>
-    <lastmod>2026-02-23</lastmod>
-    <priority>0.7</priority>
-    <changefreq>monthly</changefreq>
-  </url>
-  <url>
-    <loc>https://indiantrademart.com/directory/animal-feed</loc>
     <lastmod>2026-02-23</lastmod>
     <priority>0.7</priority>
     <changefreq>monthly</changefreq>
@@ -1767,12 +1773,6 @@
   <url>
     <loc>https://indiantrademart.com/directory/agricultural-consultants</loc>
     <lastmod>2026-02-23</lastmod>
-    <priority>0.7</priority>
-    <changefreq>monthly</changefreq>
-  </url>
-  <url>
-    <loc>https://indiantrademart.com/directory/agro-waste</loc>
-    <lastmod>2026-02-21</lastmod>
     <priority>0.7</priority>
     <changefreq>monthly</changefreq>
   </url>
