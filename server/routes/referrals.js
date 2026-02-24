@@ -60,7 +60,7 @@ router.get('/me', async (req, res) => {
       getReferralSettings(supabase),
       supabase
         .from('vendor_referrals')
-        .select('id, status, created_at, qualified_at, rewarded_at, referred_vendor:vendors!vendor_referrals_referred_vendor_id_fkey(id, company_name, vendor_id, email)')
+        .select('id, status, created_at, qualified_at, rewarded_at, referred_vendor_id')
         .eq('referrer_vendor_id', vendor.id)
         .order('created_at', { ascending: false })
         .limit(25),
@@ -75,6 +75,31 @@ router.get('/me', async (req, res) => {
     if (walletRes.error) throw walletRes.error;
     if (referredRowsRes.error) throw referredRowsRes.error;
     if (earnedRowsRes.error) throw earnedRowsRes.error;
+
+    const rawReferrals = Array.isArray(referredRowsRes.data) ? referredRowsRes.data : [];
+    const referredVendorIds = Array.from(
+      new Set(rawReferrals.map((row) => String(row?.referred_vendor_id || '').trim()).filter(Boolean))
+    );
+
+    let vendorMap = {};
+    if (referredVendorIds.length > 0) {
+      const { data: vendors, error: vendorsErr } = await supabase
+        .from('vendors')
+        .select('id, company_name, vendor_id, email')
+        .in('id', referredVendorIds);
+
+      if (vendorsErr) throw vendorsErr;
+
+      vendorMap = (vendors || []).reduce((acc, row) => {
+        if (row?.id) acc[row.id] = row;
+        return acc;
+      }, {});
+    }
+
+    const referrals = rawReferrals.map((row) => ({
+      ...row,
+      referred_vendor: row?.referred_vendor_id ? vendorMap[row.referred_vendor_id] || null : null,
+    }));
 
     const wallet = walletRes.data || {
       vendor_id: vendor.id,
@@ -94,7 +119,7 @@ router.get('/me', async (req, res) => {
           is_enabled: Boolean(settings?.is_enabled),
           min_cashout_amount: Number(settings?.min_cashout_amount || 0),
         },
-        referrals: referredRowsRes.data || [],
+        referrals,
         ledger: earnedRowsRes.data || [],
       },
     });

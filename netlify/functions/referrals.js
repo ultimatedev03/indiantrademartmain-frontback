@@ -7,6 +7,8 @@ import {
   normalizeReferralCode,
 } from '../../server/lib/referralProgram.js';
 
+const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
+
 const json = (statusCode, body, extraHeaders = {}) => ({
   statusCode,
   headers: {
@@ -56,6 +58,25 @@ const readBody = (event) => {
 const normalizeText = (value) => String(value || '').trim();
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
+const parseCookies = (cookieHeader = '') => {
+  const out = {};
+  if (!cookieHeader || typeof cookieHeader !== 'string') return out;
+  cookieHeader.split(';').forEach((part) => {
+    const idx = part.indexOf('=');
+    if (idx < 0) return;
+    const key = decodeURIComponent(part.slice(0, idx).trim());
+    const value = decodeURIComponent(part.slice(idx + 1).trim());
+    if (key) out[key] = value;
+  });
+  return out;
+};
+
+const getCookie = (event, name) => {
+  const header = event?.headers?.cookie || event?.headers?.Cookie || '';
+  const cookies = parseCookies(header);
+  return cookies[name];
+};
+
 const parseBearerToken = (headers = {}) => {
   const header = headers.Authorization || headers.authorization;
   if (!header || typeof header !== 'string') return null;
@@ -63,16 +84,57 @@ const parseBearerToken = (headers = {}) => {
   return header.replace('Bearer ', '').trim();
 };
 
+let warnedMissingJwtSecret = false;
+const getJwtSecret = () => {
+  const secret =
+    process.env.JWT_SECRET ||
+    process.env.SUPABASE_JWT_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!secret) {
+    throw new Error('Missing JWT_SECRET (or fallback secret) in environment');
+  }
+
+  if (!process.env.JWT_SECRET && !warnedMissingJwtSecret) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[Referrals] JWT_SECRET missing. Falling back to another secret. Configure a dedicated JWT_SECRET.'
+    );
+    warnedMissingJwtSecret = true;
+  }
+
+  return secret;
+};
+
+const verifyAuthToken = async (token) => {
+  try {
+    const jwt = await import('jsonwebtoken');
+    return jwt.default.verify(token, getJwtSecret());
+  } catch {
+    return null;
+  }
+};
+
 const resolveAuthUser = async (event, supabase) => {
   const token = parseBearerToken(event?.headers || {});
-  if (!token) return null;
+  if (token) {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (!error && data?.user) {
+      return {
+        id: data.user.id,
+        email: normalizeEmail(data.user.email || ''),
+      };
+    }
+  }
 
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) return null;
+  const cookieToken = getCookie(event, AUTH_COOKIE_NAME);
+  if (!cookieToken) return null;
+  const decoded = await verifyAuthToken(cookieToken);
+  if (!decoded?.sub) return null;
 
   return {
-    id: data.user.id,
-    email: normalizeEmail(data.user.email || ''),
+    id: decoded.sub,
+    email: normalizeEmail(decoded?.email || ''),
   };
 };
 
@@ -129,7 +191,7 @@ export const handler = async (event) => {
         getReferralSettings(supabase),
         supabase
           .from('vendor_referrals')
-          .select('id, status, created_at, qualified_at, rewarded_at, referred_vendor:vendors!vendor_referrals_referred_vendor_id_fkey(id, company_name, vendor_id, email)')
+          .select('id, status, created_at, qualified_at, rewarded_at, referred_vendor_id')
           .eq('referrer_vendor_id', vendor.id)
           .order('created_at', { ascending: false })
           .limit(25),
@@ -144,6 +206,31 @@ export const handler = async (event) => {
       if (walletRes.error) throw walletRes.error;
       if (referredRowsRes.error) throw referredRowsRes.error;
       if (earnedRowsRes.error) throw earnedRowsRes.error;
+
+      const rawReferrals = Array.isArray(referredRowsRes.data) ? referredRowsRes.data : [];
+      const referredVendorIds = Array.from(
+        new Set(rawReferrals.map((row) => String(row?.referred_vendor_id || '').trim()).filter(Boolean))
+      );
+
+      let vendorMap = {};
+      if (referredVendorIds.length > 0) {
+        const { data: vendors, error: vendorsErr } = await supabase
+          .from('vendors')
+          .select('id, company_name, vendor_id, email')
+          .in('id', referredVendorIds);
+
+        if (vendorsErr) throw vendorsErr;
+
+        vendorMap = (vendors || []).reduce((acc, row) => {
+          if (row?.id) acc[row.id] = row;
+          return acc;
+        }, {});
+      }
+
+      const referrals = rawReferrals.map((row) => ({
+        ...row,
+        referred_vendor: row?.referred_vendor_id ? vendorMap[row.referred_vendor_id] || null : null,
+      }));
 
       const wallet = walletRes.data || {
         vendor_id: vendor.id,
@@ -163,7 +250,7 @@ export const handler = async (event) => {
             is_enabled: Boolean(settings?.is_enabled),
             min_cashout_amount: Number(settings?.min_cashout_amount || 0),
           },
-          referrals: referredRowsRes.data || [],
+          referrals,
           ledger: earnedRowsRes.data || [],
         },
       });
@@ -232,4 +319,3 @@ export const handler = async (event) => {
     return json(500, { success: false, error: error.message || 'Internal error' });
   }
 };
-

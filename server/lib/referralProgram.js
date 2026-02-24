@@ -1,4 +1,27 @@
-import { supabase } from './supabaseClient.js';
+import { createClient } from '@supabase/supabase-js';
+
+let cachedDefaultClient = null;
+
+const getDefaultClient = () => {
+  if (cachedDefaultClient) return cachedDefaultClient;
+
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Missing Supabase credentials');
+  }
+
+  cachedDefaultClient = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+
+  return cachedDefaultClient;
+};
 
 export const REFERRAL_DEFAULTS = {
   is_enabled: false,
@@ -43,7 +66,7 @@ export const calculateOfferAmount = ({ baseAmount, type, value, cap = null }) =>
   return Math.max(0, Math.min(discount, amount));
 };
 
-export const getReferralSettings = async (client = supabase) => {
+export const getReferralSettings = async (client = getDefaultClient()) => {
   const { data, error } = await client
     .from('referral_program_settings')
     .select('*')
@@ -61,7 +84,7 @@ export const getReferralSettings = async (client = supabase) => {
   };
 };
 
-export const getReferralPlanRule = async (planId, at = new Date(), client = supabase) => {
+export const getReferralPlanRule = async (planId, at = new Date(), client = getDefaultClient()) => {
   if (!planId) return null;
   const { data, error } = await client
     .from('referral_plan_rules')
@@ -86,7 +109,7 @@ export const getReferralPlanRule = async (planId, at = new Date(), client = supa
   return data;
 };
 
-export const ensureVendorReferralProfile = async (vendor, client = supabase) => {
+export const ensureVendorReferralProfile = async (vendor, client = getDefaultClient()) => {
   const vendorId = String(vendor?.id || '').trim();
   if (!vendorId) return null;
 
@@ -135,7 +158,10 @@ export const ensureVendorReferralProfile = async (vendor, client = supabase) => 
   throw new Error('Unable to generate unique referral code');
 };
 
-export const linkReferralForVendor = async ({ referredVendor, referralCode }, client = supabase) => {
+export const linkReferralForVendor = async (
+  { referredVendor, referralCode },
+  client = getDefaultClient()
+) => {
   const referredVendorId = String(referredVendor?.id || '').trim();
   const code = normalizeReferralCode(referralCode);
   if (!referredVendorId || !code) {
@@ -216,7 +242,10 @@ export const linkReferralForVendor = async ({ referredVendor, referralCode }, cl
   return inserted;
 };
 
-const getPendingReferralForVendor = async (referredVendorId, client = supabase) => {
+const getPendingReferralForVendor = async (
+  referredVendorId,
+  client = getDefaultClient()
+) => {
   const { data, error } = await client
     .from('vendor_referrals')
     .select('*')
@@ -231,7 +260,11 @@ const getPendingReferralForVendor = async (referredVendorId, client = supabase) 
   return data || null;
 };
 
-const hasPriorCompletedPayment = async (vendorId, excludePaymentId, client = supabase) => {
+const hasPriorCompletedPayment = async (
+  vendorId,
+  excludePaymentId,
+  client = getDefaultClient()
+) => {
   const { data, error } = await client
     .from('vendor_payments')
     .select('id')
@@ -244,7 +277,7 @@ const hasPriorCompletedPayment = async (vendorId, excludePaymentId, client = sup
   return Array.isArray(data) && data.length > 0;
 };
 
-const ensureWallet = async (vendorId, client = supabase) => {
+const ensureWallet = async (vendorId, client = getDefaultClient()) => {
   const payload = {
     vendor_id: vendorId,
     available_balance: 0,
@@ -263,7 +296,10 @@ const ensureWallet = async (vendorId, client = supabase) => {
   return data;
 };
 
-export const getReferralOfferForVendor = async ({ vendor, plan, at = new Date() }, client = supabase) => {
+export const getReferralOfferForVendor = async (
+  { vendor, plan, at = new Date() },
+  client = getDefaultClient()
+) => {
   const settings = await getReferralSettings(client);
   if (!settings.is_enabled) return null;
   if (!vendor?.id || !plan?.id) return null;
@@ -300,7 +336,7 @@ export const getReferralOfferForVendor = async ({ vendor, plan, at = new Date() 
 
 export const applyReferralRewardAfterPayment = async (
   { referredVendorId, plan, paymentRow, netAmount },
-  client = supabase
+  client = getDefaultClient()
 ) => {
   const paymentId = String(paymentRow?.id || '').trim();
   if (!referredVendorId || !paymentId || !plan?.id) return { applied: false, reason: 'missing_context' };
@@ -431,7 +467,7 @@ export const applyReferralRewardAfterPayment = async (
 
 export const createReferralCashoutRequest = async (
   { vendorId, amount, bankDetailId = null, note = null },
-  client = supabase
+  client = getDefaultClient()
 ) => {
   const requestedAmount = Number(amount || 0);
   if (!vendorId || !Number.isFinite(requestedAmount) || requestedAmount <= 0) {
