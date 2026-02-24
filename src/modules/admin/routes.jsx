@@ -269,6 +269,7 @@ export const AdminRoutes = () => {
           <Route path="dashboard" element={<SalesDashboard />} />
           <Route path="leads" element={<SalesLeads />} />
           <Route path="pricing-rules" element={<PricingRules />} />
+          <Route path="territory-engagements" element={<TerritoryEngagements />} />
         </Route>
       ) : null}
 
@@ -277,8 +278,9 @@ export const AdminRoutes = () => {
         <Route path="manager" element={<EmployeeLayout allowedRole="MANAGER" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<ManagerDashboard />} />
-          <Route path="territory" element={<ManagerDashboard />} />
-          <Route path="engagements" element={<TerritoryEngagements />} />
+          <Route path="territory" element={<Navigate to="../territory-engagements" replace />} />
+          <Route path="engagements" element={<Navigate to="../territory-engagements" replace />} />
+          <Route path="territory-engagements" element={<TerritoryEngagements />} />
         </Route>
       ) : null}
 
@@ -287,8 +289,9 @@ export const AdminRoutes = () => {
         <Route path="vp" element={<EmployeeLayout allowedRole="VP" />}>
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<VpDashboard />} />
-          <Route path="territory" element={<VpDashboard />} />
-          <Route path="engagements" element={<TerritoryEngagements />} />
+          <Route path="territory" element={<Navigate to="../territory-engagements" replace />} />
+          <Route path="engagements" element={<Navigate to="../territory-engagements" replace />} />
+          <Route path="territory-engagements" element={<TerritoryEngagements />} />
         </Route>
       ) : null}
 

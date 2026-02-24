@@ -188,6 +188,51 @@ const parseCurrencyAmount = (value, fallback = 50) => {
   return Math.max(0, n);
 };
 
+const asObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const getPlanExtraLeadPrice = (plan) => {
+  const features = asObject(plan?.features);
+  const pricing = asObject(features?.pricing);
+  return parseCurrencyAmount(pricing?.extra_lead_price, 0);
+};
+
+const resolvePaidLeadPrice = (lead, plan) => {
+  const configuredPrice = getPlanExtraLeadPrice(plan);
+  if (configuredPrice > 0) return configuredPrice;
+  return parseCurrencyAmount(lead?.price, 50);
+};
+
+const isMissingPlanFeaturesColumn = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  if (code === '42703') return true;
+  const message = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  return message.includes('features') && message.includes('vendor_plans');
+};
+
+const isMissingRelationError = (error, relationName) => {
+  const msg = String(error?.message || '').toLowerCase();
+  const code = String(error?.code || '').toUpperCase();
+  const normalizedRelation = String(relationName || '').toLowerCase();
+  if (code === '42P01') return true;
+  if (!normalizedRelation) return false;
+  return (
+    (msg.includes('relation') && msg.includes(normalizedRelation) && msg.includes('does not exist')) ||
+    (msg.includes('table') && msg.includes(normalizedRelation) && msg.includes('not found')) ||
+    (msg.includes(normalizedRelation) && msg.includes('schema cache'))
+  );
+};
+
 const consumeLeadForVendor = async (supabase, { vendorId, leadId, mode = 'AUTO', purchasePrice = 0 }) => {
   return consumeLeadForVendorWithCompat({
     supabase,
@@ -215,6 +260,40 @@ const getActiveVendorSubscription = async (supabase, vendorId) => {
 
   const active = (rows || []).find((row) => !row?.end_date || String(row.end_date) > nowIso);
   return active || null;
+};
+
+const fetchVendorPlanForPricing = async (supabase, planId) => {
+  if (!planId) return null;
+
+  const full = await supabase
+    .from('vendor_plans')
+    .select('id, name, price, features')
+    .eq('id', planId)
+    .maybeSingle();
+
+  if (!full?.error) return full?.data || null;
+  if (!isMissingPlanFeaturesColumn(full.error)) {
+    // eslint-disable-next-line no-console
+    console.warn('Failed to fetch vendor plan pricing meta:', full.error?.message || full.error);
+    return null;
+  }
+
+  const fallback = await supabase
+    .from('vendor_plans')
+    .select('id, name, price')
+    .eq('id', planId)
+    .maybeSingle();
+
+  if (fallback?.error) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      'Failed to fetch vendor plan fallback pricing meta:',
+      fallback.error?.message || fallback.error
+    );
+    return null;
+  }
+
+  return fallback?.data || null;
 };
 
 const resolveAuthenticatedUser = async (event, supabase) => {
@@ -729,6 +808,7 @@ export const handler = async (event) => {
       if (!activeSubscription) {
         return json(403, { error: 'No active subscription plan' });
       }
+      const activePlan = await fetchVendorPlanForPricing(supabase, activeSubscription?.plan_id);
 
       const { data: lead, error: leadError } = await supabase
         .from('leads')
@@ -775,7 +855,7 @@ export const handler = async (event) => {
         return json(409, { error: 'This lead has reached maximum 5 vendors limit' });
       }
 
-      const leadPrice = parseCurrencyAmount(lead?.price, 50);
+      const leadPrice = resolvePaidLeadPrice(lead, activePlan);
       if (leadPrice <= 0) {
         return json(400, { error: 'Invalid lead price for online payment' });
       }
@@ -796,6 +876,7 @@ export const handler = async (event) => {
         notes: {
           lead_id: leadId,
           vendor_id: vendor.id,
+          plan_id: activeSubscription?.plan_id || '',
           vendor_email: vendor.email || '',
         },
       });
@@ -812,6 +893,7 @@ export const handler = async (event) => {
           vendor_email: vendor.email || '',
           lead_title: lead?.title || lead?.product_name || 'Lead Purchase',
           lead_price: leadPrice,
+          lead_price_source: getPlanExtraLeadPrice(activePlan) > 0 ? 'PLAN_EXTRA_LEAD_PRICE' : 'LEAD_PRICE',
         },
       });
     }
@@ -856,7 +938,15 @@ export const handler = async (event) => {
         return json(409, { error: 'Lead no longer available' });
       }
 
-      const purchaseAmount = parseCurrencyAmount(lead?.price, 50);
+      let purchaseAmount = parseCurrencyAmount(lead?.price, 50);
+      try {
+        const activeSubscription = await getActiveVendorSubscription(supabase, vendor.id);
+        const activePlan = await fetchVendorPlanForPricing(supabase, activeSubscription?.plan_id);
+        purchaseAmount = resolvePaidLeadPrice(lead, activePlan);
+      } catch (priceResolveError) {
+        // eslint-disable-next-line no-console
+        console.warn('Failed to resolve paid lead price from plan:', priceResolveError?.message || priceResolveError);
+      }
       const consumeResult = await consumeLeadForVendor(supabase, {
         vendorId: vendor.id,
         leadId,
@@ -902,6 +992,30 @@ export const handler = async (event) => {
           order_id: orderId,
         },
       });
+
+      try {
+        if (!wasExistingPurchase && purchaseRow?.id) {
+          const { error: historyError } = await supabase.from('lead_status_history').insert([
+            {
+              lead_id: leadId,
+              vendor_id: vendor.id,
+              lead_purchase_id: purchaseRow.id,
+              status: 'ACTIVE',
+              note: 'Lead purchased via paid extra',
+              source: 'PURCHASE',
+              created_by: authUser?.id || null,
+              created_at: purchaseDatetime,
+            },
+          ]);
+          if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
+            // eslint-disable-next-line no-console
+            console.warn('Paid lead purchase history insert failed:', historyError?.message || historyError);
+          }
+        }
+      } catch (historyInsertError) {
+        // eslint-disable-next-line no-console
+        console.warn('Paid lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
+      }
 
       return json(200, {
         success: true,

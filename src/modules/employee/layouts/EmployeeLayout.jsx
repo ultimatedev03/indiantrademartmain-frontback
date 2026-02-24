@@ -16,7 +16,8 @@ import {
   FileSpreadsheet,
   FileText,
   Building2,
-  User
+  User,
+  MapPin
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from '@/shared/components/NotificationBell';
@@ -66,7 +67,7 @@ const EmployeeLayout = ({ allowedRole }) => {
       'VP': '/employee/vp/dashboard'
     };
     const target = roleRoutes[user.role] || '/employee/login';
-    if (location.pathname !== target && !location.pathname.startsWith(roleRoutes[user.role])) {
+    if (location.pathname !== target && !location.pathname.startsWith(roleRoutes[user.role] || '/employee')) {
        return <Navigate to={target} replace />;
     }
   }
@@ -138,22 +139,21 @@ const EmployeeLayout = ({ allowedRole }) => {
               <SidebarLink to="/employee/sales/dashboard" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
               <SidebarLink to="/employee/sales/leads" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Lead Management</SidebarLink>
               <SidebarLink to="/employee/sales/pricing-rules" icon={Tag} onNavigate={() => setIsSidebarOpen(false)}>Pricing Rules</SidebarLink>
+              <SidebarLink to="/employee/sales/territory-engagements" icon={MapPin} onNavigate={() => setIsSidebarOpen(false)}>Territory Engagements</SidebarLink>
             </>
           )}
 
           {user.role === 'MANAGER' && (
             <>
               <SidebarLink to="/employee/manager/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
-              <SidebarLink to="/employee/manager/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Team Territory</SidebarLink>
-              <SidebarLink to="/employee/manager/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
+              <SidebarLink to="/employee/manager/territory-engagements" icon={MapPin} onNavigate={() => setIsSidebarOpen(false)}>Territory Engagements</SidebarLink>
             </>
           )}
 
           {user.role === 'VP' && (
             <>
               <SidebarLink to="/employee/vp/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
-              <SidebarLink to="/employee/vp/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Manager Allocation</SidebarLink>
-              <SidebarLink to="/employee/vp/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
+              <SidebarLink to="/employee/vp/territory-engagements" icon={MapPin} onNavigate={() => setIsSidebarOpen(false)}>Territory Engagements</SidebarLink>
             </>
           )}
         </nav>
