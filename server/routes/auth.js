@@ -1094,21 +1094,59 @@ router.patch('/password', requireAuth(), async (req, res) => {
   try {
     const currentPassword = String(req.body?.current_password || '');
     const newPassword = String(req.body?.new_password || req.body?.password || '');
+    const currentUserId = String(req.user?.id || '').trim();
+    const currentEmail = normalizeEmail(req.user?.email || '');
 
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ success: false, error: 'Password must be at least 6 characters long' });
     }
 
-    const user = await getPublicUserById(req.user.id);
-    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    let user = currentUserId ? await getPublicUserById(currentUserId) : null;
+    if (!user && currentEmail) {
+      user = await getPublicUserByEmail(currentEmail);
+    }
+    if (!user && currentEmail) {
+      user = await upsertPublicUser({
+        id: currentUserId || undefined,
+        email: currentEmail,
+        role: req.user?.role || 'USER',
+        allowPasswordUpdate: false,
+      });
+    }
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
 
     if (user.password_hash && currentPassword) {
       const ok = await verifyPassword(currentPassword, user.password_hash);
       if (!ok) return res.status(401).json({ success: false, error: 'Invalid current password' });
     }
 
-    await setPublicUserPassword(user.id, newPassword);
-    return res.json({ success: true });
+    const updatedUser = await setPublicUserPassword(user.id, newPassword);
+
+    // Keep Supabase auth.users password in sync when this ID exists in auth.
+    let authPasswordSynced = false;
+    const authIdCandidates = Array.from(
+      new Set(
+        [String(updatedUser?.id || '').trim(), currentUserId]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+      )
+    );
+
+    for (const authUserId of authIdCandidates) {
+      try {
+        const { error } = await supabase.auth.admin.updateUserById(authUserId, { password: newPassword });
+        if (!error) {
+          authPasswordSynced = true;
+          break;
+        }
+      } catch {
+        // Ignore sync failures for legacy non-Supabase identities.
+      }
+    }
+
+    return res.json({ success: true, auth_password_synced: authPasswordSynced });
   } catch (error) {
     console.error('[Auth] Password update failed:', error?.message || error);
     return res.status(500).json({ success: false, error: 'Failed to update password' });

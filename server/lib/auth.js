@@ -229,6 +229,8 @@ export async function upsertPublicUser({
 
 export async function setPublicUserPassword(userId, password) {
   if (!userId) throw new Error('Missing user id');
+  if (!password) throw new Error('Missing password');
+
   const password_hash = await hashPassword(password);
   const { data, error } = await supabase
     .from('users')
@@ -241,7 +243,21 @@ export async function setPublicUserPassword(userId, password) {
     .maybeSingle();
 
   if (error) throw new Error(error.message);
-  return data || null;
+
+  if (!data?.id) {
+    throw new Error('Password update target user not found');
+  }
+
+  if (!data?.password_hash) {
+    throw new Error('Password hash missing after update');
+  }
+
+  const verified = await verifyPassword(password, data.password_hash);
+  if (!verified) {
+    throw new Error('Password verification failed after update');
+  }
+
+  return data;
 }
 
 export async function resolveRoleForUser({ userId, email, fallbackRole }) {

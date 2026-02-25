@@ -1,6 +1,6 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
-import { hashPassword, normalizeEmail, upsertPublicUser } from '../lib/auth.js';
+import { normalizeEmail, setPublicUserPassword, upsertPublicUser } from '../lib/auth.js';
 
 const router = express.Router();
 
@@ -58,14 +58,33 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Email not found in our records' });
     }
 
-    // Step 2: Update password in public.users
-    const password_hash = await hashPassword(new_password);
-    await upsertPublicUser({
-      id: userId,
-      email: emailLower,
-      password_hash,
-      allowPasswordUpdate: true,
-    });
+    // Step 2: Update password in public.users (with self-heal for missing users row)
+    try {
+      await setPublicUserPassword(userId, new_password);
+    } catch (passwordError) {
+      if (String(passwordError?.message || '').toLowerCase().includes('target user not found')) {
+        await upsertPublicUser({
+          id: userId,
+          email: emailLower,
+          role: userRole || 'USER',
+          allowPasswordUpdate: false,
+        });
+        await setPublicUserPassword(userId, new_password);
+      } else {
+        throw passwordError;
+      }
+    }
+
+    // Step 3: Best-effort sync with Supabase auth.users
+    let authPasswordSynced = false;
+    try {
+      const { error: authSyncError } = await supabase.auth.admin.updateUserById(userId, {
+        password: new_password,
+      });
+      authPasswordSynced = !authSyncError;
+    } catch {
+      authPasswordSynced = false;
+    }
 
     // Log the password reset event for security
     console.log(`✅ Password reset successfully for ${userRole} user: ${emailLower}`);
@@ -74,7 +93,8 @@ router.post('/', async (req, res) => {
       success: true,
       message: 'Password has been reset successfully',
       email: emailLower,
-      role: userRole
+      role: userRole,
+      auth_password_synced: authPasswordSynced,
     });
 
   } catch (error) {
