@@ -71,6 +71,40 @@ const readBody = (event) => {
   }
 };
 
+const toValuesArray = (value) => {
+  if (Array.isArray(value)) return value.flatMap((entry) => toValuesArray(entry));
+  if (value === null || value === undefined) return [];
+  return [value];
+};
+
+const parseIdValues = (value) =>
+  toValuesArray(value)
+    .flatMap((entry) => String(entry || '').split(','))
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+
+const resolveIdsFromEvent = (event) => {
+  const body = readBody(event);
+  const query = event?.queryStringParameters || {};
+  const multiQuery = event?.multiValueQueryStringParameters || {};
+
+  const bodyIds = Array.isArray(body?.ids) ? body.ids : parseIdValues(body?.id);
+  const queryIds = [
+    ...parseIdValues(query?.ids),
+    ...parseIdValues(query?.id),
+    ...parseIdValues(multiQuery?.ids),
+    ...parseIdValues(multiQuery?.id),
+  ];
+
+  return Array.from(
+    new Set(
+      [...bodyIds, ...queryIds]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+};
+
 const parseCookies = (cookieHeader = '') => {
   const out = {};
   if (!cookieHeader || typeof cookieHeader !== 'string') return out;
@@ -436,11 +470,7 @@ const listNotifications = async (event, user) => {
 };
 
 const markRead = async (event, user) => {
-  const body = readBody(event);
-  const ids = Array.isArray(body?.ids) ? body.ids : [];
-  const normalizedIds = Array.from(
-    new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))
-  );
+  const normalizedIds = resolveIdsFromEvent(event);
 
   if (normalizedIds.length === 0) return ok(event, { success: true });
 
@@ -493,11 +523,7 @@ const markRead = async (event, user) => {
 };
 
 const deleteNotifications = async (event, user) => {
-  const body = readBody(event);
-  const ids = Array.isArray(body?.ids) ? body.ids : [];
-  const normalizedIds = Array.from(
-    new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))
-  );
+  const normalizedIds = resolveIdsFromEvent(event);
 
   if (normalizedIds.length === 0) return ok(event, { success: true });
 

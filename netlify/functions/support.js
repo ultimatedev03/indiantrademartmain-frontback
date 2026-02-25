@@ -325,6 +325,67 @@ export async function handler(event) {
     }
 
     // -------------------------
+    // DELETE /tickets/:id
+    // -------------------------
+    if (event.httpMethod === "DELETE" && root === "tickets" && id && tail.length === 2) {
+      let body = {};
+      try {
+        body = event.body ? JSON.parse(event.body) : {};
+      } catch {
+        body = {};
+      }
+
+      const vendorId = String(body?.vendor_id || event?.queryStringParameters?.vendor_id || "").trim();
+      const buyerId = String(body?.buyer_id || event?.queryStringParameters?.buyer_id || "").trim();
+
+      if (!vendorId && !buyerId) {
+        return bad("vendor_id or buyer_id is required to delete ticket");
+      }
+
+      let scopeQuery = supabase
+        .from("support_tickets")
+        .select("id")
+        .eq("id", id);
+
+      if (vendorId) scopeQuery = scopeQuery.eq("vendor_id", vendorId);
+      if (buyerId) scopeQuery = scopeQuery.eq("buyer_id", buyerId);
+
+      const { data: scopedTicket, error: scopeError } = await scopeQuery.maybeSingle();
+      if (scopeError) {
+        return fail("Failed to validate ticket ownership", scopeError.message);
+      }
+
+      if (!scopedTicket) {
+        return json(404, { success: false, error: "Ticket not found or not allowed to delete" });
+      }
+
+      const { error: messageDeleteError } = await supabase
+        .from("ticket_messages")
+        .delete()
+        .eq("ticket_id", id);
+
+      if (messageDeleteError) {
+        return fail("Failed to delete ticket messages", messageDeleteError.message);
+      }
+
+      const { data: deletedRows, error: deleteError } = await supabase
+        .from("support_tickets")
+        .delete()
+        .eq("id", id)
+        .select("id");
+
+      if (deleteError) {
+        return fail("Failed to delete ticket", deleteError.message);
+      }
+
+      if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+        return json(404, { success: false, error: "Ticket not found or already deleted" });
+      }
+
+      return ok({ success: true, deleted: deletedRows[0]?.id || id });
+    }
+
+    // -------------------------
     // PATCH /tickets/:id
     // -------------------------
     if (event.httpMethod === "PATCH" && root === "tickets" && id && tail.length === 2) {

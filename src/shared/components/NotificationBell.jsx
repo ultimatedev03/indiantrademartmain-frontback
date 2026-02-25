@@ -476,6 +476,12 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     };
   };
 
+  const toIdsQueryValue = (ids = []) =>
+    (ids || [])
+      .map((id) => String(id || '').trim())
+      .filter(Boolean)
+      .join(',');
+
   const markNotificationIdsReadFallback = async (ids = []) => {
     const { buyerIds, normalIds } = splitNotificationIds(ids);
 
@@ -522,10 +528,14 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     if (!normalizedIds.length) return;
 
     try {
-      const res = await fetchWithCsrf(apiUrl('/api/notifications/read'), {
-        method: 'PATCH',
-        body: JSON.stringify({ ids: normalizedIds }),
-      });
+      const queryIds = toIdsQueryValue(normalizedIds);
+      const res = await fetchWithCsrf(
+        apiUrl(`/api/notifications/read${queryIds ? `?ids=${queryIds}` : ''}`),
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ ids: normalizedIds }),
+        }
+      );
       const payload = await res.json().catch(() => null);
 
       if (!res.ok || payload?.success === false) {
@@ -544,10 +554,14 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     if (!normalizedIds.length) return;
 
     try {
-      const res = await fetchWithCsrf(apiUrl('/api/notifications'), {
-        method: 'DELETE',
-        body: JSON.stringify({ ids: normalizedIds }),
-      });
+      const queryIds = toIdsQueryValue(normalizedIds);
+      const res = await fetchWithCsrf(
+        apiUrl(`/api/notifications${queryIds ? `?ids=${queryIds}` : ''}`),
+        {
+          method: 'DELETE',
+          body: JSON.stringify({ ids: normalizedIds }),
+        }
+      );
       const payload = await res.json().catch(() => null);
 
       if (!res.ok || payload?.success === false) {

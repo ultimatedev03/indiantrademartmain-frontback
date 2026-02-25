@@ -348,6 +348,89 @@ router.post('/tickets', async (req, res) => {
   }
 });
 
+// DELETE /api/support/tickets/:id - Delete ticket (vendor/buyer scoped)
+router.delete('/tickets/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const vendorId = String(body.vendor_id || req.query?.vendor_id || '').trim();
+    const buyerId = String(body.buyer_id || req.query?.buyer_id || '').trim();
+
+    if (!vendorId && !buyerId) {
+      return res.status(400).json({
+        success: false,
+        error: 'vendor_id or buyer_id is required to delete ticket',
+      });
+    }
+
+    let scopeQuery = supabase
+      .from('support_tickets')
+      .select('id')
+      .eq('id', id);
+
+    if (vendorId) scopeQuery = scopeQuery.eq('vendor_id', vendorId);
+    if (buyerId) scopeQuery = scopeQuery.eq('buyer_id', buyerId);
+
+    const { data: scopedTicket, error: scopedError } = await scopeQuery.maybeSingle();
+    if (scopedError) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to validate ticket ownership',
+        details: scopedError.message,
+      });
+    }
+
+    if (!scopedTicket) {
+      return res.status(404).json({
+        success: false,
+        error: 'Ticket not found or not allowed to delete',
+      });
+    }
+
+    const { error: messageDeleteError } = await supabase
+      .from('ticket_messages')
+      .delete()
+      .eq('ticket_id', id);
+
+    if (messageDeleteError) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete ticket messages',
+        details: messageDeleteError.message,
+      });
+    }
+
+    const { data: deletedRows, error: deleteError } = await supabase
+      .from('support_tickets')
+      .delete()
+      .eq('id', id)
+      .select('id');
+
+    if (deleteError) {
+      return res.status(500).json({
+        success: false,
+        error: 'Failed to delete ticket',
+        details: deleteError.message,
+      });
+    }
+
+    if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Ticket not found or already deleted',
+      });
+    }
+
+    return res.json({ success: true, deleted: deletedRows[0]?.id || id });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete ticket',
+      details: error.message,
+    });
+  }
+});
+
 // PATCH /api/support/tickets/:id - Update ticket
 router.patch('/tickets/:id', async (req, res) => {
   try {

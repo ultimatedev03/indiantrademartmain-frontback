@@ -3194,15 +3194,39 @@ export const vendorApi = {
     },
 
     deleteTicket: async (id) => {
-      // Vendors can only delete their own tickets
       const vendorId = await getVendorId();
-      const { error } = await supabase
-        .from('support_tickets')
-        .delete()
-        .eq('id', id)
-        .eq('vendor_id', vendorId);
-      if (error) throw error;
-      return true;
+      try {
+        const response = await fetchVendorJson(`/api/support/tickets/${id}`, {
+          method: 'DELETE',
+          body: JSON.stringify({ vendor_id: vendorId }),
+        });
+        if (response?.success === false) {
+          throw new Error(response?.error || 'Failed to delete ticket');
+        }
+        return true;
+      } catch (apiError) {
+        const canFallback =
+          Number(apiError?.status) === 404 ||
+          String(apiError?.message || '').toLowerCase().includes('request failed');
+
+        if (!canFallback) {
+          throw apiError;
+        }
+
+        // Legacy fallback for stale local backend processes that don't have DELETE route yet.
+        const { data: deletedRows, error } = await supabase
+          .from('support_tickets')
+          .delete()
+          .eq('id', id)
+          .eq('vendor_id', vendorId)
+          .select('id');
+
+        if (error) throw error;
+        if (!Array.isArray(deletedRows) || deletedRows.length === 0) {
+          throw new Error('Delete endpoint not available. Restart backend server and try again.');
+        }
+        return true;
+      }
     },
 
     getTicketDetail: async (id) => {

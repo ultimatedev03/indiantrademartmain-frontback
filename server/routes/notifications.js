@@ -9,6 +9,33 @@ const AUTH_LOOKUP_CACHE_TTL_MS = 60 * 1000;
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeId = (value) => String(value || '').trim();
+const toValuesArray = (value) => {
+  if (Array.isArray(value)) return value.flatMap((entry) => toValuesArray(entry));
+  if (value === null || value === undefined) return [];
+  return [value];
+};
+
+const parseIdValues = (value) =>
+  toValuesArray(value)
+    .flatMap((entry) => String(entry || '').split(','))
+    .map((entry) => String(entry || '').trim())
+    .filter(Boolean);
+
+const resolveRequestIds = (req) => {
+  const bodyIds = Array.isArray(req.body?.ids) ? req.body.ids : parseIdValues(req.body?.id);
+  const queryIds = [
+    ...parseIdValues(req.query?.ids),
+    ...parseIdValues(req.query?.id),
+  ];
+
+  return Array.from(
+    new Set(
+      [...bodyIds, ...queryIds]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    )
+  );
+};
 
 const toBuyerNotifId = (id) => `${BUYER_NOTIF_PREFIX}${id}`;
 const isBuyerNotifId = (id) => String(id || '').startsWith(BUYER_NOTIF_PREFIX);
@@ -279,8 +306,7 @@ router.get('/list', requireAuth(), async (req, res) => {
 
 router.patch('/read', requireAuth(), async (req, res) => {
   try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const normalizedIds = Array.from(new Set(ids.map((v) => String(v || '').trim()).filter(Boolean)));
+    const normalizedIds = resolveRequestIds(req);
     if (normalizedIds.length === 0) {
       return res.json({ success: true });
     }
@@ -332,8 +358,7 @@ router.patch('/read', requireAuth(), async (req, res) => {
 
 router.delete('/', requireAuth(), async (req, res) => {
   try {
-    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
-    const normalizedIds = Array.from(new Set(ids.map((v) => String(v || '').trim()).filter(Boolean)));
+    const normalizedIds = resolveRequestIds(req);
     if (normalizedIds.length === 0) {
       return res.json({ success: true });
     }

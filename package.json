@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "npm run dev:all",
     "dev:client": "vite --host :: --port 3000",
-    "dev:server": "node server/server.js",
+    "dev:server": "node --watch server/server.js",
     "dev:all": "node tools/devAll.js",
     "generate:sitemaps": "node tools/generateSitemap.js",
     "build": "npm run generate:sitemaps && node tools/generate-llms.js && vite build && node tools/prerender-seo.js",
