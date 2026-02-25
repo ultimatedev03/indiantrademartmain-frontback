@@ -107,7 +107,7 @@ const VendorLayout = () => {
                   try {
                     await logout?.();
                   } finally {
-                    navigate('/vendor/login', { replace: true });
+                    window.location.replace('/');
                   }
                 }}
               >
@@ -146,7 +146,7 @@ const VendorLayout = () => {
                 try {
                   await logout?.();
                 } finally {
-                  navigate('/vendor/login', { replace: true });
+                  window.location.replace('/');
                 }
               }}
             >

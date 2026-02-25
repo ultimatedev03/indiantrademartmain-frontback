@@ -101,7 +101,7 @@ const PortalLayout = ({ role }) => {
   const handleLogout = async () => {
     await logout();
     if (isVendor) {
-      navigate('/vendor/login');
+      window.location.replace('/');
       return;
     }
 

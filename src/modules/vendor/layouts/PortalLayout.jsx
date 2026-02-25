@@ -130,9 +130,11 @@ const PortalLayout = () => {
   }, [me]);
 
   const handleLogout = async () => {
-    await logout();
-    const loginPath = resolvePath('login', 'vendor');
-    navigate(loginPath);
+    try {
+      await logout();
+    } finally {
+      window.location.replace('/');
+    }
   };
 
   const navItems = [

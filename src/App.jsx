@@ -147,8 +147,7 @@ const VendorSuspensionGate = ({ children }) => {
           } catch (e) {
             console.error('Logout failed:', e);
           } finally {
-            if (appType === 'vendor') window.location.href = '/login';
-            else window.location.href = '/vendor/login';
+            window.location.replace('/');
           }
         }}
       />

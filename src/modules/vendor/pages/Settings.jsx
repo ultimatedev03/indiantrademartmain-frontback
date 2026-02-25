@@ -9,10 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Copy, Check } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 
 const VendorSettings = () => {
-  const navigate = useNavigate();
   const [passwords, setPasswords] = useState({
     newPassword: '',
     confirmPassword: ''
@@ -91,8 +89,11 @@ const VendorSettings = () => {
          description: "Your password has been changed. You have been logged out from all sessions for security." 
       });
       // Logout logic is handled in the API call usually, or we force it here
-      await vendorApi.auth.logout();
-      navigate('/auth/login');
+      try {
+        await vendorApi.auth.logout();
+      } finally {
+        window.location.replace('/');
+      }
     } catch (error) {
       toast({ title: "Update Failed", description: error.message, variant: "destructive" });
     } finally {

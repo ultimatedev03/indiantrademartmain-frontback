@@ -42,8 +42,11 @@ const VendorHeader = ({ onMenuClick }) => {
     '';
 
   const handleLogout = async () => {
-    await logout();
-    navigate('/');
+    try {
+      await logout();
+    } finally {
+      window.location.replace('/');
+    }
   };
 
   return (

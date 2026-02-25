@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, ShoppingBag, Store, RefreshCw, Briefcase, Globe } from 'lucide-react';
+import { Loader2, ShoppingBag, Store, Eye, EyeOff, RefreshCw, Briefcase, Globe } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
@@ -29,6 +29,7 @@ const Login = () => {
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Default credentials based on tab - Password empty by default
   const [formData, setFormData] = useState({
@@ -221,16 +222,26 @@ const Login = () => {
                      <Label htmlFor="password" className="text-slate-700">Password</Label>
                      <Link to={`/auth/forgot-password?role=${activeTab === 'buyer' ? 'BUYER' : 'VENDOR'}`} className="text-xs font-medium text-blue-600 hover:text-blue-800">Forgot password?</Link>
                   </div>
-                  <Input 
-                     id="password" 
-                     name="password" 
-                     type="password" 
-                     required 
-                     className="h-11 bg-white border-slate-300 focus:border-blue-500 focus:ring-blue-500" 
-                     value={formData.password} 
-                     onChange={handleChange}
-                     placeholder="Enter your password"
-                  />
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      name="password"
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      className="h-11 bg-white border-slate-300 pr-10 focus:border-blue-500 focus:ring-blue-500"
+                      value={formData.password}
+                      onChange={handleChange}
+                      placeholder="Enter your password"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
                </div>
 
                <div>
