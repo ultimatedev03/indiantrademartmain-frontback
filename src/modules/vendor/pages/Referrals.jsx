@@ -78,6 +78,8 @@ const Referrals = () => {
   const referralProfile = overview?.referral_profile || {};
   const wallet = overview?.wallet || {};
   const settings = overview?.settings || {};
+  const linkedReferral = overview?.linked_referral || null;
+  const hasLinkedReferral = Boolean(linkedReferral?.id);
   const referrals = Array.isArray(overview?.referrals) ? overview.referrals : [];
   const ledger = Array.isArray(overview?.ledger) ? overview.ledger : [];
   const referralCode = String(referralProfile?.referral_code || '').trim();
@@ -103,6 +105,10 @@ const Referrals = () => {
   };
 
   const handleLinkCode = async () => {
+    if (hasLinkedReferral) {
+      toast({ title: 'Referral already linked', variant: 'destructive' });
+      return;
+    }
     const code = String(referralCodeInput || '').trim().toUpperCase();
     if (!code) {
       toast({ title: 'Enter referral code', variant: 'destructive' });
@@ -241,25 +247,49 @@ const Referrals = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Apply Referral Code</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Label>Have a referral code? Link it before first paid plan.</Label>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Enter referral code"
-                value={referralCodeInput}
-                onChange={(e) => setReferralCodeInput(String(e.target.value || '').toUpperCase())}
-              />
-              <Button onClick={handleLinkCode} disabled={linking}>
-                {linking ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
-                Link
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        {hasLinkedReferral ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>Applied Referral</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="text-sm text-slate-600">
+                Your account is already linked with a referral code.
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <code className="rounded-md bg-slate-100 px-3 py-2 text-sm font-semibold">
+                  {String(linkedReferral?.referral_code || '').trim() || 'N/A'}
+                </code>
+                <Badge variant={statusVariant(linkedReferral?.status)}>
+                  {String(linkedReferral?.status || 'PENDING').toUpperCase()}
+                </Badge>
+              </div>
+              <div className="text-xs text-slate-500">
+                Referrer: {linkedReferral?.referrer_vendor?.company_name || linkedReferral?.referrer_vendor?.vendor_id || '-'}
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card>
+            <CardHeader>
+              <CardTitle>Apply Referral Code</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Label>Have a referral code? Link it before first paid plan.</Label>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Enter referral code"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(String(e.target.value || '').toUpperCase())}
+                />
+                <Button onClick={handleLinkCode} disabled={linking}>
+                  {linking ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                  Link
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -427,4 +457,3 @@ const Referrals = () => {
 };
 
 export default Referrals;
-

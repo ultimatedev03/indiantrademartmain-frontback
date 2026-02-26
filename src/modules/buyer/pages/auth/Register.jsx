@@ -10,6 +10,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
 import { otpService } from '@/services/otpService';
 import { isAlreadyRegisteredError } from '@/modules/buyer/services/buyerSession';
+import { validateStrongPassword } from '@/lib/passwordPolicy';
 
 // âœ… FIX: Default 5 minutes (pehle 1/2 tha)
 const OTP_TIMER_SECONDS = 5 * 60;
@@ -103,8 +104,9 @@ const Register = () => {
       toast({ title: 'Passwords do not match', variant: 'destructive' });
       return false;
     }
-    if (formData.password.length < 8) {
-      toast({ title: 'Password too weak', description: 'Min 8 chars required', variant: 'destructive' });
+    const passwordValidation = validateStrongPassword(formData.password);
+    if (!passwordValidation.ok) {
+      toast({ title: 'Password too weak', description: passwordValidation.error, variant: 'destructive' });
       return false;
     }
     if (!formData.email.includes('@')) {
@@ -412,4 +414,3 @@ const Register = () => {
 };
 
 export default Register;
-

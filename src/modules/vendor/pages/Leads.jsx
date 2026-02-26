@@ -918,7 +918,7 @@ const Leads = () => {
                             selected
                           </span>
                         ) : (
-                          <span>All</span>
+                          <span>No filters</span>
                         )}
                       </div>
                     </div>
@@ -997,7 +997,7 @@ const Leads = () => {
                             selected
                           </span>
                         ) : (
-                          <span>All</span>
+                          <span>No filters</span>
                         )}
                       </div>
                     </div>
@@ -1197,7 +1197,7 @@ const Leads = () => {
                     <div className="text-xs text-gray-600">
                       {anySelected(myFilters.categories)
                         ? `${selectedKeys(myFilters.categories).length} selected`
-                        : "All"}
+                        : "No filters"}
                     </div>
                   </div>
 
@@ -1222,7 +1222,7 @@ const Leads = () => {
                     <div className="text-xs text-gray-600">
                       {anySelected(myFilters.locations)
                         ? `${selectedKeys(myFilters.locations).length} selected`
-                        : "All"}
+                        : "No filters"}
                     </div>
                   </div>
 
@@ -1698,4 +1698,3 @@ const LeadCard = ({
 };
 
 export default Leads;
-

@@ -269,10 +269,10 @@ const Proposals = () => {
 
               <p className="text-sm text-neutral-600">{subtitleText}</p>
 
-              <div className="flex flex-wrap items-center gap-2 text-xs md:text-sm">
-                <Badge variant="outline">Service: {service}</Badge>
-                {amount ? <Badge variant="outline">Amount: INR {amount}</Badge> : null}
-                {quantity ? <Badge variant="outline">Qty: {quantity}</Badge> : null}
+              <div className="flex flex-wrap items-center gap-2 text-xs md:text-sm text-neutral-700">
+                <span className="rounded-md bg-neutral-100 px-2 py-1">Service: {service}</span>
+                {amount ? <span className="rounded-md bg-neutral-100 px-2 py-1">Amount: INR {amount}</span> : null}
+                {quantity ? <span className="rounded-md bg-neutral-100 px-2 py-1">Qty: {quantity}</span> : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-4 text-xs text-neutral-500 md:text-sm">

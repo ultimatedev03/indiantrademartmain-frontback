@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Copy, Check } from 'lucide-react';
+import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from '@/lib/passwordPolicy';
 
 const VendorSettings = () => {
   const [passwords, setPasswords] = useState({
@@ -73,6 +74,11 @@ const VendorSettings = () => {
     e.preventDefault();
     if (passwords.newPassword !== passwords.confirmPassword) {
       toast({ title: "Passwords do not match", variant: "destructive" });
+      return;
+    }
+    const passwordValidation = validateStrongPassword(passwords.newPassword);
+    if (!passwordValidation.ok) {
+      toast({ title: "Weak Password", description: passwordValidation.error, variant: "destructive" });
       return;
     }
     if (!otpSent || otp.length !== 6) {
@@ -165,17 +171,18 @@ const VendorSettings = () => {
               <Input 
                 type="password" 
                 required
-                minLength={6}
+                minLength={8}
                 value={passwords.newPassword}
                 onChange={(e) => setPasswords({...passwords, newPassword: e.target.value})}
               />
+              <p className="text-xs text-slate-500">{PASSWORD_POLICY_MESSAGE}</p>
             </div>
             <div className="space-y-2">
               <Label>Confirm New Password</Label>
               <Input 
                 type="password" 
                 required
-                minLength={6}
+                minLength={8}
                 value={passwords.confirmPassword}
                 onChange={(e) => setPasswords({...passwords, confirmPassword: e.target.value})}
               />

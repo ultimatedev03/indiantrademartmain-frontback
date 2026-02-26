@@ -1,200 +1,247 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from '@supabase/supabase-js';
+import bcrypt from 'bcryptjs';
+import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error("[password-reset function] Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  // eslint-disable-next-line no-console
+  console.error('[password-reset] Missing SUPABASE_URL/VITE_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY');
 }
 
-const supabase = createClient(
-  SUPABASE_URL || "",
-  SUPABASE_SERVICE_ROLE_KEY || ""
-);
+const supabase = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '', {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 
-function isValidEmail(email) {
-  return !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
+const isValidEmail = (email) => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const nowIso = () => new Date().toISOString();
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const json = (statusCode, body) => ({
+  statusCode,
+  body: JSON.stringify(body),
+});
+
+const readBody = (event) => {
+  try {
+    return JSON.parse(event.body || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const updatePublicUserPasswordById = async (userId, passwordHash) => {
+  const { data, error } = await supabase
+    .from('users')
+    .update({
+      password_hash: passwordHash,
+      updated_at: nowIso(),
+    })
+    .eq('id', userId)
+    .select('id, email, password_hash')
+    .maybeSingle();
+
+  if (error) throw new Error(error.message || 'Failed to update public user password');
+  return data || null;
+};
+
+const ensurePublicUserPassword = async ({ userId, email, role, newPassword }) => {
+  const passwordHash = await bcrypt.hash(String(newPassword || ''), 10);
+
+  const updatedById = await updatePublicUserPasswordById(userId, passwordHash);
+  if (updatedById?.id) {
+    return String(updatedById.id);
+  }
+
+  const { data: existingByEmail, error: existingByEmailError } = await supabase
+    .from('users')
+    .select('id, email')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (existingByEmailError) {
+    throw new Error(existingByEmailError.message || 'Failed to load public user');
+  }
+
+  if (existingByEmail?.id) {
+    const updatedByEmailId = await updatePublicUserPasswordById(existingByEmail.id, passwordHash);
+    if (updatedByEmailId?.id) {
+      return String(updatedByEmailId.id);
+    }
+  }
+
+  const payload = {
+    id: userId,
+    email,
+    role: role || 'USER',
+    password_hash: passwordHash,
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+
+  const { data: inserted, error: insertError } = await supabase
+    .from('users')
+    .insert([payload])
+    .select('id')
+    .maybeSingle();
+
+  if (insertError) {
+    throw new Error(insertError.message || 'Failed to create public user password');
+  }
+
+  return String(inserted?.id || userId);
+};
 
 export const handler = async (event) => {
   try {
-    // Only POST
-    if (event.httpMethod !== "POST") {
-      return {
-        statusCode: 405,
-        body: JSON.stringify({ error: "Method not allowed" })
-      };
+    if (event.httpMethod !== 'POST') {
+      return json(405, { error: 'Method not allowed' });
     }
 
-    const body = JSON.parse(event.body || "{}");
-    const { email, role, new_password } = body;
+    const body = readBody(event);
+    const emailRaw = body?.email;
+    const roleRaw = body?.role;
+    const newPassword = String(body?.new_password || '');
 
-    // Validate email
-    if (!email || !isValidEmail(email)) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({ error: "Valid email is required" })
-      };
+    if (!emailRaw || !isValidEmail(emailRaw)) {
+      return json(400, { error: 'Valid email is required' });
     }
 
-    const emailLower = email.toLowerCase().trim();
+    const emailLower = normalizeEmail(emailRaw);
 
-    // ✅ CHECK EMAIL BY ROLE (BUYER / VENDOR)
-    if (!new_password && role) {
-      try {
-        const normalizedRole = String(role).toUpperCase();
+    // POST /api/password-reset/verify-email behavior
+    if (!newPassword && roleRaw) {
+      const normalizedRole = String(roleRaw).toUpperCase();
 
-        if (normalizedRole !== "BUYER" && normalizedRole !== "VENDOR") {
-          return {
-            statusCode: 400,
-            body: JSON.stringify({ error: "Invalid role" })
-          };
-        }
-
-        const table = normalizedRole === "BUYER" ? "buyers" : "vendors";
-
-        const { data, error } = await supabase
-          .from(table)
-          .select("id, email, user_id")
-          .eq("email", emailLower)
-          .maybeSingle();
-
-        if (error && error.code !== "PGRST116") {
-          console.error("[password-reset] Error checking", table, "for email", emailLower, error);
-          return {
-            statusCode: 500,
-            body: JSON.stringify({ error: "Failed to verify email" })
-          };
-        }
-
-        if (!data) {
-          const notFoundMsg = normalizedRole === "BUYER"
-            ? "This email is not registered as a buyer"
-            : "This email is not registered as a vendor";
-
-          return {
-            statusCode: 404,
-            body: JSON.stringify({ error: notFoundMsg })
-          };
-        }
-
-        const successMsg = normalizedRole === "BUYER"
-          ? "Buyer account found"
-          : "Vendor account found";
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({
-            success: true,
-            found: true,
-            role: normalizedRole,
-            email: emailLower,
-            message: successMsg
-          })
-        };
-      } catch (error) {
-        console.error("[password-reset] Email verification error:", error);
-        return {
-          statusCode: 500,
-          body: JSON.stringify({ error: error.message || "Check email failed" })
-        };
-      }
-    }
-
-    // ✅ RESET PASSWORD
-    if (new_password) {
-      if (new_password.length < 6) {
-        return {
-          statusCode: 400,
-          body: JSON.stringify({
-            error: "Password must be at least 6 characters long"
-          })
-        };
+      if (normalizedRole !== 'BUYER' && normalizedRole !== 'VENDOR') {
+        return json(400, { error: 'Invalid role' });
       }
 
-      try {
-        let userId = null;
-        let userRole = null;
+      const table = normalizedRole === 'BUYER' ? 'buyers' : 'vendors';
+      const { data, error } = await supabase
+        .from(table)
+        .select('id, email, user_id')
+        .eq('email', emailLower)
+        .maybeSingle();
 
-        // Step 1: Find user_id from buyers table
-        const { data: buyer, error: buyerError } = await supabase
-          .from("buyers")
-          .select("user_id, email")
-          .eq("email", emailLower)
-          .maybeSingle();
+      if (error) {
+        // eslint-disable-next-line no-console
+        console.error('[password-reset] verify-email failed:', error);
+        return json(500, { error: 'Failed to verify email' });
+      }
 
-        if (buyer && buyer.user_id) {
-          userId = buyer.user_id;
-          userRole = "BUYER";
-        }
-
-        // Step 2: If not found in buyers, check vendors table
-        if (!userId) {
-          const { data: vendor, error: vendorError } = await supabase
-            .from("vendors")
-            .select("user_id, email")
-            .eq("email", emailLower)
-            .maybeSingle();
-
-          if (vendor && vendor.user_id) {
-            userId = vendor.user_id;
-            userRole = "VENDOR";
+      if (!data) {
+        return json(
+          404,
+          {
+            error:
+              normalizedRole === 'BUYER'
+                ? 'This email is not registered as a buyer'
+                : 'This email is not registered as a vendor',
           }
-        }
-
-        if (!userId) {
-          return {
-            statusCode: 404,
-            body: JSON.stringify({ error: "Email not found in our records" })
-          };
-        }
-
-        // Step 3: Update password using Supabase Admin API
-        const { data: updatedUser, error: updateError } = await supabase.auth.admin.updateUserById(
-          userId,
-          { password: new_password }
         );
-
-        if (updateError) {
-          console.error("[password-reset] Password update error:", updateError);
-          return {
-            statusCode: 500,
-            body: JSON.stringify({
-              error: "Failed to reset password: " + updateError.message
-            })
-          };
-        }
-
-        console.log(`[password-reset] Password reset successfully for ${userRole} user: ${emailLower}`);
-
-        return {
-          statusCode: 200,
-          body: JSON.stringify({
-            success: true,
-            message: "Password has been reset successfully",
-            email: emailLower,
-            role: userRole
-          })
-        };
-      } catch (error) {
-        console.error("[password-reset] Password reset error:", error);
-        return {
-          statusCode: 500,
-          body: JSON.stringify({
-            error: error.message || "Password reset failed"
-          })
-        };
       }
+
+      return json(200, {
+        success: true,
+        found: true,
+        role: normalizedRole,
+        email: emailLower,
+        message: 'Email verified successfully',
+      });
     }
 
-    return {
-      statusCode: 400,
-      body: JSON.stringify({ error: "Invalid request" })
-    };
+    // POST /api/password-reset behavior
+    if (newPassword) {
+      const passwordValidation = validateStrongPassword(newPassword);
+      if (!passwordValidation.ok) {
+        return json(400, { error: passwordValidation.error });
+      }
+
+      let userId = null;
+      let userRole = null;
+
+      const { data: buyer, error: buyerError } = await supabase
+        .from('buyers')
+        .select('user_id')
+        .eq('email', emailLower)
+        .maybeSingle();
+
+      if (buyerError) {
+        // eslint-disable-next-line no-console
+        console.error('[password-reset] buyer lookup failed:', buyerError);
+      }
+
+      if (buyer?.user_id) {
+        userId = String(buyer.user_id);
+        userRole = 'BUYER';
+      }
+
+      if (!userId) {
+        const { data: vendor, error: vendorError } = await supabase
+          .from('vendors')
+          .select('user_id')
+          .eq('email', emailLower)
+          .maybeSingle();
+
+        if (vendorError) {
+          // eslint-disable-next-line no-console
+          console.error('[password-reset] vendor lookup failed:', vendorError);
+        }
+
+        if (vendor?.user_id) {
+          userId = String(vendor.user_id);
+          userRole = 'VENDOR';
+        }
+      }
+
+      if (!userId) {
+        return json(404, { error: 'Email not found in our records' });
+      }
+
+      let resolvedPublicUserId = userId;
+      try {
+        resolvedPublicUserId = await ensurePublicUserPassword({
+          userId,
+          email: emailLower,
+          role: userRole || 'USER',
+          newPassword,
+        });
+      } catch (publicSyncError) {
+        return json(500, { error: publicSyncError.message || 'Failed to update login password' });
+      }
+
+      let authPasswordSynced = false;
+      const authIdCandidates = Array.from(
+        new Set([String(userId || '').trim(), String(resolvedPublicUserId || '').trim()].filter(Boolean))
+      );
+
+      for (const authUserId of authIdCandidates) {
+        try {
+          const { error: updateError } = await supabase.auth.admin.updateUserById(authUserId, {
+            password: newPassword,
+          });
+          if (!updateError) {
+            authPasswordSynced = true;
+            break;
+          }
+        } catch {
+          // Ignore sync failures for non-Supabase identities.
+        }
+      }
+
+      return json(200, {
+        success: true,
+        message: 'Password has been reset successfully',
+        email: emailLower,
+        role: userRole,
+        auth_password_synced: authPasswordSynced,
+      });
+    }
+
+    return json(400, { error: 'Invalid request' });
   } catch (error) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: error.message || "Server error" })
-    };
+    return json(500, { error: error.message || 'Server error' });
   }
 };

@@ -1,4 +1,5 @@
 import { apiUrl } from '@/lib/apiBase';
+import { validateStrongPassword } from '@/lib/passwordPolicy';
 
 const parseJsonSafe = async (response) => {
   try {
@@ -79,8 +80,9 @@ export const passwordResetApi = {
       throw new Error('Email and new password are required');
     }
 
-    if (newPassword.length < 6) {
-      throw new Error('Password must be at least 6 characters long');
+    const validation = validateStrongPassword(newPassword);
+    if (!validation.ok) {
+      throw new Error(validation.error);
     }
 
     return postJson(

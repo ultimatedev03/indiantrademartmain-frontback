@@ -206,23 +206,7 @@ export const linkReferralForVendor = async (
     if (existing.referrer_vendor_id === referrerProfile.vendor_id) {
       return existing;
     }
-    if (!['REJECTED', 'PENDING'].includes(String(existing.status || '').toUpperCase())) {
-      throw new Error('Referral is already locked for this vendor');
-    }
-    const { data: updated, error: updErr } = await client
-      .from('vendor_referrals')
-      .update({
-        referrer_vendor_id: referrerProfile.vendor_id,
-        referral_code: code,
-        status: 'PENDING',
-        rejection_reason: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', existing.id)
-      .select('*')
-      .single();
-    if (updErr) throw new Error(updErr.message || 'Failed to update referral link');
-    return updated;
+    throw new Error('Referral code already linked for this vendor');
   }
 
   const { data: inserted, error: insErr } = await client
@@ -260,18 +244,41 @@ const getPendingReferralForVendor = async (
   return data || null;
 };
 
+const getActiveReferralForVendor = async (
+  referredVendorId,
+  client = getDefaultClient()
+) => {
+  const { data, error } = await client
+    .from('vendor_referrals')
+    .select('*')
+    .eq('referred_vendor_id', referredVendorId)
+    .in('status', ['PENDING', 'QUALIFIED', 'REWARDED'])
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(error.message || 'Failed to load vendor referral');
+  }
+  return data || null;
+};
+
 const hasPriorCompletedPayment = async (
   vendorId,
   excludePaymentId,
   client = getDefaultClient()
 ) => {
-  const { data, error } = await client
+  let query = client
     .from('vendor_payments')
     .select('id')
     .eq('vendor_id', vendorId)
     .eq('status', 'COMPLETED')
-    .neq('id', excludePaymentId)
     .limit(1);
+
+  if (excludePaymentId) {
+    query = query.neq('id', excludePaymentId);
+  }
+
+  const { data, error } = await query;
 
   if (error) throw new Error(error.message || 'Failed to verify prior payments');
   return Array.isArray(data) && data.length > 0;
@@ -304,8 +311,13 @@ export const getReferralOfferForVendor = async (
   if (!settings.is_enabled) return null;
   if (!vendor?.id || !plan?.id) return null;
 
-  const pendingReferral = await getPendingReferralForVendor(vendor.id, client);
-  if (!pendingReferral?.id) return null;
+  if (settings.first_paid_plan_only) {
+    const hasAnyCompleted = await hasPriorCompletedPayment(vendor.id, null, client);
+    if (hasAnyCompleted) return null;
+  }
+
+  const activeReferral = await getActiveReferralForVendor(vendor.id, client);
+  if (!activeReferral?.id) return null;
 
   const rule = await getReferralPlanRule(plan.id, at, client);
   if (!rule?.is_enabled) return null;
@@ -325,10 +337,10 @@ export const getReferralOfferForVendor = async (
 
   return {
     offer_type: 'REFERRAL',
-    offer_code: pendingReferral.referral_code,
-    referral_id: pendingReferral.id,
+    offer_code: activeReferral.referral_code,
+    referral_id: activeReferral.id,
     discount_amount: discountAmount,
-    pending_referral: pendingReferral,
+    referral: activeReferral,
     rule,
     settings,
   };
@@ -344,8 +356,10 @@ export const applyReferralRewardAfterPayment = async (
   const settings = await getReferralSettings(client);
   if (!settings.is_enabled) return { applied: false, reason: 'program_disabled' };
 
-  const pendingReferral = await getPendingReferralForVendor(referredVendorId, client);
-  if (!pendingReferral?.id) return { applied: false, reason: 'no_pending_referral' };
+  const rewardReferral = settings.first_paid_plan_only
+    ? await getPendingReferralForVendor(referredVendorId, client)
+    : await getActiveReferralForVendor(referredVendorId, client);
+  if (!rewardReferral?.id) return { applied: false, reason: 'no_eligible_referral' };
 
   if (settings.first_paid_plan_only) {
     const prior = await hasPriorCompletedPayment(referredVendorId, paymentId, client);
@@ -357,7 +371,7 @@ export const applyReferralRewardAfterPayment = async (
           rejection_reason: 'NOT_FIRST_PAID_PLAN',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', pendingReferral.id);
+        .eq('id', rewardReferral.id);
       return { applied: false, reason: 'not_first_paid_plan' };
     }
   }
@@ -388,11 +402,11 @@ export const applyReferralRewardAfterPayment = async (
         rejection_reason: 'ZERO_REWARD',
         updated_at: new Date().toISOString(),
       })
-      .eq('id', pendingReferral.id);
+      .eq('id', rewardReferral.id);
     return { applied: false, reason: 'zero_reward' };
   }
 
-  const referrerVendorId = pendingReferral.referrer_vendor_id;
+  const referrerVendorId = rewardReferral.referrer_vendor_id;
   const wallet = await ensureWallet(referrerVendorId, client);
   const nextAvailable = Number(wallet.available_balance || 0) + rewardAmount;
   const nextLifetimeEarned = Number(wallet.lifetime_earned || 0) + rewardAmount;
@@ -413,7 +427,7 @@ export const applyReferralRewardAfterPayment = async (
     .insert([
       {
         vendor_id: referrerVendorId,
-        referral_id: pendingReferral.id,
+        referral_id: rewardReferral.id,
         payment_id: paymentId,
         entry_type: 'REFERRAL_REWARD_CREDIT',
         amount: rewardAmount,
@@ -443,13 +457,13 @@ export const applyReferralRewardAfterPayment = async (
       rewarded_at: nowIso,
       updated_at: nowIso,
     })
-    .eq('id', pendingReferral.id);
+    .eq('id', rewardReferral.id);
   if (referralUpdErr) throw new Error(referralUpdErr.message || 'Failed to update referral status');
 
   const { error: payUpdErr } = await client
     .from('vendor_payments')
     .update({
-      referral_id: pendingReferral.id,
+      referral_id: rewardReferral.id,
       updated_at: new Date().toISOString(),
     })
     .eq('id', paymentId);
@@ -460,7 +474,7 @@ export const applyReferralRewardAfterPayment = async (
   return {
     applied: true,
     reward_amount: rewardAmount,
-    referral_id: pendingReferral.id,
+    referral_id: rewardReferral.id,
     referrer_vendor_id: referrerVendorId,
   };
 };

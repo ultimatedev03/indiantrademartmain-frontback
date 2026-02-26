@@ -80,10 +80,44 @@ const insertLeadSafely = async (leadPayload) => {
   delete a4.buyer_user_id;
   attempts.push(stripUndefined(a4));
 
+  // Attempt 5+: progressively drop optional compatibility fields.
+  const a5 = { ...a4 };
+  delete a5.proposal_id;
+  attempts.push(stripUndefined(a5));
+
+  const a6 = { ...a5 };
+  delete a6.category_slug;
+  delete a6.category;
+  delete a6.location;
+  attempts.push(stripUndefined(a6));
+
   let lastError = null;
+  const seenPayloadSignatures = new Set();
+
+  const makeSignature = (payload) =>
+    JSON.stringify(
+      Object.keys(payload || {})
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = payload[key];
+          return acc;
+        }, {})
+    );
+
+  const columnFromMissingError = (error) => {
+    const code = String(error?.code || '').toUpperCase();
+    if (code !== '42703') return '';
+    const raw = `${error?.message || ''} ${error?.details || ''}`;
+    const match = raw.match(/column\s+"([^"]+)"/i);
+    return String(match?.[1] || '').trim();
+  };
 
   for (let i = 0; i < attempts.length; i++) {
     const payload = attempts[i];
+    const signature = makeSignature(payload);
+    if (seenPayloadSignatures.has(signature)) continue;
+    seenPayloadSignatures.add(signature);
+
     const { data, error } = await supabase
       .from('leads')
       .insert([payload])
@@ -94,6 +128,13 @@ const insertLeadSafely = async (leadPayload) => {
 
     lastError = error;
     console.warn(`[Lead Insert Attempt ${i + 1}] Failed:`, error?.message || error, payload);
+
+    const missingColumn = columnFromMissingError(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
+      const retryPayload = { ...payload };
+      delete retryPayload[missingColumn];
+      attempts.push(stripUndefined(retryPayload));
+    }
   }
 
   throw lastError || new Error('Failed to insert lead');
@@ -343,6 +384,58 @@ export const buyerApi = {
         status: 'SENT',
         created_at: new Date().toISOString(),
       };
+    }
+
+    // Marketplace proposal path through backend to avoid RLS/schema drift issues.
+    try {
+      const marketplaceProposalRes = await fetchWithCsrf(apiUrl('/api/vendors/marketplace/leads'), {
+        method: 'POST',
+        body: JSON.stringify({
+          title: payload.title,
+          product_name: payload.product_name,
+          product_interest: payload.product_name,
+          buyer_name: buyerName,
+          buyer_email: buyerEmail,
+          buyer_phone: buyerPhone,
+          company_name: buyerCompany,
+          description: payload.description,
+          message: payload.description,
+          quantity: payload.quantity,
+          budget: payload.budget,
+          category: proposalData.category || '',
+          category_slug: proposalData.category_slug || '',
+          location: proposalData.location || 'India',
+          required_by_date: proposalData.required_by_date || null,
+        }),
+      });
+
+      const marketplaceProposalJson = await marketplaceProposalRes.json().catch(() => ({}));
+      if (marketplaceProposalRes.ok && marketplaceProposalJson?.success) {
+        if (marketplaceProposalJson?.proposal) {
+          return marketplaceProposalJson.proposal;
+        }
+        return {
+          id: null,
+          vendor_id: null,
+          buyer_id: buyerId,
+          title: payload.title,
+          product_name: payload.product_name,
+          quantity: payload.quantity,
+          budget: payload.budget,
+          description: payload.description,
+          status: 'SENT',
+          created_at: new Date().toISOString(),
+        };
+      }
+      console.warn(
+        '[buyerApi.createProposal] marketplace backend lead API failed, falling back:',
+        marketplaceProposalJson?.error || marketplaceProposalRes.status
+      );
+    } catch (marketplaceError) {
+      console.warn(
+        '[buyerApi.createProposal] marketplace backend lead API threw, falling back:',
+        marketplaceError?.message || marketplaceError
+      );
     }
 
     const { data: proposal, error: propError } = await supabase

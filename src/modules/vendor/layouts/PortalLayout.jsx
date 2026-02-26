@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart, Wallet, User as UserIcon, Check, Ban, MapPin, FolderKanban, MessageSquare
+  BarChart, Wallet, User as UserIcon, RefreshCw, Ban, MapPin, FolderKanban, MessageSquare
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -368,10 +368,16 @@ const PortalLayout = () => {
                     <UserIcon className="mr-2 h-4 w-4" /> Profile
                   </DropdownMenuItem>
 
-                  <DropdownMenuItem onClick={async () => {
-                    await loadVendorStatus();
-                  }}>
-                    <Check className="mr-2 h-4 w-4" /> Refresh
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      try {
+                        await loadVendorStatus();
+                      } finally {
+                        window.location.reload();
+                      }
+                    }}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" /> Refresh
                   </DropdownMenuItem>
 
                   <DropdownMenuItem onClick={() => navigate(resolvePath('settings', 'vendor'))}>

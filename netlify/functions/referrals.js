@@ -181,7 +181,7 @@ export const handler = async (event) => {
 
     // GET /api/referrals/me
     if (event.httpMethod === 'GET' && action === 'me') {
-      const [profile, walletRes, settings, referredRowsRes, earnedRowsRes] = await Promise.all([
+      const [profile, walletRes, settings, referredRowsRes, earnedRowsRes, linkedReferralRes] = await Promise.all([
         ensureVendorReferralProfile(vendor, supabase),
         supabase
           .from('vendor_referral_wallets')
@@ -201,11 +201,19 @@ export const handler = async (event) => {
           .eq('vendor_id', vendor.id)
           .order('created_at', { ascending: false })
           .limit(50),
+        supabase
+          .from('vendor_referrals')
+          .select('id, status, created_at, qualified_at, rewarded_at, rejection_reason, referral_code, referrer_vendor_id')
+          .eq('referred_vendor_id', vendor.id)
+          .order('created_at', { ascending: true })
+          .limit(1)
+          .maybeSingle(),
       ]);
 
       if (walletRes.error) throw walletRes.error;
       if (referredRowsRes.error) throw referredRowsRes.error;
       if (earnedRowsRes.error) throw earnedRowsRes.error;
+      if (linkedReferralRes.error) throw linkedReferralRes.error;
 
       const rawReferrals = Array.isArray(referredRowsRes.data) ? referredRowsRes.data : [];
       const referredVendorIds = Array.from(
@@ -232,6 +240,20 @@ export const handler = async (event) => {
         referred_vendor: row?.referred_vendor_id ? vendorMap[row.referred_vendor_id] || null : null,
       }));
 
+      let linkedReferral = linkedReferralRes.data || null;
+      if (linkedReferral?.referrer_vendor_id) {
+        const { data: referrerVendor, error: referrerErr } = await supabase
+          .from('vendors')
+          .select('id, company_name, vendor_id, email')
+          .eq('id', linkedReferral.referrer_vendor_id)
+          .maybeSingle();
+        if (referrerErr) throw referrerErr;
+        linkedReferral = {
+          ...linkedReferral,
+          referrer_vendor: referrerVendor || null,
+        };
+      }
+
       const wallet = walletRes.data || {
         vendor_id: vendor.id,
         available_balance: 0,
@@ -250,6 +272,7 @@ export const handler = async (event) => {
             is_enabled: Boolean(settings?.is_enabled),
             min_cashout_amount: Number(settings?.min_cashout_amount || 0),
           },
+          linked_referral: linkedReferral,
           referrals,
           ledger: earnedRowsRes.data || [],
         },
@@ -274,7 +297,13 @@ export const handler = async (event) => {
         return json(200, { success: true, data: linked });
       } catch (error) {
         const msg = String(error?.message || 'Failed to link referral');
-        const status = msg.toLowerCase().includes('invalid referral') ? 400 : 500;
+        const lower = msg.toLowerCase();
+        const isClientError =
+          lower.includes('invalid referral') ||
+          lower.includes('self referral') ||
+          lower.includes('already linked') ||
+          lower.includes('required');
+        const status = isClientError ? 400 : 500;
         return json(status, { success: false, error: msg });
       }
     }

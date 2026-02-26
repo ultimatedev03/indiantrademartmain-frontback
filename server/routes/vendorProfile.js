@@ -2605,22 +2605,28 @@ router.delete('/:vendorId/favorite', requireAuth({ roles: ['BUYER'] }), async (r
 
 router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
   try {
-    const { vendorId } = req.params;
-    if (!isValidId(vendorId)) {
+    const rawVendorId = String(req.params?.vendorId || '').trim();
+    const isMarketplaceRequest = rawVendorId.toLowerCase() === 'marketplace';
+
+    if (!isMarketplaceRequest && !isValidId(rawVendorId)) {
       return res.status(400).json({ success: false, error: 'Invalid vendor id' });
     }
 
-    const { data: vendor, error: vendorError } = await supabase
-      .from('vendors')
-      .select('id, user_id, company_name, email')
-      .eq('id', vendorId)
-      .maybeSingle();
+    let vendor = null;
+    if (!isMarketplaceRequest) {
+      const { data: vendorRow, error: vendorError } = await supabase
+        .from('vendors')
+        .select('id, user_id, company_name, email')
+        .eq('id', rawVendorId)
+        .maybeSingle();
 
-    if (vendorError) {
-      return res.status(500).json({ success: false, error: vendorError.message });
-    }
-    if (!vendor) {
-      return res.status(404).json({ success: false, error: 'Vendor not found' });
+      if (vendorError) {
+        return res.status(500).json({ success: false, error: vendorError.message });
+      }
+      if (!vendorRow) {
+        return res.status(404).json({ success: false, error: 'Vendor not found' });
+      }
+      vendor = vendorRow;
     }
 
     const payload = req.body || {};
@@ -2679,7 +2685,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
     );
 
     const proposalBasePayload = {
-      vendor_id: vendor.id,
+      vendor_id: vendor?.id || null,
       buyer_id: buyerProfile?.id || null,
       buyer_email: null,
       title,
@@ -2712,7 +2718,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       if (!proposalErr) {
         createdProposal = proposalRow || {
           id: null,
-          vendor_id: candidate?.vendor_id || vendor.id,
+          vendor_id: candidate?.vendor_id || vendor?.id || null,
           buyer_id: candidate?.buyer_id || null,
           title: candidate?.title || null,
           product_name: candidate?.product_name || null,
@@ -2733,7 +2739,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
     }
 
     const baseLeadPayload = {
-      vendor_id: vendor.id,
+      vendor_id: vendor?.id || null,
       title,
       product_name: productName,
       product_interest: productInterest,
@@ -2758,6 +2764,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       omitKeys(baseLeadPayload, []),
       omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest']),
       omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
+      omitKeys(baseLeadPayload, ['vendor_id', 'location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
       {
         vendor_id: baseLeadPayload.vendor_id,
         title: baseLeadPayload.title,
@@ -2786,7 +2793,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       if (!leadErr) {
         createdLead = leadRow || {
           id: null,
-          vendor_id: vendor.id,
+          vendor_id: candidate?.vendor_id || vendor?.id || null,
           title: candidate?.title || null,
           buyer_id: candidate?.buyer_id || null,
           buyer_name: candidate?.buyer_name || null,
@@ -2803,32 +2810,34 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       console.warn('Lead insert failed after proposal create:', lastError?.message || lastError);
     }
 
-    let vendorUserId = vendor.user_id || null;
-    if (!vendorUserId && vendor?.email) {
-      const { data: userRow } = await supabase
-        .from('users')
-        .select('id')
-        .eq('email', String(vendor.email).toLowerCase().trim())
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      vendorUserId = userRow?.id || null;
-    }
+    if (vendor?.id) {
+      let vendorUserId = vendor.user_id || null;
+      if (!vendorUserId && vendor?.email) {
+        const { data: userRow } = await supabase
+          .from('users')
+          .select('id')
+          .eq('email', String(vendor.email).toLowerCase().trim())
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        vendorUserId = userRow?.id || null;
+      }
 
-    if (vendorUserId) {
-      try {
-        await insertNotification({
-          user_id: vendorUserId,
-          type: 'NEW_LEAD',
-          title: 'New enquiry received',
-          message: `${buyerName || 'A buyer'} sent an enquiry for ${title || 'your listing'}`,
-          link: '/vendor/proposals?tab=received',
-          reference_id: createdProposal?.id || createdLead?.id || null,
-          is_read: false,
-          created_at: new Date().toISOString(),
-        });
-      } catch (notifError) {
-        console.warn('Vendor lead notification failed:', notifError?.message || notifError);
+      if (vendorUserId) {
+        try {
+          await insertNotification({
+            user_id: vendorUserId,
+            type: 'NEW_LEAD',
+            title: 'New enquiry received',
+            message: `${buyerName || 'A buyer'} sent an enquiry for ${title || 'your listing'}`,
+            link: '/vendor/proposals?tab=received',
+            reference_id: createdProposal?.id || createdLead?.id || null,
+            is_read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch (notifError) {
+          console.warn('Vendor lead notification failed:', notifError?.message || notifError);
+        }
       }
     }
 

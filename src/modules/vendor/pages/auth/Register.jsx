@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,10 +9,19 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { referralApi } from '@/modules/vendor/services/referralApi';
 import { otpService } from '@/services/otpService';
+import { validateStrongPassword } from '@/lib/passwordPolicy';
 
 // ✅ Logo component
 import Logo from '@/shared/components/Logo';
+
+const normalizeReferralCode = (value) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '')
+    .slice(0, 20);
 
 const Steps = ({ currentStep }) => (
   <div className="flex justify-center mb-8">
@@ -46,6 +55,7 @@ const Steps = ({ currentStep }) => (
 
 const VendorRegister = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [cityLoading, setCityLoading] = useState(false);
@@ -69,6 +79,11 @@ const VendorRegister = () => {
     cityName: '',
     otp: '',
   });
+
+  const referralCodeFromUrl = useMemo(() => {
+    const raw = new URLSearchParams(location.search || '').get('ref');
+    return normalizeReferralCode(raw);
+  }, [location.search]);
 
   useEffect(() => {
     loadStates();
@@ -183,10 +198,11 @@ const VendorRegister = () => {
       toast({ title: 'Password Mismatch', description: 'Passwords do not match', variant: 'destructive' });
       return;
     }
-    if (formData.password.length < 8) {
+    const passwordValidation = validateStrongPassword(formData.password);
+    if (!passwordValidation.ok) {
       toast({
         title: 'Weak Password',
-        description: 'Password must be at least 8 characters',
+        description: passwordValidation.error,
         variant: 'destructive',
       });
       return;
@@ -236,6 +252,18 @@ const VendorRegister = () => {
 
       if (!authData?.user) throw new Error('Failed to create auth user');
 
+      if (authData.session) {
+        await supabase.auth.setSession(authData.session);
+      } else {
+        const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+        if (!loginError && loginData?.session) {
+          await supabase.auth.setSession(loginData.session);
+        }
+      }
+
       await vendorApi.registerVendor({
         userId: authData.user.id,
         ...formData,
@@ -256,8 +284,16 @@ const VendorRegister = () => {
         console.warn('Verification update error:', err);
       }
 
-      if (authData.session) {
-        await supabase.auth.setSession(authData.session);
+      if (referralCodeFromUrl) {
+        try {
+          await referralApi.linkCode(referralCodeFromUrl);
+          toast({
+            title: 'Referral Applied',
+            description: `Code ${referralCodeFromUrl} linked successfully.`,
+          });
+        } catch (referralError) {
+          console.warn('Referral link after registration failed:', referralError);
+        }
       }
 
       try {
@@ -327,6 +363,11 @@ const VendorRegister = () => {
 
           <CardTitle className="text-2xl font-bold text-[#003D82]">Vendor Registration</CardTitle>
           <CardDescription>Join India's leading B2B marketplace</CardDescription>
+          {referralCodeFromUrl ? (
+            <div className="text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1 inline-block mx-auto">
+              Referral code applied: {referralCodeFromUrl}
+            </div>
+          ) : null}
         </CardHeader>
 
         <CardContent>

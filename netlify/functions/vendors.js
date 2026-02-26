@@ -411,6 +411,32 @@ const requireRole = (event, role) => {
 
 const normalizeEmailValue = (value) => String(value || '').trim().toLowerCase();
 const normalizeTextValue = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isValidId = (value) => UUID_RE.test(String(value || '').trim());
+
+const nonEmptyText = (value, maxLen = 500) => {
+  const text = normalizeTextValue(value);
+  if (!text) return null;
+  return text.slice(0, Math.max(1, Number(maxLen) || 500));
+};
+
+const parseBudget = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return n;
+};
+
+const omitKeys = (obj = {}, keys = []) => {
+  const block = new Set(Array.isArray(keys) ? keys : []);
+  const out = {};
+  Object.entries(obj || {}).forEach(([key, value]) => {
+    if (block.has(key)) return;
+    if (value === undefined) return;
+    out[key] = value;
+  });
+  return out;
+};
 
 const pickFirstText = (...values) => {
   for (const value of values) {
@@ -2008,6 +2034,268 @@ export const handler = async (event) => {
         if (delErr) return fail(event, delErr.message || 'Failed to remove favorite');
         return ok(event, { success: true, isFavorite: false });
       }
+    }
+
+    if (event.httpMethod === 'POST' && action === 'leads') {
+      if (!ensureCsrfValid(event)) {
+        return forbidden(event, 'CSRF token mismatch');
+      }
+
+      const { user, error } = requireRole(event);
+      if (error) return error;
+
+      const rawVendorId = String(vendorId || '').trim();
+      const isMarketplaceRequest = rawVendorId.toLowerCase() === 'marketplace';
+
+      if (!isMarketplaceRequest && !isValidId(rawVendorId)) {
+        return bad(event, 'Invalid vendor id');
+      }
+
+      let vendor = null;
+      if (!isMarketplaceRequest) {
+        const { data: vendorRow, error: vendorErr } = await supabase
+          .from('vendors')
+          .select('id, user_id, company_name, email')
+          .eq('id', rawVendorId)
+          .maybeSingle();
+
+        if (vendorErr) return fail(event, vendorErr.message || 'Failed to fetch vendor');
+        if (!vendorRow) return bad(event, 'Vendor not found', null, 404);
+        vendor = vendorRow;
+      }
+
+      const payload = readBody(event);
+      const requirement = nonEmptyText(payload?.description || payload?.message, 5000);
+      if (!requirement || requirement.length < 10) {
+        return bad(event, 'Requirement/description must be at least 10 characters');
+      }
+
+      let buyerProfile = null;
+      if (user?.id) {
+        const { data: buyerByUser, error: buyerUserErr } = await supabase
+          .from('buyers')
+          .select('id, user_id, full_name, company_name, email, phone, mobile_number, mobile, whatsapp, updated_at')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (buyerUserErr) return fail(event, buyerUserErr.message || 'Failed to fetch buyer profile');
+        buyerProfile = Array.isArray(buyerByUser) && buyerByUser.length ? buyerByUser[0] : null;
+      }
+
+      if (!buyerProfile && user?.email) {
+        const { data: buyerByEmail, error: buyerEmailErr } = await supabase
+          .from('buyers')
+          .select('id, user_id, full_name, company_name, email, phone, mobile_number, mobile, whatsapp, updated_at')
+          .ilike('email', String(user.email).toLowerCase().trim())
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (buyerEmailErr) return fail(event, buyerEmailErr.message || 'Failed to fetch buyer profile');
+        buyerProfile = Array.isArray(buyerByEmail) && buyerByEmail.length ? buyerByEmail[0] : null;
+      }
+
+      const role = normalizeRole(user?.role);
+      if (!buyerProfile && role !== 'BUYER') {
+        return forbidden(event, 'Buyer account required');
+      }
+
+      const fallbackBuyerName = nonEmptyText(
+        user?.email ? String(user.email).split('@')[0] : 'Buyer',
+        120
+      ) || 'Buyer';
+
+      const buyerName = nonEmptyText(
+        buyerProfile?.full_name ||
+          buyerProfile?.company_name ||
+          payload?.buyer_name ||
+          fallbackBuyerName,
+        160
+      );
+
+      const buyerEmail = nonEmptyText(
+        buyerProfile?.email || user?.email || payload?.buyer_email,
+        320
+      );
+      const buyerPhone = nonEmptyText(
+        buyerProfile?.phone ||
+          buyerProfile?.mobile_number ||
+          buyerProfile?.mobile ||
+          buyerProfile?.whatsapp ||
+          payload?.buyer_phone,
+        60
+      );
+      const companyName = nonEmptyText(
+        buyerProfile?.company_name || payload?.company_name,
+        200
+      );
+
+      const title = nonEmptyText(
+        payload?.title || payload?.product_name || payload?.product_interest || 'Product enquiry',
+        200
+      );
+      const productName = nonEmptyText(payload?.product_name || payload?.product_interest || title, 200);
+      const productInterest = nonEmptyText(
+        payload?.product_interest || payload?.product_name || title,
+        200
+      );
+
+      const proposalBasePayload = {
+        vendor_id: vendor?.id || null,
+        buyer_id: buyerProfile?.id || null,
+        buyer_email: null,
+        title,
+        product_name: productName,
+        quantity: nonEmptyText(payload?.quantity, 80),
+        budget: parseBudget(payload?.budget),
+        required_by_date: nonEmptyText(payload?.required_by_date, 40),
+        description: requirement,
+        status: 'SENT',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      const proposalVariants = [
+        omitKeys(proposalBasePayload, []),
+        omitKeys(proposalBasePayload, ['required_by_date']),
+        omitKeys(proposalBasePayload, ['required_by_date', 'buyer_email']),
+      ];
+
+      let createdProposal = null;
+      let proposalInsertError = null;
+
+      for (const candidate of proposalVariants) {
+        const { data: proposalRow, error: proposalErr } = await supabase
+          .from('proposals')
+          .insert([candidate])
+          .select('id, vendor_id, buyer_id, title, product_name, status, created_at')
+          .maybeSingle();
+
+        if (!proposalErr) {
+          createdProposal = proposalRow || {
+            id: null,
+            vendor_id: candidate?.vendor_id || vendor?.id || null,
+            buyer_id: candidate?.buyer_id || null,
+            title: candidate?.title || null,
+            product_name: candidate?.product_name || null,
+            status: candidate?.status || 'SENT',
+            created_at: candidate?.created_at || null,
+          };
+          break;
+        }
+
+        proposalInsertError = proposalErr;
+      }
+
+      if (!createdProposal) {
+        return fail(event, proposalInsertError?.message || 'Failed to create proposal');
+      }
+
+      const baseLeadPayload = {
+        vendor_id: vendor?.id || null,
+        title,
+        product_name: productName,
+        product_interest: productInterest,
+        proposal_id: createdProposal?.id || null,
+        buyer_id: buyerProfile?.id || null,
+        buyer_name: buyerName,
+        buyer_email: buyerEmail ? String(buyerEmail).toLowerCase().trim() : null,
+        buyer_phone: buyerPhone,
+        company_name: companyName,
+        description: requirement,
+        message: requirement,
+        quantity: nonEmptyText(payload?.quantity, 80),
+        budget: parseBudget(payload?.budget),
+        category: nonEmptyText(payload?.category, 120),
+        category_slug: nonEmptyText(payload?.category_slug, 160),
+        location: nonEmptyText(payload?.location, 200),
+        status: 'AVAILABLE',
+        created_at: new Date().toISOString(),
+      };
+
+      const leadVariants = [
+        omitKeys(baseLeadPayload, []),
+        omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest']),
+        omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
+        omitKeys(baseLeadPayload, ['vendor_id', 'location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
+        {
+          vendor_id: baseLeadPayload.vendor_id,
+          title: baseLeadPayload.title,
+          product_name: baseLeadPayload.product_name,
+          buyer_name: baseLeadPayload.buyer_name,
+          buyer_email: baseLeadPayload.buyer_email,
+          description: baseLeadPayload.description,
+          message: baseLeadPayload.message,
+          quantity: baseLeadPayload.quantity,
+          budget: baseLeadPayload.budget,
+          status: 'AVAILABLE',
+          created_at: baseLeadPayload.created_at,
+        },
+      ];
+
+      let createdLead = null;
+      let leadInsertError = null;
+
+      for (const candidate of leadVariants) {
+        const { data: leadRow, error: leadErr } = await supabase
+          .from('leads')
+          .insert([candidate])
+          .select('id, vendor_id, title, buyer_id, buyer_name, buyer_email, created_at')
+          .maybeSingle();
+
+        if (!leadErr) {
+          createdLead = leadRow || {
+            id: null,
+            vendor_id: candidate?.vendor_id || vendor?.id || null,
+            title: candidate?.title || null,
+            buyer_id: candidate?.buyer_id || null,
+            buyer_name: candidate?.buyer_name || null,
+            buyer_email: candidate?.buyer_email || null,
+            created_at: candidate?.created_at || null,
+          };
+          break;
+        }
+
+        leadInsertError = leadErr;
+      }
+
+      if (!createdLead) {
+        // Lead creation failure should not mask proposal success.
+        // eslint-disable-next-line no-console
+        console.warn('Lead insert failed after proposal create:', leadInsertError?.message || leadInsertError);
+      }
+
+      if (vendor?.id) {
+        let vendorUserId = vendor?.user_id || null;
+        if (!vendorUserId && vendor?.email) {
+          const { data: userRow } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', String(vendor.email).toLowerCase().trim())
+            .order('updated_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          vendorUserId = userRow?.id || null;
+        }
+
+        if (vendorUserId) {
+          try {
+            await insertNotification({
+              user_id: vendorUserId,
+              type: 'NEW_LEAD',
+              title: 'New enquiry received',
+              message: `${buyerName || 'A buyer'} sent an enquiry for ${title || 'your listing'}`,
+              link: '/vendor/proposals?tab=received',
+              reference_id: createdProposal?.id || createdLead?.id || null,
+              is_read: false,
+              created_at: new Date().toISOString(),
+            });
+          } catch (notifError) {
+            // eslint-disable-next-line no-console
+            console.warn('Vendor lead notification failed:', notifError?.message || notifError);
+          }
+        }
+      }
+
+      return json(event, 201, { success: true, lead: createdLead, proposal: createdProposal });
     }
 
     if (event.httpMethod === 'GET' && action === 'leads') {

@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'crypto';
+import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
 
 const ENABLE_SUPABASE_AUTH_MIGRATION =
   String(process.env.ENABLE_SUPABASE_AUTH_MIGRATION || 'true').toLowerCase() !== 'false';
@@ -1136,8 +1137,9 @@ export const handler = async (event) => {
 
       if (!email || !password) return bad(event, 'Email and password are required');
       if (!isValidEmail(email)) return bad(event, 'Invalid email format');
-      if (password.length < 6) {
-        return bad(event, 'Password must be at least 6 characters long');
+      const passwordValidation = validateStrongPassword(password);
+      if (!passwordValidation.ok) {
+        return bad(event, passwordValidation.error);
       }
 
       const existing = await getPublicUserByEmail(email);
@@ -1456,8 +1458,9 @@ export const handler = async (event) => {
       const currentPassword = String(body?.current_password || '');
       const newPassword = String(body?.new_password || body?.password || '');
 
-      if (!newPassword || newPassword.length < 6) {
-        return bad(event, 'Password must be at least 6 characters long');
+      const passwordValidation = validateStrongPassword(newPassword);
+      if (!passwordValidation.ok) {
+        return bad(event, passwordValidation.error);
       }
 
       const user = await getPublicUserById(auth.user.id);

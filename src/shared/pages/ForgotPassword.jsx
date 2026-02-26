@@ -8,6 +8,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, ArrowRight, Lock } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
 import { passwordResetApi } from '@/services/passwordResetApi';
+import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from '@/lib/passwordPolicy';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -156,10 +157,11 @@ const ForgotPassword = () => {
       return;
     }
 
-    if (newPassword.length < 6) {
+    const validation = validateStrongPassword(newPassword);
+    if (!validation.ok) {
       toast({
-        title: 'Password Too Short',
-        description: 'Password must be at least 6 characters long',
+        title: 'Weak Password',
+        description: validation.error,
         variant: 'destructive'
       });
       return;
@@ -346,14 +348,14 @@ const ForgotPassword = () => {
                   <Input
                     id="newPassword"
                     type={showPassword ? 'text' : 'password'}
-                    placeholder="At least 6 characters"
+                    placeholder="Strong password"
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     required
                   />
                 </div>
                 <p className="text-xs text-gray-500">
-                  Must be at least 6 characters long
+                  {PASSWORD_POLICY_MESSAGE}
                 </p>
               </div>
 

@@ -104,6 +104,9 @@ const openCheckoutAndVerify = async ({ order, keyId, leadId }) =>
         }
       },
       modal: {
+        confirm_close: true,
+        escape: false,
+        backdropclose: false,
         ondismiss: () => {
           const error = new Error('Payment cancelled');
           error.code = 'PAYMENT_CANCELLED';

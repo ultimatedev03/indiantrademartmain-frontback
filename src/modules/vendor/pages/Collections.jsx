@@ -390,8 +390,8 @@ const Collections = () => {
           <Layers className="w-5 h-5 text-indigo-600" />
           <h2 className="text-lg font-semibold text-slate-900">Grouped Products/Services</h2>
         </div>
-        <div className="flex flex-wrap gap-2 text-sm">
-          <span className="text-slate-600">Group by:</span>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-slate-600 font-medium shrink-0">Group by:</span>
           {[
             { key: 'custom', label: 'Custom/Category' },
             { key: 'head', label: 'Head Category' },

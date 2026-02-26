@@ -23,6 +23,7 @@ import {
   getPublicUserByEmail,
   getPublicUserById,
 } from '../lib/auth.js';
+import { validateStrongPassword } from '../lib/passwordPolicy.js';
 
 const router = express.Router();
 
@@ -738,8 +739,9 @@ router.post('/register', async (req, res) => {
     if (!isValidEmail(email)) {
       return res.status(400).json({ success: false, error: 'Invalid email format' });
     }
-    if (password.length < 6) {
-      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters long' });
+    const passwordValidation = validateStrongPassword(password);
+    if (!passwordValidation.ok) {
+      return res.status(400).json({ success: false, error: passwordValidation.error });
     }
 
     // ✅ If already exists in public_users -> 409
@@ -1097,8 +1099,9 @@ router.patch('/password', requireAuth(), async (req, res) => {
     const currentUserId = String(req.user?.id || '').trim();
     const currentEmail = normalizeEmail(req.user?.email || '');
 
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters long' });
+    const passwordValidation = validateStrongPassword(newPassword);
+    if (!passwordValidation.ok) {
+      return res.status(400).json({ success: false, error: passwordValidation.error });
     }
 
     let user = currentUserId ? await getPublicUserById(currentUserId) : null;

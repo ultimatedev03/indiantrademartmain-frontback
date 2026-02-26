@@ -98,12 +98,76 @@ const getDiscountTag = (pricing) => {
   return '';
 };
 
+const getReferralDisplaySummary = (preview, baseAmount = 0) => {
+  const normalizedType = String(preview?.configured_discount_type || '').toUpperCase();
+  const type = normalizedType || null;
+  const valueRaw = Number(preview?.configured_discount_value || 0);
+  const value = Number.isFinite(valueRaw) ? Math.max(0, valueRaw) : 0;
+  const capRaw = Number(preview?.configured_discount_cap);
+  const cap = Number.isFinite(capRaw) && capRaw > 0 ? capRaw : null;
+  const percentRaw = Number(preview?.display_discount_percent ?? preview?.discount_percent ?? 0);
+  const percent = Number.isFinite(percentRaw) ? Math.max(0, percentRaw) : 0;
+  const amount = Number(baseAmount || 0);
+  const expectedPercentDiscount = type === 'PERCENT' && value > 0 && amount > 0
+    ? (amount * value) / 100
+    : 0;
+  const capApplied = Boolean(cap && expectedPercentDiscount > cap + 0.01);
+  const capText = capApplied ? ` (max ₹${formatINR(cap)})` : '';
+
+  if (type === 'FLAT' && value > 0) {
+    const amountLabel = `₹${formatINR(value)}`;
+    return {
+      type,
+      value,
+      cap,
+      percent,
+      capApplied,
+      promoText: `Referral ${amountLabel} OFF${capText}`,
+      breakdownText: `Referral (${amountLabel} OFF${capText})`,
+      includedText: `Referral discount (${amountLabel}) is already included above.`,
+    };
+  }
+
+  const roundedPercent = Math.round(percent);
+  return {
+    type,
+    value,
+    cap,
+    percent,
+    capApplied,
+    promoText: `Referral ${roundedPercent}% OFF${capText}`,
+    breakdownText: `Referral (${roundedPercent}% OFF${capText})`,
+    includedText: `Referral discount (${roundedPercent}%) is already included above.`,
+  };
+};
+
 const normalizeCouponCode = (value) =>
   String(value || '')
     .toUpperCase()
     .replace(/\s+/g, '')
     .replace(/[^A-Z0-9_-]/g, '')
     .slice(0, 32);
+
+const extractApiErrorMessage = async (response, fallbackMessage) => {
+  const fallback = fallbackMessage || `Request failed (${response?.status || 500})`;
+  if (!response) return fallback;
+
+  const contentType = String(response.headers?.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    const payload = await response.json().catch(() => ({}));
+    return payload?.error || payload?.message || fallback;
+  }
+
+  const text = await response.text().catch(() => '');
+  const trimmed = String(text || '').trim();
+  if (!trimmed || trimmed.startsWith('<')) return fallback;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed?.error || parsed?.message || fallback;
+  } catch {
+    return trimmed || fallback;
+  }
+};
 
 const badgeStyle = (variant) => {
   switch ((variant || '').toLowerCase()) {
@@ -145,6 +209,11 @@ const Services = () => {
   const [fatalError, setFatalError] = useState(null);
   const [vendorId, setVendorId] = useState(null);
   const [couponCode, setCouponCode] = useState('');
+  const [referralOffersByPlan, setReferralOffersByPlan] = useState({});
+  const [referralOfferSettings, setReferralOfferSettings] = useState({
+    is_enabled: false,
+    first_paid_plan_only: true,
+  });
   const TRIAL_PLAN_ID = '7fee24d0-de18-44d3-a357-be7b40492a1a'; // Trial plan UUID
   const TRIAL_DURATION_DAYS = 30;
 
@@ -329,6 +398,30 @@ const Services = () => {
       if (plansErr) throw plansErr;
       setPlans(plansData || []);
 
+      try {
+        const referralResponse = await fetchWithCsrf(apiUrl(`/api/payment/referral-offers/${vendorId}`));
+        const referralPayload = await referralResponse.json().catch(() => ({}));
+        if (referralResponse.ok && referralPayload?.success) {
+          const nextSettings = referralPayload?.data?.settings || {};
+          const nextOffers =
+            referralPayload?.data?.offers && typeof referralPayload.data.offers === 'object'
+              ? referralPayload.data.offers
+              : {};
+          setReferralOfferSettings({
+            is_enabled: Boolean(nextSettings?.is_enabled),
+            first_paid_plan_only: Boolean(nextSettings?.first_paid_plan_only),
+          });
+          setReferralOffersByPlan(nextOffers);
+        } else {
+          setReferralOfferSettings({ is_enabled: false, first_paid_plan_only: true });
+          setReferralOffersByPlan({});
+        }
+      } catch (referralPreviewError) {
+        console.warn('Referral offer preview load failed:', referralPreviewError);
+        setReferralOfferSettings({ is_enabled: false, first_paid_plan_only: true });
+        setReferralOffersByPlan({});
+      }
+
       // Query for ACTIVE subscription - this will get the latest one
       const { data: subs, error: subsErr } = await supabase
         .from('vendor_plan_subscriptions')
@@ -428,18 +521,13 @@ const Services = () => {
       });
 
       if (!response.ok) {
-        const ct = response.headers.get('content-type') || '';
-        const txt = await response.text().catch(() => '');
-        const looksHtml = ct.includes('text/html') || /^\s*</.test(txt);
-        throw new Error(
-          looksHtml
-            ? `Payment API error (${response.status})`
-            : (txt || `Payment API error (${response.status})`)
-        );
+        const message = await extractApiErrorMessage(response, `Payment API error (${response.status})`);
+        throw new Error(message);
       }
       const data = await response.json();
       const orderData = data.order;
       const keyId = data.key_id || import.meta.env.VITE_RAZORPAY_KEY_ID;
+      const effectiveOfferCode = normalizeCouponCode(orderData?.coupon_code || appliedCoupon);
 
       if (!keyId) {
         toast({
@@ -455,7 +543,7 @@ const Services = () => {
         const script = document.createElement('script');
         script.src = 'https://checkout.razorpay.com/v1/checkout.js';
         script.async = true;
-        script.onload = () => openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
+        script.onload = () => openRazorpayCheckout(orderData, plan, keyId, effectiveOfferCode);
         script.onerror = () => {
           toast({ 
             title: 'Warning', 
@@ -467,7 +555,7 @@ const Services = () => {
             const retryScript = document.createElement('script');
             retryScript.src = 'https://checkout.razorpay.com/v1/checkout.js';
             retryScript.async = true;
-            retryScript.onload = () => openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
+            retryScript.onload = () => openRazorpayCheckout(orderData, plan, keyId, effectiveOfferCode);
             retryScript.onerror = () => {
               toast({ 
                 title: 'Error', 
@@ -480,7 +568,7 @@ const Services = () => {
         };
         document.body.appendChild(script);
       } else {
-        openRazorpayCheckout(orderData, plan, keyId, appliedCoupon);
+        openRazorpayCheckout(orderData, plan, keyId, effectiveOfferCode);
       }
     } catch (err) {
       toast({ title: 'Error', description: err?.message || 'Failed to initiate payment', variant: 'destructive' });
@@ -515,14 +603,11 @@ const Services = () => {
           });
 
           if (!verifyResponse.ok) {
-            const ct = verifyResponse.headers.get('content-type') || '';
-            const txt = await verifyResponse.text().catch(() => '');
-            const looksHtml = ct.includes('text/html') || /^\s*</.test(txt);
-            throw new Error(
-              looksHtml
-                ? `Payment verification failed (${verifyResponse.status})`
-                : (txt || `Payment verification failed (${verifyResponse.status})`)
+            const message = await extractApiErrorMessage(
+              verifyResponse,
+              `Payment verification failed (${verifyResponse.status})`
             );
+            throw new Error(message);
           }
           await verifyResponse.json();
 
@@ -536,6 +621,9 @@ const Services = () => {
         }
       },
       modal: {
+        confirm_close: true,
+        escape: false,
+        backdropclose: false,
         ondismiss: () => {
           toast({ title: 'Payment Cancelled', description: 'Your payment was cancelled.', variant: 'destructive' });
         },
@@ -692,6 +780,24 @@ const Services = () => {
     ? getPlanDisplayPricing(selectedPlan)
     : { nowPrice: 0, originalPrice: 0, discountPercent: 0, discountLabel: '', extraLeadPrice: 0 };
   const selectedDiscountTag = getDiscountTag(selectedPricing);
+  const selectedReferralPreview = selectedPlan ? referralOffersByPlan?.[selectedPlan.id] || null : null;
+  const selectedReferralDiscountRaw = Number(selectedReferralPreview?.discount_amount || 0);
+  const selectedReferralDiscountAmount = Number.isFinite(selectedReferralDiscountRaw)
+    ? Math.max(0, selectedReferralDiscountRaw)
+    : 0;
+  const selectedReferralNetRaw = Number(selectedReferralPreview?.net_amount ?? selectedPricing.nowPrice);
+  const selectedReferralNetAmount = Number.isFinite(selectedReferralNetRaw)
+    ? Math.max(0, selectedReferralNetRaw)
+    : selectedPricing.nowPrice;
+  const selectedReferralSummary = getReferralDisplaySummary(
+    selectedReferralPreview,
+    selectedPricing.nowPrice
+  );
+  const selectedHasReferralPreview =
+    selectedReferralDiscountAmount > 0 && selectedReferralNetAmount < selectedPricing.nowPrice;
+  const selectedPayableBase = selectedHasReferralPreview
+    ? selectedReferralNetAmount
+    : selectedPricing.nowPrice;
 
   if (!plans.length && !loading && !fatalError) {
     return (
@@ -792,6 +898,17 @@ const Services = () => {
           const isPopular = plan.id === mostPopularPlanId;
           const pricing = getPlanDisplayPricing(plan);
           const discountTag = getDiscountTag(pricing);
+          const referralPreview = referralOffersByPlan?.[plan.id] || null;
+          const referralDiscountAmountRaw = Number(referralPreview?.discount_amount || 0);
+          const referralDiscountAmount = Number.isFinite(referralDiscountAmountRaw)
+            ? Math.max(0, referralDiscountAmountRaw)
+            : 0;
+          const referralNetAmountRaw = Number(referralPreview?.net_amount ?? pricing.nowPrice);
+          const referralNetAmount = Number.isFinite(referralNetAmountRaw)
+            ? Math.max(0, referralNetAmountRaw)
+            : pricing.nowPrice;
+          const referralSummary = getReferralDisplaySummary(referralPreview, pricing.nowPrice);
+          const hasReferralPreview = referralDiscountAmount > 0 && referralNetAmount < pricing.nowPrice;
 
           const { meta, keyBenefits } = buildGroups(plan);
           const badge = meta.badge || {};
@@ -865,6 +982,17 @@ const Services = () => {
                       ₹{formatINR(pricing.nowPrice)}
                       <span className="text-xs font-medium text-slate-500">/year</span>
                     </div>
+                    {hasReferralPreview ? (
+                      <div className="mt-1 space-y-0.5">
+                        <div className="text-[11px] font-semibold text-emerald-700">
+                          {referralSummary.promoText}
+                          {referralOfferSettings?.first_paid_plan_only ? ' • first paid purchase' : ''}
+                        </div>
+                        <div className="text-sm font-bold text-emerald-700">
+                          ₹{formatINR(referralNetAmount)} / year after referral
+                        </div>
+                      </div>
+                    ) : null}
                     {discountTag ? (
                       <div className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                         {discountTag}
@@ -987,13 +1115,24 @@ const Services = () => {
                           ₹{formatINR(selectedPricing.originalPrice)}
                         </div>
                       ) : null}
+                      {selectedHasReferralPreview ? (
+                        <div className="text-xs text-white/60 line-through">
+                          ₹{formatINR(selectedPricing.nowPrice)}
+                        </div>
+                      ) : null}
                       <div className="text-3xl font-extrabold leading-tight">
-                        ₹{formatINR(selectedPricing.nowPrice)}
+                        ₹{formatINR(selectedPayableBase)}
                         <span className="text-sm font-medium text-white/80"> / year</span>
                       </div>
                       {selectedDiscountTag ? (
                         <div className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
                           {selectedDiscountTag}
+                        </div>
+                      ) : null}
+                      {selectedHasReferralPreview ? (
+                        <div className="mt-1 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                          {selectedReferralSummary.promoText}
+                          {referralOfferSettings?.first_paid_plan_only ? ' • first paid purchase' : ''}
                         </div>
                       ) : null}
                     </div>
@@ -1121,6 +1260,11 @@ const Services = () => {
                       <p className="text-[11px] text-slate-600">
                         If you don&apos;t have a coupon, leave this blank and continue.
                       </p>
+                      {selectedHasReferralPreview ? (
+                        <p className="text-[11px] font-semibold text-emerald-700">
+                          {selectedReferralSummary.includedText}
+                        </p>
+                      ) : null}
                     </div>
 
                     <div className="rounded-2xl bg-white border px-3.5 py-3 shadow-[inset_0_1px_10px_rgba(15,23,42,0.05)] space-y-2">
@@ -1134,6 +1278,12 @@ const Services = () => {
                         <span>Plan price</span>
                         <span className="font-semibold text-slate-800">₹{formatINR(selectedPricing.nowPrice)}</span>
                       </div>
+                      {selectedHasReferralPreview ? (
+                        <div className="flex justify-between text-sm text-emerald-700 font-semibold">
+                          <span>{selectedReferralSummary.breakdownText}</span>
+                          <span>-₹{formatINR(selectedReferralDiscountAmount)}</span>
+                        </div>
+                      ) : null}
                       {selectedDiscountTag ? (
                         <div className="flex justify-between text-sm text-emerald-700 font-semibold">
                           <span>Offer</span>
@@ -1153,8 +1303,13 @@ const Services = () => {
                       )}
                       <div className="border-t pt-2.5 flex justify-between text-base font-bold text-slate-900">
                         <span>Payable now</span>
-                        <span>₹{formatINR(selectedPricing.nowPrice)}</span>
+                        <span>₹{formatINR(selectedPayableBase)}</span>
                       </div>
+                      {selectedHasReferralPreview && referralOfferSettings?.first_paid_plan_only ? (
+                        <div className="text-[11px] text-emerald-700 text-right">
+                          Referral benefit is valid only on first paid purchase.
+                        </div>
+                      ) : null}
                       {couponCode.trim() && (
                         <div className="text-[11px] text-amber-700 text-right">Final amount updates after validation</div>
                       )}
