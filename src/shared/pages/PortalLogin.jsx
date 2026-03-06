@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
-import { Loader2, Lock, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
@@ -14,11 +14,13 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const getColorClass = (type) => {
     const colors = {
       blue: 'bg-blue-600 hover:bg-blue-700 text-blue-600',
       emerald: 'bg-emerald-600 hover:bg-emerald-700 text-emerald-600',
+      amber: 'bg-amber-600 hover:bg-amber-700 text-amber-600',
       purple: 'bg-purple-600 hover:bg-purple-700 text-purple-600',
     };
     return colors[colorScheme] || colors.blue;
@@ -124,22 +126,29 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
               <div className="relative">
                 <Input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   placeholder="••••••"
                   className="h-11 bg-slate-50 border-slate-200 focus:bg-white transition-colors pr-10"
                 />
-                <Lock className="absolute right-3 top-3 h-5 w-5 text-slate-400" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
             {error && (
               <Alert variant="destructive" className="bg-red-50 border-red-100 text-red-800">
                 <AlertCircle className="h-4 w-4" />
-                <div className="ml-2">
-                  <AlertTitle>Authentication Failed</AlertTitle>
+                <div>
+                  <AlertTitle className="mb-1">Authentication Failed</AlertTitle>
                   <AlertDescription>{error}</AlertDescription>
                 </div>
               </Alert>

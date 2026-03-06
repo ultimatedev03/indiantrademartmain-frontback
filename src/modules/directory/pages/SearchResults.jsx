@@ -47,14 +47,6 @@ const slugify = (text = '') =>
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 
-const safeJsonParse = (s) => {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-};
-
 const levenshtein = (a = '', b = '') => {
   a = String(a);
   b = String(b);
@@ -78,68 +70,14 @@ const levenshtein = (a = '', b = '') => {
   return dp[m][n];
 };
 
-const getTargetLocations = (raw) => {
-  if (!raw) return { tl: null, rawStr: null };
-  if (typeof raw === 'object') return { tl: raw, rawStr: null };
-  if (typeof raw === 'string') {
-    const parsed = safeJsonParse(raw);
-    if (parsed && typeof parsed === 'object') return { tl: parsed, rawStr: null };
-    return { tl: null, rawStr: raw };
-  }
-  return { tl: null, rawStr: null };
-};
-
-const productMatchesLocation = (product, stateId, cityId, stateCityIdSet) => {
+const productMatchesLocation = (product, stateId, cityId) => {
   if (!stateId && !cityId) return true;
 
-  const { tl, rawStr } = getTargetLocations(product?.target_locations);
+  const vendorStateId = product?.vendors?.state_id ? String(product.vendors.state_id) : '';
+  const vendorCityId = product?.vendors?.city_id ? String(product.vendors.city_id) : '';
 
-  const vendorFallback = () => {
-    const vState = product?.vendors?.state_id ? String(product.vendors.state_id) : '';
-    const vCity = product?.vendors?.city_id ? String(product.vendors.city_id) : '';
-
-    if (cityId) return vCity === String(cityId) || (stateId ? vState === String(stateId) : false);
-    if (stateId) return vState === String(stateId);
-    return false;
-  };
-
-  if (!tl && rawStr) {
-    const s = rawStr.replace(/\s+/g, '').toLowerCase();
-    const pan = s.includes('"pan_india":true') || s.includes('"panindia":true');
-    if (pan) return true;
-
-    if (cityId && rawStr.includes(String(cityId))) return true;
-    if (stateId && rawStr.includes(String(stateId))) return true;
-
-    return vendorFallback();
-  }
-
-  if (!tl) return vendorFallback();
-  if (!!tl.pan_india) return true;
-
-  const targetStateIds = (tl.states || []).map((x) => String(x?.id)).filter(Boolean);
-  const targetCityIds = (tl.cities || []).map((x) => String(x?.id)).filter(Boolean);
-
-  const hasTargets = targetStateIds.length > 0 || targetCityIds.length > 0;
-  if (!hasTargets) return vendorFallback();
-
-  if (cityId) {
-    if (targetCityIds.includes(String(cityId))) return true;
-    if (stateId && targetStateIds.includes(String(stateId))) return true;
-    return false;
-  }
-
-  if (stateId) {
-    if (targetStateIds.includes(String(stateId))) return true;
-
-    if (stateCityIdSet && targetCityIds.length > 0) {
-      for (const cid of targetCityIds) {
-        if (stateCityIdSet.has(String(cid))) return true;
-      }
-    }
-    return false;
-  }
-
+  if (cityId) return vendorCityId === String(cityId);
+  if (stateId) return vendorStateId === String(stateId);
   return true;
 };
 
@@ -212,6 +150,13 @@ const buildPriceBounds = (items = []) => {
   const min = Math.floor(Math.min(...prices));
   const max = Math.ceil(Math.max(...prices));
   return { min, max: max > min ? max : min + 1 };
+};
+
+const applyLocationFilters = (query, stateId, cityId) => {
+  let scopedQuery = query;
+  if (stateId) scopedQuery = scopedQuery.eq('vendors.state_id', stateId);
+  if (cityId) scopedQuery = scopedQuery.eq('vendors.city_id', cityId);
+  return scopedQuery;
 };
 
 const SearchResults = () => {
@@ -392,7 +337,7 @@ const SearchResults = () => {
     return best;
   };
 
-  const runKeywordProductsQueryWithFallback = async ({ servicePhrase, serviceSlug, selectString }) => {
+  const runKeywordProductsQueryWithFallback = async ({ servicePhrase, serviceSlug, selectString, stateId, cityId }) => {
     const attempts = [
       [
         `category_slug.eq.${serviceSlug}`,
@@ -408,14 +353,15 @@ const SearchResults = () => {
     let lastErr = null;
 
     for (const orParts of attempts) {
-      const q = supabase
+      let q = supabase
         .from('products')
         .select(selectString)
         .eq('status', 'ACTIVE')
         .eq('vendors.is_active', true)
-        .or(orParts.join(','))
-        .order('created_at', { ascending: false })
-        .limit(300);
+        .or(orParts.join(','));
+
+      q = applyLocationFilters(q, stateId, cityId);
+      q = q.order('created_at', { ascending: false }).limit(300);
 
       const { data, error } = await q;
       if (!error) return data || [];
@@ -481,12 +427,6 @@ const SearchResults = () => {
         const stateId = state?.id || null;
         const cityId = city?.id || null;
 
-        let stateCityIdSet = null;
-        if (stateId) {
-          const allCities = await locationService.getCities(stateId);
-          stateCityIdSet = new Set((allCities || []).map((c) => String(c.id)));
-        }
-
         const ctx = await resolveCategoryContext(serviceSlug);
 
         if (ctx.type === 'text') {
@@ -515,36 +455,48 @@ const SearchResults = () => {
         let data = [];
 
         if (ctx.type === 'micro' && ctx.microId) {
-          const { data: d, error } = await supabase
+          let query = supabase
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
             .eq('vendors.is_active', true)
-            .eq('micro_category_id', ctx.microId)
+            .eq('micro_category_id', ctx.microId);
+
+          query = applyLocationFilters(query, stateId, cityId);
+
+          const { data: d, error } = await query
             .order('created_at', { ascending: false })
             .limit(300);
 
           if (error) throw error;
           data = d || [];
         } else if (ctx.type === 'sub' && ctx.subId) {
-          const { data: d, error } = await supabase
+          let query = supabase
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
             .eq('vendors.is_active', true)
-            .eq('sub_category_id', ctx.subId)
+            .eq('sub_category_id', ctx.subId);
+
+          query = applyLocationFilters(query, stateId, cityId);
+
+          const { data: d, error } = await query
             .order('created_at', { ascending: false })
             .limit(300);
 
           if (error) throw error;
           data = d || [];
         } else if (ctx.type === 'head' && ctx.headId) {
-          const { data: d, error } = await supabase
+          let query = supabase
             .from('products')
             .select(selectString)
             .eq('status', 'ACTIVE')
             .eq('vendors.is_active', true)
-            .eq('head_category_id', ctx.headId)
+            .eq('head_category_id', ctx.headId);
+
+          query = applyLocationFilters(query, stateId, cityId);
+
+          const { data: d, error } = await query
             .order('created_at', { ascending: false })
             .limit(300);
 
@@ -555,6 +507,8 @@ const SearchResults = () => {
             servicePhrase,
             serviceSlug,
             selectString,
+            stateId,
+            cityId,
           });
         }
 
@@ -602,7 +556,7 @@ const SearchResults = () => {
           };
         });
 
-        const locationFiltered = mapped.filter((p) => productMatchesLocation(p, stateId, cityId, stateCityIdSet));
+        const locationFiltered = mapped.filter((p) => productMatchesLocation(p, stateId, cityId));
 
         if (locationFiltered.length === 0) {
           await tryAutoCorrect({
@@ -795,4 +749,3 @@ const SearchResults = () => {
 };
 
 export default SearchResults;
-

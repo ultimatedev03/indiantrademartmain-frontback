@@ -4,7 +4,7 @@ import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext'
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Briefcase, Lock, Mail, AlertCircle } from 'lucide-react';
+import { Loader2, Briefcase, Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
@@ -15,6 +15,8 @@ const Login = () => {
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const showDemoCredentials = Boolean(import.meta.env.DEV);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -144,13 +146,21 @@ const Login = () => {
                   <Lock className="absolute left-3 top-3 h-5 w-5 text-slate-500" />
                   <Input
                     id="password"
-                    type="password"
+                    type={showPassword ? 'text' : 'password'}
                     required
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    className="pl-10 bg-slate-900/50 border-slate-700 focus:border-blue-500 text-white placeholder:text-slate-600"
+                    className="pl-10 pr-10 bg-slate-900/50 border-slate-700 focus:border-blue-500 text-white placeholder:text-slate-600"
                     placeholder="••••••••"
                   />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-300"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -169,34 +179,36 @@ const Login = () => {
             </form>
           </CardContent>
 
-          <CardFooter className="bg-slate-900/50 border-t border-slate-800 p-4 rounded-b-xl">
-            <div className="w-full">
-              <p className="text-xs text-center text-slate-500 mb-2">Test Credentials</p>
-              <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400 text-center">
-                <div
-                  className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                  onClick={() => setFormData({ email: 'deepak@yourcompany.com', password: '123456789' })}
-                >
-                  <span className="font-bold text-blue-400">Data Entry</span><br />
-                  deepak@yourcompany.com
-                </div>
-                <div
-                  className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                  onClick={() => setFormData({ email: 'support@itm.com', password: 'support' })}
-                >
-                  <span className="font-bold text-purple-400">Support</span><br />
-                  support@itm.com
-                </div>
-                <div
-                  className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                  onClick={() => setFormData({ email: 'sales@itm.com', password: 'sales' })}
-                >
-                  <span className="font-bold text-emerald-400">Sales</span><br />
-                  sales@itm.com
+          {showDemoCredentials && (
+            <CardFooter className="bg-slate-900/50 border-t border-slate-800 p-4 rounded-b-xl">
+              <div className="w-full">
+                <p className="text-xs text-center text-slate-500 mb-2">Test Credentials (Dev Only)</p>
+                <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400 text-center">
+                  <div
+                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
+                    onClick={() => setFormData({ email: 'deepak@yourcompany.com', password: '123456789' })}
+                  >
+                    <span className="font-bold text-blue-400">Data Entry</span><br />
+                    deepak@yourcompany.com
+                  </div>
+                  <div
+                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
+                    onClick={() => setFormData({ email: 'support@itm.com', password: 'support' })}
+                  >
+                    <span className="font-bold text-purple-400">Support</span><br />
+                    support@itm.com
+                  </div>
+                  <div
+                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
+                    onClick={() => setFormData({ email: 'sales@itm.com', password: 'sales' })}
+                  >
+                    <span className="font-bold text-emerald-400">Sales</span><br />
+                    sales@itm.com
+                  </div>
                 </div>
               </div>
-            </div>
-          </CardFooter>
+            </CardFooter>
+          )}
         </Card>
       </div>
     </div>

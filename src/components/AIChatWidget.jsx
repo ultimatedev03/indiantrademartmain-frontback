@@ -116,13 +116,19 @@ const AIChatWidget = () => {
         body: JSON.stringify({ messages: history, provider, language }),
       });
 
-      if (!resp.ok) throw new Error('API error');
-      const data = await resp.json();
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        const backendError = String(data?.error || '').trim();
+        throw new Error(backendError || `Chat service unavailable (${resp.status})`);
+      }
+
       const botText = data.text || copy.error;
       setMessages((prev) => [...prev, { id: `bot-${Date.now()}`, role: 'assistant', text: botText }]);
     } catch (e) {
       console.error(e);
-      setError('Unable to connect. Please check your connection.');
+      const msg = String(e?.message || '').trim();
+      const isNetworkError = /failed to fetch|networkerror|load failed/i.test(msg.toLowerCase());
+      setError(isNetworkError ? 'Unable to connect. Please check your connection.' : (msg || copy.error));
       setTimeout(() => setError(''), 4000);
     } finally {
       setLoading(false);

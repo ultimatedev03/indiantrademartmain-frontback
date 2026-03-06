@@ -101,25 +101,66 @@ export const locationService = {
 
   // Helper to find location details by slug
   getLocationBySlug: async (stateSlug, citySlug) => {
-    try {
-        let state = null;
-        let city = null;
+    let state = null;
+    let city = null;
 
-        if (stateSlug) {
-            const { data: sData } = await supabase.from('states').select('*').eq('slug', stateSlug).single();
-            state = sData;
-        }
+    const normalizedStateSlug = String(stateSlug || '').trim();
+    const normalizedCitySlug = String(citySlug || '').trim();
 
-        if (citySlug && state) {
-            const { data: cData } = await supabase.from('cities').select('*').eq('slug', citySlug).eq('state_id', state.id).single();
-            city = cData;
-        }
-
-        return { state, city };
-    } catch (e) {
-        console.error("Location lookup failed", e);
-        return { state: null, city: null };
+    if (normalizedStateSlug) {
+      try {
+        const { data: stateBySlug } = await supabase
+          .from('states')
+          .select('*')
+          .eq('slug', normalizedStateSlug)
+          .maybeSingle();
+        state = stateBySlug || null;
+      } catch (error) {
+        console.error('State lookup failed', error);
+      }
     }
+
+    if (normalizedCitySlug && state?.id) {
+      try {
+        const { data: cityBySlug } = await supabase
+          .from('cities')
+          .select('*')
+          .eq('slug', normalizedCitySlug)
+          .eq('state_id', state.id)
+          .maybeSingle();
+        city = cityBySlug || null;
+      } catch (error) {
+        console.error('City lookup failed (state scoped)', error);
+      }
+    }
+
+    if (normalizedCitySlug && !city) {
+      try {
+        const { data: cityFallback } = await supabase
+          .from('cities')
+          .select('*')
+          .eq('slug', normalizedCitySlug)
+          .maybeSingle();
+        city = cityFallback || null;
+      } catch (error) {
+        console.error('City lookup failed', error);
+      }
+    }
+
+    if (!state && city?.state_id) {
+      try {
+        const { data: stateFallback } = await supabase
+          .from('states')
+          .select('*')
+          .eq('id', city.state_id)
+          .maybeSingle();
+        state = stateFallback || null;
+      } catch (error) {
+        console.error('State fallback lookup failed', error);
+      }
+    }
+
+    return { state, city };
   },
 
   seedLocations: async () => {

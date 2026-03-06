@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,13 +19,28 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const BUYER_CREDENTIAL_MESSAGE = 'This email is not registered as buyer';
+const LOGIN_TAB_STORAGE_KEY = 'itm_directory_login_tab';
+
+const getInitialLoginTab = () => {
+  if (typeof window === 'undefined') return 'buyer';
+
+  const params = new URLSearchParams(window.location.search || '');
+  const roleParam = String(params.get('role') || '').trim().toLowerCase();
+  if (['seller', 'supplier', 'vendor'].includes(roleParam)) return 'seller';
+  if (roleParam === 'buyer') return 'buyer';
+
+  const stored = String(window.sessionStorage.getItem(LOGIN_TAB_STORAGE_KEY) || '')
+    .trim()
+    .toLowerCase();
+  return stored === 'seller' ? 'seller' : 'buyer';
+};
 
 const Login = () => {
   const navigate = useNavigate();
   const { signIn } = useAuth();
   
   // 'buyer' or 'seller'
-  const [activeTab, setActiveTab] = useState('buyer'); 
+  const [activeTab, setActiveTab] = useState(() => getInitialLoginTab());
   const [loading, setLoading] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [showResetDialog, setShowResetDialog] = useState(false);
@@ -38,7 +53,14 @@ const Login = () => {
   });
 
   // Switch tab helper
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(LOGIN_TAB_STORAGE_KEY, activeTab);
+    }
+  }, [activeTab]);
+
   const handleTabSwitch = (tab) => {
+    if (loading || activeTab === tab) return;
     setActiveTab(tab);
     if (tab === 'buyer') {
       setFormData({ email: '', password: '' });
@@ -179,6 +201,7 @@ const Login = () => {
             {/* Role Toggle */}
             <div className="bg-slate-100 p-1 rounded-lg flex mb-8">
                <button 
+                  type="button"
                   onClick={() => handleTabSwitch('buyer')}
                   className={`flex-1 flex items-center justify-center py-2.5 text-sm font-medium rounded-md transition-all ${
                      activeTab === 'buyer' 
@@ -190,6 +213,7 @@ const Login = () => {
                   Buyer
                </button>
                <button 
+                  type="button"
                   onClick={() => handleTabSwitch('seller')}
                   className={`flex-1 flex items-center justify-center py-2.5 text-sm font-medium rounded-md transition-all ${
                      activeTab === 'seller' 

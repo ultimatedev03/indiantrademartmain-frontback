@@ -203,6 +203,11 @@ export const Jobs = () => (
 
 // ==================== CONTACT PAGE ====================
 export const ContactPage = () => {
+  const normalizePhone = (value) =>
+    String(value || '')
+      .replace(/\D/g, '')
+      .slice(0, 10);
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -217,9 +222,10 @@ export const ContactPage = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    const normalizedValue = name === 'phone' ? normalizePhone(value) : value;
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: normalizedValue
     }));
   };
 
@@ -237,6 +243,9 @@ export const ContactPage = () => {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(formData.email)) {
         throw new Error('Please enter a valid email address');
+      }
+      if (formData.phone && !/^\d{10}$/.test(formData.phone)) {
+        throw new Error('Please enter a valid 10-digit contact number');
       }
 
       const fullName = `${formData.firstName} ${formData.lastName}`.trim();
@@ -422,8 +431,11 @@ export const ContactPage = () => {
                     name="phone"
                     value={formData.phone}
                     onChange={handleInputChange}
+                    inputMode="numeric"
+                    pattern="[0-9]{10}"
+                    maxLength={10}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition"
-                    placeholder="+91 7290010051"
+                    placeholder="10-digit mobile number"
                   />
                 </div>
                 

@@ -2092,7 +2092,7 @@ export const vendorApi = {
       const vendorId = await getVendorId();
       let { data, error } = await supabase
         .from('proposals')
-        .select('*, buyers(id, user_id, full_name, email, phone, mobile_number, mobile, company_name, avatar_url, is_active)')
+        .select('*, buyers(id, user_id, full_name, email, phone, mobile, company_name, avatar_url, is_active)')
         .eq('vendor_id', vendorId)
         .eq('id', id)
         .maybeSingle();

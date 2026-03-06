@@ -5,6 +5,38 @@ const FALLBACK_LANG = 'en';
 const FALLBACK_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const FALLBACK_GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
 
+const buildFallbackReply = (language = FALLBACK_LANG, messages = []) => {
+  const lang = String(language || FALLBACK_LANG).toLowerCase() === 'hi' ? 'hi' : 'en';
+  const lastUserMessage = [...(Array.isArray(messages) ? messages : [])]
+    .reverse()
+    .find((m) => String(m?.role || '').toLowerCase() === 'user');
+  const query = String(lastUserMessage?.text || '').toLowerCase();
+
+  if (lang === 'hi') {
+    if (query.includes('register') || query.includes('vendor') || query.includes('sell')) {
+      return 'Vendor registration ke liye: 1) Sell with Us par jaayein 2) Business + GST/license details bharein 3) Documents upload karke verification complete karein.';
+    }
+    if (query.includes('quote') || query.includes('rfq') || query.includes('price')) {
+      return 'Quote paane ke liye product search karke enquiry bhejein. Vendor replies dashboard me mil jayenge.';
+    }
+    if (query.includes('supplier') || query.includes('product') || query.includes('search')) {
+      return 'Product/supplier dhoondhne ke liye keyword + location filter use karein aur verified vendors compare karein.';
+    }
+    return 'Main ITM support assistant hoon. Aap product search, supplier finding, enquiry, ya vendor registration me help le sakte hain.';
+  }
+
+  if (query.includes('register') || query.includes('vendor') || query.includes('sell')) {
+    return 'To register as a vendor: 1) Open Sell with Us 2) Fill business + GST/license details 3) Upload documents and complete verification.';
+  }
+  if (query.includes('quote') || query.includes('rfq') || query.includes('price')) {
+    return 'To get quotes, search the product, submit an enquiry/RFQ, and track vendor responses in your dashboard.';
+  }
+  if (query.includes('supplier') || query.includes('product') || query.includes('search')) {
+    return 'Use search with product keywords and location filters, then compare verified suppliers before contacting them.';
+  }
+  return 'I can help with product search, supplier discovery, enquiries/RFQs, and vendor onboarding on IndianTradeMart.';
+};
+
 const buildSystemPrompt = (language = FALLBACK_LANG) =>
   [
     `You are “Khushi from ITM”, the official assistant of IndianTradeMart (indiantrademart.com), a B2B marketplace that connects trusted manufacturers, suppliers, and buyers across India.`,
@@ -41,7 +73,11 @@ export const handler = async (event) => {
     const groqKey = process.env.GROQ_API_KEY;
 
     if (!openaiKey && !groqKey) {
-      return { statusCode: 500, headers: okCors, body: JSON.stringify({ error: 'No AI provider configured' }) };
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json', ...okCors },
+        body: JSON.stringify({ text: buildFallbackReply(language, messages), provider: 'fallback' }),
+      };
     }
 
     let completion;
@@ -66,9 +102,13 @@ export const handler = async (event) => {
         const quotaError = status === 429 || (typeof detail === 'string' && detail.toLowerCase().includes('quota'));
         if (!quotaError || !groqKey) {
           return {
-            statusCode: 502,
-            headers: okCors,
-            body: JSON.stringify({ error: detail || 'OpenAI error' }),
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json', ...okCors },
+            body: JSON.stringify({
+              text: buildFallbackReply(language, messages),
+              provider: 'fallback',
+              warning: detail || 'OpenAI unavailable',
+            }),
           };
         }
         providerUsed = 'groq';
@@ -93,9 +133,13 @@ export const handler = async (event) => {
       } catch (err) {
         const detail = err?.error?.message || err?.response?.data || err?.message;
         return {
-          statusCode: 502,
-          headers: okCors,
-          body: JSON.stringify({ error: detail || 'Groq error' }),
+          statusCode: 200,
+          headers: { 'Content-Type': 'application/json', ...okCors },
+          body: JSON.stringify({
+            text: buildFallbackReply(language, messages),
+            provider: 'fallback',
+            warning: detail || 'Groq unavailable',
+          }),
         };
       }
     }

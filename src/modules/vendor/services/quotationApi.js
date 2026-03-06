@@ -119,7 +119,7 @@ export const quotationApi = {
 
     const { data: buyers, error: buyerError } = await supabase
       .from('buyers')
-      .select('id, full_name, company_name, email, phone, mobile_number, mobile')
+      .select('id, full_name, company_name, email, phone, mobile')
       .in('id', buyerIds);
 
     if (buyerError || !Array.isArray(buyers)) return rows;
@@ -131,7 +131,7 @@ export const quotationApi = {
           full_name: buyer?.full_name || buyer?.company_name || null,
           company_name: buyer?.company_name || null,
           email: buyer?.email || null,
-          phone: buyer?.phone || buyer?.mobile_number || buyer?.mobile || null,
+          phone: buyer?.phone || buyer?.mobile || null,
         },
       ])
     );

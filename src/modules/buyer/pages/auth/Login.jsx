@@ -153,6 +153,14 @@ const Login = () => {
                    Create new buyer account
                 </Link>
              </div>
+             <div className="mt-4 text-center">
+                <Link
+                  to="/"
+                  className="text-sm font-medium text-slate-600 hover:text-blue-700 transition-colors"
+                >
+                  Back to Home
+                </Link>
+             </div>
           </div>
         </div>
       </div>

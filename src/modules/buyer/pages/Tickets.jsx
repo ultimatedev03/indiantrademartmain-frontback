@@ -33,6 +33,10 @@ const Tickets = () => {
   const [loading, setLoading] = useState(true);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [ticketMessages, setTicketMessages] = useState([]);
   
   // Filters
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -46,6 +50,12 @@ const Tickets = () => {
   });
   
   const [errors, setErrors] = useState({});
+
+  const formatDateTime = (value) => {
+    const date = new Date(value || '');
+    if (Number.isNaN(date.getTime())) return '-';
+    return date.toLocaleString();
+  };
 
   useEffect(() => {
     fetchTickets();
@@ -117,6 +127,32 @@ const Tickets = () => {
       });
     } finally {
       setSubmitLoading(false);
+    }
+  };
+
+  const openTicketDetails = async (ticket) => {
+    if (!ticket?.id) return;
+
+    setSelectedTicket(ticket);
+    setTicketMessages([]);
+    setDetailOpen(true);
+    setDetailLoading(true);
+
+    try {
+      const detail = await buyerApi.getTicketDetail(ticket.id);
+      if (detail) {
+        setSelectedTicket(detail);
+        setTicketMessages(Array.isArray(detail.messages) ? detail.messages : []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch ticket details:', error);
+      toast({
+        title: 'Unable to load ticket details',
+        description: error?.message || 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -219,6 +255,98 @@ const Tickets = () => {
             </form>
           </DialogContent>
         </Dialog>
+        <Dialog
+          open={detailOpen}
+          onOpenChange={(nextOpen) => {
+            setDetailOpen(nextOpen);
+            if (!nextOpen) {
+              setSelectedTicket(null);
+              setTicketMessages([]);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-[650px] max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Ticket Details</DialogTitle>
+            </DialogHeader>
+            {detailLoading ? (
+              <div className="py-12 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+              </div>
+            ) : selectedTicket ? (
+              <div className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-gray-500">Ticket ID</p>
+                    <p className="text-sm font-semibold text-gray-900 mt-1">
+                      #{String(selectedTicket.id || '').slice(0, 8).toUpperCase()}
+                    </p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-gray-500">Status</p>
+                    <p className="text-sm font-semibold text-gray-900 mt-1">
+                      {String(selectedTicket.status || '').replace('_', ' ') || '-'}
+                    </p>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <p className="text-xs text-gray-500">Priority</p>
+                    <p className="text-sm font-semibold text-gray-900 mt-1">
+                      {selectedTicket.priority || '-'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-md border p-4">
+                  <p className="text-xs text-gray-500">Subject</p>
+                  <p className="text-sm font-semibold text-[#003D82] mt-1">
+                    {selectedTicket.subject || '-'}
+                  </p>
+                </div>
+
+                <div className="rounded-md border p-4">
+                  <p className="text-xs text-gray-500">Description</p>
+                  <p className="text-sm text-gray-700 mt-1 whitespace-pre-wrap">
+                    {selectedTicket.description || '-'}
+                  </p>
+                </div>
+
+                <div className="rounded-md border p-4">
+                  <p className="text-xs text-gray-500">Created</p>
+                  <p className="text-sm text-gray-700 mt-1">
+                    {formatDateTime(selectedTicket.created_at)}
+                  </p>
+                </div>
+
+                <div className="rounded-md border p-4">
+                  <p className="text-sm font-semibold text-gray-900 mb-3">Conversation</p>
+                  {ticketMessages.length === 0 ? (
+                    <p className="text-sm text-gray-500">No replies yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {ticketMessages.map((msg, index) => (
+                        <div key={msg?.id || `${selectedTicket.id}-msg-${index}`} className="rounded-md bg-gray-50 border p-3">
+                          <div className="flex justify-between items-center gap-2 mb-1">
+                            <p className="text-xs font-medium text-gray-700">
+                              {msg?.sender_type || msg?.sender || 'Support'}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {formatDateTime(msg?.created_at)}
+                            </p>
+                          </div>
+                          <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                            {msg?.message || msg?.content || '-'}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-sm text-gray-500">No ticket details available.</div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Filters */}
@@ -290,13 +418,16 @@ const Tickets = () => {
               </CardHeader>
               <CardContent className="px-4 sm:px-6 pb-4">
                 <p className="text-sm text-gray-600 line-clamp-2">{ticket.description}</p>
-                {ticket.status !== 'CLOSED' && (
-                  <div className="mt-3 flex justify-end">
-                     <Button variant="ghost" size="sm" className="text-xs h-7 text-gray-500">
-                        View Details
-                     </Button>
-                  </div>
-                )}
+                <div className="mt-3 flex justify-end">
+                   <Button
+                     variant="ghost"
+                     size="sm"
+                     className="text-xs h-7 text-gray-500"
+                     onClick={() => openTicketDetails(ticket)}
+                   >
+                      View Details
+                   </Button>
+                </div>
               </CardContent>
             </Card>
           ))

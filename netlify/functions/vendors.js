@@ -2074,7 +2074,7 @@ export const handler = async (event) => {
       if (user?.id) {
         const { data: buyerByUser, error: buyerUserErr } = await supabase
           .from('buyers')
-          .select('id, user_id, full_name, company_name, email, phone, mobile_number, mobile, whatsapp, updated_at')
+          .select('id, user_id, full_name, company_name, email, phone, mobile, whatsapp, updated_at')
           .eq('user_id', user.id)
           .order('updated_at', { ascending: false })
           .limit(1);
@@ -2085,7 +2085,7 @@ export const handler = async (event) => {
       if (!buyerProfile && user?.email) {
         const { data: buyerByEmail, error: buyerEmailErr } = await supabase
           .from('buyers')
-          .select('id, user_id, full_name, company_name, email, phone, mobile_number, mobile, whatsapp, updated_at')
+          .select('id, user_id, full_name, company_name, email, phone, mobile, whatsapp, updated_at')
           .ilike('email', String(user.email).toLowerCase().trim())
           .order('updated_at', { ascending: false })
           .limit(1);
@@ -2117,7 +2117,6 @@ export const handler = async (event) => {
       );
       const buyerPhone = nonEmptyText(
         buyerProfile?.phone ||
-          buyerProfile?.mobile_number ||
           buyerProfile?.mobile ||
           buyerProfile?.whatsapp ||
           payload?.buyer_phone,

@@ -15,6 +15,38 @@ const groqClient = process.env.GROQ_API_KEY
 const FALLBACK_LANG = 'en';
 const FALLBACK_MODEL = 'gpt-4o-mini';
 
+const buildFallbackReply = (language = FALLBACK_LANG, messages = []) => {
+  const lang = String(language || FALLBACK_LANG).toLowerCase() === 'hi' ? 'hi' : 'en';
+  const lastUserMessage = [...(Array.isArray(messages) ? messages : [])]
+    .reverse()
+    .find((m) => String(m?.role || '').toLowerCase() === 'user');
+  const query = String(lastUserMessage?.text || '').toLowerCase();
+
+  if (lang === 'hi') {
+    if (query.includes('register') || query.includes('vendor') || query.includes('sell')) {
+      return 'Vendor registration ke liye: 1) Sell with Us par jaayein 2) Business details + GST/license bharein 3) Documents upload karke verification complete karein.';
+    }
+    if (query.includes('quote') || query.includes('rfq') || query.includes('price')) {
+      return 'Quote paane ke liye product search karke inquiry bhejein. Vendor responses dashboard me mil jayenge.';
+    }
+    if (query.includes('supplier') || query.includes('product') || query.includes('search')) {
+      return 'Product/supplier dhoondhne ke liye search bar me keyword + location use karein, fir verified vendors compare karein.';
+    }
+    return 'Main ITM support assistant hoon. Aap product search, supplier finding, inquiry, ya vendor registration me help le sakte hain.';
+  }
+
+  if (query.includes('register') || query.includes('vendor') || query.includes('sell')) {
+    return 'To register as a vendor: 1) Open Sell with Us 2) Fill business + GST/license details 3) Upload documents and complete verification.';
+  }
+  if (query.includes('quote') || query.includes('rfq') || query.includes('price')) {
+    return 'To get quotes, search the product, submit an enquiry/RFQ, and track vendor replies from your dashboard.';
+  }
+  if (query.includes('supplier') || query.includes('product') || query.includes('search')) {
+    return 'Use search with product keywords and location filters, then compare verified suppliers before contacting them.';
+  }
+  return 'I can help with product search, supplier discovery, enquiries/RFQs, and vendor onboarding on IndianTradeMart.';
+};
+
 const buildSystemPrompt = (language = FALLBACK_LANG) =>
   [
     `You are “Khushi from ITM”, the official assistant of IndianTradeMart (indiantrademart.com), a B2B marketplace that connects trusted manufacturers, suppliers, and buyers across India.`,
@@ -46,7 +78,7 @@ router.post('/', async (req, res) => {
 
     const lang = (language || FALLBACK_LANG).toLowerCase();
     if (!openaiClient && !groqClient) {
-      return res.status(500).json({ error: 'No AI provider configured (OPENAI_API_KEY or GROQ_API_KEY missing)' });
+      return res.json({ text: buildFallbackReply(lang, messages), provider: 'fallback' });
     }
 
     const selectedModel = model || process.env.OPENAI_MODEL || FALLBACK_MODEL;
@@ -74,7 +106,11 @@ router.post('/', async (req, res) => {
           status === 429 || (typeof detail === 'string' && detail.toLowerCase().includes('quota'));
 
         if (!quotaError || !groqClient) {
-          return res.status(502).json({ error: detail || 'Upstream model error (OpenAI)' });
+          return res.json({
+            text: buildFallbackReply(lang, messages),
+            provider: 'fallback',
+            warning: detail || 'OpenAI unavailable',
+          });
         }
         // fallback to Groq
         providerUsed = 'groq';
@@ -103,7 +139,11 @@ router.post('/', async (req, res) => {
         const status = err?.status || err?.response?.status;
         const detail = err?.error?.message || err?.response?.data || err?.message;
         console.error('[chatbot] Groq error', status, detail);
-        return res.status(502).json({ error: detail || 'Upstream model error (Groq)' });
+        return res.json({
+          text: buildFallbackReply(lang, messages),
+          provider: 'fallback',
+          warning: detail || 'Groq unavailable',
+        });
       }
     }
 
@@ -111,7 +151,6 @@ router.post('/', async (req, res) => {
       completion?.choices?.[0]?.message?.content ||
       'Sorry, I could not generate a response right now.';
     return res.json({ text, provider: providerUsed });
-    return res.json({ text, provider: 'groq' });
   } catch (err) {
     console.error('[chatbot] error', err);
     res.status(500).json({ error: 'Internal error generating reply' });
