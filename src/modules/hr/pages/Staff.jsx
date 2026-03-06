@@ -9,6 +9,21 @@ import { Label } from '@/components/ui/label';
 import { Plus, UserMinus, UserCog } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 
+const normalizeEmployee = (employee = {}) => {
+  const joinedDate = employee?.created_at || employee?.joined || employee?.createdAt || null;
+  const joined = joinedDate ? new Date(joinedDate) : null;
+  const status = String(employee?.status || 'ACTIVE').trim().toUpperCase();
+
+  return {
+    ...employee,
+    displayName: employee?.full_name || employee?.name || employee?.employee_name || 'Unnamed Employee',
+    displayRole: employee?.role || employee?.designation || '-',
+    displayEmail: employee?.email || '-',
+    status,
+    joinedLabel: joined && !Number.isNaN(joined.getTime()) ? joined.toLocaleDateString('en-GB') : '-',
+  };
+};
+
 const HrStaff = () => {
   const [staff, setStaff] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -22,7 +37,7 @@ const HrStaff = () => {
           .select('*')
           .order('full_name');
         if (error) throw error;
-        setStaff(data || []);
+        setStaff((data || []).map(normalizeEmployee));
       } catch (error) {
         console.error('Failed to fetch staff:', error);
       } finally {
@@ -30,6 +45,21 @@ const HrStaff = () => {
       }
     };
     fetchStaff();
+
+    const channel = supabase
+      .channel('hr-staff-directory')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'employees' },
+        () => {
+          void fetchStaff();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleCreate = (e) => {
@@ -60,31 +90,45 @@ const HrStaff = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {staff.map((employee) => (
-              <TableRow key={employee.id}>
-                <TableCell className="font-medium">{employee.name}</TableCell>
-                <TableCell>{employee.role}</TableCell>
-                <TableCell>{employee.email}</TableCell>
-                <TableCell>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                    employee.status === 'Active' ? 'bg-green-100 text-green-800' : 'bg-neutral-100 text-neutral-800'
-                  }`}>
-                    {employee.status}
-                  </span>
-                </TableCell>
-                <TableCell>{employee.joined}</TableCell>
-                <TableCell className="text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" title="Manage Role">
-                      <UserCog className="h-4 w-4 text-blue-500" />
-                    </Button>
-                    <Button variant="ghost" size="icon" title="Deactivate">
-                      <UserMinus className="h-4 w-4 text-red-500" />
-                    </Button>
-                  </div>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-10 text-center text-neutral-500">
+                  Loading employee directory...
                 </TableCell>
               </TableRow>
-            ))}
+            ) : staff.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-10 text-center text-neutral-500">
+                  No employees found in the directory.
+                </TableCell>
+              </TableRow>
+            ) : (
+              staff.map((employee) => (
+                <TableRow key={employee.id}>
+                  <TableCell className="font-medium">{employee.displayName}</TableCell>
+                  <TableCell>{employee.displayRole}</TableCell>
+                  <TableCell>{employee.displayEmail}</TableCell>
+                  <TableCell>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                      employee.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-neutral-100 text-neutral-800'
+                    }`}>
+                      {employee.status}
+                    </span>
+                  </TableCell>
+                  <TableCell>{employee.joinedLabel}</TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="icon" title="Manage Role">
+                        <UserCog className="h-4 w-4 text-blue-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" title="Deactivate">
+                        <UserMinus className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </div>

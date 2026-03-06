@@ -117,8 +117,6 @@ const EmployeeLayout = ({ allowedRole }) => {
               <div className="px-4 py-2 mt-4 text-xs font-semibold text-neutral-400 uppercase tracking-wider">Management</div>
               <SidebarLink to="/employee/dataentry/categories" icon={Database} onNavigate={() => setIsSidebarOpen(false)}>Categories</SidebarLink>
               <SidebarLink to="/employee/dataentry/locations" icon={FileSpreadsheet} onNavigate={() => setIsSidebarOpen(false)}>Locations</SidebarLink>
-              <SidebarLink to="/employee/dataentry/bulk-import" icon={Upload} onNavigate={() => setIsSidebarOpen(false)}>Bulk Import (Loc)</SidebarLink>
-              
               {/* Added KYC Review Link */}
               <div className="px-4 py-2 mt-4 text-xs font-semibold text-neutral-400 uppercase tracking-wider">Review</div>
               <SidebarLink to="/employee/dataentry/kyc-review" icon={ShieldCheck} onNavigate={() => setIsSidebarOpen(false)}>KYC Review</SidebarLink>

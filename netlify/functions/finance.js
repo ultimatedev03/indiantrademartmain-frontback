@@ -51,6 +51,17 @@ const normalizePlanScopeId = (planScope) => {
   return token;
 };
 
+const resolveCouponStatus = (coupon = {}) => {
+  const usedCount = Number(coupon?.used_count || 0);
+  const maxUses = Number(coupon?.max_uses || 0);
+  const expiresAt = coupon?.expires_at ? new Date(coupon.expires_at).getTime() : null;
+
+  if (coupon?.is_active === false) return "INACTIVE";
+  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt < Date.now()) return "EXPIRED";
+  if (maxUses > 0 && usedCount >= maxUses) return "USED_UP";
+  return "ACTIVE";
+};
+
 const toNumberOrNull = (value) => {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -174,12 +185,58 @@ export const handler = async (event) => {
     if (event.httpMethod === 'GET' && action === 'coupons') {
       const { data, error } = await supabase.from('vendor_plan_coupons').select('*').order('created_at', { ascending: false });
       if (error) return json(500, { success: false, error: error.message });
-      const normalized = (data || []).map((row) => ({
+
+      const coupons = Array.isArray(data) ? data : [];
+      const normalizedCoupons = coupons.map((row) => ({
         ...row,
         plan_id: normalizePlanScopeId(row?.plan_id),
         vendor_id: isGlobalScopeValue(row?.vendor_id) ? null : row?.vendor_id || null,
       }));
-      return json(200, { success: true, data: normalized });
+
+      const planIds = Array.from(
+        new Set(normalizedCoupons.map((c) => normalizePlanScopeId(c.plan_id)).filter((id) => id && looksLikeUuid(id)))
+      );
+      const vendorIds = Array.from(
+        new Set(normalizedCoupons.map((c) => normalizeScopeToken(c.vendor_id)).filter((id) => id && looksLikeUuid(id)))
+      );
+
+      let planMap = {};
+      let vendorMap = {};
+
+      if (planIds.length) {
+        const { data: plans, error: planErr } = await supabase
+          .from('vendor_plans')
+          .select('id, name')
+          .in('id', planIds);
+        if (!planErr) {
+          planMap = (plans || []).reduce((acc, plan) => {
+            if (plan?.id) acc[plan.id] = plan;
+            return acc;
+          }, {});
+        }
+      }
+
+      if (vendorIds.length) {
+        const { data: vendors, error: vendorErr } = await supabase
+          .from('vendors')
+          .select('id, company_name, owner_name, vendor_id')
+          .in('id', vendorIds);
+        if (!vendorErr) {
+          vendorMap = (vendors || []).reduce((acc, vendor) => {
+            if (vendor?.id) acc[vendor.id] = vendor;
+            return acc;
+          }, {});
+        }
+      }
+
+      const enriched = normalizedCoupons.map((coupon) => ({
+        ...coupon,
+        plan: coupon.plan_id ? planMap[coupon.plan_id] || null : null,
+        vendor: coupon.vendor_id ? vendorMap[coupon.vendor_id] || null : null,
+        effective_status: resolveCouponStatus(coupon),
+      }));
+
+      return json(200, { success: true, data: enriched });
     }
 
     // POST /api/finance/coupons

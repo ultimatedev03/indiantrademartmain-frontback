@@ -629,6 +629,70 @@ router.get('/sales/leads', requireAuth(), async (req, res) => {
   }
 });
 
+router.patch('/sales/leads/:leadId', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) {
+      return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    }
+    if (!hasSalesAccess(req.user?.role, employee?.role)) {
+      return res.status(403).json({ success: false, error: 'Sales access required' });
+    }
+
+    const leadId = String(req.params?.leadId || '').trim();
+    if (!leadId) {
+      return res.status(400).json({ success: false, error: 'leadId is required' });
+    }
+
+    const payload = {};
+    if (req.body?.status !== undefined) {
+      const nextStatus = String(req.body.status || '').trim().toUpperCase();
+      if (!nextStatus) {
+        return res.status(400).json({ success: false, error: 'status cannot be empty' });
+      }
+      payload.status = nextStatus;
+    }
+
+    ['budget', 'price'].forEach((field) => {
+      if (req.body?.[field] === undefined) return;
+      const numericValue = Number(req.body[field]);
+      if (!Number.isFinite(numericValue) || numericValue < 0) {
+        throw new Error(`${field} must be a non-negative number`);
+      }
+      payload[field] = numericValue;
+    });
+
+    if (req.body?.vendor_id !== undefined) {
+      payload.vendor_id = String(req.body.vendor_id || '').trim() || null;
+    }
+
+    if (req.body?.sales_note !== undefined) {
+      payload.sales_note = String(req.body.sales_note || '').trim() || null;
+    }
+
+    if (!Object.keys(payload).length) {
+      return res.status(400).json({ success: false, error: 'No valid fields provided for update' });
+    }
+
+    payload.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('leads')
+      .update(payload)
+      .eq('id', leadId)
+      .select('*')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message || 'Failed to update lead' });
+    }
+
+    return res.json({ success: true, lead: data || null });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to update lead' });
+  }
+});
+
 router.patch('/sales/leads/:leadId/status', requireAuth(), async (req, res) => {
   try {
     const employee = await resolveEmployeeProfile(req.user);

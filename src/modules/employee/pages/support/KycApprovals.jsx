@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/use-toast';
-import { Loader2, FileText, AlertCircle, Check, X, Eye, BellRing, Mail } from 'lucide-react';
+import { Loader2, FileText, AlertCircle, Check, X, Eye, BellRing, Mail, Search } from 'lucide-react';
 
 const normalizeStatus = (status) => String(status || 'PENDING').trim().toUpperCase();
 const formatDate = (value) => {
@@ -50,6 +51,22 @@ const normalizeDocuments = (documents = []) =>
     created_at: doc.created_at || doc.uploaded_at || doc.updated_at || null,
   }));
 
+const matchesVendorSearch = (vendor, searchTerm) => {
+  const query = String(searchTerm || '').trim().toLowerCase();
+  if (!query) return true;
+  return [
+    vendor?.vendor_id,
+    vendor?.company_name,
+    vendor?.owner_name,
+    vendor?.email,
+    vendor?.phone,
+    vendor?.address,
+    vendor?.registered_address,
+  ]
+    .filter(Boolean)
+    .some((value) => String(value).toLowerCase().includes(query));
+};
+
 const KycApprovals = () => {
   const { user } = useEmployeeAuth();
   const isSupportUser = normalizeStatus(user?.role) === 'SUPPORT';
@@ -59,6 +76,7 @@ const KycApprovals = () => {
   const [rejectedVendors, setRejectedVendors] = useState([]);
   const [vendorDocCounts, setVendorDocCounts] = useState({});
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [docs, setDocs] = useState([]);
@@ -482,6 +500,19 @@ const KycApprovals = () => {
   const shouldShowSupportReminder =
     isSupportUser && (selectedStatus === 'REJECTED' || selectedStatus === 'PENDING' || selectedStatus === 'SUBMITTED');
 
+  const filteredVendorsWithDocs = useMemo(
+    () => vendorsWithDocs.filter((vendor) => matchesVendorSearch(vendor, searchTerm)),
+    [vendorsWithDocs, searchTerm]
+  );
+  const filteredVendorsWithoutDocs = useMemo(
+    () => vendorsWithoutDocs.filter((vendor) => matchesVendorSearch(vendor, searchTerm)),
+    [vendorsWithoutDocs, searchTerm]
+  );
+  const filteredRejectedVendors = useMemo(
+    () => rejectedVendors.filter((vendor) => matchesVendorSearch(vendor, searchTerm)),
+    [rejectedVendors, searchTerm]
+  );
+
   const VendorTable = ({ vendors, title, emptyMessage, variant = 'default', action }) => (
     <Card>
       <CardHeader>
@@ -637,13 +668,27 @@ const KycApprovals = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-neutral-800">KYC Status Map</h1>
-        <Badge variant="outline">{isSupportUser ? 'Support Review' : 'Data Entry Review'}</Badge>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-neutral-800">KYC Status Map</h1>
+          <p className="text-sm text-gray-500">Search vendors by ID, company, owner, email, or phone.</p>
+        </div>
+        <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+          <div className="relative w-full sm:w-80">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-9"
+              placeholder="Search vendor awaiting docs..."
+            />
+          </div>
+          <Badge variant="outline" className="w-fit">{isSupportUser ? 'Support Review' : 'Data Entry Review'}</Badge>
+        </div>
       </div>
 
       <VendorTable
-        vendors={vendorsWithDocs}
+        vendors={filteredVendorsWithDocs}
         title="Vendors with Documents"
         emptyMessage="No vendors with submitted documents."
         variant="default"
@@ -651,7 +696,7 @@ const KycApprovals = () => {
       />
 
       <VendorTable
-        vendors={vendorsWithoutDocs}
+        vendors={filteredVendorsWithoutDocs}
         title="Vendors Awaiting Documents"
         emptyMessage="No vendors awaiting documents."
         variant="warning"
@@ -659,7 +704,7 @@ const KycApprovals = () => {
       />
 
       <VendorTable
-        vendors={rejectedVendors}
+        vendors={filteredRejectedVendors}
         title="Rejected KYC Vendors"
         emptyMessage="No rejected KYC vendors."
         variant="danger"

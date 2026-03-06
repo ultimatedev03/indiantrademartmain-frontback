@@ -45,6 +45,20 @@ export const salesApi = {
     return data?.lead || null;
   },
 
+  updateLead: async (id, updates = {}) => {
+    const leadId = String(id || '').trim();
+    if (!leadId) {
+      throw new Error('leadId is required');
+    }
+
+    const res = await fetchWithCsrf(apiUrl(`/api/employee/sales/leads/${leadId}`), {
+      method: 'PATCH',
+      body: JSON.stringify(updates || {}),
+    });
+    const data = await unwrap(res, 'Failed to update lead');
+    return data?.lead || null;
+  },
+
   getPricingRules: async () => {
     const res = await fetchWithCsrf(apiUrl('/api/employee/sales/pricing-rules'));
     const data = await unwrap(res, 'Failed to load pricing rules');

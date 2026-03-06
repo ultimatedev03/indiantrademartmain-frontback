@@ -31,6 +31,26 @@ function isActiveSub(s) {
   return end > Date.now();
 }
 
+function roleToDepartment(role) {
+  switch (normalizeRole(role)) {
+    case "ADMIN":
+      return "Administration";
+    case "HR":
+      return "Human Resources";
+    case "FINANCE":
+      return "Finance";
+    case "SUPPORT":
+      return "Support";
+    case "SALES":
+      return "Sales";
+    case "DATA_ENTRY":
+    case "DATAENTRY":
+      return "Operations";
+    default:
+      return "";
+  }
+}
+
 async function findPublicUserByEmail(email) {
   const target = normalizeEmail(email);
   if (!target) return null;
@@ -1048,39 +1068,101 @@ router.get("/staff", async (req, res) => {
 
 router.post("/staff", async (req, res) => {
   try {
-    const { full_name, email, password, role } = req.body;
+    const full_name = String(req.body?.full_name || "").trim();
+    const email = normalizeEmail(req.body?.email || "");
+    const password = String(req.body?.password || "").trim();
+    const role = normalizeRole(req.body?.role || "DATA_ENTRY") || "DATA_ENTRY";
+    const phone = String(req.body?.phone || "").trim() || null;
+    const department = String(req.body?.department || "").trim() || roleToDepartment(role);
+
+    if (!full_name || !email || !password) {
+      return res
+        .status(400)
+        .json({ success: false, error: "full_name, email and password are required" });
+    }
+
     const password_hash = await hashPassword(password);
     const publicUser = await upsertPublicUser({
       email,
       full_name,
       role,
+      phone,
       password_hash,
       allowPasswordUpdate: true,
     });
     const userId = publicUser.id;
 
-    const { data: emp } = await supabase
+    const employeePayload = {
+      user_id: userId,
+      full_name,
+      email,
+      phone,
+      role,
+      department: department || null,
+      status: "ACTIVE",
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existingByUserId, error: existingByUserIdError } = await supabase
       .from("employees")
-      .insert([
-        {
-          user_id: userId,
-          full_name,
-          email,
-          role,
-          status: "ACTIVE",
-          created_at: new Date().toISOString(),
-        },
-      ])
-      .select()
-      .single();
+      .select("*")
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (existingByUserIdError) {
+      return res.status(500).json({ success: false, error: existingByUserIdError.message });
+    }
+
+    let existingEmployee = existingByUserId || null;
+
+    if (!existingEmployee) {
+      const { data: existingByEmail, error: existingByEmailError } = await supabase
+        .from("employees")
+        .select("*")
+        .ilike("email", email)
+        .limit(1)
+        .maybeSingle();
+      if (existingByEmailError) {
+        return res.status(500).json({ success: false, error: existingByEmailError.message });
+      }
+      existingEmployee = existingByEmail || null;
+    }
+
+    let emp = null;
+    if (existingEmployee?.id) {
+      const { data: updatedEmployee, error: updateEmployeeError } = await supabase
+        .from("employees")
+        .update(employeePayload)
+        .eq("id", existingEmployee.id)
+        .select()
+        .maybeSingle();
+      if (updateEmployeeError) {
+        return res.status(500).json({ success: false, error: updateEmployeeError.message });
+      }
+      emp = updatedEmployee || { ...existingEmployee, ...employeePayload };
+    } else {
+      const { data: insertedEmployee, error: insertEmployeeError } = await supabase
+        .from("employees")
+        .insert([
+          {
+            ...employeePayload,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select()
+        .maybeSingle();
+      if (insertEmployeeError) {
+        return res.status(500).json({ success: false, error: insertEmployeeError.message });
+      }
+      emp = insertedEmployee || null;
+    }
 
     await writeAuditLog({
       req,
       actor: req.actor,
-      action: "STAFF_CREATE",
+      action: existingEmployee?.id ? "STAFF_UPSERT" : "STAFF_CREATE",
       entityType: "employees",
-      entityId: emp.id,
-      details: { email, role, user_id: userId },
+      entityId: emp?.id || null,
+      details: { email, role, user_id: userId, department: department || null },
     });
 
     if (userId) {
@@ -1093,7 +1175,11 @@ router.post("/staff", async (req, res) => {
       });
     }
 
-    return res.json({ success: true, employee: emp });
+    return res.json({
+      success: true,
+      employee: emp,
+      reused_existing: Boolean(existingEmployee?.id),
+    });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

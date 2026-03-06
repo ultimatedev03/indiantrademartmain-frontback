@@ -40,6 +40,7 @@ import {
   Phone,
   Package,
   Search,
+  Download,
   UserX,
   ShieldCheck,
   Check,
@@ -88,6 +89,7 @@ export default function Vendors() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterKyc, setFilterKyc] = useState("all");
   const [filterActive, setFilterActive] = useState("all");
+  const [filterJoined, setFilterJoined] = useState("all");
 
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [showVendorModal, setShowVendorModal] = useState(false);
@@ -140,7 +142,78 @@ export default function Vendors() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const total = useMemo(() => vendors.length, [vendors]);
+  const filteredVendors = useMemo(() => {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - now.getDay());
+    startOfWeek.setHours(0, 0, 0, 0);
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+
+    return (vendors || []).filter((vendor) => {
+      if (filterJoined === "all") return true;
+      const joinedAt = vendor?.created_at ? new Date(vendor.created_at).getTime() : null;
+      if (!joinedAt || Number.isNaN(joinedAt)) return false;
+
+      if (filterJoined === "today") return joinedAt >= startOfToday;
+      if (filterJoined === "week") return joinedAt >= startOfWeek.getTime();
+      if (filterJoined === "month") return joinedAt >= startOfMonth;
+      if (filterJoined === "year") return joinedAt >= startOfYear;
+      return true;
+    });
+  }, [filterJoined, vendors]);
+
+  const total = useMemo(() => filteredVendors.length, [filteredVendors]);
+
+  const exportVendors = () => {
+    const header = [
+      "vendor_id",
+      "company_name",
+      "owner_name",
+      "email",
+      "phone",
+      "kyc_status",
+      "package",
+      "product_count",
+      "joined_on",
+      "status",
+    ];
+
+    const escapeCsv = (value) => {
+      const text = String(value ?? "");
+      if (text.includes(",") || text.includes('"') || text.includes("\n")) {
+        return `"${text.replace(/"/g, '""')}"`;
+      }
+      return text;
+    };
+
+    const rows = filteredVendors.map((vendor) =>
+      [
+        vendor?.vendor_id || "",
+        vendor?.company_name || "",
+        vendor?.owner_name || "",
+        vendor?.email || "",
+        vendor?.phone || "",
+        norm(vendor?.kyc_status || "PENDING"),
+        vendor?.package?.plan_name || "FREE",
+        vendor?.product_count || 0,
+        vendor?.created_at ? new Date(vendor.created_at).toLocaleDateString("en-GB") : "",
+        vendor?.is_active !== false ? "ACTIVE" : "TERMINATED",
+      ]
+        .map(escapeCsv)
+        .join(",")
+    );
+
+    const csv = [header.join(","), ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "vendors-export.csv";
+    link.click();
+    window.URL.revokeObjectURL(url);
+  };
 
   const onSearch = (e) => {
     e.preventDefault();
@@ -232,9 +305,15 @@ export default function Vendors() {
               Vendor details, package, products and termination
             </p>
           </div>
-          <Badge variant="outline" className="text-sm">
-            {total} Total Vendors
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-sm">
+              {total} Total Vendors
+            </Badge>
+            <Button variant="outline" size="sm" onClick={exportVendors} disabled={filteredVendors.length === 0}>
+              <Download className="mr-2 h-4 w-4" />
+              Export CSV
+            </Button>
+          </div>
         </div>
 
         <div className="mt-2 flex flex-col md:flex-row gap-2 p-2 bg-white rounded-lg border w-full max-w-full">
@@ -273,6 +352,20 @@ export default function Vendors() {
               <SelectItem value="inactive">Terminated</SelectItem>
             </SelectContent>
           </Select>
+
+          <Select value={filterJoined} onValueChange={setFilterJoined}>
+            <SelectTrigger className="w-full md:w-[180px] h-9">
+              <Filter className="h-4 w-4 mr-2" />
+              <SelectValue placeholder="Joined On" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Time</SelectItem>
+              <SelectItem value="today">Today</SelectItem>
+              <SelectItem value="week">This Week</SelectItem>
+              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="year">This Year</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
       </div>
 
@@ -302,7 +395,7 @@ export default function Vendors() {
                         <Loader2 className="animate-spin mx-auto h-6 w-6 text-gray-400" />
                       </TableCell>
                     </TableRow>
-                  ) : vendors.length === 0 ? (
+                  ) : filteredVendors.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-7 text-gray-500">
                         <Building2 className="h-12 w-12 mx-auto mb-2 opacity-30" />
@@ -310,7 +403,7 @@ export default function Vendors() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    vendors.map((v) => {
+                    filteredVendors.map((v) => {
                       const active = v.is_active !== false;
                       const planName = v.package?.plan_name || "FREE";
                       const planPrice = Number(v.package?.price || 0);

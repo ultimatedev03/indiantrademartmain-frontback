@@ -713,6 +713,65 @@ export const handler = async (event) => {
         return json(200, { success: true, leads: data || [] });
       }
 
+      // PATCH /api/employee/sales/leads/:leadId
+      if (
+        event.httpMethod === 'PATCH' &&
+        tail[1] === 'leads' &&
+        tail.length === 3 &&
+        tail[2]
+      ) {
+        const leadId = String(tail[2] || '').trim();
+        const body = readBody(event);
+        if (!leadId) {
+          return json(400, { success: false, error: 'leadId is required' });
+        }
+
+        const payload = {};
+        if (body?.status !== undefined) {
+          const nextStatus = String(body.status || '').trim().toUpperCase();
+          if (!nextStatus) {
+            return json(400, { success: false, error: 'status cannot be empty' });
+          }
+          payload.status = nextStatus;
+        }
+
+        ['budget', 'price'].forEach((field) => {
+          if (body?.[field] === undefined) return;
+          const numericValue = Number(body[field]);
+          if (!Number.isFinite(numericValue) || numericValue < 0) {
+            throw new Error(`${field} must be a non-negative number`);
+          }
+          payload[field] = numericValue;
+        });
+
+        if (body?.vendor_id !== undefined) {
+          payload.vendor_id = String(body.vendor_id || '').trim() || null;
+        }
+
+        if (body?.sales_note !== undefined) {
+          payload.sales_note = String(body.sales_note || '').trim() || null;
+        }
+
+        if (!Object.keys(payload).length) {
+          return json(400, { success: false, error: 'No valid fields provided for update' });
+        }
+
+        payload.updated_at = new Date().toISOString();
+
+        const { data, error } = await supabase
+          .from('leads')
+          .update(payload)
+          .eq('id', leadId)
+          .select('*')
+          .maybeSingle();
+
+        if (error) {
+          return json(500, { success: false, error: error.message || 'Failed to update lead' });
+        }
+
+        return json(200, { success: true, lead: data || null });
+      }
+
       // PATCH /api/employee/sales/leads/:leadId/status
       if (
         event.httpMethod === 'PATCH' &&

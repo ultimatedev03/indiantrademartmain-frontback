@@ -393,7 +393,16 @@ const VendorProfileContent = () => {
                 {isFavorite ? 'Favorited' : 'Add Favorite'}
               </Button>
 
-              <Button variant="outline" className="border-gray-300">
+              <Button
+                variant="outline"
+                className="border-gray-300"
+                onClick={() =>
+                  toast({
+                    title: 'Lead confirmation required',
+                    description: 'Number show after lead confirm.',
+                  })
+                }
+              >
                 <Phone className="h-4 w-4 mr-2" /> View Number
               </Button>
 

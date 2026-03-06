@@ -47,6 +47,27 @@ const fmtDateTime = (d) => {
   return date.toLocaleString('en-IN');
 };
 
+const resolveCouponStatusMeta = (coupon = {}) => {
+  const explicitStatus = String(coupon?.effective_status || '').trim().toUpperCase();
+  if (explicitStatus) {
+    if (explicitStatus === 'EXPIRED') return { label: 'Expired', variant: 'destructive' };
+    if (explicitStatus === 'USED_UP') return { label: 'Used Up', variant: 'secondary' };
+    if (explicitStatus === 'INACTIVE') return { label: 'Inactive', variant: 'secondary' };
+    return { label: 'Active', variant: 'default' };
+  }
+
+  const expiresAt = coupon?.expires_at ? new Date(coupon.expires_at).getTime() : null;
+  const usedCount = Number(coupon?.used_count || 0);
+  const maxUses = Number(coupon?.max_uses || 0);
+
+  if (coupon?.is_active === false) return { label: 'Inactive', variant: 'secondary' };
+  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt < Date.now()) {
+    return { label: 'Expired', variant: 'destructive' };
+  }
+  if (maxUses > 0 && usedCount >= maxUses) return { label: 'Used Up', variant: 'secondary' };
+  return { label: 'Active', variant: 'default' };
+};
+
 const defaultReferralSettings = {
   is_enabled: false,
   first_paid_plan_only: true,
@@ -91,6 +112,15 @@ const AdminFinance = () => {
     max_uses: '',
     expires_at: '',
   });
+
+  const planNameById = useMemo(
+    () =>
+      (plans || []).reduce((acc, plan) => {
+        if (plan?.id) acc[plan.id] = plan.name || plan.plan_name || plan.id;
+        return acc;
+      }, {}),
+    [plans]
+  );
 
   const ruleFromApi = (row) => ({
     is_enabled: row?.is_enabled !== false,
@@ -601,7 +631,7 @@ const AdminFinance = () => {
                   <TableCell className="font-semibold">{c.code}</TableCell>
                   <TableCell>{c.discount_type === 'PERCENT' ? `${c.value}%` : `₹ ${c.value}`}</TableCell>
                   <TableCell>
-                    {c.plan_id ? (c.plan?.name || c.plan_id) : 'Any'}
+                    {c.plan_id ? (c.plan?.name || planNameById[c.plan_id] || c.plan_id) : 'Any'}
                   </TableCell>
                   <TableCell>
                     {c.vendor_id
@@ -610,7 +640,9 @@ const AdminFinance = () => {
                   </TableCell>
                   <TableCell>{c.used_count || 0}/{c.max_uses || '∞'}</TableCell>
                   <TableCell>
-                    <Badge variant={c.is_active ? 'default' : 'secondary'}>{c.is_active ? 'Active' : 'Inactive'}</Badge>
+                    <Badge variant={resolveCouponStatusMeta(c).variant}>
+                      {resolveCouponStatusMeta(c).label}
+                    </Badge>
                   </TableCell>
                   <TableCell>
                     <Button size="sm" variant="destructive" onClick={() => deleteCoupon(c.id)}>

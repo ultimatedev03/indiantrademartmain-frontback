@@ -64,6 +64,26 @@ async function hashPassword(password) {
   return bcrypt.hash(String(password), 10);
 }
 
+function roleToDepartment(role) {
+  switch (String(role || "").trim().toUpperCase()) {
+    case "ADMIN":
+      return "Administration";
+    case "HR":
+      return "Human Resources";
+    case "FINANCE":
+      return "Finance";
+    case "SUPPORT":
+      return "Support";
+    case "SALES":
+      return "Sales";
+    case "DATA_ENTRY":
+    case "DATAENTRY":
+      return "Operations";
+    default:
+      return "";
+  }
+}
+
 const toTrimmedTextOrNull = (value, { upper = false } = {}) => {
   if (value === undefined) return undefined;
   const text = String(value ?? "").trim();
@@ -409,20 +429,58 @@ export async function handler(event) {
         const password = String(body?.password || "").trim();
         const phone = String(body?.phone || "").trim();
         const role = String(body?.role || "DATA_ENTRY").trim().toUpperCase();
-        const department = String(body?.department || "Operations").trim();
+        const department = String(body?.department || "").trim() || roleToDepartment(role) || "Operations";
 
         if (!full_name || !email || !password) return bad("full_name, email and password are required");
 
-        const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+        const provisionalEmployee = {
+          full_name,
           email,
-          password,
-          email_confirm: true,
-          user_metadata: { full_name, role, phone, department },
-        });
+          phone: phone || null,
+          role,
+          department,
+        };
 
-        if (authError || !authData?.user) return fail("Failed to create auth user", authError?.message);
+        let authUser = await resolveEmployeeAuthUser(provisionalEmployee);
+        let createdAuthUser = false;
 
-        const userId = authData.user.id;
+        if (!authUser?.id) {
+          const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { full_name, role, phone, department },
+            app_metadata: { role },
+          });
+
+          if (authError || !authData?.user) {
+            return fail("Failed to create auth user", authError?.message);
+          }
+
+          authUser = authData.user;
+          createdAuthUser = true;
+        } else {
+          const { error: updateAuthError } = await supabase.auth.admin.updateUserById(authUser.id, {
+            password,
+            email,
+            user_metadata: {
+              ...(authUser.user_metadata || {}),
+              full_name,
+              role,
+              phone: phone || null,
+              department,
+            },
+            app_metadata: {
+              ...(authUser.app_metadata || {}),
+              role,
+            },
+          });
+          if (updateAuthError) {
+            return fail("Failed to update auth user", updateAuthError.message);
+          }
+        }
+
+        const userId = authUser.id;
 
         // best-effort upsert into public.users
         await supabase.from("users").upsert(
@@ -447,18 +505,54 @@ export async function handler(event) {
           role,
           department,
           status: "ACTIVE",
-          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         };
 
-        const { data: emp, error: empErr } = await supabase
+        const { data: existingByUserId, error: existingByUserIdError } = await supabase
           .from("employees")
-          .upsert([empPayload], { onConflict: "user_id" })
           .select("*")
+          .eq("user_id", userId)
           .maybeSingle();
+        if (existingByUserIdError) return fail("Failed to fetch employee", existingByUserIdError.message);
+
+        let existingEmployee = existingByUserId || null;
+        if (!existingEmployee) {
+          const { data: existingByEmail, error: existingByEmailError } = await supabase
+            .from("employees")
+            .select("*")
+            .ilike("email", email)
+            .limit(1)
+            .maybeSingle();
+          if (existingByEmailError) return fail("Failed to fetch employee", existingByEmailError.message);
+          existingEmployee = existingByEmail || null;
+        }
+
+        let emp = null;
+        let empErr = null;
+        if (existingEmployee?.id) {
+          const response = await supabase
+            .from("employees")
+            .update(empPayload)
+            .eq("id", existingEmployee.id)
+            .select("*")
+            .maybeSingle();
+          emp = response.data || null;
+          empErr = response.error || null;
+        } else {
+          const response = await supabase
+            .from("employees")
+            .insert([{ ...empPayload, created_at: new Date().toISOString() }])
+            .select("*")
+            .maybeSingle();
+          emp = response.data || null;
+          empErr = response.error || null;
+        }
 
         if (empErr) {
           try {
-            await supabase.auth.admin.deleteUser(userId);
+            if (createdAuthUser) {
+              await supabase.auth.admin.deleteUser(userId);
+            }
           } catch {
             // ignore
           }
@@ -466,7 +560,7 @@ export async function handler(event) {
         }
 
         await writeAudit({
-          action: "STAFF_CREATE",
+          action: existingEmployee?.id ? "STAFF_UPSERT" : "STAFF_CREATE",
           entity_type: "employees",
           entity_id: emp?.id || null,
           details: { user_id: userId, email, role, department },
@@ -480,7 +574,11 @@ export async function handler(event) {
           link: "/employee/login",
         });
 
-        return ok({ success: true, employee: emp || empPayload });
+        return ok({
+          success: true,
+          employee: emp || empPayload,
+          reused_existing: Boolean(existingEmployee?.id),
+        });
       }
 
       // PUT /staff/:employeeId/password

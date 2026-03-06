@@ -38,6 +38,17 @@ const normalizePlanScopeId = (planScope) => {
   return token;
 };
 
+const resolveCouponStatus = (coupon = {}) => {
+  const usedCount = Number(coupon?.used_count || 0);
+  const maxUses = Number(coupon?.max_uses || 0);
+  const expiresAt = coupon?.expires_at ? new Date(coupon.expires_at).getTime() : null;
+
+  if (coupon?.is_active === false) return 'INACTIVE';
+  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt < Date.now()) return 'EXPIRED';
+  if (maxUses > 0 && usedCount >= maxUses) return 'USED_UP';
+  return 'ACTIVE';
+};
+
 const toNumberOrNull = (value) => {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -245,6 +256,7 @@ router.get('/coupons', async (_req, res) => {
       ...c,
       plan: c.plan_id ? planMap[c.plan_id] || null : null,
       vendor: c.vendor_id ? vendorMap[c.vendor_id] || null : null,
+      effective_status: resolveCouponStatus(c),
     }));
 
     return res.json({ success: true, data: enriched });

@@ -35,7 +35,6 @@ const DataEntryVendorProducts = lazy(() => import('@/modules/employee/pages/data
 const DataEntryAddProduct = lazy(() => import('@/modules/employee/pages/dataentry/AddProduct'));
 const DataEntryCategories = lazy(() => import('@/modules/employee/pages/dataentry/CategoriesFixed'));
 const DataEntryCsvUpload = lazy(() => import('@/modules/employee/pages/dataentry/CsvUpload'));
-const DataEntryBulkImport = lazy(() => import('@/modules/employee/pages/dataentry/BulkImport'));
 const DataEntryVendorOnboarding = lazy(() => import('@/modules/employee/pages/dataentry/VendorOnboarding'));
 const DataEntryRecords = lazy(() => import('@/modules/employee/pages/dataentry/DataEntryRecords'));
 const KycApprovals = lazy(() => import('@/modules/employee/pages/support/KycApprovals'));
@@ -236,7 +235,6 @@ export const AdminRoutes = () => {
           <Route path="categories" element={<DataEntryCategories />} />
           <Route path="categories/upload" element={<DataEntryCsvUpload />} />
           <Route path="locations" element={<DataEntryLocations />} />
-          <Route path="bulk-import" element={<DataEntryBulkImport />} />
           <Route path="vendor-onboarding" element={<DataEntryVendorOnboarding />} />
           <Route path="records" element={<DataEntryRecords />} />
           <Route path="vendors" element={<DataEntryVendors />} />
