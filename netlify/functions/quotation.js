@@ -1504,11 +1504,54 @@ const handleSendQuotation = async (event) => {
     status: 'SENT',
   };
 
-  const { data: inserted, error: dbError } = await supabase
-    .from('proposals')
-    .insert([quotationPayload])
-    .select('*')
-    .maybeSingle();
+  const optionalProposalFields = {
+    validity_days: validity_days ? Number(validity_days) || null : null,
+    delivery_days: delivery_days ? Number(delivery_days) || null : null,
+    attachment_name: attachment_name ? String(attachment_name).trim() || null : null,
+    attachment_mime: attachment_mime ? String(attachment_mime).trim() || null : null,
+  };
+  const optionalProposalFieldNames = Object.keys(optionalProposalFields);
+
+  const extractMissingOptionalField = (error) => {
+    const code = String(error?.code || '').trim();
+    const message = String(error?.message || '');
+    if (code !== '42703' && !/column.+does not exist/i.test(message)) return '';
+    const match = message.match(/column\s+"?([a-zA-Z0-9_]+)"?/i);
+    const field = String(match?.[1] || '').trim();
+    return optionalProposalFieldNames.includes(field) ? field : '';
+  };
+
+  let inserted = null;
+  let dbError = null;
+  const omittedOptionalFields = new Set();
+
+  while (true) {
+    const payload = { ...quotationPayload };
+
+    optionalProposalFieldNames.forEach((field) => {
+      const value = optionalProposalFields[field];
+      if (omittedOptionalFields.has(field)) return;
+      if (value === null || value === undefined || value === '') return;
+      payload[field] = value;
+    });
+
+    const result = await supabase
+      .from('proposals')
+      .insert([payload])
+      .select('*')
+      .maybeSingle();
+
+    inserted = result.data || null;
+    dbError = result.error || null;
+
+    const missingField = extractMissingOptionalField(dbError);
+    if (missingField && !omittedOptionalFields.has(missingField)) {
+      omittedOptionalFields.add(missingField);
+      continue;
+    }
+
+    break;
+  }
 
   if (dbError) {
     return fail(event, dbError.message || 'Failed to save quotation', dbError);

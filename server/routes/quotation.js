@@ -1636,9 +1636,45 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
       status: 'SENT',
     };
 
+    const optionalProposalFields = {
+      validity_days: validity_days ? Number(validity_days) || null : null,
+      delivery_days: delivery_days ? Number(delivery_days) || null : null,
+      attachment_name: attachment_name ? String(attachment_name).trim() || null : null,
+      attachment_mime: attachment_mime ? String(attachment_mime).trim() || null : null,
+    };
+    const optionalProposalFieldNames = Object.keys(optionalProposalFields);
+
+    const extractMissingOptionalField = (error) => {
+      const code = String(error?.code || '').trim();
+      const message = String(error?.message || '');
+      if (code !== '42703' && !/column.+does not exist/i.test(message)) return '';
+      const match = message.match(/column\s+"?([a-zA-Z0-9_]+)"?/i);
+      const field = String(match?.[1] || '').trim();
+      return optionalProposalFieldNames.includes(field) ? field : '';
+    };
+
     const tryInsert = async (buyerIdValue) => {
-      const payload = { ...baseQuotationPayload, buyer_id: buyerIdValue ?? null };
-      return supabase.from('proposals').insert([payload]).select('id, vendor_id, buyer_id, title').single();
+      const omittedOptionalFields = new Set();
+
+      while (true) {
+        const payload = { ...baseQuotationPayload, buyer_id: buyerIdValue ?? null };
+
+        optionalProposalFieldNames.forEach((field) => {
+          const value = optionalProposalFields[field];
+          if (omittedOptionalFields.has(field)) return;
+          if (value === null || value === undefined || value === '') return;
+          payload[field] = value;
+        });
+
+        const result = await supabase.from('proposals').insert([payload]).select('*').single();
+        const missingField = extractMissingOptionalField(result?.error);
+        if (missingField && !omittedOptionalFields.has(missingField)) {
+          omittedOptionalFields.add(missingField);
+          continue;
+        }
+
+        return result;
+      }
     };
 
     let savedQuotation = null;

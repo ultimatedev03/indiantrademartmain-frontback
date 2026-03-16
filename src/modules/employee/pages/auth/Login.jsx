@@ -8,6 +8,7 @@ import { Loader2, Briefcase, Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide
 import Logo from '@/shared/components/Logo';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
+import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -27,6 +28,11 @@ const Login = () => {
       return;
     }
 
+    if (formData.password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -39,7 +45,7 @@ const Login = () => {
         } else if (user.role === 'HR') {
           navigate('/hr/dashboard');
         } else if (user.role === 'FINANCE') {
-          navigate('/admin/finance-portal/dashboard');
+          navigate('/finance-portal/dashboard');
         } else if (user.role === 'DATA_ENTRY' || user.role === 'DATAENTRY') {
           navigate('/employee/dataentry/dashboard');
         } else if (user.role === 'SUPPORT') {
@@ -193,14 +199,14 @@ const Login = () => {
                   </div>
                   <div
                     className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                    onClick={() => setFormData({ email: 'support@itm.com', password: 'support' })}
+                    onClick={() => setFormData({ email: 'support@itm.com', password: 'support123' })}
                   >
                     <span className="font-bold text-purple-400">Support</span><br />
                     support@itm.com
                   </div>
                   <div
                     className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                    onClick={() => setFormData({ email: 'sales@itm.com', password: 'sales' })}
+                    onClick={() => setFormData({ email: 'sales@itm.com', password: 'sales123' })}
                   >
                     <span className="font-bold text-emerald-400">Sales</span><br />
                     sales@itm.com

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 
 const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
   const navigate = useNavigate();
@@ -40,6 +41,18 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
     setIsLoading(true);
     setError('');
 
+    if (!formData.email.trim() || !formData.password) {
+      setError('Email and password are required.');
+      setIsLoading(false);
+      return;
+    }
+
+    if (formData.password.length < PASSWORD_MIN_LENGTH) {
+      setError(`Password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       // Strict portal-role enforcement (no cross-dashboard login)
       const user = await login(formData.email, formData.password, expectedRole);
@@ -56,7 +69,7 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
             navigate('/admin/dashboard');
             break;
           case 'FINANCE':
-            navigate('/admin/finance-portal/dashboard');
+            navigate('/finance-portal/dashboard');
             break;
           case 'HR':
             navigate('/hr/dashboard');

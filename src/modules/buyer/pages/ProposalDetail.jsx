@@ -107,6 +107,9 @@ const ProposalDetail = () => {
       qtyText: qtyText || '—',
       createdAt: formatDate(proposal?.created_at),
       requiredBy: proposal?.required_by_date ? formatDate(proposal.required_by_date) : null,
+      validityDays: proposal?.validity_days ? String(proposal.validity_days) : null,
+      deliveryDays: proposal?.delivery_days ? String(proposal.delivery_days) : null,
+      attachmentName: proposal?.attachment_name || null,
       desc: proposal?.description || '—',
       vendorName,
       vendorEmail,
@@ -158,6 +161,13 @@ const ProposalDetail = () => {
                   Required By: {view.requiredBy}
                 </span>
               ) : null}
+
+              {view.deliveryDays ? (
+                <span className="flex items-center gap-2">
+                  <Package className="h-4 w-4" />
+                  Delivery: {view.deliveryDays} day{view.deliveryDays === '1' ? '' : 's'}
+                </span>
+              ) : null}
             </div>
           </div>
         </CardHeader>
@@ -177,6 +187,26 @@ const ProposalDetail = () => {
               </div>
               <div className="mt-1 font-semibold text-gray-900">{view.budgetText}</div>
             </div>
+
+            {view.validityDays ? (
+              <div className="rounded-lg border bg-gray-50 p-4">
+                <div className="text-xs text-gray-500 flex items-center gap-2">
+                  <Calendar className="h-4 w-4" /> Validity
+                </div>
+                <div className="mt-1 font-semibold text-gray-900">
+                  {view.validityDays} day{view.validityDays === '1' ? '' : 's'}
+                </div>
+              </div>
+            ) : null}
+
+            {view.attachmentName ? (
+              <div className="rounded-lg border bg-gray-50 p-4">
+                <div className="text-xs text-gray-500 flex items-center gap-2">
+                  <Package className="h-4 w-4" /> Attachment
+                </div>
+                <div className="mt-1 font-semibold text-gray-900">{view.attachmentName}</div>
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-lg border bg-white p-4">

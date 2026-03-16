@@ -11,7 +11,14 @@ const formatSubmissionDate = (value) => {
     if (!value) return '-';
     const parsed = new Date(value);
     if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= 0) return '-';
-    return parsed.toLocaleDateString('en-GB');
+    return parsed.toLocaleString('en-GB', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+    });
 };
 
 const DataEntryRecords = () => {
@@ -98,7 +105,7 @@ const DataEntryRecords = () => {
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Date</TableHead>
+                                <TableHead>Date & Time</TableHead>
                                 <TableHead>Vendor</TableHead>
                                 <TableHead>Products</TableHead>
                                 <TableHead>KYC Status</TableHead>

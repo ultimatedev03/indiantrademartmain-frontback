@@ -58,7 +58,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
       case 'ADMIN':
         return '/admin/dashboard';
       case 'FINANCE':
-        return '/admin/finance-portal/dashboard';
+        return '/finance-portal/dashboard';
       case 'HR':
         return '/hr/dashboard';
       case 'DATA_ENTRY':
@@ -88,14 +88,19 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
     const p = location.pathname || '';
     if (p.startsWith('/buyer')) return '/buyer/login';
     if (p.startsWith('/vendor')) return '/vendor/login';
-    if (p.startsWith('/admin') || p.startsWith('/employee') || p.startsWith('/hr')) return '/admin/login';
-    if (p.startsWith('/finance-portal')) {
-      return '/admin/login?portal=finance';
-    }
+    if (p.startsWith('/finance-portal')) return '/finance-portal/login';
+    if (p.startsWith('/hr')) return '/hr/login';
+    if (p.startsWith('/employee')) return '/employee/login';
+    if (p.startsWith('/admin')) return '/admin/login';
 
     // 3) Infer from allowedRoles (subdomain-safe)
     if (allowedRoles.includes('BUYER')) return isBuyerSubdomain ? '/login' : '/buyer/login';
     if (allowedRoles.includes('VENDOR')) return isVendorSubdomain ? '/login' : '/vendor/login';
+    if (allowedRoles.includes('FINANCE')) return '/finance-portal/login';
+    if (allowedRoles.includes('HR')) return '/hr/login';
+    if (allowedRoles.some((role) => ['DATA_ENTRY', 'DATAENTRY', 'SUPPORT', 'SALES', 'MANAGER', 'VP'].includes(normalizeRole(role)))) {
+      return '/employee/login';
+    }
 
     // Default fallback
     return '/buyer/login';

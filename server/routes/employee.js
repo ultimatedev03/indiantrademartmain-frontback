@@ -1,12 +1,14 @@
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
-import { normalizeRole } from '../lib/auth.js';
+import { hashPassword, normalizeEmail, normalizeRole, upsertPublicUser } from '../lib/auth.js';
+import { validateStrongPassword } from '../lib/passwordPolicy.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = express.Router();
 
 const SALES_ROLES = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
+const STAFF_MANAGE_ROLES = new Set(['ADMIN', 'HR', 'SUPERADMIN']);
 const CATEGORY_IMAGE_BUCKET = 'avatars';
 const CATEGORY_IMAGE_LEVELS = new Set(['head', 'sub', 'micro']);
 const CATEGORY_TABLE_BY_LEVEL = {
@@ -164,6 +166,36 @@ const hasSalesAccess = (authRole, employeeRole) => {
   return SALES_ROLES.has(a) || SALES_ROLES.has(e);
 };
 
+const hasStaffManagementAccess = (authRole, employeeRole) => {
+  const a = normalizeRole(authRole || '');
+  const e = normalizeRole(employeeRole || '');
+  return STAFF_MANAGE_ROLES.has(a) || STAFF_MANAGE_ROLES.has(e);
+};
+
+const roleToDepartment = (role) => {
+  switch (normalizeRole(role)) {
+    case 'ADMIN':
+      return 'Administration';
+    case 'HR':
+      return 'Human Resources';
+    case 'FINANCE':
+      return 'Finance';
+    case 'SUPPORT':
+      return 'Support';
+    case 'SALES':
+      return 'Sales';
+    case 'MANAGER':
+      return 'Territory';
+    case 'VP':
+      return 'Leadership';
+    case 'DATA_ENTRY':
+    case 'DATAENTRY':
+      return 'Operations';
+    default:
+      return '';
+  }
+};
+
 async function resolveEmployeeProfile(authUser) {
   const userId = String(authUser?.id || '').trim();
   const email = String(authUser?.email || '').trim().toLowerCase();
@@ -195,6 +227,157 @@ async function resolveEmployeeProfile(authUser) {
 
   return employee || null;
 }
+
+async function resolveStaffManager(req, res) {
+  const employee = await resolveEmployeeProfile(req.user);
+  if (!employee) {
+    res.status(404).json({ success: false, error: 'Employee profile not found' });
+    return null;
+  }
+
+  if (!hasStaffManagementAccess(req.user?.role, employee?.role)) {
+    res.status(403).json({ success: false, error: 'Staff management access required' });
+    return null;
+  }
+
+  return employee;
+}
+
+router.get('/staff', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveStaffManager(req, res);
+    if (!employee) return;
+
+    const { data, error } = await supabase
+      .from('employees')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message || 'Failed to fetch staff' });
+    }
+
+    return res.json({ success: true, employees: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to fetch staff' });
+  }
+});
+
+router.post('/staff', requireAuth(), async (req, res) => {
+  try {
+    const manager = await resolveStaffManager(req, res);
+    if (!manager) return;
+
+    const full_name = String(req.body?.full_name || '').trim();
+    const email = normalizeEmail(req.body?.email || '');
+    const password = String(req.body?.password || '').trim();
+    const role = normalizeRole(req.body?.role || 'DATA_ENTRY') || 'DATA_ENTRY';
+    const phone = String(req.body?.phone || '').trim() || null;
+    const department = String(req.body?.department || '').trim() || roleToDepartment(role) || null;
+
+    if (!full_name || !email || !password) {
+      return res.status(400).json({ success: false, error: 'full_name, email and password are required' });
+    }
+
+    if (normalizeRole(manager?.role) === 'HR' && ['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN'].includes(role)) {
+      return res.status(403).json({ success: false, error: 'HR portal cannot create privileged staff roles' });
+    }
+
+    const passwordValidation = validateStrongPassword(password);
+    if (!passwordValidation.ok) {
+      return res.status(400).json({ success: false, error: passwordValidation.error });
+    }
+
+    const password_hash = await hashPassword(password);
+    const publicUser = await upsertPublicUser({
+      email,
+      full_name,
+      role,
+      phone,
+      password_hash,
+      allowPasswordUpdate: true,
+    });
+
+    const employeePayload = {
+      user_id: publicUser.id,
+      full_name,
+      email,
+      phone,
+      role,
+      department,
+      status: 'ACTIVE',
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: existingByUserId, error: existingByUserIdError } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('user_id', publicUser.id)
+      .maybeSingle();
+
+    if (existingByUserIdError) {
+      return res.status(500).json({ success: false, error: existingByUserIdError.message });
+    }
+
+    let existingEmployee = existingByUserId || null;
+
+    if (!existingEmployee) {
+      const { data: existingByEmail, error: existingByEmailError } = await supabase
+        .from('employees')
+        .select('*')
+        .ilike('email', email)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingByEmailError) {
+        return res.status(500).json({ success: false, error: existingByEmailError.message });
+      }
+
+      existingEmployee = existingByEmail || null;
+    }
+
+    let employeeRow = null;
+    if (existingEmployee?.id) {
+      const { data: updatedEmployee, error: updateEmployeeError } = await supabase
+        .from('employees')
+        .update(employeePayload)
+        .eq('id', existingEmployee.id)
+        .select('*')
+        .maybeSingle();
+
+      if (updateEmployeeError) {
+        return res.status(500).json({ success: false, error: updateEmployeeError.message });
+      }
+
+      employeeRow = updatedEmployee || { ...existingEmployee, ...employeePayload };
+    } else {
+      const { data: insertedEmployee, error: insertEmployeeError } = await supabase
+        .from('employees')
+        .insert([
+          {
+            ...employeePayload,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select('*')
+        .maybeSingle();
+
+      if (insertEmployeeError) {
+        return res.status(500).json({ success: false, error: insertEmployeeError.message });
+      }
+
+      employeeRow = insertedEmployee || null;
+    }
+
+    return res.json({
+      success: true,
+      employee: employeeRow,
+      reused_existing: Boolean(existingEmployee?.id),
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to create employee' });
+  }
+});
 
 async function sumRevenueByPeriod({ startIso, endIso, endInclusive = true }) {
   let byPurchaseDate = supabase

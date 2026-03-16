@@ -162,6 +162,12 @@ export async function getPublicUserById(userId) {
   return data || null;
 }
 
+function isUniqueViolationError(error) {
+  const code = String(error?.code || '').trim();
+  const message = String(error?.message || '').toLowerCase();
+  return code === '23505' || message.includes('duplicate key') || message.includes('unique constraint');
+}
+
 export async function upsertPublicUser({
   id,
   email,
@@ -223,7 +229,40 @@ export async function upsertPublicUser({
     .select('*')
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (isUniqueViolationError(error)) {
+      const recovered = await getPublicUserByEmail(targetEmail);
+      if (recovered) {
+        const updates = {
+          updated_at: nowIso,
+        };
+
+        if (full_name && full_name !== recovered.full_name) updates.full_name = full_name;
+        if (role && normalizeRole(role) !== normalizeRole(recovered.role)) updates.role = normalizeRole(role);
+        if (phone && phone !== recovered.phone) updates.phone = phone;
+
+        if (password_hash && (allowPasswordUpdate || !recovered.password_hash)) {
+          updates.password_hash = password_hash;
+        }
+
+        if (Object.keys(updates).length > 1) {
+          const { data: mergedData, error: mergeError } = await supabase
+            .from('users')
+            .update(updates)
+            .eq('id', recovered.id)
+            .select('*')
+            .maybeSingle();
+
+          if (mergeError) throw new Error(mergeError.message);
+          return mergedData || { ...recovered, ...updates };
+        }
+
+        return recovered;
+      }
+    }
+
+    throw new Error(error.message);
+  }
   return data || payload;
 }
 

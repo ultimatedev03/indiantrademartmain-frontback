@@ -166,6 +166,9 @@ export const AdminRoutes = () => {
       {/* ✅ Correct login route for /admin/login, /employee/login, /hr/login */}
       <Route path="login" element={<LoginRouter />} />
 
+      {/* Legacy finance path redirect */}
+      {isAdminScope ? <Route path="finance-portal/*" element={<Navigate to="/finance-portal/dashboard" replace />} /> : null}
+
       {/* Superadmin */}
       {isAdminScope ? (
         <>
@@ -180,7 +183,7 @@ export const AdminRoutes = () => {
 
       {/* Finance Portal */}
       {isFinanceScope ? (
-        <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
+        <Route element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
           <Route element={<PortalLayout role="FINANCE" />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<FinanceDashboard />} />

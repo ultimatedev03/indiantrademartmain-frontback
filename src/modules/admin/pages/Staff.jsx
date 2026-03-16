@@ -338,7 +338,16 @@ const Staff = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Role</Label>
-                  <Select value={formData.role} onValueChange={(v) => setFormData({ ...formData, role: v })}>
+                  <Select
+                    value={formData.role}
+                    onValueChange={(v) =>
+                      setFormData({
+                        ...formData,
+                        role: v,
+                        department: roleToDepartment(v) || formData.department,
+                      })
+                    }
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>

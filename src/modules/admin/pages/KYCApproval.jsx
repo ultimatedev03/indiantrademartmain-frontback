@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -76,12 +76,7 @@ const KYCApproval = () => {
 
   const KYC_API_BASE = getKycBase();
 
-  useEffect(() => {
-    loadVendors();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterStatus]);
-
-  const loadVendors = async () => {
+  const loadVendors = useCallback(async () => {
     setLoading(true);
     try {
       let query = supabase.from('vendors').select('*, products(count)').order('created_at', { ascending: false });
@@ -112,11 +107,38 @@ const KYCApproval = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterStatus, searchTerm, toast]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadVendors();
+    }, searchTerm.trim() ? 250 : 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadVendors, searchTerm]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('admin-kyc-sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vendors' }, () => {
+        void loadVendors();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vendor_documents' }, () => {
+        void loadVendors();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'kyc_documents' }, () => {
+        void loadVendors();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadVendors]);
 
   const handleSearch = (e) => {
     e.preventDefault();
-    loadVendors();
+    void loadVendors();
   };
 
   const handleApprove = async (vendor) => {

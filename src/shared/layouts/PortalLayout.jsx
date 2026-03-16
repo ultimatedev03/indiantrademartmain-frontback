@@ -153,7 +153,7 @@ const PortalLayout = ({ role }) => {
         navigate('/hr/login');
         break;
       case 'FINANCE':
-        navigate('/admin/login?portal=finance');
+        navigate('/finance-portal/login');
         break;
       case 'DATA_ENTRY':
       case 'SUPPORT':
@@ -191,8 +191,8 @@ const PortalLayout = ({ role }) => {
         ];
       case 'FINANCE':
         return [
-          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/admin/finance-portal/dashboard' },
-          { icon: BarChart3, label: 'Payments', path: '/admin/finance-portal/dashboard#payments' },
+          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/finance-portal/dashboard' },
+          { icon: BarChart3, label: 'Payments', path: '/finance-portal/dashboard#payments' },
         ];
       case 'HR':
         return [
