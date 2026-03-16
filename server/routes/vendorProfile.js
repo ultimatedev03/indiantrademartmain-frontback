@@ -446,10 +446,18 @@ const omitKeys = (obj, keys = []) =>
   );
 
 const getMissingColumnFromInsertError = (error) => {
-  const code = String(error?.code || '').toUpperCase();
-  if (code !== '42703') return '';
   const raw = `${error?.message || ''} ${error?.details || ''}`;
-  const match = raw.match(/column\s+"([^"]+)"/i);
+  const quotedMatch = raw.match(/column\s+"([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return String(quotedMatch[1] || '').trim();
+  }
+  const schemaCacheMatch = raw.match(/could not find the ['"]([^'"]+)['"] column/i);
+  if (schemaCacheMatch?.[1]) {
+    return String(schemaCacheMatch[1] || '').trim();
+  }
+  const code = String(error?.code || '').toUpperCase();
+  if (code !== '42703' && code !== 'PGRST204') return '';
+  const match = raw.match(/column\s+([^ .]+)\s+/i);
   return String(match?.[1] || '').trim();
 };
 

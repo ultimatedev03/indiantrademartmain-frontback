@@ -43,10 +43,18 @@ const isUuid = (value) =>
   );
 
 const missingColumnFromError = (error) => {
-  const code = String(error?.code || '').toUpperCase();
-  if (code !== '42703') return '';
   const raw = `${error?.message || ''} ${error?.details || ''}`;
-  const match = raw.match(/column\s+"([^"]+)"/i);
+  const quotedMatch = raw.match(/column\s+"([^"]+)"/i);
+  if (quotedMatch?.[1]) {
+    return String(quotedMatch[1] || '').trim();
+  }
+  const schemaCacheMatch = raw.match(/could not find the ['"]([^'"]+)['"] column/i);
+  if (schemaCacheMatch?.[1]) {
+    return String(schemaCacheMatch[1] || '').trim();
+  }
+  const code = String(error?.code || '').toUpperCase();
+  if (code !== '42703' && code !== 'PGRST204') return '';
+  const match = raw.match(/column\s+([^ .]+)\s+/i);
   return String(match?.[1] || '').trim();
 };
 
@@ -143,11 +151,13 @@ const insertLeadSafely = async (leadPayload) => {
     payload: leadPayload,
     select: '*',
     dropKeySets: [
+      ['updated_at'],
       ['buyer_user_id'],
       ['buyer_id'],
       ['buyer_id', 'buyer_user_id'],
       ['buyer_id', 'buyer_user_id', 'proposal_id'],
       [
+        'updated_at',
         'buyer_id',
         'buyer_user_id',
         'proposal_id',
@@ -676,7 +686,6 @@ export const buyerApi = {
       source: payload.vendor_id ? 'DIRECT' : 'MARKETPLACE',
       status: 'AVAILABLE',
       created_at: createdAt,
-      updated_at: createdAt,
       proposal_id: proposal?.id || null,
     };
 
