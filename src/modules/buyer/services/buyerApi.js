@@ -523,41 +523,48 @@ export const buyerApi = {
     // Direct vendor proposal path must go through backend API
     // to bypass RLS and ensure vendor sees it in "Received Requests".
     if (payload.vendor_id) {
-      const directProposalRes = await fetchWithCsrf(apiUrl(`/api/vendors/${payload.vendor_id}/leads`), {
-        method: 'POST',
-        body: JSON.stringify(requestPayload),
-      });
+      try {
+        const directProposalRes = await fetchWithCsrf(apiUrl(`/api/vendors/${payload.vendor_id}/leads`), {
+          method: 'POST',
+          body: JSON.stringify(requestPayload),
+        });
 
-      const directProposalJson = await directProposalRes.json().catch(() => ({}));
-      if (!directProposalRes.ok || !directProposalJson?.success) {
-        throw new Error(directProposalJson?.error || 'Failed to create proposal request');
+        const directProposalJson = await directProposalRes.json().catch(() => ({}));
+        if (!directProposalRes.ok || !directProposalJson?.success) {
+          throw new Error(directProposalJson?.error || 'Failed to create proposal request');
+        }
+
+        const createdProposal = directProposalJson?.proposal || null;
+        if (createdProposal) return createdProposal;
+
+        return {
+          id: null,
+          vendor_id: payload.vendor_id,
+          vendor_email: payload.vendor_email,
+          buyer_id: buyerId,
+          title: payload.title,
+          product_name: payload.product_name,
+          category: payload.category,
+          category_slug: payload.category_slug,
+          micro_category_id: payload.micro_category_id,
+          sub_category_id: payload.sub_category_id,
+          head_category_id: payload.head_category_id,
+          location: payload.location,
+          state_id: payload.state_id,
+          city_id: payload.city_id,
+          pincode: payload.pincode,
+          quantity: payload.quantity,
+          budget: payload.budget,
+          description: payload.description,
+          status: 'SENT',
+          created_at: createdAt,
+        };
+      } catch (directProposalError) {
+        console.warn(
+          '[buyerApi.createProposal] direct proposal backend API failed, falling back:',
+          directProposalError?.message || directProposalError
+        );
       }
-
-      const createdProposal = directProposalJson?.proposal || null;
-      if (createdProposal) return createdProposal;
-
-      return {
-        id: null,
-        vendor_id: payload.vendor_id,
-        vendor_email: payload.vendor_email,
-        buyer_id: buyerId,
-        title: payload.title,
-        product_name: payload.product_name,
-        category: payload.category,
-        category_slug: payload.category_slug,
-        micro_category_id: payload.micro_category_id,
-        sub_category_id: payload.sub_category_id,
-        head_category_id: payload.head_category_id,
-        location: payload.location,
-        state_id: payload.state_id,
-        city_id: payload.city_id,
-        pincode: payload.pincode,
-        quantity: payload.quantity,
-        budget: payload.budget,
-        description: payload.description,
-        status: 'SENT',
-        created_at: createdAt,
-      };
     }
 
     // Marketplace proposal path through backend to avoid RLS/schema drift issues.
