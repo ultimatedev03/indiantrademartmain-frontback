@@ -223,7 +223,7 @@ const Proposals = () => {
     }
 
     const productName = item?.product_name || item?.title || item?.__title || '';
-    const category = item?.product_name || item?.title || item?.__title || '';
+    const category = item?.category || item?.product_name || item?.title || item?.__title || '';
     const vendorName = item?.vendors?.company_name || item?.__vendorName || '';
     const query = new URLSearchParams({
       vendorId: targetVendorId,
@@ -231,7 +231,6 @@ const Proposals = () => {
       productName,
       category,
       lockVendor: '1',
-      lockCategory: '1',
     });
     navigate(`/buyer/proposals/new?${query.toString()}`);
   };

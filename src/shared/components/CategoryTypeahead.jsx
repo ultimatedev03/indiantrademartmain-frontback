@@ -1,17 +1,37 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Input } from '@/components/ui/input';
-import { Loader2, Search, ChevronRight, CheckCircle } from 'lucide-react';
+import { Loader2, Search } from 'lucide-react';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { cn } from '@/lib/utils';
-import { toast } from '@/components/ui/use-toast';
 
-const CategoryTypeahead = ({ onSelect, defaultValue = '', placeholder = "Search category...", disabled = false, onAutoSelect = null }) => {
+const CategoryTypeahead = ({
+  onSelect,
+  defaultValue = '',
+  placeholder = 'Search category...',
+  disabled = false,
+  allowedTypes = ['micro', 'sub'],
+}) => {
   const [query, setQuery] = useState(defaultValue);
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
   const [show, setShow] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const wrapperRef = useRef(null);
+  const selectedLabelRef = useRef(String(defaultValue || '').trim());
+
+  const normalizedAllowedTypes = useMemo(
+    () =>
+      Array.isArray(allowedTypes)
+        ? allowedTypes.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+        : [],
+    [allowedTypes]
+  );
+
+  useEffect(() => {
+    const nextValue = String(defaultValue || '');
+    setQuery(nextValue);
+    selectedLabelRef.current = nextValue.trim();
+  }, [defaultValue]);
 
   useEffect(() => {
     // Hide suggestions on click outside
@@ -30,10 +50,14 @@ const CategoryTypeahead = ({ onSelect, defaultValue = '', placeholder = "Search 
         setLoading(true);
         try {
           const results = await directoryApi.searchMicroCategories(query);
-          setSuggestions(results);
+          const filteredResults =
+            normalizedAllowedTypes.length > 0
+              ? results.filter((item) => normalizedAllowedTypes.includes(String(item?.type || '').toLowerCase()))
+              : results;
+          setSuggestions(filteredResults);
           
           // Just show dropdown, don't auto-select
-          if (results.length > 0) {
+          if (filteredResults.length > 0) {
             setShow(true);
           } else {
             setShow(false);
@@ -52,7 +76,7 @@ const CategoryTypeahead = ({ onSelect, defaultValue = '', placeholder = "Search 
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [normalizedAllowedTypes, query]);
 
   const handleKeyDown = (e) => {
     if (!show || suggestions.length === 0) return;
@@ -75,6 +99,7 @@ const CategoryTypeahead = ({ onSelect, defaultValue = '', placeholder = "Search 
 
   const handleSelect = (item) => {
     setQuery(item.name);
+    selectedLabelRef.current = String(item?.name || '').trim();
     setShow(false);
     onSelect(item);
   };
@@ -84,11 +109,19 @@ const CategoryTypeahead = ({ onSelect, defaultValue = '', placeholder = "Search 
       <div className="relative">
         <Input 
           value={query} 
-          onChange={(e) => { setQuery(e.target.value); if(!e.target.value) onSelect(null); }}
+          onChange={(e) => {
+            const nextValue = e.target.value;
+            setQuery(nextValue);
+            if (!nextValue || String(nextValue).trim() !== selectedLabelRef.current) {
+              selectedLabelRef.current = '';
+              onSelect(null);
+            }
+          }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           className="pr-8"
           disabled={disabled}
+          disableAutoSanitize
         />
         <div className="absolute right-2 top-2.5 text-slate-400">
            {loading ? <Loader2 className="w-4 h-4 animate-spin"/> : <Search className="w-4 h-4"/>}

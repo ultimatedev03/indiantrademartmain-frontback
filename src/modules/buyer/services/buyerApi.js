@@ -20,6 +20,86 @@ const stripUndefined = (obj) => {
   return cleaned;
 };
 
+const omitKeys = (obj, keys = []) =>
+  stripUndefined(
+    Object.fromEntries(
+      Object.entries(obj || {}).filter(([key, value]) => !keys.includes(key) && value !== undefined)
+    )
+  );
+
+const normalizeOptionalText = (value) => {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const lowered = text.toLowerCase();
+  if (lowered === 'null' || lowered === 'undefined') return null;
+  return text;
+};
+
+const normalizeVendorId = (value) => normalizeOptionalText(value);
+
+const isUuid = (value) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '').trim()
+  );
+
+const missingColumnFromError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  if (code !== '42703') return '';
+  const raw = `${error?.message || ''} ${error?.details || ''}`;
+  const match = raw.match(/column\s+"([^"]+)"/i);
+  return String(match?.[1] || '').trim();
+};
+
+const makePayloadSignature = (payload) =>
+  JSON.stringify(
+    Object.keys(payload || {})
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = payload[key];
+        return acc;
+      }, {})
+  );
+
+const insertSingleWithFallback = async ({ table, payload, select = '*', dropKeySets = [] }) => {
+  const attempts = [];
+  const seen = new Set();
+
+  const enqueue = (candidate) => {
+    const cleaned = stripUndefined(candidate || {});
+    if (!Object.keys(cleaned).length) return;
+    const signature = makePayloadSignature(cleaned);
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    attempts.push(cleaned);
+  };
+
+  enqueue(payload);
+  dropKeySets.forEach((keys) => enqueue(omitKeys(payload, keys)));
+
+  let lastError = null;
+
+  while (attempts.length > 0) {
+    const candidate = attempts.shift();
+    const { data, error } = await supabase
+      .from(table)
+      .insert([candidate])
+      .select(select)
+      .maybeSingle();
+
+    if (!error) return data;
+
+    lastError = error;
+    console.warn(`[${table} insert] Failed:`, error?.message || error, candidate);
+
+    const missingColumn = missingColumnFromError(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(candidate, missingColumn)) {
+      enqueue(omitKeys(candidate, [missingColumn]));
+    }
+  }
+
+  throw lastError || new Error(`Failed to insert ${table}`);
+};
+
 const MESSAGE_MARKERS = {
   edited: /^::itm_edited::$/i,
   deliveredBuyer: /^::itm_delivered_buyer::(.+)$/i,
@@ -57,87 +137,62 @@ const normalizeProposalMessage = (row = {}) => {
   };
 };
 
-// ✅ Safe lead insert with fallback (agar leads table me buyer_id/buyer_user_id columns na ho)
 const insertLeadSafely = async (leadPayload) => {
-  const attempts = [];
+  return insertSingleWithFallback({
+    table: 'leads',
+    payload: leadPayload,
+    select: '*',
+    dropKeySets: [
+      ['buyer_user_id'],
+      ['buyer_id'],
+      ['buyer_id', 'buyer_user_id'],
+      ['buyer_id', 'buyer_user_id', 'proposal_id'],
+      [
+        'buyer_id',
+        'buyer_user_id',
+        'proposal_id',
+        'category_slug',
+        'category',
+        'location',
+        'vendor_email',
+        'city',
+        'state',
+        'pincode',
+        'micro_category_id',
+        'sub_category_id',
+        'head_category_id',
+        'state_id',
+        'city_id',
+        'source',
+      ],
+    ],
+  });
+};
 
-  // Attempt 1: as-is
-  attempts.push(stripUndefined({ ...leadPayload }));
-
-  // Attempt 2: without buyer_user_id
-  const a2 = { ...leadPayload };
-  delete a2.buyer_user_id;
-  attempts.push(stripUndefined(a2));
-
-  // Attempt 3: without buyer_id
-  const a3 = { ...leadPayload };
-  delete a3.buyer_id;
-  attempts.push(stripUndefined(a3));
-
-  // Attempt 4: without both
-  const a4 = { ...leadPayload };
-  delete a4.buyer_id;
-  delete a4.buyer_user_id;
-  attempts.push(stripUndefined(a4));
-
-  // Attempt 5+: progressively drop optional compatibility fields.
-  const a5 = { ...a4 };
-  delete a5.proposal_id;
-  attempts.push(stripUndefined(a5));
-
-  const a6 = { ...a5 };
-  delete a6.category_slug;
-  delete a6.category;
-  delete a6.location;
-  attempts.push(stripUndefined(a6));
-
-  let lastError = null;
-  const seenPayloadSignatures = new Set();
-
-  const makeSignature = (payload) =>
-    JSON.stringify(
-      Object.keys(payload || {})
-        .sort()
-        .reduce((acc, key) => {
-          acc[key] = payload[key];
-          return acc;
-        }, {})
-    );
-
-  const columnFromMissingError = (error) => {
-    const code = String(error?.code || '').toUpperCase();
-    if (code !== '42703') return '';
-    const raw = `${error?.message || ''} ${error?.details || ''}`;
-    const match = raw.match(/column\s+"([^"]+)"/i);
-    return String(match?.[1] || '').trim();
-  };
-
-  for (let i = 0; i < attempts.length; i++) {
-    const payload = attempts[i];
-    const signature = makeSignature(payload);
-    if (seenPayloadSignatures.has(signature)) continue;
-    seenPayloadSignatures.add(signature);
-
-    const { data, error } = await supabase
-      .from('leads')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (!error) return data;
-
-    lastError = error;
-    console.warn(`[Lead Insert Attempt ${i + 1}] Failed:`, error?.message || error, payload);
-
-    const missingColumn = columnFromMissingError(error);
-    if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
-      const retryPayload = { ...payload };
-      delete retryPayload[missingColumn];
-      attempts.push(stripUndefined(retryPayload));
-    }
-  }
-
-  throw lastError || new Error('Failed to insert lead');
+const insertProposalSafely = async (proposalPayload) => {
+  return insertSingleWithFallback({
+    table: 'proposals',
+    payload: proposalPayload,
+    select: '*',
+    dropKeySets: [
+      ['required_by_date'],
+      ['required_by_date', 'buyer_email'],
+      [
+        'required_by_date',
+        'buyer_email',
+        'category',
+        'category_slug',
+        'micro_category_id',
+        'sub_category_id',
+        'head_category_id',
+        'state_id',
+        'city_id',
+        'location',
+        'pincode',
+        'vendor_email',
+      ],
+    ],
+  });
 };
 
 export const buyerApi = {
@@ -289,20 +344,53 @@ export const buyerApi = {
 
   // --- PROPOSALS ---
   createProposal: async (proposalData) => {
-    const normalizedTitle = String(
-      proposalData?.title || proposalData?.product_name || proposalData?.category || ''
-    ).trim();
-    const normalizedProductName = String(
-      proposalData?.product_name || proposalData?.category || proposalData?.title || ''
-    ).trim();
-    const normalizedCategory = String(proposalData?.category || '').trim();
-    const normalizedDescription = String(proposalData?.description || '').trim();
-    const normalizedLocation = String(proposalData?.location || '').trim();
+    const normalizedCategory = normalizeOptionalText(proposalData?.category);
+    const normalizedCategoryName =
+      normalizeOptionalText(proposalData?.category_name) ||
+      normalizeOptionalText(proposalData?.product_name) ||
+      normalizedCategory;
+    const normalizedTitle =
+      normalizeOptionalText(proposalData?.title) ||
+      normalizeOptionalText(proposalData?.product_name) ||
+      normalizedCategoryName ||
+      normalizedCategory;
+    const normalizedProductName =
+      normalizeOptionalText(proposalData?.product_name) ||
+      normalizedCategoryName ||
+      normalizedCategory ||
+      normalizedTitle;
+    const normalizedDescription = normalizeOptionalText(proposalData?.description);
+    const normalizedState = normalizeOptionalText(proposalData?.state);
+    const normalizedCity = normalizeOptionalText(proposalData?.city);
+    const normalizedLocation =
+      normalizeOptionalText(proposalData?.location) ||
+      [normalizedCity, normalizedState].filter(Boolean).join(', ') ||
+      null;
+    const normalizedStateId = normalizeOptionalText(proposalData?.state_id);
+    const normalizedCityId = normalizeOptionalText(proposalData?.city_id);
+    const normalizedPincode = normalizeOptionalText(proposalData?.pincode);
+    const normalizedCategorySlug = normalizeOptionalText(proposalData?.category_slug);
+    const normalizedMicroCategoryId = normalizeOptionalText(proposalData?.micro_category_id);
+    const normalizedSubCategoryId = normalizeOptionalText(proposalData?.sub_category_id);
+    const normalizedHeadCategoryId = normalizeOptionalText(proposalData?.head_category_id);
+    const normalizedRequiredByDate = normalizeOptionalText(proposalData?.required_by_date);
     const normalizedQuantity = Number(proposalData?.quantity);
     const normalizedBudget = Number(proposalData?.budget);
 
     if (!normalizedTitle || !normalizedProductName || !normalizedCategory) {
       throw new Error('Category and product details are required');
+    }
+
+    if (!normalizedMicroCategoryId) {
+      throw new Error('Micro category is required');
+    }
+
+    if (!normalizedStateId || !normalizedCityId || !normalizedCity || !normalizedPincode) {
+      throw new Error('Delivery state, city, and pincode are required');
+    }
+
+    if (!/^\d{6}$/.test(normalizedPincode)) {
+      throw new Error('Please enter a valid 6-digit pincode');
     }
 
     if (!normalizedDescription || normalizedDescription.length < 10) {
@@ -317,14 +405,6 @@ export const buyerApi = {
       throw new Error('Budget must be greater than 0');
     }
 
-    const normalizeVendorId = (value) => {
-      const cleaned = String(value ?? '').trim();
-      if (!cleaned) return null;
-      const lowered = cleaned.toLowerCase();
-      if (lowered === 'null' || lowered === 'undefined') return null;
-      return cleaned;
-    };
-
     const urlVendorId =
       typeof window !== 'undefined'
         ? normalizeVendorId(
@@ -333,13 +413,31 @@ export const buyerApi = {
           )
         : null;
 
-    const resolvedVendorId =
+    let resolvedVendorId =
       normalizeVendorId(proposalData?.vendor_id) ||
       normalizeVendorId(proposalData?.vendorId) ||
       normalizeVendorId(proposalData?.selected_vendor_id) ||
       normalizeVendorId(proposalData?.selectedVendorId) ||
       urlVendorId ||
       null;
+    let resolvedVendorEmail = normalizeOptionalText(
+      proposalData?.vendor_email || proposalData?.selected_vendor_email
+    );
+
+    if (!resolvedVendorId && resolvedVendorEmail) {
+      const { data: vendorByEmail, error: vendorLookupError } = await supabase
+        .from('vendors')
+        .select('id, email')
+        .eq('email', String(resolvedVendorEmail).toLowerCase())
+        .eq('is_active', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (vendorLookupError) throw vendorLookupError;
+      resolvedVendorId = normalizeVendorId(vendorByEmail?.id);
+      resolvedVendorEmail = normalizeOptionalText(vendorByEmail?.email) || resolvedVendorEmail;
+    }
 
     const user = await getAuthUser();
     let buyerProfile = null;
@@ -363,44 +461,71 @@ export const buyerApi = {
     const buyerCompany = buyerProfile?.company_name || user?.user_metadata?.full_name || '';
     const buyerEmail = String(user?.email || '').trim().toLowerCase();
     const buyerPhone = buyerProfile?.phone || buyerProfile?.mobile_number || '';
+    const createdAt = new Date().toISOString();
+
+    if (resolvedVendorEmail) {
+      resolvedVendorEmail = String(resolvedVendorEmail).toLowerCase().trim();
+    }
 
     const payload = {
       buyer_id: buyerId,
       buyer_email: null,
       vendor_id: resolvedVendorId,
+      vendor_email: resolvedVendorEmail,
       title: normalizedTitle,
       product_name: normalizedProductName,
+      category: normalizedCategory,
+      category_slug: normalizedCategorySlug,
+      micro_category_id: normalizedMicroCategoryId,
+      sub_category_id: normalizedSubCategoryId,
+      head_category_id: normalizedHeadCategoryId,
+      state_id: normalizedStateId,
+      city_id: normalizedCityId,
+      location: normalizedLocation,
+      pincode: normalizedPincode,
       quantity: normalizedQuantity,
       budget: normalizedBudget,
-      required_by_date: proposalData.required_by_date || null,
+      required_by_date: normalizedRequiredByDate,
       description: normalizedDescription,
       status: 'SENT',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: createdAt,
+      updated_at: createdAt,
     };
+
+    const requestPayload = stripUndefined({
+      title: payload.title,
+      product_name: payload.product_name,
+      product_interest: payload.product_name,
+      buyer_name: buyerName,
+      buyer_email: buyerEmail,
+      buyer_phone: buyerPhone,
+      company_name: buyerCompany,
+      description: payload.description,
+      message: payload.description,
+      quantity: payload.quantity,
+      budget: payload.budget,
+      category: normalizedCategory,
+      category_name: normalizedCategoryName,
+      category_slug: normalizedCategorySlug,
+      location: normalizedLocation,
+      state: normalizedState,
+      state_id: normalizedStateId,
+      city: normalizedCity,
+      city_id: normalizedCityId,
+      pincode: normalizedPincode,
+      micro_category_id: normalizedMicroCategoryId,
+      sub_category_id: normalizedSubCategoryId,
+      head_category_id: normalizedHeadCategoryId,
+      required_by_date: normalizedRequiredByDate,
+      vendor_email: resolvedVendorEmail,
+    });
 
     // Direct vendor proposal path must go through backend API
     // to bypass RLS and ensure vendor sees it in "Received Requests".
     if (payload.vendor_id) {
       const directProposalRes = await fetchWithCsrf(apiUrl(`/api/vendors/${payload.vendor_id}/leads`), {
         method: 'POST',
-        body: JSON.stringify({
-          title: payload.title,
-          product_name: payload.product_name,
-          product_interest: payload.product_name,
-          buyer_name: buyerName,
-          buyer_email: buyerEmail,
-          buyer_phone: buyerPhone,
-          company_name: buyerCompany,
-          description: payload.description,
-          message: payload.description,
-          quantity: payload.quantity,
-          budget: payload.budget,
-          category: normalizedCategory,
-          category_slug: proposalData.category_slug || '',
-          location: normalizedLocation || 'India',
-          required_by_date: proposalData.required_by_date || null,
-        }),
+        body: JSON.stringify(requestPayload),
       });
 
       const directProposalJson = await directProposalRes.json().catch(() => ({}));
@@ -414,14 +539,24 @@ export const buyerApi = {
       return {
         id: null,
         vendor_id: payload.vendor_id,
+        vendor_email: payload.vendor_email,
         buyer_id: buyerId,
         title: payload.title,
         product_name: payload.product_name,
+        category: payload.category,
+        category_slug: payload.category_slug,
+        micro_category_id: payload.micro_category_id,
+        sub_category_id: payload.sub_category_id,
+        head_category_id: payload.head_category_id,
+        location: payload.location,
+        state_id: payload.state_id,
+        city_id: payload.city_id,
+        pincode: payload.pincode,
         quantity: payload.quantity,
         budget: payload.budget,
         description: payload.description,
         status: 'SENT',
-        created_at: new Date().toISOString(),
+        created_at: createdAt,
       };
     }
 
@@ -429,23 +564,7 @@ export const buyerApi = {
     try {
       const marketplaceProposalRes = await fetchWithCsrf(apiUrl('/api/vendors/marketplace/leads'), {
         method: 'POST',
-        body: JSON.stringify({
-          title: payload.title,
-          product_name: payload.product_name,
-          product_interest: payload.product_name,
-          buyer_name: buyerName,
-          buyer_email: buyerEmail,
-          buyer_phone: buyerPhone,
-          company_name: buyerCompany,
-          description: payload.description,
-          message: payload.description,
-          quantity: payload.quantity,
-          budget: payload.budget,
-          category: normalizedCategory,
-          category_slug: proposalData.category_slug || '',
-          location: normalizedLocation || 'India',
-          required_by_date: proposalData.required_by_date || null,
-        }),
+        body: JSON.stringify(requestPayload),
       });
 
       const marketplaceProposalJson = await marketplaceProposalRes.json().catch(() => ({}));
@@ -456,14 +575,24 @@ export const buyerApi = {
         return {
           id: null,
           vendor_id: null,
+          vendor_email: payload.vendor_email,
           buyer_id: buyerId,
           title: payload.title,
           product_name: payload.product_name,
+          category: payload.category,
+          category_slug: payload.category_slug,
+          micro_category_id: payload.micro_category_id,
+          sub_category_id: payload.sub_category_id,
+          head_category_id: payload.head_category_id,
+          location: payload.location,
+          state_id: payload.state_id,
+          city_id: payload.city_id,
+          pincode: payload.pincode,
           quantity: payload.quantity,
           budget: payload.budget,
           description: payload.description,
           status: 'SENT',
-          created_at: new Date().toISOString(),
+          created_at: createdAt,
         };
       }
       console.warn(
@@ -481,19 +610,36 @@ export const buyerApi = {
       throw new Error('Buyer profile not found');
     }
 
-    const { data: proposal, error: propError } = await supabase
-      .from('proposals')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (propError) throw propError;
+    const proposal =
+      (await insertProposalSafely(payload)) || {
+        id: null,
+        vendor_id: payload.vendor_id,
+        vendor_email: payload.vendor_email,
+        buyer_id: payload.buyer_id,
+        title: payload.title,
+        product_name: payload.product_name,
+        category: payload.category,
+        category_slug: payload.category_slug,
+        micro_category_id: payload.micro_category_id,
+        sub_category_id: payload.sub_category_id,
+        head_category_id: payload.head_category_id,
+        location: payload.location,
+        state_id: payload.state_id,
+        city_id: payload.city_id,
+        pincode: payload.pincode,
+        quantity: payload.quantity,
+        budget: payload.budget,
+        description: payload.description,
+        status: payload.status,
+        created_at: payload.created_at,
+      };
 
     // ✅ Lead create (Direct lead OR Marketplace lead)
     // - Direct lead: vendor_id set
     // - Marketplace lead: vendor_id null
     const leadPayload = {
       vendor_id: payload.vendor_id || null,
+      vendor_email: payload.vendor_email || null,
 
       // ✅ buyer mapping (agar columns exist)
       buyer_id: buyerId,
@@ -502,20 +648,29 @@ export const buyerApi = {
       title: payload.title,
       product_name: payload.product_name,
       category: normalizedCategory,
+      category_slug: normalizedCategorySlug,
+      micro_category_id: normalizedMicroCategoryId,
+      sub_category_id: normalizedSubCategoryId,
+      head_category_id: normalizedHeadCategoryId,
       quantity: payload.quantity,
       budget: payload.budget,
-      location: normalizedLocation || 'India',
-      city: proposalData.city || null,
-      state: proposalData.state || null,
+      location: normalizedLocation,
+      city: normalizedCity,
+      state: normalizedState,
+      state_id: normalizedStateId,
+      city_id: normalizedCityId,
+      pincode: normalizedPincode,
+      description: payload.description,
       message: payload.description,
       buyer_name: buyerName,
       buyer_email: buyerEmail,
       buyer_phone: buyerPhone,
       company_name: buyerCompany,
+      source: payload.vendor_id ? 'DIRECT' : 'MARKETPLACE',
       status: 'AVAILABLE',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      proposal_id: proposal.id
+      created_at: createdAt,
+      updated_at: createdAt,
+      proposal_id: proposal?.id || null,
     };
 
     if (!leadPayload.buyer_name || !leadPayload.buyer_email) {
@@ -533,22 +688,7 @@ export const buyerApi = {
       try {
         const directLeadRes = await fetchWithCsrf(apiUrl(`/api/vendors/${payload.vendor_id}/leads`), {
           method: 'POST',
-          body: JSON.stringify({
-            title: payload.title,
-            product_name: payload.product_name,
-            product_interest: payload.product_name,
-            buyer_name: buyerName,
-            buyer_email: buyerEmail,
-            buyer_phone: buyerPhone,
-            company_name: buyerCompany,
-            description: payload.description,
-            message: payload.description,
-            quantity: payload.quantity,
-            budget: payload.budget,
-            category: normalizedCategory,
-            category_slug: proposalData.category_slug || '',
-            location: normalizedLocation || null,
-          }),
+          body: JSON.stringify(requestPayload),
         });
         const directLeadJson = await directLeadRes.json().catch(() => ({}));
         if (!directLeadRes.ok || !directLeadJson?.success) {
@@ -601,7 +741,7 @@ export const buyerApi = {
             link: '/vendor/leads?tab=my_leads',
             reference_id: leadData?.id || proposal?.id || null,
             is_read: false,
-            created_at: new Date().toISOString(),
+            created_at: createdAt,
           };
 
           let { error: notifError } = await supabase
@@ -1108,6 +1248,73 @@ export const buyerApi = {
   },
 
   // --- DIRECTORY ---
+  searchProposalVendors: async (searchTerm) => {
+    const term = String(searchTerm || '').trim().replace(/[,%'()]/g, ' ');
+    if (term.length < 2) return [];
+
+    let query = supabase
+      .from('vendors')
+      .select('id, vendor_id, company_name, owner_name, email, phone, city, state, pincode, state_id, city_id, kyc_status, is_active, is_verified')
+      .eq('is_active', true)
+      .or(
+        `company_name.ilike.%${term}%,owner_name.ilike.%${term}%,vendor_id.ilike.%${term}%,email.ilike.%${term}%`
+      );
+
+    const { data, error } = await query
+      .order('is_verified', { ascending: false })
+      .order('company_name', { ascending: true })
+      .limit(10);
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  getProposalTargetVendor: async (vendorRef) => {
+    const normalized = String(vendorRef || '').trim();
+    if (!normalized) return null;
+
+    const selectFields =
+      'id, vendor_id, company_name, owner_name, email, phone, city, state, pincode, state_id, city_id, kyc_status, is_active, is_verified';
+
+    if (normalized.includes('@')) {
+      const { data, error } = await supabase
+        .from('vendors')
+        .select(selectFields)
+        .eq('email', normalized.toLowerCase())
+        .eq('is_active', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data || null;
+    }
+
+    const { data: byVendorId, error: byVendorIdError } = await supabase
+      .from('vendors')
+      .select(selectFields)
+      .eq('vendor_id', normalized)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (byVendorIdError) throw byVendorIdError;
+    if (byVendorId) return byVendorId;
+
+    if (!isUuid(normalized)) return null;
+
+    const { data: byId, error: byIdError } = await supabase
+      .from('vendors')
+      .select(selectFields)
+      .eq('id', normalized)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (byIdError) throw byIdError;
+    return byId || null;
+  },
+
   searchVendors: async (filters = {}) => {
     let query = supabase
       .from('vendors')

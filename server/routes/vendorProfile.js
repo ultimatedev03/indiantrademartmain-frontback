@@ -445,6 +445,67 @@ const omitKeys = (obj, keys = []) =>
     Object.entries(obj || {}).filter(([key, value]) => !keys.includes(key) && value !== undefined)
   );
 
+const getMissingColumnFromInsertError = (error) => {
+  const code = String(error?.code || '').toUpperCase();
+  if (code !== '42703') return '';
+  const raw = `${error?.message || ''} ${error?.details || ''}`;
+  const match = raw.match(/column\s+"([^"]+)"/i);
+  return String(match?.[1] || '').trim();
+};
+
+const makeInsertPayloadSignature = (payload = {}) =>
+  JSON.stringify(
+    Object.keys(payload || {})
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = payload[key];
+        return acc;
+      }, {})
+  );
+
+async function insertWithOptionalColumns({
+  table,
+  payload,
+  select = '*',
+  fallbackDropSets = [],
+}) {
+  const attempts = [];
+  const seen = new Set();
+
+  const enqueue = (candidate) => {
+    const cleaned = omitKeys(candidate, []);
+    if (!Object.keys(cleaned).length) return;
+    const signature = makeInsertPayloadSignature(cleaned);
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    attempts.push(cleaned);
+  };
+
+  enqueue(payload);
+  (fallbackDropSets || []).forEach((keys) => enqueue(omitKeys(payload, keys)));
+
+  let lastError = null;
+
+  while (attempts.length > 0) {
+    const candidate = attempts.shift();
+    const { data, error } = await supabase
+      .from(table)
+      .insert([candidate])
+      .select(select)
+      .maybeSingle();
+
+    if (!error) return data;
+
+    lastError = error;
+    const missingColumn = getMissingColumnFromInsertError(error);
+    if (missingColumn && Object.prototype.hasOwnProperty.call(candidate, missingColumn)) {
+      enqueue(omitKeys(candidate, [missingColumn]));
+    }
+  }
+
+  throw lastError || new Error(`Failed to insert ${table}`);
+}
+
 async function attachBuyerMetaToProposals(rows = [], options = {}) {
   const list = Array.isArray(rows) ? rows : [];
   const normalizeEmailValue = (value) => String(value || '').trim().toLowerCase();
@@ -2683,55 +2744,84 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       payload.product_interest || payload.product_name || title,
       200
     );
+    const category = nonEmptyText(payload.category || payload.category_name, 320);
+    const categorySlug = nonEmptyText(payload.category_slug, 160);
+    const microCategoryId = nonEmptyText(payload.micro_category_id, 80);
+    const subCategoryId = nonEmptyText(payload.sub_category_id, 80);
+    const headCategoryId = nonEmptyText(payload.head_category_id, 80);
+    const stateId = nonEmptyText(payload.state_id, 80);
+    const cityId = nonEmptyText(payload.city_id, 80);
+    const stateName = nonEmptyText(payload.state, 120);
+    const cityName = nonEmptyText(payload.city, 120);
+    const location =
+      nonEmptyText(payload.location, 200) ||
+      [cityName, stateName].filter(Boolean).join(', ') ||
+      null;
+    const pincode = nonEmptyText(payload.pincode, 10);
+    const vendorEmail = nonEmptyText(payload.vendor_email || vendor?.email, 320);
+    const createdAt = new Date().toISOString();
 
     const proposalBasePayload = {
       vendor_id: vendor?.id || null,
+      vendor_email: vendorEmail,
       buyer_id: buyerProfile?.id || null,
       buyer_email: null,
       title,
       product_name: productName,
+      category,
+      category_slug: categorySlug,
+      micro_category_id: microCategoryId,
+      sub_category_id: subCategoryId,
+      head_category_id: headCategoryId,
+      state_id: stateId,
+      city_id: cityId,
+      location,
+      pincode,
       quantity: nonEmptyText(payload.quantity, 80),
       budget: parseBudget(payload.budget),
       required_by_date: nonEmptyText(payload.required_by_date, 40),
       description: requirement,
       status: 'SENT',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: createdAt,
+      updated_at: createdAt,
     };
 
-    const proposalVariants = [
-      omitKeys(proposalBasePayload, []),
-      omitKeys(proposalBasePayload, ['required_by_date']),
-      omitKeys(proposalBasePayload, ['required_by_date', 'buyer_email']),
-    ];
-
     let createdProposal = null;
-    let proposalInsertError = null;
+    try {
+      const proposalRow = await insertWithOptionalColumns({
+        table: 'proposals',
+        payload: proposalBasePayload,
+        select: 'id, vendor_id, buyer_id, title, product_name, status, created_at',
+        fallbackDropSets: [
+          ['required_by_date'],
+          ['required_by_date', 'buyer_email'],
+          [
+            'required_by_date',
+            'buyer_email',
+            'vendor_email',
+            'category',
+            'category_slug',
+            'micro_category_id',
+            'sub_category_id',
+            'head_category_id',
+            'state_id',
+            'city_id',
+            'location',
+            'pincode',
+          ],
+        ],
+      });
 
-    for (const candidate of proposalVariants) {
-      const { data: proposalRow, error: proposalErr } = await supabase
-        .from('proposals')
-        .insert([candidate])
-        .select('id, vendor_id, buyer_id, title, product_name, status, created_at')
-        .maybeSingle();
-
-      if (!proposalErr) {
-        createdProposal = proposalRow || {
-          id: null,
-          vendor_id: candidate?.vendor_id || vendor?.id || null,
-          buyer_id: candidate?.buyer_id || null,
-          title: candidate?.title || null,
-          product_name: candidate?.product_name || null,
-          status: candidate?.status || 'SENT',
-          created_at: candidate?.created_at || null,
-        };
-        break;
-      }
-
-      proposalInsertError = proposalErr;
-    }
-
-    if (!createdProposal) {
+      createdProposal = proposalRow || {
+        id: null,
+        vendor_id: proposalBasePayload?.vendor_id || vendor?.id || null,
+        buyer_id: proposalBasePayload?.buyer_id || null,
+        title: proposalBasePayload?.title || null,
+        product_name: proposalBasePayload?.product_name || null,
+        status: proposalBasePayload?.status || 'SENT',
+        created_at: proposalBasePayload?.created_at || null,
+      };
+    } catch (proposalInsertError) {
       return res.status(500).json({
         success: false,
         error: proposalInsertError?.message || 'Failed to create proposal',
@@ -2740,6 +2830,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
 
     const baseLeadPayload = {
       vendor_id: vendor?.id || null,
+      vendor_email: vendorEmail,
       title,
       product_name: productName,
       product_interest: productInterest,
@@ -2753,56 +2844,102 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       message: requirement,
       quantity: nonEmptyText(payload.quantity, 80),
       budget: parseBudget(payload.budget),
-      category: nonEmptyText(payload.category, 120),
-      category_slug: nonEmptyText(payload.category_slug, 160),
-      location: nonEmptyText(payload.location, 200),
+      category,
+      category_slug: categorySlug,
+      micro_category_id: microCategoryId,
+      sub_category_id: subCategoryId,
+      head_category_id: headCategoryId,
+      location,
+      state: stateName,
+      city: cityName,
+      state_id: stateId,
+      city_id: cityId,
+      pincode,
+      source: vendor?.id ? 'DIRECT' : 'MARKETPLACE',
       status: 'AVAILABLE',
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
     };
-
-    const variants = [
-      omitKeys(baseLeadPayload, []),
-      omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest']),
-      omitKeys(baseLeadPayload, ['location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
-      omitKeys(baseLeadPayload, ['vendor_id', 'location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name']),
-      {
-        vendor_id: baseLeadPayload.vendor_id,
-        title: baseLeadPayload.title,
-        product_name: baseLeadPayload.product_name,
-        buyer_name: baseLeadPayload.buyer_name,
-        buyer_email: baseLeadPayload.buyer_email,
-        description: baseLeadPayload.description,
-        message: baseLeadPayload.message,
-        quantity: baseLeadPayload.quantity,
-        budget: baseLeadPayload.budget,
-        status: 'AVAILABLE',
-        created_at: baseLeadPayload.created_at,
-      },
-    ];
 
     let createdLead = null;
     let lastError = null;
 
-    for (const candidate of variants) {
-      const { data: leadRow, error: leadErr } = await supabase
-        .from('leads')
-        .insert([candidate])
-        .select('id, vendor_id, title, buyer_id, buyer_name, buyer_email, created_at')
-        .maybeSingle();
+    try {
+      const leadRow = await insertWithOptionalColumns({
+        table: 'leads',
+        payload: baseLeadPayload,
+        select: 'id, vendor_id, title, buyer_id, buyer_name, buyer_email, created_at',
+        fallbackDropSets: [
+          ['location', 'category_slug', 'product_interest'],
+          ['location', 'category_slug', 'product_interest', 'buyer_phone', 'company_name'],
+          [
+            'vendor_email',
+            'location',
+            'category_slug',
+            'product_interest',
+            'buyer_phone',
+            'company_name',
+            'micro_category_id',
+            'sub_category_id',
+            'head_category_id',
+            'state_id',
+            'city_id',
+            'pincode',
+            'source',
+            'city',
+            'state',
+          ],
+          [
+            'vendor_id',
+            'vendor_email',
+            'location',
+            'category_slug',
+            'product_interest',
+            'buyer_phone',
+            'company_name',
+            'micro_category_id',
+            'sub_category_id',
+            'head_category_id',
+            'state_id',
+            'city_id',
+            'pincode',
+            'source',
+            'city',
+            'state',
+          ],
+          [
+            'vendor_id',
+            'vendor_email',
+            'proposal_id',
+            'buyer_id',
+            'category',
+            'category_slug',
+            'location',
+            'micro_category_id',
+            'sub_category_id',
+            'head_category_id',
+            'state_id',
+            'city_id',
+            'pincode',
+            'source',
+            'product_interest',
+            'buyer_phone',
+            'company_name',
+            'city',
+            'state',
+          ],
+        ],
+      });
 
-      if (!leadErr) {
-        createdLead = leadRow || {
-          id: null,
-          vendor_id: candidate?.vendor_id || vendor?.id || null,
-          title: candidate?.title || null,
-          buyer_id: candidate?.buyer_id || null,
-          buyer_name: candidate?.buyer_name || null,
-          buyer_email: candidate?.buyer_email || null,
-          created_at: candidate?.created_at || null,
-        };
-        break;
-      }
-
+      createdLead = leadRow || {
+        id: null,
+        vendor_id: baseLeadPayload?.vendor_id || vendor?.id || null,
+        title: baseLeadPayload?.title || null,
+        buyer_id: baseLeadPayload?.buyer_id || null,
+        buyer_name: baseLeadPayload?.buyer_name || null,
+        buyer_email: baseLeadPayload?.buyer_email || null,
+        created_at: baseLeadPayload?.created_at || null,
+      };
+    } catch (leadErr) {
       lastError = leadErr;
     }
 
