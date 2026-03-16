@@ -54,13 +54,11 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   const allowedSet = new Set((allowedRoles || []).map((r) => normalizeRole(r)));
 
   const internalHome = (r) => {
-    const path = location.pathname || '';
-    const financeBase = path.startsWith('/admin') ? '/admin/finance-portal/dashboard' : '/finance-portal/dashboard';
     switch (r) {
       case 'ADMIN':
         return '/admin/dashboard';
       case 'FINANCE':
-        return financeBase;
+        return '/admin/finance-portal/dashboard';
       case 'HR':
         return '/hr/dashboard';
       case 'DATA_ENTRY':
@@ -92,8 +90,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
     if (p.startsWith('/vendor')) return '/vendor/login';
     if (p.startsWith('/admin') || p.startsWith('/employee') || p.startsWith('/hr')) return '/admin/login';
     if (p.startsWith('/finance-portal')) {
-      const isAdminSubdomain = host.startsWith('admin.') || host.startsWith('management.');
-      return isAdminSubdomain ? '/login' : '/admin/login';
+      return '/admin/login?portal=finance';
     }
 
     // 3) Infer from allowedRoles (subdomain-safe)
@@ -125,6 +122,10 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
 
       if (buyerVendorMismatch) {
         return <Navigate to={getDefaultRedirect()} state={{ from: location }} replace />;
+      }
+
+      if (wantsInternal) {
+        return <Navigate to="/unauthorized" replace />;
       }
 
       const fallback = internalHome(normalizedRole);

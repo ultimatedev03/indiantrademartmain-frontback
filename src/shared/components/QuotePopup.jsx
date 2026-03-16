@@ -7,9 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/shared/hooks/useAuth';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
+import { isValidIndianPhone, normalizeIndianPhone, submitPublicLead } from '@/shared/services/publicLeadApi';
+
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+const hasStartedForm = (data = {}) =>
+  Object.values(data || {}).some((value) => String(value || '').trim().length > 0);
 
 const QuotePopup = () => {
   const { user } = useAuth();
@@ -111,7 +115,7 @@ const QuotePopup = () => {
     closeTimerRef.current = setTimeout(() => {
       // Only auto-close if user hasn't started typing (checking if form data is empty)
       setFormData(currentData => {
-        if (!currentData.productName && !currentData.email) {
+        if (!hasStartedForm(currentData)) {
           setIsVisible(false);
         }
         return currentData;
@@ -128,7 +132,10 @@ const QuotePopup = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData(prev => ({
+      ...prev,
+      [name]: name === 'phone' ? normalizeIndianPhone(value) : value,
+    }));
   };
 
   const handleStateChange = (e) => {
@@ -141,11 +148,29 @@ const QuotePopup = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    if (!isValidEmail(formData.email)) {
+      toast({
+        title: "Invalid Email",
+        description: "Please enter a valid email address.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!isValidIndianPhone(formData.phone)) {
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid 10-digit mobile number.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
-       // Extract phone number (remove +91 prefix if any)
-       const phoneNum = formData.phone.replace(/^\+91\s*/, '');
+       const phoneNum = normalizeIndianPhone(formData.phone);
 
        const stateName = states.find((s) => s.id === formData.stateId)?.name || '';
        const cityName = cities.find((c) => c.id === formData.cityId)?.name || '';
@@ -153,22 +178,25 @@ const QuotePopup = () => {
          ? `${cityName}, ${stateName}`
          : (stateName || cityName || 'India');
        
-       const { error } = await supabase.from('leads').insert([{
-           product_name: formData.productName,
-           quantity: formData.quantity,
-           buyer_name: formData.email.split('@')[0], // Extract name from email prefix
-           buyer_email: formData.email,
-           buyer_phone: phoneNum,
-           message: formData.description,
-           location: locationText,
-           state_id: formData.stateId || null,
-           city_id: formData.cityId || null,
-           status: 'AVAILABLE',
-           category: 'General',
-           created_at: new Date().toISOString()
-       }]);
-
-       if (error) throw error;
+       await submitPublicLead({
+         title: `Quote request for ${formData.productName}`,
+         product_name: formData.productName,
+         product_interest: formData.productName,
+         quantity: formData.quantity,
+         buyer_name: formData.email.split('@')[0] || 'Buyer',
+         buyer_email: formData.email,
+         buyer_phone: phoneNum,
+         location: locationText,
+         state_id: formData.stateId || null,
+         city_id: formData.cityId || null,
+         category: 'General',
+         message: [
+           formData.description,
+           formData.unit ? `Unit: ${formData.unit}` : '',
+         ].filter(Boolean).join('\n'),
+         status: 'AVAILABLE',
+         created_at: new Date().toISOString(),
+       });
 
        toast({
          title: "Quote Requested",
@@ -304,6 +332,8 @@ const QuotePopup = () => {
                                     className="rounded-l-none"
                                     value={formData.phone}
                                     onChange={handleInputChange}
+                                    inputMode="numeric"
+                                    maxLength={10}
                                 />
                             </div>
                         </div>

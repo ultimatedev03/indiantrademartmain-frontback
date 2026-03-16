@@ -172,9 +172,10 @@ const CreateProposal = () => {
               <Label htmlFor="location">Delivery Location *</Label>
               <Input 
                 id="location" 
-                placeholder="City or Pincode" 
+                placeholder="City / Area / Pincode" 
                 value={formData.location}
                 onChange={(e) => handleChange('location', e.target.value)}
+                disableAutoSanitize
               />
             </div>
 

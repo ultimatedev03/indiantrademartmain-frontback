@@ -12,6 +12,7 @@ import {
   setPublicUserPassword,
   upsertPublicUser,
 } from "../lib/auth.js";
+import { validateStrongPassword } from "../lib/passwordPolicy.js";
 
 const router = express.Router();
 
@@ -1081,6 +1082,11 @@ router.post("/staff", async (req, res) => {
         .json({ success: false, error: "full_name, email and password are required" });
     }
 
+    const passwordValidation = validateStrongPassword(password);
+    if (!passwordValidation.ok) {
+      return res.status(400).json({ success: false, error: passwordValidation.error });
+    }
+
     const password_hash = await hashPassword(password);
     const publicUser = await upsertPublicUser({
       email,
@@ -1219,8 +1225,9 @@ router.put("/staff/:employeeId/password", async (req, res) => {
   try {
     const { employeeId } = req.params;
     const password = String(req.body?.password || "").trim();
-    if (!password || password.length < 6) {
-      return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
+    const passwordValidation = validateStrongPassword(password);
+    if (!passwordValidation.ok) {
+      return res.status(400).json({ success: false, error: passwordValidation.error });
     }
 
     const { data: emp, error: empErr } = await supabase

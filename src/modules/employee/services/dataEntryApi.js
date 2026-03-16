@@ -331,8 +331,19 @@ export const dataEntryApi = {
   },
 
   // --- VENDORS ---
-  getVendors: async () => {
-    const { data, error } = await supabase.from('vendors').select('*').order('created_at', { ascending: false });
+  getVendors: async (filters = {}) => {
+    let query = supabase
+      .from('vendors')
+      .select('*, products(count)')
+      .order('created_at', { ascending: false });
+
+    if (filters?.createdByMe) {
+      const emp = await getEmployeeContext();
+      const filter = buildVendorFilter({ userId: emp?.user_id, employeeId: emp?.id });
+      if (filter) query = query.or(filter);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   },
@@ -696,7 +707,7 @@ export const dataEntryApi = {
       const { data: vendors, error: vendorError } = await supabase
         .from('vendors')
         .select('*')
-        .eq('kyc_status', 'PENDING')
+        .in('kyc_status', KYC_PENDING_STATUSES)
         .order('created_at', { ascending: false });
 
       if (vendorError) throw vendorError;
@@ -1309,4 +1320,3 @@ export const dataEntryApi = {
     }
   }
 };
-

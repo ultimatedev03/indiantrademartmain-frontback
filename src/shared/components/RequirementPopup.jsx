@@ -8,8 +8,10 @@ import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelecto
 import { supabase } from '@/lib/customSupabaseClient';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, X } from 'lucide-react';
+import { isValidIndianPhone, normalizeIndianPhone, submitPublicLead } from '@/shared/services/publicLeadApi';
 
 const safe = (v) => (v == null ? '' : String(v).trim());
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const PostRequirementModal = ({ isOpen, onOpenChange }) => {
   const [loading, setLoading] = useState(false);
@@ -174,6 +176,18 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
       toast({ title: 'Name, Phone, Email required', variant: 'destructive' });
       return;
     }
+    if (!isValidEmail(formData.buyer_email)) {
+      toast({ title: 'Invalid email address', variant: 'destructive' });
+      return;
+    }
+    if (!isValidIndianPhone(formData.buyer_phone)) {
+      toast({
+        title: 'Invalid phone number',
+        description: 'Please enter a valid 10-digit mobile number.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (!safe(formData.requirement_description)) {
       toast({ title: 'Requirement description required', variant: 'destructive' });
       return;
@@ -187,7 +201,7 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
       // ✅ EXACT mapping to your leads table columns
       const payload = {
         buyer_name: safe(formData.buyer_name),
-        buyer_phone: safe(formData.buyer_phone),
+        buyer_phone: normalizeIndianPhone(formData.buyer_phone),
         buyer_email: safe(formData.buyer_email),
         company_name: safe(formData.company_name),
 
@@ -216,8 +230,7 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
         price: 0,
       };
 
-      const { error } = await supabase.from('leads').insert([payload]);
-      if (error) throw error;
+      await submitPublicLead(payload);
 
       toast({ title: 'Requirement Submitted!', description: 'We will contact you shortly.' });
       onOpenChange?.(false);
@@ -280,8 +293,10 @@ const PostRequirementModal = ({ isOpen, onOpenChange }) => {
               <Label>Phone *</Label>
               <Input
                 value={formData.buyer_phone}
-                onChange={(e) => setFormData((p) => ({ ...p, buyer_phone: e.target.value }))}
+                onChange={(e) => setFormData((p) => ({ ...p, buyer_phone: normalizeIndianPhone(e.target.value) }))}
                 placeholder="Mobile No."
+                inputMode="numeric"
+                maxLength={10}
                 required
               />
             </div>

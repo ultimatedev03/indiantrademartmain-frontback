@@ -1,15 +1,24 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { dataEntryApi } from '@/modules/employee/services/dataEntryApi';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/shared/components/Badge';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Loader2, FileText, CheckCircle, Clock } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Loader2, Search } from 'lucide-react';
+
+const formatSubmissionDate = (value) => {
+    if (!value) return '-';
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime()) || parsed.getTime() <= 0) return '-';
+    return parsed.toLocaleDateString('en-GB');
+};
 
 const DataEntryRecords = () => {
     const [stats, setStats] = useState(null);
     const [records, setRecords] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
 
     useEffect(() => {
         const load = async () => {
@@ -26,6 +35,26 @@ const DataEntryRecords = () => {
         };
         load();
     }, []);
+
+    const filteredRecords = useMemo(() => {
+        const query = String(searchTerm || '').trim().toLowerCase();
+        if (!query) return records;
+
+        return (records || []).filter((record) => {
+            const haystack = [
+                record?.company_name,
+                record?.vendor_id,
+                record?.owner_name,
+                record?.email,
+                record?.kyc_status,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+
+            return haystack.includes(query);
+        });
+    }, [records, searchTerm]);
 
     if (loading) return <div className="p-8"><Loader2 className="animate-spin" /></div>;
 
@@ -53,7 +82,18 @@ const DataEntryRecords = () => {
             </div>
 
             <Card>
-                <CardHeader><CardTitle>Submission History</CardTitle></CardHeader>
+                <CardHeader className="space-y-4">
+                    <CardTitle>Submission History</CardTitle>
+                    <div className="relative max-w-md">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                        <Input
+                            value={searchTerm}
+                            onChange={(event) => setSearchTerm(event.target.value)}
+                            placeholder="Search by vendor, owner, email, vendor ID, or status..."
+                            className="pl-9"
+                        />
+                    </div>
+                </CardHeader>
                 <CardContent>
                     <Table>
                         <TableHeader>
@@ -65,12 +105,18 @@ const DataEntryRecords = () => {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {records.map((r) => {
+                            {filteredRecords.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={4} className="py-8 text-center text-gray-500">
+                                        No submission history found.
+                                    </TableCell>
+                                </TableRow>
+                            ) : filteredRecords.map((r) => {
                                 const normalizedStatus = String(r.kyc_status || 'PENDING').toUpperCase();
                                 const isApproved = normalizedStatus === 'VERIFIED' || normalizedStatus === 'APPROVED';
                                 return (
                                     <TableRow key={r.id}>
-                                        <TableCell>{new Date(r.created_at).toLocaleDateString()}</TableCell>
+                                        <TableCell>{formatSubmissionDate(r.created_at)}</TableCell>
                                         <TableCell className="font-medium">{r.company_name}</TableCell>
                                         <TableCell>{r.products?.[0]?.count || 0}</TableCell>
                                         <TableCell>

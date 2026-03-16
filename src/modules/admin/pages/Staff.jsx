@@ -30,6 +30,7 @@ import { toast } from "@/components/ui/use-toast";
 import { Plus, Search, Trash2, Loader2, KeyRound } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
+import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from "@/lib/passwordPolicy";
 
 // ✅ Local vs Netlify API base (same pattern as Vendors.jsx)
 const isLocalHost = () => {
@@ -152,6 +153,16 @@ const Staff = () => {
       return;
     }
 
+    const passwordValidation = validateStrongPassword(formData.password);
+    if (!passwordValidation.ok) {
+      toast({
+        title: "Invalid password",
+        description: passwordValidation.error,
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff`, {
@@ -220,10 +231,11 @@ const Staff = () => {
 
   const handleChangePassword = async () => {
     if (!pwEmployee?.id) return;
-    if (!pwForm.password || pwForm.password.length < 6) {
+    const passwordValidation = validateStrongPassword(pwForm.password);
+    if (!passwordValidation.ok) {
       toast({
         title: "Invalid password",
-        description: "Password must be at least 6 characters",
+        description: passwordValidation.error,
         variant: "destructive",
       });
       return;
@@ -320,7 +332,7 @@ const Staff = () => {
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   placeholder="********"
                 />
-                <p className="text-xs text-muted-foreground">Min 6 characters</p>
+                <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_MESSAGE}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -483,7 +495,7 @@ const Staff = () => {
                 onChange={(e) => setPwForm((p) => ({ ...p, password: e.target.value }))}
                 placeholder="********"
               />
-              <p className="text-xs text-muted-foreground">Min 6 characters</p>
+              <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_MESSAGE}</p>
             </div>
 
             <div className="space-y-2">

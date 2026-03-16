@@ -2,6 +2,10 @@ import { submitContactForm } from '@/modules/directory/services/contactApi';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { Clock, Eye, Heart, Loader, Mail, MapPin, Phone, Search, ShoppingCart, Star } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+
+const buildMailtoLink = (email, subject) =>
+  `mailto:${email}?subject=${encodeURIComponent(subject || '')}`;
 
 // ==================== JOIN SALES PAGE ====================
 export const JoinSales = () => (
@@ -16,7 +20,9 @@ export const JoinSales = () => (
       <div className="max-w-2xl bg-white rounded-lg shadow-sm p-8">
         <h2 className="text-2xl font-bold mb-4">Sales Partnership Opportunities</h2>
         <p className="text-gray-600 mb-6">We are looking for motivated professionals to join our sales team.</p>
-        <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">Apply Now</button>
+        <Link to="/career" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+          Apply Now
+        </Link>
       </div>
     </div>
   </div>
@@ -37,7 +43,9 @@ export const SuccessStories = () => (
           <div key={i} className="bg-white rounded-lg shadow-sm p-6 hover:shadow-lg transition">
             <h3 className="text-xl font-bold mb-2">Success Story {i}</h3>
             <p className="text-gray-600 mb-4">Learn how Company {i} achieved 300% growth using our platform...</p>
-            <button className="text-blue-600 hover:text-blue-800 font-semibold">Read Full Story →</button>
+            <Link to="/contact" className="text-blue-600 hover:text-blue-800 font-semibold">
+              Read Full Story →
+            </Link>
           </div>
         ))}
       </div>
@@ -137,13 +145,20 @@ export const CustomerCare = () => (
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-xl font-bold text-gray-900 mb-3">Submit a Ticket</h3>
             <p className="text-gray-600 mb-4">Get in touch with our support team for detailed assistance.</p>
-            <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Submit Ticket</button>
+            <Link to="/contact" className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+              Submit Ticket
+            </Link>
           </div>
           
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-xl font-bold text-gray-900 mb-3">Live Chat</h3>
             <p className="text-gray-600 mb-4">Chat with our support representatives in real-time.</p>
-            <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Start Chat</button>
+            <a
+              href={buildMailtoLink('support@indiantrademart.com', 'Customer Care Support Request')}
+              className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+            >
+              Start Chat
+            </a>
           </div>
         </div>
       </section>
@@ -152,7 +167,9 @@ export const CustomerCare = () => (
         <h2 className="text-3xl font-bold text-gray-900 mb-6">Give Us Feedback</h2>
         <div className="bg-white rounded-lg shadow-sm p-8">
           <p className="text-gray-600 mb-6">We value your feedback. Let us know how we can improve our services.</p>
-          <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">Share Feedback</button>
+          <Link to="/contact" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+            Share Feedback
+          </Link>
         </div>
       </section>
     </main>
@@ -172,7 +189,9 @@ export const Complaints = () => (
       <div className="bg-white rounded-lg shadow-sm p-8 max-w-2xl mx-auto">
         <h2 className="text-2xl font-bold mb-4">File a Complaint</h2>
         <p className="text-gray-600 mb-6">We take complaints seriously. Let us know how we can improve.</p>
-        <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">File Complaint</button>
+        <Link to="/contact" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+          File Complaint
+        </Link>
       </div>
     </div>
   </div>
@@ -193,7 +212,9 @@ export const Jobs = () => (
           <div key={i} className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-bold mb-2">{job}</h3>
             <p className="text-gray-600 mb-4">Location: India</p>
-            <button className="text-blue-600 hover:text-blue-800 font-semibold">Apply Now →</button>
+            <Link to="/career" className="text-blue-600 hover:text-blue-800 font-semibold">
+              Apply Now →
+            </Link>
           </div>
         ))}
       </div>
@@ -503,7 +524,9 @@ export const BuyLeads = () => (
     <div className="container mx-auto px-4 py-16">
       <div className="bg-white rounded-lg shadow-sm p-8">
         <p className="text-gray-600 mb-6">View real-time buy leads from verified buyers across India.</p>
-        <button className="bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">Browse Buy Leads</button>
+        <Link to="/vendor/register" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+          Browse Buy Leads
+        </Link>
       </div>
     </div>
   </div>
@@ -524,7 +547,9 @@ export const LearningCentre = () => (
           <div key={i} className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-bold mb-2">{course}</h3>
             <p className="text-gray-600 mb-4">Learn from industry experts</p>
-            <button className="text-blue-600 hover:text-blue-800 font-semibold">Enroll Now →</button>
+            <Link to="/contact" className="text-blue-600 hover:text-blue-800 font-semibold">
+              Enroll Now →
+            </Link>
           </div>
         ))}
       </div>
@@ -602,6 +627,12 @@ export const ProductsPage = () => {
     return parts.length ? parts[parts.length - 1] : path;
   };
 
+  const getProductDetailPath = (product) =>
+    product?.slug ? `/p/${product.slug}` : product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';
+
+  const getSupplierPath = (product) =>
+    product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';
+
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -617,12 +648,14 @@ export const ProductsPage = () => {
 
           return {
             id: p?.id,
+            slug: p?.slug || '',
             name: p?.name || 'Unnamed Product',
             category: pickCategory(p),
             description: p?.description || '',
             price: formatPrice(p?.price, p?.price_unit),
             minOrder: formatMinOrder(p?.min_order_qty ?? p?.moq, p?.qty_unit),
             supplier: vendor?.company_name || '',
+            vendorId: vendor?.id || '',
             location: location || 'India',
             rating: Number.isFinite(rating) ? rating : 0,
             reviews: Number.isFinite(views) ? views : 0,
@@ -637,8 +670,21 @@ export const ProductsPage = () => {
           };
         });
 
+        const uniqueList = Array.from(
+          new Map(
+            list.map((item) => {
+              const key = String(
+                item.slug ||
+                item.id ||
+                `${item.name}|${item.supplier}|${item.location}`
+              ).toLowerCase();
+              return [key, item];
+            })
+          ).values()
+        );
+
         if (!alive) return;
-        setProducts(list);
+        setProducts(uniqueList);
       } catch (error) {
         console.error('Failed to load products:', error);
         if (!alive) return;
@@ -792,12 +838,22 @@ export const ProductsPage = () => {
                       )}
                     </div>
                     <div className="absolute top-2 right-2 flex gap-1">
-                      <button className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50">
-                        <Heart size={16} className="text-gray-600" />
-                      </button>
-                      <button className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50">
+                      <Link
+                        to={getSupplierPath(product)}
+                        className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
+                        aria-label="Contact supplier"
+                        title="Contact supplier"
+                      >
+                        <Mail size={16} className="text-gray-600" />
+                      </Link>
+                      <Link
+                        to={getProductDetailPath(product)}
+                        className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
+                        aria-label="View product"
+                        title="View product"
+                      >
                         <Eye size={16} className="text-gray-600" />
-                      </button>
+                      </Link>
                     </div>
                     {!product.inStock && (
                       <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs">
@@ -863,19 +919,22 @@ export const ProductsPage = () => {
                     )}
 
                     <div className="flex gap-2">
-                      <button 
-                        className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                          product.inStock 
-                            ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                      <Link
+                        to={getProductDetailPath(product)}
+                        className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium text-center transition-colors ${
+                          product.inStock
+                            ? 'bg-blue-600 text-white hover:bg-blue-700'
+                            : 'bg-gray-300 text-gray-500'
                         }`}
-                        disabled={!product.inStock}
                       >
-                        {product.inStock ? 'Add to Cart' : 'Out of Stock'}
-                      </button>
-                      <button className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">
-                        Quote
-                      </button>
+                        {product.inStock ? 'View Details' : 'View Product'}
+                      </Link>
+                      <Link
+                        to={getSupplierPath(product)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                      >
+                        Get Quote
+                      </Link>
                     </div>
                   </div>
                 </div>

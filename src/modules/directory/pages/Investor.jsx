@@ -1,4 +1,5 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { TrendingUp, FileText, BarChart3 } from 'lucide-react';
 
 const Investor = () => {
@@ -22,7 +23,12 @@ const Investor = () => {
               <h2 className="text-2xl font-bold">Financial Reports</h2>
             </div>
             <p className="text-gray-600 mb-4">Access our latest financial statements and reports</p>
-            <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Download Reports</button>
+            <a
+              href="mailto:investors@indiantrademart.com?subject=Investor%20Reports%20Request"
+              className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+            >
+              Download Reports
+            </a>
           </div>
 
           <div className="bg-white rounded-lg shadow-sm p-8">
@@ -31,7 +37,9 @@ const Investor = () => {
               <h2 className="text-2xl font-bold">Governance</h2>
             </div>
             <p className="text-gray-600 mb-4">Corporate governance policies and documents</p>
-            <button className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Learn More</button>
+            <Link to="/about-us" className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+              Learn More
+            </Link>
           </div>
         </div>
 

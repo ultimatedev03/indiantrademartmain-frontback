@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
 import { Plus } from 'lucide-react';
 import { salesApi } from '@/modules/employee/services/salesApi';
+
+const LOCAL_RULES_STORAGE_KEY = 'itm_sales_pricing_rule_drafts';
 
 const getRuleStatus = (rule) => {
   if (rule?.status) return String(rule.status).toUpperCase();
@@ -32,15 +36,35 @@ const getRuleValue = (rule) => {
   return rule?.value ?? rule?.price ?? '-';
 };
 
+const readLocalRules = () => {
+  try {
+    const raw = window.localStorage.getItem(LOCAL_RULES_STORAGE_KEY);
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalRules = (rules = []) => {
+  try {
+    window.localStorage.setItem(LOCAL_RULES_STORAGE_KEY, JSON.stringify(rules || []));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 const PricingRules = () => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newRule, setNewRule] = useState({ name: '', type: 'Manual', value: '' });
 
   useEffect(() => {
     const fetchRules = async () => {
       try {
         const data = await salesApi.getPricingRules();
-        setRules(data || []);
+        setRules([...(readLocalRules() || []), ...(data || [])]);
       } catch (error) {
         console.error('Failed to fetch pricing rules:', error);
         toast({
@@ -56,15 +80,66 @@ const PricingRules = () => {
   }, []);
 
   const handleSubmitForApproval = (id) => {
-    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, status: 'PENDING_APPROVAL' } : r)));
+    setRules((prev) => {
+      const next = prev.map((r) => (r.id === id ? { ...r, status: 'PENDING_APPROVAL' } : r));
+      writeLocalRules(next.filter((rule) => String(rule?.id || '').startsWith('draft-')));
+      return next;
+    });
     toast({ title: 'Submitted', description: 'Rule sent for manager approval.' });
+  };
+
+  const handleCreateRule = () => {
+    const name = String(newRule.name || '').trim();
+    const value = Number(newRule.value);
+
+    if (!name) {
+      toast({
+        title: 'Rule name required',
+        description: 'Please enter a rule name.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!Number.isFinite(value) || value < 0) {
+      toast({
+        title: 'Invalid rule value',
+        description: 'Please enter a valid non-negative value.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const draftRule = {
+      id: `draft-${Date.now()}`,
+      rule_name: name,
+      type: newRule.type || 'Manual',
+      value,
+      status: 'DRAFT',
+      is_active: false,
+      created_at: new Date().toISOString(),
+    };
+
+    setRules((prev) => {
+      const next = [draftRule, ...prev];
+      writeLocalRules(next.filter((rule) => String(rule?.id || '').startsWith('draft-')));
+      return next;
+    });
+    setNewRule({ name: '', type: 'Manual', value: '' });
+    setCreateOpen(false);
+    toast({
+      title: 'Draft rule created',
+      description: 'New pricing rule draft added to the list.',
+    });
   };
 
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-neutral-800">Pricing Rules Engine</h2>
-        <Button className="bg-[#003D82]"><Plus className="h-4 w-4 mr-2" /> New Rule</Button>
+        <Button className="bg-[#003D82]" onClick={() => setCreateOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" /> New Rule
+        </Button>
       </div>
 
       <div className="bg-white rounded-lg border border-neutral-200 shadow-sm overflow-hidden">
@@ -122,6 +197,53 @@ const PricingRules = () => {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Create Pricing Rule</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-neutral-700">Rule Name</label>
+              <Input
+                value={newRule.name}
+                onChange={(event) => setNewRule((prev) => ({ ...prev, name: event.target.value }))}
+                placeholder="e.g. North Region Premium"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-neutral-700">Rule Type</label>
+              <Input
+                value={newRule.type}
+                onChange={(event) => setNewRule((prev) => ({ ...prev, type: event.target.value }))}
+                placeholder="e.g. Manual / Discount / Markup"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-neutral-700">Value</label>
+              <Input
+                type="number"
+                value={newRule.value}
+                onChange={(event) => setNewRule((prev) => ({ ...prev, value: event.target.value }))}
+                placeholder="0"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="bg-[#003D82]" onClick={handleCreateRule}>
+              Create Draft
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

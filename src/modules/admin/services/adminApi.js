@@ -17,7 +17,7 @@ export const adminApi = {
   getStats: async () => {
     const [users, vendors, orders] = await Promise.all([
       supabase.from('users').select('*', { count: 'exact', head: true }),
-      supabase.from('vendors').select('*', { count: 'exact', head: true }),
+      supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('is_active', true),
       supabase.from('lead_purchases').select('*', { count: 'exact', head: true })
     ]);
 

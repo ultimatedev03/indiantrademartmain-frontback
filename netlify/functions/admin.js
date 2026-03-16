@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
+import { validateStrongPassword } from "../../server/lib/passwordPolicy.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -432,6 +433,8 @@ export async function handler(event) {
         const department = String(body?.department || "").trim() || roleToDepartment(role) || "Operations";
 
         if (!full_name || !email || !password) return bad("full_name, email and password are required");
+        const passwordValidation = validateStrongPassword(password);
+        if (!passwordValidation.ok) return bad(passwordValidation.error);
 
         const provisionalEmployee = {
           full_name,
@@ -482,20 +485,41 @@ export async function handler(event) {
 
         const userId = authUser.id;
 
-        // best-effort upsert into public.users
-        await supabase.from("users").upsert(
-          [
-            {
-              id: userId,
-              email,
+        const { data: existingPublicUser, error: existingPublicUserError } = await supabase
+          .from("users")
+          .select("*")
+          .ilike("email", email)
+          .limit(1)
+          .maybeSingle();
+        if (existingPublicUserError) return fail("Failed to sync public user", existingPublicUserError.message);
+
+        if (existingPublicUser?.id) {
+          const { error: updatePublicUserError } = await supabase
+            .from("users")
+            .update({
               full_name,
               role,
               phone: phone || null,
-              created_at: new Date().toISOString(),
-            },
-          ],
-          { onConflict: "id" }
-        );
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", existingPublicUser.id);
+          if (updatePublicUserError) return fail("Failed to sync public user", updatePublicUserError.message);
+        } else {
+          const { error: insertPublicUserError } = await supabase
+            .from("users")
+            .insert([
+              {
+                id: userId,
+                email,
+                full_name,
+                role,
+                phone: phone || null,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+            ]);
+          if (insertPublicUserError) return fail("Failed to sync public user", insertPublicUserError.message);
+        }
 
         const empPayload = {
           user_id: userId,
@@ -588,7 +612,8 @@ export async function handler(event) {
         const password = String(body?.password || "").trim();
 
         if (!employeeId) return bad("employeeId missing");
-        if (!password || password.length < 6) return bad("Password must be at least 6 characters");
+        const passwordValidation = validateStrongPassword(password);
+        if (!passwordValidation.ok) return bad(passwordValidation.error);
 
         const { data: emp, error: empErr } = await supabase
           .from("employees")
@@ -634,7 +659,8 @@ export async function handler(event) {
         const password = String(body?.password || "").trim();
 
         if (!employeeId) return bad("employeeId missing");
-        if (!password || password.length < 6) return bad("Password must be at least 6 characters");
+        const passwordValidation = validateStrongPassword(password);
+        if (!passwordValidation.ok) return bad(passwordValidation.error);
 
         const { data: emp, error: empErr } = await supabase
           .from("employees")

@@ -4,8 +4,10 @@ import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { supabase } from '@/lib/customSupabaseClient';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
+import { isValidIndianPhone, normalizeIndianPhone, submitPublicLead } from '@/shared/services/publicLeadApi';
 
 const safe = (value) => (value == null ? '' : String(value).trim());
+const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const PostRequirementModal = ({ isOpen, onClose }) => {
   // Debug log
@@ -126,7 +128,7 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: name === 'phone' ? normalizeIndianPhone(value) : value
     }));
   };
 
@@ -242,10 +244,26 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
       });
       return;
     }
+    if (!isValidEmail(formData.email)) {
+      toast({
+        title: "Invalid Email",
+        description: "Please enter a valid email address",
+        variant: "destructive"
+      });
+      return;
+    }
     if (!safe(formData.phone)) {
       toast({
         title: "Missing Information",
         description: "Please enter phone number",
+        variant: "destructive"
+      });
+      return;
+    }
+    if (!isValidIndianPhone(formData.phone)) {
+      toast({
+        title: "Invalid Phone Number",
+        description: "Please enter a valid 10-digit mobile number",
         variant: "destructive"
       });
       return;
@@ -260,12 +278,12 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
         category: categoryValue,
         description: safe(formData.description),
         quantity: safe(formData.quantity),
-        budget: parseFloat(formData.budget) || 0,
+        budget: Number(String(formData.budget || '').replace(/,/g, '')) || 0,
         location: derivedLocation || null,
         company_name: safe(formData.companyName),
         buyer_name: safe(formData.buyerName),
         buyer_email: safe(formData.email),
-        buyer_phone: safe(formData.phone),
+        buyer_phone: normalizeIndianPhone(formData.phone),
         product_interest: safe(formData.category_text) || categoryValue || safe(formData.title),
         message: safe(formData.description),
         category_slug: safe(formData.category_slug) || null,
@@ -276,14 +294,11 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
         city_id: safe(formData.city_id) || null,
         source: 'marketplace',
         status: 'AVAILABLE',
+        price: 0,
         created_at: new Date().toISOString()
       };
 
-      const { error } = await supabase
-        .from('leads')
-        .insert([payload]);
-
-      if (error) throw error;
+      await submitPublicLead(payload);
       
       toast({
         title: "Requirement Posted!",
@@ -566,6 +581,8 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
                   name="phone"
                   value={formData.phone}
                   onChange={handleChange}
+                  inputMode="numeric"
+                  maxLength={10}
                   placeholder="+91 XXXXX XXXXX"
                   className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />

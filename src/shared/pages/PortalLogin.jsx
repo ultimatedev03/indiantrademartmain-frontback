@@ -145,11 +145,11 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
             </div>
 
             {error && (
-              <Alert variant="destructive" className="bg-red-50 border-red-100 text-red-800">
-                <AlertCircle className="h-4 w-4" />
-                <div>
+              <Alert variant="destructive" className="bg-red-50 border-red-100 text-red-800 items-start">
+                <AlertCircle className="h-4 w-4 mt-0.5" />
+                <div className="min-w-0">
                   <AlertTitle className="mb-1">Authentication Failed</AlertTitle>
-                  <AlertDescription>{error}</AlertDescription>
+                  <AlertDescription className="leading-relaxed">{error}</AlertDescription>
                 </div>
               </Alert>
             )}

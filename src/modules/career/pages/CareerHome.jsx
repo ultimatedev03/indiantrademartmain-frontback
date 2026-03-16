@@ -1,10 +1,34 @@
 
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import { Button } from '@/components/ui/button';
 import { Search, MapPin, Briefcase, Zap, Users } from 'lucide-react';
 
 const CareerHome = () => {
+  const [jobSearch, setJobSearch] = useState('');
+  const openings = [
+    { title: "Senior Frontend Engineer", dept: "Engineering", loc: "Remote / Bangalore" },
+    { title: "Product Manager - Supply Chain", dept: "Product", loc: "Mumbai" },
+    { title: "Enterprise Sales Manager", dept: "Sales", loc: "Delhi NCR" },
+    { title: "Customer Success Executive", dept: "Support", loc: "Bangalore" },
+  ];
+
+  const filteredOpenings = useMemo(() => {
+    const query = String(jobSearch || '').trim().toLowerCase();
+    if (!query) return openings;
+    return openings.filter((job) =>
+      [job.title, job.dept, job.loc].join(' ').toLowerCase().includes(query)
+    );
+  }, [jobSearch]);
+
+  const scrollToOpenings = () => {
+    document.getElementById('career-openings')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const applyForRole = (jobTitle) => {
+    window.location.href = `mailto:hr@indiantrademart.com?subject=${encodeURIComponent(`Application for ${jobTitle}`)}`;
+  };
+
   return (
     <>
       <Helmet>
@@ -30,10 +54,13 @@ const CareerHome = () => {
                   <input 
                     type="text" 
                     placeholder="Search roles (e.g. Engineer)" 
+                    value={jobSearch}
+                    onChange={(event) => setJobSearch(event.target.value)}
+                    onKeyDown={(event) => event.key === 'Enter' && scrollToOpenings()}
                     className="w-full h-12 pl-10 pr-4 rounded-lg bg-white/10 border border-white/20 text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500"
                   />
                </div>
-               <Button className="h-12 bg-rose-600 hover:bg-rose-700 font-bold px-8">
+               <Button className="h-12 bg-rose-600 hover:bg-rose-700 font-bold px-8" onClick={scrollToOpenings}>
                   Find Jobs
                </Button>
             </div>
@@ -65,17 +92,12 @@ const CareerHome = () => {
       </section>
 
       {/* Open Roles */}
-      <section className="py-20 bg-slate-50">
+      <section id="career-openings" className="py-20 bg-slate-50">
          <div className="container mx-auto px-4">
             <h2 className="text-3xl font-bold text-slate-900 mb-10 text-center">Current Openings</h2>
             
             <div className="grid gap-4 max-w-3xl mx-auto">
-               {[
-                 { title: "Senior Frontend Engineer", dept: "Engineering", loc: "Remote / Bangalore" },
-                 { title: "Product Manager - Supply Chain", dept: "Product", loc: "Mumbai" },
-                 { title: "Enterprise Sales Manager", dept: "Sales", loc: "Delhi NCR" },
-                 { title: "Customer Success Executive", dept: "Support", loc: "Bangalore" },
-               ].map((job, idx) => (
+               {filteredOpenings.map((job, idx) => (
                   <div key={idx} className="bg-white p-6 rounded-xl border border-slate-200 hover:border-rose-300 hover:shadow-md transition-all flex items-center justify-between group cursor-pointer">
                      <div>
                         <h3 className="font-bold text-lg text-slate-900 group-hover:text-rose-600 transition-colors">{job.title}</h3>
@@ -84,13 +106,34 @@ const CareerHome = () => {
                            <span className="flex items-center gap-1"><MapPin className="w-4 h-4" /> {job.loc}</span>
                         </div>
                      </div>
-                     <Button variant="outline" className="border-rose-200 text-rose-600 hover:bg-rose-50">Apply</Button>
+                     <Button
+                       variant="outline"
+                       className="border-rose-200 text-rose-600 hover:bg-rose-50"
+                       onClick={() => applyForRole(job.title)}
+                     >
+                       Apply
+                     </Button>
                   </div>
                ))}
             </div>
+
+            {filteredOpenings.length === 0 ? (
+               <p className="mt-6 text-center text-slate-500">
+                  No roles matched "{jobSearch}". Try a broader keyword.
+               </p>
+            ) : null}
             
             <div className="text-center mt-10">
-               <Button variant="link" className="text-rose-600 font-semibold">View All 45 Openings &rarr;</Button>
+               <Button
+                 variant="link"
+                 className="text-rose-600 font-semibold"
+                 onClick={() => {
+                   setJobSearch('');
+                   scrollToOpenings();
+                 }}
+               >
+                 View All Openings &rarr;
+               </Button>
             </div>
          </div>
       </section>

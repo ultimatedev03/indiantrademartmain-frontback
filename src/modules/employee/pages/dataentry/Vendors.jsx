@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -55,8 +55,6 @@ const Vendors = () => {
     const [vendors, setVendors] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
-    const [filteredVendors, setFilteredVendors] = useState([]);
-    const [vendorIdSearch, setVendorIdSearch] = useState('');
 
     useEffect(() => {
         loadVendors();
@@ -73,7 +71,6 @@ const Vendors = () => {
 
             if (error) throw error;
             setVendors(data || []);
-            setFilteredVendors(data || []);
         } catch (error) {
             console.error(error);
             toast({ title: "Error", description: "Failed to load vendors", variant: "destructive" });
@@ -82,36 +79,33 @@ const Vendors = () => {
         }
     };
 
-    const handleSearch = (query) => {
-        setSearchQuery(query);
-        if (!query.trim()) {
-            setFilteredVendors(vendors);
+    const filteredVendors = useMemo(() => {
+        if (!searchQuery.trim()) return vendors;
+        return vendors.filter((vendor) => matchesSearch(vendor, searchQuery));
+    }, [searchQuery, vendors]);
+
+    const handleSearchKeyDown = (event) => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+
+        if (filteredVendors.length === 1) {
+            navigate(`/employee/dataentry/vendors/${filteredVendors[0].id}/products`);
             return;
         }
 
-        const filtered = vendors.filter((v) => matchesSearch(v, query));
-        setFilteredVendors(filtered);
-    };
-
-    const handleVendorIdSearch = async () => {
-        if (!vendorIdSearch.trim()) {
-            toast({ title: "Error", description: "Please enter vendor ID, company, owner, or email", variant: "destructive" });
-            return;
-        }
-
-        const matches = vendors.filter((v) => matchesSearch(v, vendorIdSearch));
-        if (matches.length === 1) {
-            navigate(`/employee/dataentry/vendors/${matches[0].id}/products`);
-        } else if (matches.length > 1) {
-            setSearchQuery(vendorIdSearch);
-            setFilteredVendors(matches);
+        if (filteredVendors.length === 0) {
             toast({
-                title: "Filtered",
-                description: `${matches.length} vendors matched. Refine search to open one vendor directly.`,
+                title: "Not Found",
+                description: `No vendors matched "${searchQuery}".`,
+                variant: "destructive",
             });
-        } else {
-            toast({ title: "Not Found", description: `"${vendorIdSearch}" not found`, variant: "destructive" });
+            return;
         }
+
+        toast({
+            title: "Search Refined",
+            description: `${filteredVendors.length} vendors matched. Select one from the list below.`,
+        });
     };
 
     return (
@@ -120,26 +114,6 @@ const Vendors = () => {
                 <h1 className="text-2xl font-bold mb-2">Vendor Management</h1>
                 <p className="text-gray-600">View and manage all vendors</p>
             </div>
-
-            {/* Vendor ID Quick Search */}
-            <Card className="bg-blue-50 border-blue-200">
-                <CardHeader><CardTitle className="text-lg">Quick Vendor Lookup</CardTitle></CardHeader>
-                <CardContent>
-                    <div className="flex gap-2">
-                        <Input 
-                            placeholder="Enter Vendor ID, company, owner, or email"
-                            value={vendorIdSearch}
-                            onChange={e => setVendorIdSearch(e.target.value)}
-                            onKeyDown={e => e.key === 'Enter' && handleVendorIdSearch()}
-                        />
-                        <Button onClick={handleVendorIdSearch} className="gap-1">
-                            <Search className="w-4 h-4" />
-                            Search
-                        </Button>
-                    </div>
-                    <p className="text-xs text-gray-600 mt-2">Type vendor ID, company, owner, or email and press Enter/click Search to open vendor products</p>
-                </CardContent>
-            </Card>
 
             {/* Vendor List */}
             <Card>
@@ -151,9 +125,13 @@ const Vendors = () => {
                         <Input 
                             placeholder="Search by company name, owner, vendor ID, or email..."
                             value={searchQuery}
-                            onChange={e => handleSearch(e.target.value)}
+                            onChange={e => setSearchQuery(e.target.value)}
+                            onKeyDown={handleSearchKeyDown}
                             className="max-w-md"
                         />
+                        <p className="mt-2 text-xs text-gray-500">
+                            Press Enter to open the vendor directly when there is a single match.
+                        </p>
                     </div>
                 </CardHeader>
                 <CardContent>

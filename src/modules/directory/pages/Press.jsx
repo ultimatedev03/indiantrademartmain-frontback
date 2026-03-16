@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Newspaper, Calendar, User } from 'lucide-react';
 
 const Press = () => {
+  const [expandedId, setExpandedId] = useState(null);
   const pressReleases = [
     {
       id: 1,
@@ -64,7 +66,15 @@ const Press = () => {
                   </div>
                   
                   <p className="text-gray-700 mb-4">{release.excerpt}</p>
-                  <button className="text-blue-600 hover:text-blue-800 font-semibold">Read More →</button>
+                  {expandedId === release.id ? (
+                    <p className="mb-4 text-sm text-gray-600">{release.content}</p>
+                  ) : null}
+                  <button
+                    className="text-blue-600 hover:text-blue-800 font-semibold"
+                    onClick={() => setExpandedId((current) => (current === release.id ? null : release.id))}
+                  >
+                    {expandedId === release.id ? 'Show Less ↑' : 'Read More →'}
+                  </button>
                 </article>
               ))}
             </div>
@@ -85,6 +95,17 @@ const Press = () => {
                 </div>
                 <div className="border-t pt-4 mt-4">
                   <p className="text-gray-600 text-xs">For media inquiries, please contact our press office with relevant details about your story.</p>
+                </div>
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <a
+                    href="mailto:press@indiantrademart.com?subject=Press%20Inquiry"
+                    className="text-sm font-semibold text-blue-600 hover:text-blue-800"
+                  >
+                    Email Press Team
+                  </a>
+                  <Link to="/contact" className="text-sm font-semibold text-blue-600 hover:text-blue-800">
+                    Contact Form
+                  </Link>
                 </div>
               </div>
             </div>

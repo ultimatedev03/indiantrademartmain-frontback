@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -33,6 +33,7 @@ const SidebarItem = ({ icon: Icon, label, path, active, collapsed }) => (
 );
 
 const PortalLayout = ({ role }) => {
+  const VENDOR_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
@@ -47,6 +48,7 @@ const PortalLayout = ({ role }) => {
 
   const [pageStatus, setPageStatus] = useState({ isBlocked: false, message: '' });
   const [checkingStatus, setCheckingStatus] = useState(true);
+  const vendorIdleTimerRef = useRef(null);
 
   useEffect(() => {
     const checkPageStatus = async () => {
@@ -98,6 +100,47 @@ const PortalLayout = ({ role }) => {
     };
   }, [location.pathname, role]);
 
+  useEffect(() => {
+    if (!isVendor || !user?.id) {
+      if (vendorIdleTimerRef.current) {
+        window.clearTimeout(vendorIdleTimerRef.current);
+        vendorIdleTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    const resetIdleTimer = () => {
+      if (vendorIdleTimerRef.current) {
+        window.clearTimeout(vendorIdleTimerRef.current);
+      }
+
+      vendorIdleTimerRef.current = window.setTimeout(async () => {
+        try {
+          await logout();
+        } finally {
+          window.location.replace('/vendor/login?reason=timeout');
+        }
+      }, VENDOR_IDLE_TIMEOUT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, resetIdleTimer, { passive: true });
+    });
+
+    resetIdleTimer();
+
+    return () => {
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resetIdleTimer);
+      });
+      if (vendorIdleTimerRef.current) {
+        window.clearTimeout(vendorIdleTimerRef.current);
+        vendorIdleTimerRef.current = null;
+      }
+    };
+  }, [isVendor, logout, user?.id]);
+
   const handleLogout = async () => {
     await logout();
     if (isVendor) {
@@ -148,8 +191,8 @@ const PortalLayout = ({ role }) => {
         ];
       case 'FINANCE':
         return [
-          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/finance-portal/dashboard' },
-          { icon: BarChart3, label: 'Payments', path: '/finance-portal/dashboard#payments' },
+          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/admin/finance-portal/dashboard' },
+          { icon: BarChart3, label: 'Payments', path: '/admin/finance-portal/dashboard#payments' },
         ];
       case 'HR':
         return [

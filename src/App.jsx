@@ -332,6 +332,7 @@ const AppRoutes = () => {
       <Route path="/buyer/*" element={<BuyerRoutes />} />
       <Route path="/admin/*" element={<AdminRoutes />} />
       <Route path="/employee/*" element={<AdminRoutes />} />
+      <Route path="/finance-portal/*" element={<AdminRoutes />} />
       <Route path="/career/*" element={<CareerRoutes />} />
       <Route path="/hr/*" element={<AdminRoutes />} />
 
