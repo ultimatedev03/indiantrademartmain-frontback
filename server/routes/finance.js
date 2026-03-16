@@ -13,9 +13,146 @@ const COUPON_EXPIRY_SYNC_ATTEMPTS = [
   { table: 'coupon_codes', expiresColumn: 'expires_at' },
   { table: 'coupon_codes', expiresColumn: 'expiry_at' },
 ];
+const COUPON_EXPIRY_SCAN_TABLES = ['coupons', 'coupon_codes'];
+const ACTIVE_COUPON_STATUSES = ['ACTIVE', 'SCHEDULED'];
 
 let couponExpirySyncInFlight = null;
 let couponExpirySyncLastAt = 0;
+
+const normalizeCouponStatus = (value) => String(value || '').toUpperCase().trim();
+
+const parseCouponTimeToken = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return { hours: 23, minutes: 59, seconds: 59 };
+
+  const meridiemMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)$/i);
+  if (meridiemMatch) {
+    let hours = Number(meridiemMatch[1]) || 0;
+    const minutes = Number(meridiemMatch[2]) || 0;
+    const seconds = Number(meridiemMatch[3]) || 0;
+    const meridiem = String(meridiemMatch[4] || '').toUpperCase();
+    if (meridiem === 'PM' && hours < 12) hours += 12;
+    if (meridiem === 'AM' && hours === 12) hours = 0;
+    return { hours, minutes, seconds };
+  }
+
+  const twentyFourHourMatch = raw.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (twentyFourHourMatch) {
+    return {
+      hours: Number(twentyFourHourMatch[1]) || 0,
+      minutes: Number(twentyFourHourMatch[2]) || 0,
+      seconds: Number(twentyFourHourMatch[3]) || 0,
+    };
+  }
+
+  return { hours: 23, minutes: 59, seconds: 59 };
+};
+
+const parseCouponDateToken = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    return {
+      year: Number(isoMatch[1]),
+      month: Number(isoMatch[2]),
+      day: Number(isoMatch[3]),
+    };
+  }
+
+  const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashMatch) {
+    return {
+      day: Number(slashMatch[1]),
+      month: Number(slashMatch[2]),
+      year: Number(slashMatch[3]),
+    };
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return {
+      year: parsed.getUTCFullYear(),
+      month: parsed.getUTCMonth() + 1,
+      day: parsed.getUTCDate(),
+    };
+  }
+
+  return null;
+};
+
+const parseCouponExpiryAt = (coupon = {}) => {
+  const directCandidates = [
+    coupon?.expires_at,
+    coupon?.expiry_at,
+    coupon?.valid_till,
+    coupon?.expires_on,
+  ];
+
+  for (const candidate of directCandidates) {
+    if (!candidate) continue;
+    const parsed = new Date(candidate);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  const dateToken =
+    coupon?.expiry_date_only ||
+    coupon?.expiry_date ||
+    coupon?.valid_date ||
+    coupon?.expires_date ||
+    coupon?.end_date ||
+    null;
+  const dateParts = parseCouponDateToken(dateToken);
+  if (!dateParts) return null;
+
+  const { hours, minutes, seconds } = parseCouponTimeToken(
+    coupon?.expiry_time ||
+      coupon?.valid_time ||
+      coupon?.expires_time ||
+      coupon?.end_time ||
+      ''
+  );
+
+  const utcMillis =
+    Date.UTC(dateParts.year, dateParts.month - 1, dateParts.day, hours, minutes, seconds) -
+    (5 * 60 + 30) * 60 * 1000;
+  return new Date(utcMillis);
+};
+
+const syncExpiredCouponsByRowScan = async () => {
+  const nowTs = Date.now();
+
+  for (const table of COUPON_EXPIRY_SCAN_TABLES) {
+    try {
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .in('status', ACTIVE_COUPON_STATUSES)
+        .limit(1000);
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        continue;
+      }
+
+      const expiredIds = data
+        .filter((row) => {
+          const status = normalizeCouponStatus(row?.status);
+          if (!ACTIVE_COUPON_STATUSES.includes(status)) return false;
+          const expiresAt = parseCouponExpiryAt(row);
+          return expiresAt && expiresAt.getTime() <= nowTs;
+        })
+        .map((row) => row?.id)
+        .filter(Boolean);
+
+      if (expiredIds.length === 0) continue;
+
+      await supabase.from(table).update({ status: 'EXPIRED' }).in('id', expiredIds);
+    } catch {
+      // Ignore schema mismatches here; another deployed table shape may match.
+    }
+  }
+};
 
 const syncExpiredCoupons = async () => {
   const now = Date.now();
@@ -29,19 +166,20 @@ const syncExpiredCoupons = async () => {
           .from(attempt.table)
           .update({ status: 'EXPIRED' })
           .lte(attempt.expiresColumn, new Date().toISOString())
-          .in('status', ['ACTIVE', 'SCHEDULED']);
+          .in('status', ACTIVE_COUPON_STATUSES);
 
         if (!error) {
-          couponExpirySyncLastAt = Date.now();
-          return true;
+          // Keep going so date+time split schemas also get handled.
         }
       } catch (error) {
         // Ignore schema mismatches here; next attempt may match deployed schema.
       }
     }
 
+    await syncExpiredCouponsByRowScan();
+
     couponExpirySyncLastAt = Date.now();
-    return false;
+    return true;
   })();
 
   try {
