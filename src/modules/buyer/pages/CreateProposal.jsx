@@ -11,6 +11,8 @@ import { buyerApi } from '@/modules/buyer/services/buyerApi';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, ArrowLeft, Send } from 'lucide-react';
 
+const MIN_REQUIREMENT_LENGTH = 10;
+
 const CreateProposal = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -47,9 +49,36 @@ const CreateProposal = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (loading) return;
-    
-    if (!formData.category || !formData.quantity || !formData.budget || !formData.description) {
+
+    const category = String(formData.category || '').trim();
+    const quantity = String(formData.quantity || '').trim();
+    const budget = String(formData.budget || '').trim();
+    const location = String(formData.location || '').trim();
+    const description = String(formData.description || '').trim();
+    const quantityValue = Number(quantity);
+    const budgetValue = Number(budget);
+
+    if (!category || !quantity || !budget || !location || !description) {
       toast({ title: "Validation Error", description: "Please fill all required fields.", variant: "destructive" });
+      return;
+    }
+
+    if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+      toast({ title: "Validation Error", description: "Quantity must be greater than 0.", variant: "destructive" });
+      return;
+    }
+
+    if (!Number.isFinite(budgetValue) || budgetValue <= 0) {
+      toast({ title: "Validation Error", description: "Budget must be greater than 0.", variant: "destructive" });
+      return;
+    }
+
+    if (description.length < MIN_REQUIREMENT_LENGTH) {
+      toast({
+        title: "Validation Error",
+        description: `Requirement details must be at least ${MIN_REQUIREMENT_LENGTH} characters.`,
+        variant: "destructive",
+      });
       return;
     }
 
@@ -58,13 +87,13 @@ const CreateProposal = () => {
     try {
       await buyerApi.createProposal({
         vendor_id: vendorId,
-        title: productName || formData.category,
-        product_name: productName || formData.category,
-        category: formData.category,
-        quantity: formData.quantity,
-        budget: formData.budget,
-        location: formData.location,
-        description: formData.description
+        title: productName || category,
+        product_name: productName || category,
+        category,
+        quantity: quantityValue,
+        budget: budgetValue,
+        location,
+        description,
       });
 
       toast({ 

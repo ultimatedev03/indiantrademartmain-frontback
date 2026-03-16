@@ -289,6 +289,34 @@ export const buyerApi = {
 
   // --- PROPOSALS ---
   createProposal: async (proposalData) => {
+    const normalizedTitle = String(
+      proposalData?.title || proposalData?.product_name || proposalData?.category || ''
+    ).trim();
+    const normalizedProductName = String(
+      proposalData?.product_name || proposalData?.category || proposalData?.title || ''
+    ).trim();
+    const normalizedCategory = String(proposalData?.category || '').trim();
+    const normalizedDescription = String(proposalData?.description || '').trim();
+    const normalizedLocation = String(proposalData?.location || '').trim();
+    const normalizedQuantity = Number(proposalData?.quantity);
+    const normalizedBudget = Number(proposalData?.budget);
+
+    if (!normalizedTitle || !normalizedProductName || !normalizedCategory) {
+      throw new Error('Category and product details are required');
+    }
+
+    if (!normalizedDescription || normalizedDescription.length < 10) {
+      throw new Error('Requirement details must be at least 10 characters');
+    }
+
+    if (!Number.isFinite(normalizedQuantity) || normalizedQuantity <= 0) {
+      throw new Error('Quantity must be greater than 0');
+    }
+
+    if (!Number.isFinite(normalizedBudget) || normalizedBudget <= 0) {
+      throw new Error('Budget must be greater than 0');
+    }
+
     const normalizeVendorId = (value) => {
       const cleaned = String(value ?? '').trim();
       if (!cleaned) return null;
@@ -313,28 +341,39 @@ export const buyerApi = {
       urlVendorId ||
       null;
 
-    const buyerId = await getBuyerId();
     const user = await getAuthUser();
+    let buyerProfile = null;
+    try {
+      buyerProfile = await resolveBuyerProfile({ required: false });
+    } catch {
+      buyerProfile = null;
+    }
+    let buyerId = buyerProfile?.id || null;
+    if (!buyerId) {
+      try {
+        buyerId = await resolveBuyerId({ required: false });
+      } catch {
+        buyerId = null;
+      }
+    }
 
     // Get buyer profile for contact details
-    const buyerProfile = await resolveBuyerProfile({ required: false });
-
     // Determine buyer name and company
     const buyerName = buyerProfile?.company_name || user?.user_metadata?.full_name || user?.email || 'Buyer';
     const buyerCompany = buyerProfile?.company_name || user?.user_metadata?.full_name || '';
-    const buyerEmail = user?.email || '';
+    const buyerEmail = String(user?.email || '').trim().toLowerCase();
     const buyerPhone = buyerProfile?.phone || buyerProfile?.mobile_number || '';
 
     const payload = {
       buyer_id: buyerId,
       buyer_email: null,
       vendor_id: resolvedVendorId,
-      title: proposalData.title || proposalData.product_name || proposalData.category,
-      product_name: proposalData.product_name || proposalData.category,
-      quantity: proposalData.quantity,
-      budget: parseFloat(proposalData.budget) || 0,
+      title: normalizedTitle,
+      product_name: normalizedProductName,
+      quantity: normalizedQuantity,
+      budget: normalizedBudget,
       required_by_date: proposalData.required_by_date || null,
-      description: proposalData.description,
+      description: normalizedDescription,
       status: 'SENT',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
@@ -357,9 +396,9 @@ export const buyerApi = {
           message: payload.description,
           quantity: payload.quantity,
           budget: payload.budget,
-          category: proposalData.category || '',
+          category: normalizedCategory,
           category_slug: proposalData.category_slug || '',
-          location: proposalData.location || 'India',
+          location: normalizedLocation || 'India',
           required_by_date: proposalData.required_by_date || null,
         }),
       });
@@ -402,9 +441,9 @@ export const buyerApi = {
           message: payload.description,
           quantity: payload.quantity,
           budget: payload.budget,
-          category: proposalData.category || '',
+          category: normalizedCategory,
           category_slug: proposalData.category_slug || '',
-          location: proposalData.location || 'India',
+          location: normalizedLocation || 'India',
           required_by_date: proposalData.required_by_date || null,
         }),
       });
@@ -438,6 +477,10 @@ export const buyerApi = {
       );
     }
 
+    if (!buyerId) {
+      throw new Error('Buyer profile not found');
+    }
+
     const { data: proposal, error: propError } = await supabase
       .from('proposals')
       .insert([payload])
@@ -458,10 +501,10 @@ export const buyerApi = {
 
       title: payload.title,
       product_name: payload.product_name,
-      category: proposalData.category || '',
+      category: normalizedCategory,
       quantity: payload.quantity,
       budget: payload.budget,
-      location: proposalData.location || 'India',
+      location: normalizedLocation || 'India',
       city: proposalData.city || null,
       state: proposalData.state || null,
       message: payload.description,
@@ -502,9 +545,9 @@ export const buyerApi = {
             message: payload.description,
             quantity: payload.quantity,
             budget: payload.budget,
-            category: proposalData.category || '',
+            category: normalizedCategory,
             category_slug: proposalData.category_slug || '',
-            location: proposalData.location || null,
+            location: normalizedLocation || null,
           }),
         });
         const directLeadJson = await directLeadRes.json().catch(() => ({}));
