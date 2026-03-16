@@ -6,6 +6,60 @@ import { getReferralSettings } from '../lib/referralProgram.js';
 
 const router = express.Router();
 
+const COUPON_EXPIRY_SYNC_ATTEMPTS = [
+  { table: 'coupons', expiresColumn: 'expires_at' },
+  { table: 'coupons', expiresColumn: 'expiry_at' },
+  { table: 'coupons', expiresColumn: 'valid_till' },
+  { table: 'coupon_codes', expiresColumn: 'expires_at' },
+  { table: 'coupon_codes', expiresColumn: 'expiry_at' },
+];
+
+let couponExpirySyncInFlight = null;
+let couponExpirySyncLastAt = 0;
+
+const syncExpiredCoupons = async () => {
+  const now = Date.now();
+  if (couponExpirySyncInFlight) return couponExpirySyncInFlight;
+  if (now - couponExpirySyncLastAt < 30 * 1000) return null;
+
+  couponExpirySyncInFlight = (async () => {
+    for (const attempt of COUPON_EXPIRY_SYNC_ATTEMPTS) {
+      try {
+        const { error } = await supabase
+          .from(attempt.table)
+          .update({ status: 'EXPIRED' })
+          .lte(attempt.expiresColumn, new Date().toISOString())
+          .in('status', ['ACTIVE', 'SCHEDULED']);
+
+        if (!error) {
+          couponExpirySyncLastAt = Date.now();
+          return true;
+        }
+      } catch (error) {
+        // Ignore schema mismatches here; next attempt may match deployed schema.
+      }
+    }
+
+    couponExpirySyncLastAt = Date.now();
+    return false;
+  })();
+
+  try {
+    return await couponExpirySyncInFlight;
+  } finally {
+    couponExpirySyncInFlight = null;
+  }
+};
+
+router.use(async (_req, _res, next) => {
+  try {
+    await syncExpiredCoupons();
+  } catch {
+    // Status sync should never block finance APIs.
+  }
+  next();
+});
+
 // Finance APIs require FINANCE or ADMIN employees.
 router.use(requireEmployeeRoles(['FINANCE', 'ADMIN']));
 
