@@ -194,11 +194,12 @@ const VendorLogin = () => {
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Sign In
             </Button>
 
-            <div className="space-y-3">
+            <div className="flex flex-col items-center space-y-3">
               <TurnstileField
                 action="auth_login"
                 appearance="execute"
                 execution="execute"
+                className="mx-auto w-full max-w-[320px]"
                 onWidgetReady={setCaptchaController}
                 resetKey={loginCaptcha.captchaResetKey}
                 onTokenChange={loginCaptcha.setCaptchaToken}

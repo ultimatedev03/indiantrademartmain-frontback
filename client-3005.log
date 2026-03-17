@@ -5857,3 +5857,58 @@
 [2m5:19:52 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
 [2m5:19:53 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
 [2m5:19:53 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/product-rental-and-leasing/index.html[22m
+[2m5:53:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m5:57:06 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:00:15 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:00:36 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:01:06 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:02:04 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:02:27 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:02:45 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:04:43 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:05:21 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m6:06:08 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m6:06:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m6:07:01 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m6:07:05 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/r-and-d-and-testing-labs/diagnostic-medical-imaging-equipment/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/r-and-d-and-testing-labs/metallurgical-lab-microscopes/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/r-and-d-and-testing-labs/optical-laser-instruments-devices/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/r-and-d-and-testing-labs/plastic-glass-labware/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/r-and-d-and-testing-labs/weighing-scales-measuring-tapes/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/security-systems-and-services/fire-fighting-prevention-products/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/security-systems-and-services/metal-security-safety-detectors/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/security-systems-and-services/security-inspection-devices/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/security-systems-and-services/smoke-gas-leak-detectors/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/telecom-equipment-and-goods/telecom-services-engg-maintenance/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/apparel-fabrics-and-clothing-textiles/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/carpets-and-rugs/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/cufflink-buttons-zippers-and-buckles/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/embroidered-apparel-and-garments/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/embroidery-needles-and-accessories/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/garment-and-textile-industrial-tools/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/garments-and-textiles-job-work/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/hand-sanitizers-and-personal-hygiene/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/home-decor-fabric/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/jute-handicrafts-and-jute-products/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/kids-casual-ethnic-and-western-wear/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/ladies-dresses-apparels-and-clothings/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/leggings-jeggings-socks-and-stocking/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/men-shirts-jeans-and-clothing/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/mosquito-insect-and-bugs-netting/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/motifs-badges-emblems-and-lanyards/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/reflective-products-and-holograms/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/sarees-lehenga-and-salwar-suits/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/sewing-threads-laces-and-accessories/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/silk-apparel-clothings-and-fabrics/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/tents-tarpaulins-and-pe-covers/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/textile-dyeing-finishing-chemical/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/towels-napkins-and-handkerchieves/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/umbrellas-and-raincoats/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/wallpaper-blinds-and-accessories/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/winter-wear-and-accessories/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/textiles-yarn-and-fabrics/yarns-and-threads/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/transportation-and-logistics/forwarding-and-custom-clearing/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/transportation-and-logistics/transport-agents-and-bulk-carriers/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/travel-tourism-and-hotels/adventure-and-trekking-tours/index.html[22m
+[2m6:08:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/travel-tourism-and-hotels/tour-operators-and-travel-agents/index.html[22m

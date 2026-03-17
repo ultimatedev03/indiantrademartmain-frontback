@@ -65,6 +65,7 @@ const TurnstileField = ({
 }) => {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
+  const canAcceptTokenRef = useRef(execution !== 'execute');
   const [status, setStatus] = useState(() => {
     if (isCaptchaDevBypass()) return 'dev_bypass';
     if (!isCaptchaConfigured()) return 'unavailable';
@@ -81,6 +82,7 @@ const TurnstileField = ({
     let active = true;
 
     const renderWidget = async () => {
+      canAcceptTokenRef.current = execution !== 'execute';
       onTokenChange?.('');
       setStatus('loading');
 
@@ -96,16 +98,24 @@ const TurnstileField = ({
           execution,
           callback: (token) => {
             if (!active) return;
+            if (execution === 'execute' && !canAcceptTokenRef.current) {
+              setStatus('idle');
+              onTokenChange?.('');
+              return;
+            }
+            canAcceptTokenRef.current = execution !== 'execute';
             setStatus('ready');
             onTokenChange?.(token || '');
           },
           'expired-callback': () => {
             if (!active) return;
+            canAcceptTokenRef.current = execution !== 'execute';
             setStatus('expired');
             onTokenChange?.('');
           },
           'error-callback': () => {
             if (!active) return;
+            canAcceptTokenRef.current = execution !== 'execute';
             setStatus('error');
             onTokenChange?.('');
           },
@@ -114,6 +124,7 @@ const TurnstileField = ({
         onWidgetReady?.({
           execute: async () => {
             if (widgetIdRef.current === null || !window.turnstile?.execute) return false;
+            canAcceptTokenRef.current = true;
             onTokenChange?.('');
             setStatus('loading');
             if (window.turnstile?.reset) {
@@ -124,6 +135,7 @@ const TurnstileField = ({
           },
           reset: () => {
             if (widgetIdRef.current === null || !window.turnstile?.reset) return false;
+            canAcceptTokenRef.current = execution !== 'execute';
             onTokenChange?.('');
             setStatus('idle');
             window.turnstile.reset(widgetIdRef.current);
@@ -172,8 +184,8 @@ const TurnstileField = ({
   const statusMessage = getStatusMessage(status);
 
   return (
-    <div className={cn('flex flex-col items-center space-y-2', className)}>
-      <div ref={containerRef} className="flex justify-center" />
+    <div className={cn('flex w-full flex-col items-center space-y-2', className)}>
+      <div ref={containerRef} className="flex w-full justify-center" />
       {statusMessage ? <p className="text-center text-xs text-slate-500">{statusMessage}</p> : null}
     </div>
   );
