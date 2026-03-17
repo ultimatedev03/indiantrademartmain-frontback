@@ -135,6 +135,7 @@ export default function Vendors() {
   const ADMIN_API_BASE = getAdminBase();
 
   const [vendors, setVendors] = useState([]);
+  const [serverTotal, setServerTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -176,7 +177,9 @@ export default function Vendors() {
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
 
-      setVendors(Array.isArray(data.vendors) ? data.vendors : []);
+      const nextVendors = Array.isArray(data.vendors) ? data.vendors : [];
+      setVendors(nextVendors);
+      setServerTotal(Number(data.total) || nextVendors.length);
     } catch (e) {
       console.error(e);
       toast({
@@ -184,6 +187,7 @@ export default function Vendors() {
         description: e.message || "Failed to load vendors",
         variant: "destructive",
       });
+      setServerTotal(0);
     } finally {
       setLoading(false);
     }
@@ -207,7 +211,15 @@ export default function Vendors() {
     });
   }, [filterJoined, vendors]);
 
-  const total = useMemo(() => filteredVendors.length, [filteredVendors]);
+  const visibleCount = useMemo(() => filteredVendors.length, [filteredVendors]);
+  const hasActiveFilters = useMemo(
+    () =>
+      Boolean(searchTerm.trim()) ||
+      filterKyc !== "all" ||
+      filterActive !== "all" ||
+      filterJoined !== "all",
+    [filterActive, filterJoined, filterKyc, searchTerm]
+  );
 
   const exportVendors = () => {
     const header = [
@@ -350,9 +362,14 @@ export default function Vendors() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-sm">
-              {total} Total Vendors
+              {hasActiveFilters ? `${visibleCount} Shown` : `${serverTotal || visibleCount} Total Vendors`}
             </Badge>
-            <Button variant="outline" size="sm" onClick={exportVendors} disabled={filteredVendors.length === 0}>
+            {hasActiveFilters ? (
+              <Badge variant="secondary" className="text-sm">
+                {serverTotal || visibleCount} Total Vendors
+              </Badge>
+            ) : null}
+            <Button variant="outline" size="sm" onClick={exportVendors} disabled={visibleCount === 0}>
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </Button>

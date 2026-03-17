@@ -4,11 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
-import { Loader2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Loader2, AlertCircle, Eye, EyeOff, Home } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { getPublicSiteUrl } from '@/shared/lib/publicSite';
 
 const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
   const navigate = useNavigate();
@@ -120,6 +121,15 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <div className="mb-6 flex justify-center">
+          <a
+            href={getPublicSiteUrl(typeof window !== 'undefined' ? window.location : null)}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+          >
+            <Home className="h-4 w-4" />
+            Back to Home
+          </a>
+        </div>
         <div className="flex justify-center mb-6">
           <div className="h-16 w-16 rounded-xl flex items-center justify-center shadow-lg bg-white">
             {Icon && <Icon className={`h-8 w-8 ${getColorClass().split(' ').pop()}`} />}

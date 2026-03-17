@@ -33,6 +33,22 @@ export const hrApi = {
     return payload;
   },
 
+  updateEmployee: async (employeeId, employeeData) => {
+    const response = await fetchWithCsrf(apiUrl(`/api/employee/staff/${employeeId}`), {
+      method: 'PATCH',
+      body: JSON.stringify(employeeData),
+    });
+    const payload = await safeReadJson(response);
+    if (!response.ok || payload?.success === false) {
+      throw new Error(payload?.error || 'Failed to update employee');
+    }
+    return payload?.employee || payload;
+  },
+
+  updateEmployeeStatus: async (employeeId, status) => {
+    return hrApi.updateEmployee(employeeId, { status });
+  },
+
   getStats: async () => {
     const employees = await hrApi.getEmployees();
     const totalEmployees = employees.length;

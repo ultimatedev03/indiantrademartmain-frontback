@@ -18,6 +18,8 @@ const VendorLogin = () => {
   const supaAuth = useAuth();
   const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
+  const [captchaController, setCaptchaController] = useState(null);
+  const [submitAfterCaptcha, setSubmitAfterCaptcha] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -30,19 +32,7 @@ const VendorLogin = () => {
     }
   }, [supaAuth?.userRole, navigate]);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-
-    const captchaError = loginCaptcha.getCaptchaError();
-    if (captchaError) {
-      toast({
-        title: 'Captcha Required',
-        description: captchaError,
-        variant: 'destructive',
-      });
-      return;
-    }
-
+  const performLogin = async () => {
     setLoading(true);
 
     try {
@@ -119,6 +109,7 @@ const VendorLogin = () => {
       window.location.href = '/vendor/dashboard';
 
     } catch (error) {
+      setSubmitAfterCaptcha(false);
       loginCaptcha.resetCaptcha();
       toast({ 
         title: "Login Failed", 
@@ -128,6 +119,36 @@ const VendorLogin = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  React.useEffect(() => {
+    if (!submitAfterCaptcha || !loginCaptcha.captchaToken || loading) return;
+    setSubmitAfterCaptcha(false);
+    void performLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [submitAfterCaptcha, loginCaptcha.captchaToken, loading]);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      const started = await captchaController?.execute?.();
+      if (started) {
+        setSubmitAfterCaptcha(true);
+        return;
+      }
+
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    await performLogin();
   };
 
   return (
@@ -177,9 +198,14 @@ const VendorLogin = () => {
 
             <TurnstileField
               action="auth_login"
+              execution="execute"
+              onWidgetReady={setCaptchaController}
               resetKey={loginCaptcha.captchaResetKey}
               onTokenChange={loginCaptcha.setCaptchaToken}
             />
+            <p className="text-xs text-gray-500">
+              Security verification runs when you click Sign In.
+            </p>
           </form>
         </CardContent>
         <CardFooter className="flex justify-center border-t p-4 bg-gray-50 rounded-b-lg">

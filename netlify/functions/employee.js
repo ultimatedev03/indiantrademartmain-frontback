@@ -268,6 +268,49 @@ const hasStaffManagementAccess = (authRole, employeeRole) => {
   return STAFF_MANAGE_ROLES.has(a) || STAFF_MANAGE_ROLES.has(e);
 };
 
+const roleToDepartment = (role) => {
+  switch (normalizeRole(role)) {
+    case 'ADMIN':
+      return 'Administration';
+    case 'HR':
+      return 'Human Resources';
+    case 'FINANCE':
+      return 'Finance';
+    case 'SUPPORT':
+      return 'Support';
+    case 'SALES':
+      return 'Sales';
+    case 'MANAGER':
+      return 'Territory';
+    case 'VP':
+      return 'Leadership';
+    case 'DATA_ENTRY':
+    case 'DATAENTRY':
+      return 'Operations';
+    default:
+      return '';
+  }
+};
+
+const PRIVILEGED_STAFF_ROLES = new Set(['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN']);
+
+const canHrManageRole = (managerRole, targetRole) =>
+  normalizeRole(managerRole) !== 'HR' || !PRIVILEGED_STAFF_ROLES.has(normalizeRole(targetRole));
+
+const syncEmployeePublicUser = async (employee) => {
+  const email = normalizeEmail(employee?.email || '');
+  if (!email) return null;
+
+  return upsertPublicUser({
+    id: employee?.user_id || undefined,
+    email,
+    full_name: String(employee?.full_name || '').trim(),
+    role: normalizeRole(employee?.role || 'DATA_ENTRY') || 'DATA_ENTRY',
+    phone: String(employee?.phone || '').trim() || null,
+    allowPasswordUpdate: false,
+  });
+};
+
 const resolveAuthenticatedUser = async (event, supabase) => {
   const bearer = parseBearerToken(event?.headers || {});
   if (bearer) {
@@ -520,6 +563,135 @@ export const handler = async (event) => {
         employee: employeeRow,
         reused_existing: Boolean(existingEmployee?.id),
       });
+    }
+
+    // PATCH /api/employee/staff/:employeeId
+    if (event.httpMethod === 'PATCH' && tail[0] === 'staff' && tail[1]) {
+      const { employee: manager, error: managerError, statusCode } = await resolveStaffManager(supabase, authUser);
+      if (managerError) {
+        return json(statusCode, { success: false, error: managerError });
+      }
+
+      const employeeId = String(tail[1] || '').trim();
+      const { data: employeeRow, error: employeeError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('id', employeeId)
+        .maybeSingle();
+
+      if (employeeError) {
+        return json(500, { success: false, error: employeeError.message || 'Failed to fetch employee' });
+      }
+
+      if (!employeeRow?.id) {
+        return json(404, { success: false, error: 'Employee not found' });
+      }
+
+      const body = readBody(event);
+      const nextRole = body?.role === undefined ? undefined : normalizeRole(body?.role || '');
+      const nextStatus = body?.status === undefined ? undefined : String(body?.status || '').trim().toUpperCase();
+      const nextName = body?.full_name === undefined ? undefined : String(body?.full_name || '').trim();
+      const nextEmail = body?.email === undefined ? undefined : normalizeEmail(body?.email || '');
+      const nextPhone = body?.phone === undefined ? undefined : String(body?.phone || '').trim() || null;
+      const nextDepartment = body?.department === undefined ? undefined : String(body?.department || '').trim() || null;
+
+      if (body?.role !== undefined && !nextRole) {
+        return json(400, { success: false, error: 'Valid role is required' });
+      }
+
+      if (body?.status !== undefined && !['ACTIVE', 'INACTIVE'].includes(nextStatus)) {
+        return json(400, { success: false, error: 'Status must be ACTIVE or INACTIVE' });
+      }
+
+      if (body?.full_name !== undefined && !nextName) {
+        return json(400, { success: false, error: 'full_name cannot be empty' });
+      }
+
+      if (body?.email !== undefined && !nextEmail) {
+        return json(400, { success: false, error: 'Valid email is required' });
+      }
+
+      const currentRole = normalizeRole(employeeRow?.role || 'DATA_ENTRY');
+      const targetRole = nextRole || currentRole;
+      if (!canHrManageRole(manager?.role, currentRole) || !canHrManageRole(manager?.role, targetRole)) {
+        return json(403, { success: false, error: 'HR portal cannot manage privileged staff roles' });
+      }
+
+      const isSelfUpdate =
+        String(employeeRow?.user_id || '').trim() === String(authUser?.id || '').trim() ||
+        normalizeEmail(employeeRow?.email || '') === normalizeEmail(authUser?.email || '');
+
+      if (isSelfUpdate && nextStatus && nextStatus !== 'ACTIVE') {
+        return json(400, { success: false, error: 'You cannot deactivate your own account' });
+      }
+
+      const updates = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (nextName !== undefined && nextName !== String(employeeRow?.full_name || '').trim()) {
+        updates.full_name = nextName;
+      }
+      if (nextEmail !== undefined && nextEmail !== normalizeEmail(employeeRow?.email || '')) {
+        updates.email = nextEmail;
+      }
+      if (nextPhone !== undefined && nextPhone !== (String(employeeRow?.phone || '').trim() || null)) {
+        updates.phone = nextPhone;
+      }
+      if (nextRole !== undefined && nextRole !== currentRole) {
+        updates.role = nextRole;
+        if (nextDepartment === undefined && !employeeRow?.department) {
+          updates.department = roleToDepartment(nextRole) || null;
+        }
+      }
+      if (nextDepartment !== undefined && nextDepartment !== (employeeRow?.department || null)) {
+        updates.department = nextDepartment;
+      }
+      if (nextStatus !== undefined && nextStatus !== String(employeeRow?.status || 'ACTIVE').trim().toUpperCase()) {
+        updates.status = nextStatus;
+      }
+
+      if (Object.keys(updates).length === 1) {
+        return json(200, { success: true, employee: employeeRow });
+      }
+
+      const draftEmployee = { ...employeeRow, ...updates };
+      const publicUser = await syncEmployeePublicUser(draftEmployee);
+      if (publicUser?.id && publicUser.id !== employeeRow?.user_id) {
+        updates.user_id = publicUser.id;
+      }
+
+      const { data: updatedEmployee, error: updateError } = await supabase
+        .from('employees')
+        .update(updates)
+        .eq('id', employeeId)
+        .select('*')
+        .maybeSingle();
+
+      if (updateError) {
+        return json(500, { success: false, error: updateError.message || 'Failed to update employee' });
+      }
+
+      await writeAudit({
+        user_id: authUser.id,
+        action: 'STAFF_UPDATE',
+        entity_type: 'employees',
+        entity_id: employeeId,
+        details: {
+          before: {
+            role: currentRole,
+            status: employeeRow?.status || 'ACTIVE',
+            department: employeeRow?.department || null,
+          },
+          after: {
+            role: updatedEmployee?.role || currentRole,
+            status: updatedEmployee?.status || employeeRow?.status || 'ACTIVE',
+            department: updatedEmployee?.department || updates.department || employeeRow?.department || null,
+          },
+        },
+      });
+
+      return json(200, { success: true, employee: updatedEmployee || { ...employeeRow, ...updates } });
     }
 
     // POST /api/employee/category-image-upload

@@ -15,6 +15,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2 } from 'lucide-react';
 import AnalyticsLoader from '@/components/AnalyticsLoader';
 import DeferredAIChatWidget from '@/shared/components/DeferredAIChatWidget';
+import ScrollToTopButton from '@/shared/components/ScrollToTopButton';
 
 const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage'));
 
@@ -368,6 +369,7 @@ function App() {
                             <Suspense fallback={<RouteFallback />}>
                               <AppRoutes />
                             </Suspense>
+                            <ScrollToTopButton />
                             <DeferredAIChatWidget />
                           </VendorSuspensionGate>
                         </PublicNoticeGate>

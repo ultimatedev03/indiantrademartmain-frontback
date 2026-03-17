@@ -196,6 +196,25 @@ const roleToDepartment = (role) => {
   }
 };
 
+const PRIVILEGED_STAFF_ROLES = new Set(['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN']);
+
+const canHrManageRole = (managerRole, targetRole) =>
+  normalizeRole(managerRole) !== 'HR' || !PRIVILEGED_STAFF_ROLES.has(normalizeRole(targetRole));
+
+const syncEmployeePublicUser = async (employee) => {
+  const email = normalizeEmail(employee?.email || '');
+  if (!email) return null;
+
+  return upsertPublicUser({
+    id: employee?.user_id || undefined,
+    email,
+    full_name: String(employee?.full_name || '').trim(),
+    role: normalizeRole(employee?.role || 'DATA_ENTRY') || 'DATA_ENTRY',
+    phone: String(employee?.phone || '').trim() || null,
+    allowPasswordUpdate: false,
+  });
+};
+
 async function resolveEmployeeProfile(authUser) {
   const userId = String(authUser?.id || '').trim();
   const email = String(authUser?.email || '').trim().toLowerCase();
@@ -376,6 +395,145 @@ router.post('/staff', requireAuth(), async (req, res) => {
     });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to create employee' });
+  }
+});
+
+router.patch('/staff/:employeeId', requireAuth(), async (req, res) => {
+  try {
+    const manager = await resolveStaffManager(req, res);
+    if (!manager) return;
+
+    const { employeeId } = req.params;
+    const { data: employeeRow, error: employeeError } = await supabase
+      .from('employees')
+      .select('*')
+      .eq('id', employeeId)
+      .maybeSingle();
+
+    if (employeeError) {
+      return res.status(500).json({ success: false, error: employeeError.message || 'Failed to fetch employee' });
+    }
+
+    if (!employeeRow?.id) {
+      return res.status(404).json({ success: false, error: 'Employee not found' });
+    }
+
+    const nextRole = req.body?.role === undefined ? undefined : normalizeRole(req.body?.role || '');
+    const nextStatus = req.body?.status === undefined ? undefined : String(req.body?.status || '').trim().toUpperCase();
+    const nextName = req.body?.full_name === undefined ? undefined : String(req.body?.full_name || '').trim();
+    const nextEmail = req.body?.email === undefined ? undefined : normalizeEmail(req.body?.email || '');
+    const nextPhone = req.body?.phone === undefined ? undefined : String(req.body?.phone || '').trim() || null;
+    const nextDepartment =
+      req.body?.department === undefined
+        ? undefined
+        : String(req.body?.department || '').trim() || null;
+
+    if (req.body?.role !== undefined && !nextRole) {
+      return res.status(400).json({ success: false, error: 'Valid role is required' });
+    }
+
+    if (req.body?.status !== undefined && !['ACTIVE', 'INACTIVE'].includes(nextStatus)) {
+      return res.status(400).json({ success: false, error: 'Status must be ACTIVE or INACTIVE' });
+    }
+
+    if (req.body?.full_name !== undefined && !nextName) {
+      return res.status(400).json({ success: false, error: 'full_name cannot be empty' });
+    }
+
+    if (req.body?.email !== undefined && !nextEmail) {
+      return res.status(400).json({ success: false, error: 'Valid email is required' });
+    }
+
+    const currentRole = normalizeRole(employeeRow?.role || 'DATA_ENTRY');
+    const targetRole = nextRole || currentRole;
+
+    if (!canHrManageRole(manager?.role, currentRole) || !canHrManageRole(manager?.role, targetRole)) {
+      return res.status(403).json({ success: false, error: 'HR portal cannot manage privileged staff roles' });
+    }
+
+    const isSelfUpdate =
+      String(employeeRow?.user_id || '').trim() === String(req.user?.id || '').trim() ||
+      normalizeEmail(employeeRow?.email || '') === normalizeEmail(req.user?.email || '');
+
+    if (isSelfUpdate && nextStatus && nextStatus !== 'ACTIVE') {
+      return res.status(400).json({ success: false, error: 'You cannot deactivate your own account' });
+    }
+
+    const updates = {
+      updated_at: new Date().toISOString(),
+    };
+
+    if (nextName !== undefined && nextName !== String(employeeRow?.full_name || '').trim()) {
+      updates.full_name = nextName;
+    }
+
+    if (nextEmail !== undefined && nextEmail !== normalizeEmail(employeeRow?.email || '')) {
+      updates.email = nextEmail;
+    }
+
+    if (nextPhone !== undefined && nextPhone !== (String(employeeRow?.phone || '').trim() || null)) {
+      updates.phone = nextPhone;
+    }
+
+    if (nextRole !== undefined && nextRole !== currentRole) {
+      updates.role = nextRole;
+      if (nextDepartment === undefined && !employeeRow?.department) {
+        updates.department = roleToDepartment(nextRole) || null;
+      }
+    }
+
+    if (nextDepartment !== undefined && nextDepartment !== (employeeRow?.department || null)) {
+      updates.department = nextDepartment;
+    }
+
+    if (nextStatus !== undefined && nextStatus !== String(employeeRow?.status || 'ACTIVE').trim().toUpperCase()) {
+      updates.status = nextStatus;
+    }
+
+    if (Object.keys(updates).length === 1) {
+      return res.json({ success: true, employee: employeeRow });
+    }
+
+    const draftEmployee = { ...employeeRow, ...updates };
+    const publicUser = await syncEmployeePublicUser(draftEmployee);
+    if (publicUser?.id && publicUser.id !== employeeRow?.user_id) {
+      updates.user_id = publicUser.id;
+    }
+
+    const { data: updatedEmployee, error: updateError } = await supabase
+      .from('employees')
+      .update(updates)
+      .eq('id', employeeId)
+      .select('*')
+      .maybeSingle();
+
+    if (updateError) {
+      return res.status(500).json({ success: false, error: updateError.message || 'Failed to update employee' });
+    }
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'STAFF_UPDATE',
+      entityType: 'employees',
+      entityId: employeeId,
+      details: {
+        before: {
+          role: currentRole,
+          status: employeeRow?.status || 'ACTIVE',
+          department: employeeRow?.department || null,
+        },
+        after: {
+          role: updatedEmployee?.role || currentRole,
+          status: updatedEmployee?.status || employeeRow?.status || 'ACTIVE',
+          department: updatedEmployee?.department || updates.department || employeeRow?.department || null,
+        },
+      },
+    });
+
+    return res.json({ success: true, employee: updatedEmployee || { ...employeeRow, ...updates } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to update employee' });
   }
 });
 

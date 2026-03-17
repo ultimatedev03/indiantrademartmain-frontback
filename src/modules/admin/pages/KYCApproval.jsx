@@ -58,6 +58,24 @@ async function safeReadJson(res) {
   throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 80)}...`);
 }
 
+const normalizeSearchValue = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+const matchesSearchValue = (candidate, query) => {
+  const rawCandidate = String(candidate || '').toLowerCase();
+  const rawQuery = String(query || '').trim().toLowerCase();
+
+  if (!rawQuery) return true;
+  if (rawCandidate.includes(rawQuery)) return true;
+
+  const normalizedQuery = normalizeSearchValue(rawQuery);
+  if (!normalizedQuery) return false;
+
+  return normalizeSearchValue(candidate).includes(normalizedQuery);
+};
+
 const KYCApproval = () => {
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -94,11 +112,11 @@ const KYCApproval = () => {
         const t = searchTerm.toLowerCase();
         filtered = filtered.filter(
           (v) =>
-            v.vendor_id?.toLowerCase().includes(t) ||
-            v.company_name?.toLowerCase().includes(t) ||
-            v.owner_name?.toLowerCase().includes(t) ||
-            v.email?.toLowerCase().includes(t) ||
-            String(v.phone || '').toLowerCase().includes(t)
+            matchesSearchValue(v.vendor_id, t) ||
+            matchesSearchValue(v.company_name, t) ||
+            matchesSearchValue(v.owner_name, t) ||
+            matchesSearchValue(v.email, t) ||
+            matchesSearchValue(v.phone, t)
         );
       }
 
@@ -313,7 +331,7 @@ const KYCApproval = () => {
                         </div>
                         <div>
                           <p className="font-medium">{vendor.company_name}</p>
-                          <p className="text-xs text-gray-500">{vendor.business_type || 'Business'}</p>
+                          <p className="text-xs text-gray-500">{vendor.vendor_id || vendor.business_type || 'Business'}</p>
                         </div>
                       </div>
                     </TableCell>

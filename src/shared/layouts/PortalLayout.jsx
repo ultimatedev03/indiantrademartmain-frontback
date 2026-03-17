@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart3, UserCheck, Ticket, Database
+  BarChart3, UserCheck, Ticket, Database, Home
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -13,6 +13,7 @@ import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import MaintenancePage from '@/shared/components/MaintenancePage';
 import { Loader2 } from 'lucide-react';
 import NotificationBell from '@/shared/components/NotificationBell';
+import { getPublicSiteUrl } from '@/shared/lib/publicSite';
 
 const SidebarItem = ({ icon: Icon, label, path, active, collapsed }) => (
   <Link to={path}>
@@ -166,6 +167,10 @@ const PortalLayout = ({ role }) => {
     }
   };
 
+  const handleGoHome = () => {
+    window.location.href = getPublicSiteUrl(window.location);
+  };
+
   const getNavItems = () => {
     switch (role) {
       case 'VENDOR':
@@ -307,6 +312,10 @@ const PortalLayout = ({ role }) => {
           </div>
 
           <div className="flex items-center gap-4">
+            <Button variant="outline" size="sm" onClick={handleGoHome}>
+              <Home className="mr-2 h-4 w-4" />
+              Home
+            </Button>
             <NotificationBell
               userId={user?.user_id || user?.id || null}
               userEmail={user?.email || null}

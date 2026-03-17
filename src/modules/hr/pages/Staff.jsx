@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import Modal from '@/shared/components/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Plus, UserMinus, UserCog } from 'lucide-react';
+import { Loader2, Plus, UserCheck, UserCog, UserMinus } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { hrApi } from '@/modules/hr/services/hrApi';
 import { PASSWORD_POLICY_MESSAGE } from '@/lib/passwordPolicy';
@@ -26,6 +26,11 @@ const DEFAULT_FORM = {
   department: 'Operations',
   password: '',
 };
+
+const normalizeRole = (value = '') => String(value || '').trim().toUpperCase();
+const isActiveStatus = (value = '') => String(value || 'ACTIVE').trim().toUpperCase() === 'ACTIVE';
+const defaultDepartmentForRole = (role) =>
+  ROLE_OPTIONS.find((option) => option.value === normalizeRole(role))?.department || 'Operations';
 
 const normalizeEmployee = (employee = {}) => {
   const joinedDate = employee?.created_at || employee?.joined || employee?.createdAt || null;
@@ -48,6 +53,10 @@ const HrStaff = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState(DEFAULT_FORM);
+  const [busyEmployeeId, setBusyEmployeeId] = useState('');
+  const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [roleForm, setRoleForm] = useState({ role: 'DATA_ENTRY', department: 'Operations' });
 
   const fetchStaff = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -134,6 +143,75 @@ const HrStaff = () => {
     }
   };
 
+  const openRoleModal = (employee) => {
+    setSelectedEmployee(employee);
+    setRoleForm({
+      role: normalizeRole(employee?.role || 'DATA_ENTRY') || 'DATA_ENTRY',
+      department: employee?.department || defaultDepartmentForRole(employee?.role || 'DATA_ENTRY'),
+    });
+    setIsRoleModalOpen(true);
+  };
+
+  const handleUpdateRole = async (event) => {
+    event.preventDefault();
+    if (!selectedEmployee?.id) return;
+
+    setBusyEmployeeId(selectedEmployee.id);
+    try {
+      await hrApi.updateEmployee(selectedEmployee.id, {
+        role: roleForm.role,
+        department: roleForm.department,
+      });
+      await fetchStaff({ silent: true });
+      setIsRoleModalOpen(false);
+      setSelectedEmployee(null);
+      toast({
+        title: 'Employee updated',
+        description: 'Role and department updated successfully.',
+      });
+    } catch (error) {
+      toast({
+        title: 'Update failed',
+        description: error?.message || 'Could not update employee role.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyEmployeeId('');
+    }
+  };
+
+  const handleToggleStatus = async (employee) => {
+    if (!employee?.id) return;
+
+    const currentlyActive = isActiveStatus(employee.status);
+    const nextStatus = currentlyActive ? 'INACTIVE' : 'ACTIVE';
+    const confirmed = window.confirm(
+      currentlyActive
+        ? `Deactivate ${employee.displayName}?`
+        : `Reactivate ${employee.displayName}?`
+    );
+
+    if (!confirmed) return;
+
+    setBusyEmployeeId(employee.id);
+    try {
+      await hrApi.updateEmployeeStatus(employee.id, nextStatus);
+      await fetchStaff({ silent: true });
+      toast({
+        title: currentlyActive ? 'Employee deactivated' : 'Employee reactivated',
+        description: `${employee.displayName} is now ${nextStatus}.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Status update failed',
+        description: error?.message || 'Could not update employee status.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyEmployeeId('');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -189,11 +267,29 @@ const HrStaff = () => {
                   <TableCell>{employee.joinedLabel}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="ghost" size="icon" title="Manage Role" disabled>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title="Manage Role"
+                        onClick={() => openRoleModal(employee)}
+                        disabled={busyEmployeeId === employee.id}
+                      >
                         <UserCog className="h-4 w-4 text-blue-500" />
                       </Button>
-                      <Button variant="ghost" size="icon" title="Deactivate" disabled>
-                        <UserMinus className="h-4 w-4 text-red-500" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={isActiveStatus(employee.status) ? 'Deactivate' : 'Reactivate'}
+                        onClick={() => handleToggleStatus(employee)}
+                        disabled={busyEmployeeId === employee.id}
+                      >
+                        {busyEmployeeId === employee.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-slate-500" />
+                        ) : isActiveStatus(employee.status) ? (
+                          <UserMinus className="h-4 w-4 text-red-500" />
+                        ) : (
+                          <UserCheck className="h-4 w-4 text-emerald-600" />
+                        )}
                       </Button>
                     </div>
                   </TableCell>
@@ -285,6 +381,67 @@ const HrStaff = () => {
           <div className="flex justify-end pt-4">
             <Button type="submit" className="bg-emerald-600 hover:bg-emerald-700" disabled={saving}>
               {saving ? 'Saving...' : 'Add Employee'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isRoleModalOpen}
+        onClose={() => {
+          setIsRoleModalOpen(false);
+          setSelectedEmployee(null);
+        }}
+        title={`Manage Access${selectedEmployee?.displayName ? `: ${selectedEmployee.displayName}` : ''}`}
+      >
+        <form className="space-y-4" onSubmit={handleUpdateRole}>
+          <div>
+            <Label>Role</Label>
+            <select
+              className="mt-1 flex h-10 w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50"
+              value={roleForm.role}
+              onChange={(event) => {
+                const nextRole = event.target.value;
+                const selected = ROLE_OPTIONS.find((option) => option.value === nextRole);
+                setRoleForm((prev) => ({
+                  ...prev,
+                  role: nextRole,
+                  department: selected?.department || prev.department,
+                }));
+              }}
+            >
+              {ROLE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <Label>Department</Label>
+            <Input
+              className="mt-1"
+              value={roleForm.department}
+              onChange={(event) =>
+                setRoleForm((prev) => ({ ...prev, department: event.target.value }))
+              }
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setIsRoleModalOpen(false);
+                setSelectedEmployee(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" disabled={!selectedEmployee?.id || busyEmployeeId === selectedEmployee?.id}>
+              {busyEmployeeId === selectedEmployee?.id ? 'Saving...' : 'Save Changes'}
             </Button>
           </div>
         </form>

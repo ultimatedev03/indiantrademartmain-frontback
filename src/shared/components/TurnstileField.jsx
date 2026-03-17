@@ -57,7 +57,9 @@ const getStatusMessage = (status) => {
 const TurnstileField = ({
   action = 'submit',
   className,
+  execution = 'render',
   onTokenChange,
+  onWidgetReady,
   resetKey = 0,
 }) => {
   const containerRef = useRef(null);
@@ -71,6 +73,7 @@ const TurnstileField = ({
   useEffect(() => {
     if (!isCaptchaConfigured()) {
       onTokenChange?.('');
+      onWidgetReady?.(null);
       return undefined;
     }
 
@@ -88,6 +91,8 @@ const TurnstileField = ({
         widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
           action,
+          appearance: 'always',
+          execution,
           callback: (token) => {
             if (!active) return;
             setStatus('ready');
@@ -104,6 +109,30 @@ const TurnstileField = ({
             onTokenChange?.('');
           },
         });
+
+        onWidgetReady?.({
+          execute: async () => {
+            if (widgetIdRef.current === null || !window.turnstile?.execute) return false;
+            onTokenChange?.('');
+            setStatus('loading');
+            if (window.turnstile?.reset) {
+              window.turnstile.reset(widgetIdRef.current);
+            }
+            window.turnstile.execute(widgetIdRef.current);
+            return true;
+          },
+          reset: () => {
+            if (widgetIdRef.current === null || !window.turnstile?.reset) return false;
+            onTokenChange?.('');
+            setStatus('idle');
+            window.turnstile.reset(widgetIdRef.current);
+            return true;
+          },
+        });
+
+        if (execution === 'execute') {
+          setStatus('idle');
+        }
       } catch (error) {
         if (!active) return;
         setStatus('error');
@@ -119,8 +148,9 @@ const TurnstileField = ({
         window.turnstile.remove(widgetIdRef.current);
         widgetIdRef.current = null;
       }
+      onWidgetReady?.(null);
     };
-  }, [action, onTokenChange, resetKey]);
+  }, [action, execution, onTokenChange, onWidgetReady, resetKey]);
 
   if (isCaptchaDevBypass()) {
     return (

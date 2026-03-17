@@ -51,6 +51,24 @@ const normalizeDocuments = (documents = []) =>
     created_at: doc.created_at || doc.uploaded_at || doc.updated_at || null,
   }));
 
+const normalizeSearchValue = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+const matchesSearchValue = (candidate, query) => {
+  const rawCandidate = String(candidate || '').toLowerCase();
+  const rawQuery = String(query || '').trim().toLowerCase();
+
+  if (!rawQuery) return true;
+  if (rawCandidate.includes(rawQuery)) return true;
+
+  const normalizedQuery = normalizeSearchValue(rawQuery);
+  if (!normalizedQuery) return false;
+
+  return normalizeSearchValue(candidate).includes(normalizedQuery);
+};
+
 const matchesVendorSearch = (vendor, searchTerm) => {
   const query = String(searchTerm || '').trim().toLowerCase();
   if (!query) return true;
@@ -64,7 +82,7 @@ const matchesVendorSearch = (vendor, searchTerm) => {
     vendor?.registered_address,
   ]
     .filter(Boolean)
-    .some((value) => String(value).toLowerCase().includes(query));
+    .some((value) => matchesSearchValue(value, query));
 };
 
 const KycApprovals = () => {
