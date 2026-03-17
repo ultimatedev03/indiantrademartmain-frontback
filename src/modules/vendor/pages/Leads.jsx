@@ -523,7 +523,7 @@ const Leads = () => {
 
   const executeLeadPurchase = async (lead, options = {}) => {
     const leadId = String(lead?.id || "").trim();
-    if (!leadId) return;
+    if (!leadId) return false;
 
     setPurchasing((prev) => ({ ...prev, [leadId]: true }));
     try {
@@ -550,12 +550,14 @@ const Leads = () => {
       setMarketplaceLeads((prev) => (prev || []).filter((l) => l?.id !== leadId));
       setPurchaseChoiceDialog({ open: false, lead: null });
       await loadStats();
+      return true;
     } catch (error) {
       toast({
         title: "Failed to purchase lead",
         description: error?.message || "Something went wrong",
         variant: "destructive",
       });
+      return false;
     } finally {
       setPurchasing((prev) => ({ ...prev, [leadId]: false }));
     }
@@ -854,7 +856,12 @@ const Leads = () => {
 
   const handleBuyExtraLead = async () => {
     if (!purchaseChoiceDialog?.lead) return;
-    await executeLeadPurchase(purchaseChoiceDialog.lead, { mode: "BUY_EXTRA", forcePaid: true });
+    const selectedLead = purchaseChoiceDialog.lead;
+    setPurchaseChoiceDialog({ open: false, lead: null });
+    const success = await executeLeadPurchase(selectedLead, { mode: "BUY_EXTRA", forcePaid: true });
+    if (!success) {
+      setPurchaseChoiceDialog({ open: true, lead: selectedLead });
+    }
   };
 
   return (

@@ -1,21 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
 import { setDefaultResultOrder } from 'dns';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { resolve } from 'path';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const envPath = join(__dirname, '..', '..', '.env.local');
+const envCandidates = [
+  resolve(process.cwd(), '.env.local'),
+  resolve(process.cwd(), '.env'),
+];
 
-dotenv.config({ path: envPath });
+for (const envPath of envCandidates) {
+  dotenv.config({ path: envPath });
+}
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Service role key for admin access
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseServiceKey) {
-  throw new Error('Missing Supabase credentials in .env.local');
+  throw new Error('Missing Supabase credentials in environment');
 }
 
 try {

@@ -54,11 +54,13 @@ const writeLocalRules = (rules = []) => {
   }
 };
 
+const createDefaultNewRule = () => ({ name: '', type: 'Manual', value: '' });
+
 const PricingRules = () => {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
-  const [newRule, setNewRule] = useState({ name: '', type: 'Manual', value: '' });
+  const [newRule, setNewRule] = useState(createDefaultNewRule);
 
   useEffect(() => {
     const fetchRules = async () => {
@@ -125,7 +127,7 @@ const PricingRules = () => {
       writeLocalRules(next.filter((rule) => String(rule?.id || '').startsWith('draft-')));
       return next;
     });
-    setNewRule({ name: '', type: 'Manual', value: '' });
+    setNewRule(createDefaultNewRule());
     setCreateOpen(false);
     toast({
       title: 'Draft rule created',
@@ -135,10 +137,15 @@ const PricingRules = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold text-neutral-800">Pricing Rules Engine</h2>
-        <Button className="bg-[#003D82]" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Rule
+        <Button
+          type="button"
+          className="bg-[#003D82]"
+          onClick={() => setCreateOpen(true)}
+        >
+          <Plus className="h-4 w-4 mr-2" />
+          New Rule
         </Button>
       </div>
 
@@ -198,16 +205,31 @@ const PricingRules = () => {
         </Table>
       </div>
 
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          setCreateOpen(open);
+          if (!open) {
+            setNewRule(createDefaultNewRule());
+          }
+        }}
+      >
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Create Pricing Rule</DialogTitle>
-          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleCreateRule();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Create Pricing Rule</DialogTitle>
+            </DialogHeader>
 
-          <div className="space-y-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-neutral-700">Rule Name</label>
               <Input
+                autoFocus
                 value={newRule.name}
                 onChange={(event) => setNewRule((prev) => ({ ...prev, name: event.target.value }))}
                 placeholder="e.g. North Region Premium"
@@ -232,16 +254,23 @@ const PricingRules = () => {
                 placeholder="0"
               />
             </div>
-          </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button className="bg-[#003D82]" onClick={handleCreateRule}>
-              Create Draft
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCreateOpen(false);
+                  setNewRule(createDefaultNewRule());
+                }}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" className="bg-[#003D82]">
+                Create Draft
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>
