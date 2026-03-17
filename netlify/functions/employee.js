@@ -1,6 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { randomUUID } from 'crypto';
 import jwt from 'jsonwebtoken';
+import { hashPassword, normalizeEmail, upsertPublicUser } from '../../server/lib/auth.js';
+import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
 
@@ -84,6 +86,7 @@ const verifyAuthToken = (token) => {
 
 const normalizeRole = (role) => String(role || '').trim().toUpperCase();
 const SALES_ROLES = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
+const STAFF_MANAGE_ROLES = new Set(['ADMIN', 'HR', 'SUPERADMIN']);
 const CATEGORY_IMAGE_BUCKET = 'avatars';
 const CATEGORY_IMAGE_LEVELS = new Set(['head', 'sub', 'micro']);
 const CATEGORY_TABLE_BY_LEVEL = {
@@ -259,6 +262,12 @@ const hasSalesAccess = (authRole, employeeRole) => {
   return SALES_ROLES.has(a) || SALES_ROLES.has(e);
 };
 
+const hasStaffManagementAccess = (authRole, employeeRole) => {
+  const a = normalizeRole(authRole || '');
+  const e = normalizeRole(employeeRole || '');
+  return STAFF_MANAGE_ROLES.has(a) || STAFF_MANAGE_ROLES.has(e);
+};
+
 const resolveAuthenticatedUser = async (event, supabase) => {
   const bearer = parseBearerToken(event?.headers || {});
   if (bearer) {
@@ -316,6 +325,19 @@ const resolveEmployeeProfile = async (supabase, authUser) => {
   return employee || null;
 };
 
+const resolveStaffManager = async (supabase, authUser) => {
+  const employee = await resolveEmployeeProfile(supabase, authUser);
+  if (!employee) {
+    return { employee: null, statusCode: 404, error: 'Employee profile not found' };
+  }
+
+  if (!hasStaffManagementAccess(authUser?.role, employee?.role)) {
+    return { employee: null, statusCode: 403, error: 'Staff management access required' };
+  }
+
+  return { employee, statusCode: 200, error: null };
+};
+
 const sumRevenueByPeriod = async (supabase, { startIso, endIso, endInclusive = true }) => {
   let byPurchaseDate = supabase.from('lead_purchases').select('amount, purchase_date');
 
@@ -362,6 +384,141 @@ export const handler = async (event) => {
           user_id: authUser.id || employee.user_id || null,
           role: normalizeRole(employee.role || 'UNKNOWN'),
         },
+      });
+    }
+
+    // GET /api/employee/staff
+    if (event.httpMethod === 'GET' && tail[0] === 'staff') {
+      const { error: managerError, statusCode } = await resolveStaffManager(supabase, authUser);
+      if (managerError) {
+        return json(statusCode, { success: false, error: managerError });
+      }
+
+      const { data, error } = await supabase
+        .from('employees')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        return json(500, { success: false, error: error.message || 'Failed to fetch staff' });
+      }
+
+      return json(200, { success: true, employees: data || [] });
+    }
+
+    // POST /api/employee/staff
+    if (event.httpMethod === 'POST' && tail[0] === 'staff') {
+      const { employee: manager, error: managerError, statusCode } = await resolveStaffManager(supabase, authUser);
+      if (managerError) {
+        return json(statusCode, { success: false, error: managerError });
+      }
+
+      const body = readBody(event);
+      const full_name = String(body?.full_name || '').trim();
+      const email = normalizeEmail(body?.email || '');
+      const password = String(body?.password || '').trim();
+      const role = normalizeRole(body?.role || 'DATA_ENTRY') || 'DATA_ENTRY';
+      const phone = String(body?.phone || '').trim() || null;
+      const department = String(body?.department || '').trim() || roleToDepartment(role) || null;
+
+      if (!full_name || !email || !password) {
+        return json(400, { success: false, error: 'full_name, email and password are required' });
+      }
+
+      if (normalizeRole(manager?.role) === 'HR' && ['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN'].includes(role)) {
+        return json(403, { success: false, error: 'HR portal cannot create privileged staff roles' });
+      }
+
+      const passwordValidation = validateStrongPassword(password);
+      if (!passwordValidation.ok) {
+        return json(400, { success: false, error: passwordValidation.error });
+      }
+
+      const password_hash = await hashPassword(password);
+      const publicUser = await upsertPublicUser({
+        email,
+        full_name,
+        role,
+        phone,
+        password_hash,
+        allowPasswordUpdate: true,
+      });
+
+      const employeePayload = {
+        user_id: publicUser.id,
+        full_name,
+        email,
+        phone,
+        role,
+        department,
+        status: 'ACTIVE',
+        updated_at: new Date().toISOString(),
+      };
+
+      const { data: existingByUserId, error: existingByUserIdError } = await supabase
+        .from('employees')
+        .select('*')
+        .eq('user_id', publicUser.id)
+        .maybeSingle();
+
+      if (existingByUserIdError) {
+        return json(500, { success: false, error: existingByUserIdError.message });
+      }
+
+      let existingEmployee = existingByUserId || null;
+
+      if (!existingEmployee) {
+        const { data: existingByEmail, error: existingByEmailError } = await supabase
+          .from('employees')
+          .select('*')
+          .ilike('email', email)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingByEmailError) {
+          return json(500, { success: false, error: existingByEmailError.message });
+        }
+
+        existingEmployee = existingByEmail || null;
+      }
+
+      let employeeRow = null;
+      if (existingEmployee?.id) {
+        const { data: updatedEmployee, error: updateEmployeeError } = await supabase
+          .from('employees')
+          .update(employeePayload)
+          .eq('id', existingEmployee.id)
+          .select('*')
+          .maybeSingle();
+
+        if (updateEmployeeError) {
+          return json(500, { success: false, error: updateEmployeeError.message });
+        }
+
+        employeeRow = updatedEmployee || { ...existingEmployee, ...employeePayload };
+      } else {
+        const { data: insertedEmployee, error: insertEmployeeError } = await supabase
+          .from('employees')
+          .insert([
+            {
+              ...employeePayload,
+              created_at: new Date().toISOString(),
+            },
+          ])
+          .select('*')
+          .maybeSingle();
+
+        if (insertEmployeeError) {
+          return json(500, { success: false, error: insertEmployeeError.message });
+        }
+
+        employeeRow = insertedEmployee || null;
+      }
+
+      return json(200, {
+        success: true,
+        employee: employeeRow,
+        reused_existing: Boolean(existingEmployee?.id),
       });
     }
 

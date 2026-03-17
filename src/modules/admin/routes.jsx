@@ -156,15 +156,17 @@ export const AdminRoutes = () => {
   const location = useLocation();
   const { appType } = useSubdomain();
   const path = location.pathname || '';
+  const isDirectInternalPortalMode = appType === 'admin' || appType === 'management';
   const isFinanceScope = path.includes('/finance-portal');
   const isHrScope = path.startsWith('/hr');
   const isEmployeeScope = path.startsWith('/employee');
-  const isAdminScope = appType === 'admin' || appType === 'management' || path.startsWith('/admin') || (!isFinanceScope && !isHrScope && !isEmployeeScope);
+  const isAdminScope = isDirectInternalPortalMode || path.startsWith('/admin') || (!isFinanceScope && !isHrScope && !isEmployeeScope);
 
   return (
     <Routes>
       {/* ✅ Correct login route for /admin/login, /employee/login, /hr/login */}
       <Route path="login" element={<LoginRouter />} />
+      {isDirectInternalPortalMode ? <Route path="finance-portal/login" element={<LoginRouter />} /> : null}
 
       {/* Legacy finance path redirect */}
       {isAdminScope ? <Route path="finance-portal/*" element={<Navigate to="/finance-portal/dashboard" replace />} /> : null}
@@ -183,12 +185,21 @@ export const AdminRoutes = () => {
 
       {/* Finance Portal */}
       {isFinanceScope ? (
-        <Route element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
-          <Route element={<PortalLayout role="FINANCE" />}>
-            <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<FinanceDashboard />} />
+        isDirectInternalPortalMode ? (
+          <Route path="finance-portal" element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
+            <Route element={<PortalLayout role="FINANCE" />}>
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<FinanceDashboard />} />
+            </Route>
           </Route>
-        </Route>
+        ) : (
+          <Route element={<ProtectedRoute allowedRoles={['FINANCE', 'ADMIN']} />}>
+            <Route element={<PortalLayout role="FINANCE" />}>
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<FinanceDashboard />} />
+            </Route>
+          </Route>
+        )
       ) : null}
 
       {/* Admin */}

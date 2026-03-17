@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -81,6 +81,7 @@ const SidebarItem = ({ icon: Icon, label, path, active, collapsed, resolvePath, 
 
 const PortalLayout = () => {
   useGlobalInputSanitizer();
+  const VENDOR_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -89,6 +90,7 @@ const PortalLayout = () => {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { resolvePath } = useSubdomain();
+  const idleTimerRef = useRef(null);
 
   // ✅ Local "me" for header display
   const [me, setMe] = useState(user || null);
@@ -233,6 +235,47 @@ const PortalLayout = () => {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  useEffect(() => {
+    if (!user?.id) {
+      if (idleTimerRef.current) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    const resetIdleTimer = () => {
+      if (idleTimerRef.current) {
+        window.clearTimeout(idleTimerRef.current);
+      }
+
+      idleTimerRef.current = window.setTimeout(async () => {
+        try {
+          await logout?.();
+        } finally {
+          window.location.replace(`${resolvePath('login', 'vendor')}?reason=timeout`);
+        }
+      }, VENDOR_IDLE_TIMEOUT_MS);
+    };
+
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, resetIdleTimer, { passive: true });
+    });
+
+    resetIdleTimer();
+
+    return () => {
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resetIdleTimer);
+      });
+      if (idleTimerRef.current) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
+      }
+    };
+  }, [logout, resolvePath, user?.id]);
 
   // ✅ This is the KEY fix: blur actual UI (not backdrop-filter)
   const blurWrapperClass = showOverlay
