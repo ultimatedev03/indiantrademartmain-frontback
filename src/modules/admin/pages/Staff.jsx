@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
-import { Plus, Search, Trash2, Loader2, KeyRound } from "lucide-react";
+import { Plus, Search, Trash2, Loader2, KeyRound, Eye, EyeOff } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
 import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from "@/lib/passwordPolicy";
@@ -103,6 +103,9 @@ const Staff = () => {
   const [pwSaving, setPwSaving] = useState(false);
   const [pwEmployee, setPwEmployee] = useState(null);
   const [pwForm, setPwForm] = useState({ password: "", confirm: "" });
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
+  const [showPwPassword, setShowPwPassword] = useState(false);
+  const [showPwConfirm, setShowPwConfirm] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: "",
@@ -194,6 +197,7 @@ const Staff = () => {
         department: "Operations",
         password: "",
       });
+      setShowCreatePassword(false);
       await loadEmployees();
     } catch (error) {
       toast({
@@ -226,6 +230,8 @@ const Staff = () => {
   const openChangePassword = (employee) => {
     setPwEmployee(employee);
     setPwForm({ password: "", confirm: "" });
+    setShowPwPassword(false);
+    setShowPwConfirm(false);
     setPwDialogOpen(true);
   };
 
@@ -283,7 +289,15 @@ const Staff = () => {
           <p className="text-muted-foreground">Manage employees and their access roles.</p>
         </div>
 
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (!open) {
+              setShowCreatePassword(false);
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button className="bg-[#003D82]">
               <Plus className="mr-2 h-4 w-4" /> Add Employee
@@ -326,12 +340,23 @@ const Staff = () => {
 
               <div className="space-y-2">
                 <Label>Password</Label>
-                <Input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="********"
-                />
+                <div className="relative">
+                  <Input
+                    type={showCreatePassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    placeholder="********"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCreatePassword((prev) => !prev)}
+                    className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700"
+                    aria-label={showCreatePassword ? "Hide password" : "Show password"}
+                  >
+                    {showCreatePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
                 <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_MESSAGE}</p>
               </div>
 
@@ -381,7 +406,13 @@ const Staff = () => {
             </div>
 
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setShowCreatePassword(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button onClick={handleCreate} disabled={saving}>
@@ -484,7 +515,16 @@ const Staff = () => {
       </div>
 
       {/* Change Password Dialog */}
-      <Dialog open={pwDialogOpen} onOpenChange={setPwDialogOpen}>
+      <Dialog
+        open={pwDialogOpen}
+        onOpenChange={(open) => {
+          setPwDialogOpen(open);
+          if (!open) {
+            setShowPwPassword(false);
+            setShowPwConfirm(false);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change Password</DialogTitle>
@@ -498,28 +538,57 @@ const Staff = () => {
 
             <div className="space-y-2">
               <Label>New Password</Label>
-              <Input
-                type="password"
-                value={pwForm.password}
-                onChange={(e) => setPwForm((p) => ({ ...p, password: e.target.value }))}
-                placeholder="********"
-              />
+              <div className="relative">
+                <Input
+                  type={showPwPassword ? "text" : "password"}
+                  value={pwForm.password}
+                  onChange={(e) => setPwForm((p) => ({ ...p, password: e.target.value }))}
+                  placeholder="********"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwPassword((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700"
+                  aria-label={showPwPassword ? "Hide password" : "Show password"}
+                >
+                  {showPwPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground">{PASSWORD_POLICY_MESSAGE}</p>
             </div>
 
             <div className="space-y-2">
               <Label>Confirm Password</Label>
-              <Input
-                type="password"
-                value={pwForm.confirm}
-                onChange={(e) => setPwForm((p) => ({ ...p, confirm: e.target.value }))}
-                placeholder="********"
-              />
+              <div className="relative">
+                <Input
+                  type={showPwConfirm ? "text" : "password"}
+                  value={pwForm.confirm}
+                  onChange={(e) => setPwForm((p) => ({ ...p, confirm: e.target.value }))}
+                  placeholder="********"
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwConfirm((prev) => !prev)}
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-500 hover:text-slate-700"
+                  aria-label={showPwConfirm ? "Hide password" : "Show password"}
+                >
+                  {showPwConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPwDialogOpen(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setPwDialogOpen(false);
+                setShowPwPassword(false);
+                setShowPwConfirm(false);
+              }}
+            >
               Cancel
             </Button>
             <Button onClick={handleChangePassword} disabled={pwSaving}>

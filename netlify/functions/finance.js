@@ -24,6 +24,9 @@ const getSupabase = () => {
 
 const COUPON_CODE_REGEX = /^[A-Z0-9_-]+$/;
 const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
+const INDIA_TZ_OFFSET_MINUTES = 5 * 60 + 30;
+const ISO_TZ_SUFFIX_REGEX = /(Z|[+-]\d{2}:\d{2})$/i;
+const LOCAL_DATETIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
 
 const looksLikeUuid = (value) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -51,13 +54,53 @@ const normalizePlanScopeId = (planScope) => {
   return token;
 };
 
+const parseCouponExpiryInput = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  if (ISO_TZ_SUFFIX_REGEX.test(raw)) {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const localMatch = raw.match(LOCAL_DATETIME_REGEX);
+  if (localMatch) {
+    const [, year, month, day, hours, minutes, seconds = '0'] = localMatch;
+    const utcMillis =
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hours),
+        Number(minutes),
+        Number(seconds)
+      ) -
+      INDIA_TZ_OFFSET_MINUTES * 60 * 1000;
+    const parsed = new Date(utcMillis);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getCouponExpiryMs = (coupon = {}) => {
+  const candidates = [coupon?.expires_at, coupon?.expiry_at, coupon?.valid_till, coupon?.expires_on];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const parsed = parseCouponExpiryInput(candidate);
+    if (parsed) return parsed.getTime();
+  }
+  return null;
+};
+
 const resolveCouponStatus = (coupon = {}) => {
   const usedCount = Number(coupon?.used_count || 0);
   const maxUses = Number(coupon?.max_uses || 0);
-  const expiresAt = coupon?.expires_at ? new Date(coupon.expires_at).getTime() : null;
+  const expiresAt = getCouponExpiryMs(coupon);
 
   if (coupon?.is_active === false) return "INACTIVE";
-  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt < Date.now()) return "EXPIRED";
+  if (expiresAt !== null && !Number.isNaN(expiresAt) && expiresAt <= Date.now()) return "EXPIRED";
   if (maxUses > 0 && usedCount >= maxUses) return "USED_UP";
   return "ACTIVE";
 };
@@ -270,8 +313,8 @@ export const handler = async (event) => {
         return json(400, { success: false, error: 'max_uses must be 0 or more' });
       }
 
-      const normalizedExpiresAt = expires_at ? new Date(expires_at) : null;
-      if (normalizedExpiresAt && Number.isNaN(normalizedExpiresAt.getTime())) {
+      const normalizedExpiresAt = parseCouponExpiryInput(expires_at);
+      if (expires_at && !normalizedExpiresAt) {
         return json(400, { success: false, error: 'expires_at must be a valid date/time' });
       }
 
@@ -290,7 +333,16 @@ export const handler = async (event) => {
         created_at: new Date().toISOString(),
       };
       const { data, error } = await supabase.from('vendor_plan_coupons').insert([payload]).select().single();
-      if (error) return json(500, { success: false, error: error.message });
+      if (error) {
+        const normalizedMessage = String(error.message || '').toLowerCase();
+        const status = error.code === '23505' ? 409 : 500;
+        const friendlyMessage =
+          error.code === '23505' &&
+          (normalizedMessage.includes('vendor_plan_coupons_code_key') || normalizedMessage.includes('duplicate'))
+            ? 'Coupon code already exists. Use a different code.'
+            : error.message;
+        return json(status, { success: false, error: friendlyMessage });
+      }
       return json(200, { success: true, data });
     }
 

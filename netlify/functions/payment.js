@@ -157,6 +157,45 @@ const normalizeCouponCode = (value) =>
     .replace(/\s+/g, '')
     .replace(/[^A-Z0-9_-]/g, '');
 
+const INDIA_TZ_OFFSET_MINUTES = 5 * 60 + 30;
+const ISO_TZ_SUFFIX_REGEX = /(Z|[+-]\d{2}:\d{2})$/i;
+const LOCAL_DATETIME_REGEX = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/;
+
+const parseCouponExpiryInput = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  if (ISO_TZ_SUFFIX_REGEX.test(raw)) {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const localMatch = raw.match(LOCAL_DATETIME_REGEX);
+  if (localMatch) {
+    const [, year, month, day, hours, minutes, seconds = '0'] = localMatch;
+    const utcMillis =
+      Date.UTC(
+        Number(year),
+        Number(month) - 1,
+        Number(day),
+        Number(hours),
+        Number(minutes),
+        Number(seconds)
+      ) -
+      INDIA_TZ_OFFSET_MINUTES * 60 * 1000;
+    const parsed = new Date(utcMillis);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getCouponExpiresAtMs = (coupon = {}) => {
+  const parsed = parseCouponExpiryInput(coupon?.expires_at);
+  return parsed ? parsed.getTime() : null;
+};
+
 const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
 
 const normalizeScope = (value) => String(value || '').trim();
@@ -393,8 +432,8 @@ async function resolveOfferForPayment({
       .maybeSingle();
 
     if (cpn && !couponErr) {
-      const now = new Date();
-      if (cpn.expires_at && new Date(cpn.expires_at) < now) {
+      const expiresAtMs = getCouponExpiresAtMs(cpn);
+      if (expiresAtMs !== null && expiresAtMs <= Date.now()) {
         couponFailureMessage = 'Coupon expired';
       } else if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) {
         couponFailureMessage = 'Coupon usage limit reached';

@@ -270,7 +270,7 @@ const resolveCouponStatus = (coupon = {}) => {
   const expiresAt = parseCouponExpiryAt(coupon)?.getTime() ?? null;
 
   if (coupon?.is_active === false) return 'INACTIVE';
-  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt <= Date.now()) return 'EXPIRED';
+  if (expiresAt !== null && !Number.isNaN(expiresAt) && expiresAt <= Date.now()) return 'EXPIRED';
   if (maxUses > 0 && usedCount >= maxUses) return 'USED_UP';
   return 'ACTIVE';
 };
@@ -559,8 +559,14 @@ router.post('/coupons', async (req, res) => {
 
     const { data, error } = await supabase.from('vendor_plan_coupons').insert([payload]).select().single();
     if (error) {
+      const normalizedMessage = String(error.message || '').toLowerCase();
       const status = error.code === '23505' ? 409 : 500;
-      return res.status(status).json({ success: false, error: error.message });
+      const friendlyMessage =
+        error.code === '23505' &&
+        (normalizedMessage.includes('vendor_plan_coupons_code_key') || normalizedMessage.includes('duplicate'))
+          ? 'Coupon code already exists. Use a different code.'
+          : error.message;
+      return res.status(status).json({ success: false, error: friendlyMessage });
     }
 
     await writeAuditLog({

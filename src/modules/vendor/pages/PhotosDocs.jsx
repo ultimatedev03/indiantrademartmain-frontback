@@ -148,6 +148,8 @@ const PhotosDocs = () => {
   };
 
   const handleUpload = async (e, type) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     const file = e.target.files[0];
     if (!file) return;
 
@@ -161,6 +163,7 @@ const PhotosDocs = () => {
       toast({ title: "Upload failed", description: error.message, variant: "destructive" });
     } finally {
       setUploading(false);
+      try { e.target.value = ''; } catch (_) {}
     }
   };
 
@@ -228,16 +231,18 @@ const PhotosDocs = () => {
                                               <Eye className="w-3 h-3" />
                                           </a>
                                       </Button>
-                                      <Button size="sm" variant="destructive" onClick={() => handleDelete(kycDocs.find(d => d.document_type === type).id)}>
+                                      <Button type="button" size="sm" variant="destructive" onClick={() => handleDelete(kycDocs.find(d => d.document_type === type).id)}>
                                           <Trash2 className="w-3 h-3" />
                                       </Button>
                                   </div>
                               </div>
                           ) : (
-                              <Button className="w-full relative" disabled={uploading}>
-                                  {uploading ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Upload className="w-3 h-3 mr-2" />}
-                                  Upload
-                                  <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={(e) => handleUpload(e, type)} />
+                              <Button asChild className="w-full" disabled={uploading}>
+                                  <label className="cursor-pointer">
+                                      {uploading ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Upload className="w-3 h-3 mr-2" />}
+                                      Upload
+                                      <input type="file" className="hidden" onChange={(e) => handleUpload(e, type)} />
+                                  </label>
                               </Button>
                           )}
                       </CardContent>
@@ -248,16 +253,18 @@ const PhotosDocs = () => {
 
         <TabsContent value="other" className="space-y-6">
           <div className="flex items-center gap-4">
-            <Button className="relative bg-[#003D82]" disabled={uploading}>
-              {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-              Upload General Document
-              <input 
-                type="file" 
-                accept=".pdf,.doc,.docx,.jpg,.png" 
-                className="absolute inset-0 opacity-0 cursor-pointer" 
-                onChange={(e) => handleUpload(e, 'general')}
-                disabled={uploading}
-              />
+            <Button asChild className="bg-[#003D82]" disabled={uploading}>
+              <label className="cursor-pointer">
+                {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                Upload General Document
+                <input 
+                  type="file" 
+                  accept=".pdf,.doc,.docx,.jpg,.png" 
+                  className="hidden"
+                  onChange={(e) => handleUpload(e, 'general')}
+                  disabled={uploading}
+                />
+              </label>
             </Button>
           </div>
 
@@ -277,7 +284,7 @@ const PhotosDocs = () => {
                   <Button variant="outline" size="sm" asChild>
                     <a href={doc.document_url} target="_blank" rel="noreferrer"><Download className="w-4 h-4" /></a>
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-red-500 hover:text-red-600" onClick={() => handleDelete(doc.id)}>
+                  <Button type="button" variant="ghost" size="icon" className="text-red-500 hover:text-red-600" onClick={() => handleDelete(doc.id)}>
                     <Trash2 className="h-4 w-4" />
                   </Button>
                 </div>

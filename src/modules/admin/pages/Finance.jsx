@@ -66,6 +66,23 @@ const resolveCouponStatusMeta = (coupon = {}, nowTs = Date.now()) => {
   return { label: 'Active', variant: 'default' };
 };
 
+const isDuplicateCouponError = (message) => {
+  const normalized = String(message || '').trim().toLowerCase();
+  return (
+    normalized.includes('already exists') ||
+    normalized.includes('vendor_plan_coupons_code_key') ||
+    (normalized.includes('duplicate') && normalized.includes('coupon'))
+  );
+};
+
+const getCouponCreateErrorMessage = (error) => {
+  const message = String(error?.message || error || '').trim();
+  if (isDuplicateCouponError(message)) {
+    return 'Coupon code already exists. Use a different code.';
+  }
+  return message || 'Failed to create coupon';
+};
+
 const defaultReferralSettings = {
   is_enabled: false,
   first_paid_plan_only: true,
@@ -212,7 +229,7 @@ const AdminFinance = () => {
   }, []);
 
   useEffect(() => {
-    const intervalId = window.setInterval(() => setCouponStatusNow(Date.now()), 5000);
+    const intervalId = window.setInterval(() => setCouponStatusNow(Date.now()), 1000);
     return () => window.clearInterval(intervalId);
   }, []);
 
@@ -268,6 +285,15 @@ const AdminFinance = () => {
         return;
       }
 
+      if ((coupons || []).some((coupon) => normalizeCouponCode(coupon?.code) === normalizedCode)) {
+        toast({
+          title: 'Duplicate code',
+          description: 'Coupon code already exists. Use a different code.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
       const payload = {
         ...form,
         code: normalizedCode,
@@ -287,7 +313,7 @@ const AdminFinance = () => {
       setForm((prev) => ({ ...prev, code: '', value: '', max_uses: '', vendor_id: '', expires_at: '' }));
       fetchData(cashoutStatus, false);
     } catch (e) {
-      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+      toast({ title: 'Error', description: getCouponCreateErrorMessage(e), variant: 'destructive' });
     }
   };
 

@@ -17,6 +17,27 @@ import {
 } from 'lucide-react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 
+const normalizeVendorProfile = (profile = {}) => ({
+  ...profile,
+  companyName: profile.companyName || profile.company_name,
+  ownerName: profile.ownerName || profile.owner_name,
+  gstNumber: profile.gstNumber || profile.gst_number,
+  panNumber: profile.panNumber || profile.pan_number,
+  aadharNumber: profile.aadharNumber || profile.aadhar_number,
+  secondaryEmail: profile.secondaryEmail || profile.secondary_email,
+  secondaryPhone: profile.secondaryPhone || profile.secondary_phone,
+  landlineNumber: profile.landlineNumber || profile.landline_number,
+  websiteUrl: profile.websiteUrl || profile.website_url,
+  primaryBusinessType: profile.primaryBusinessType || profile.primary_business_type,
+  annualTurnover: profile.annualTurnover || profile.annual_turnover,
+  businessDescription: profile.businessDescription || profile.business_description || profile.description,
+  cinNumber: profile.cinNumber || profile.cin_number,
+  llpinNumber: profile.llpinNumber || profile.llpin_number,
+  iecCode: profile.iecCode || profile.iec_code,
+  yearOfEstablishment: profile.yearOfEstablishment ?? profile.year_of_establishment,
+  ownerDesignation: profile.ownerDesignation || profile.owner_designation,
+});
+
 const Profile = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -44,8 +65,10 @@ const Profile = () => {
     if (tabParam && tabParam !== activeTab) setActiveTab(tabParam);
   }, [searchParams, activeTab]);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [prof, bankList, docList, sub] = await Promise.all([
         vendorApi.auth.me(),
@@ -54,59 +77,16 @@ const Profile = () => {
         vendorApi.subscriptions.getCurrent()
       ]);
 
-      const p = prof || {};
-
-      // Normalize the profile data to ensure both snake_case and camelCase keys exist
-      const normalizedProfile = {
-        ...p,
-        companyName: p.companyName || p.company_name,
-        ownerName: p.ownerName || p.owner_name,
-        gstNumber: p.gstNumber || p.gst_number,
-        panNumber: p.panNumber || p.pan_number,
-        aadharNumber: p.aadharNumber || p.aadhar_number,
-        secondaryEmail: p.secondaryEmail || p.secondary_email,
-        secondaryPhone: p.secondaryPhone || p.secondary_phone,
-        landlineNumber: p.landlineNumber || p.landline_number,
-        websiteUrl: p.websiteUrl || p.website_url,
-        primaryBusinessType: p.primaryBusinessType || p.primary_business_type,
-        annualTurnover: p.annualTurnover || p.annual_turnover,
-        businessDescription: p.businessDescription || p.business_description || p.description,
-        cinNumber: p.cinNumber || p.cin_number,
-        llpinNumber: p.llpinNumber || p.llpin_number,
-        iecCode: p.iecCode || p.iec_code,
-        yearOfEstablishment: p.yearOfEstablishment ?? p.year_of_establishment,
-        ownerDesignation: p.ownerDesignation || p.owner_designation,
-      };
+      const normalizedProfile = normalizeVendorProfile(prof || {});
 
       setProfile(normalizedProfile);
-      setDraft(normalizedProfile);
+      if (!silent) {
+        setDraft(normalizedProfile);
+      }
       setKycStatus(normalizedProfile.kyc_status || 'PENDING');
       setBanks(bankList || []);
       setDocuments(docList || []);
       setSubscription(sub || null);
-
-      // Subscribe to real-time KYC status updates
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        supabase
-          .channel('profile_kyc_updates')
-          .on(
-            'postgres_changes',
-            {
-              event: 'UPDATE',
-              schema: 'public',
-              table: 'vendors',
-              filter: `user_id=eq.${user.id}`
-            },
-            (payload) => {
-              console.log('🔄 KYC status updated:', payload);
-              if (payload.new?.kyc_status) {
-                setKycStatus(payload.new.kyc_status);
-              }
-            }
-          )
-          .subscribe();
-      }
     } catch (e) {
       console.error(e);
       toast({
@@ -115,12 +95,57 @@ const Profile = () => {
         variant: "destructive"
       });
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
       setSubscriptionLoading(false);
     }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    let isActive = true;
+    let channel = null;
+
+    const setupSubscription = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!isActive || !user?.id) return;
+
+      channel = supabase
+        .channel('profile_kyc_updates')
+        .on(
+          'postgres_changes',
+          {
+            event: 'UPDATE',
+            schema: 'public',
+            table: 'vendors',
+            filter: `user_id=eq.${user.id}`
+          },
+          (payload) => {
+            const nextStatus = payload.new?.kyc_status;
+            if (!nextStatus) return;
+            setKycStatus(nextStatus);
+            setProfile((prev) => ({ ...prev, kyc_status: nextStatus }));
+            setDraft((prev) => ({ ...prev, kyc_status: nextStatus }));
+          }
+        )
+        .subscribe();
+    };
+
+    setupSubscription().catch(() => {});
+
+    return () => {
+      isActive = false;
+      if (channel) {
+        supabase.removeChannel(channel).catch(() => {});
+      }
+    };
+  }, []);
+
+  const refreshKycData = useCallback(async () => {
+    await loadData({ silent: true });
+  }, [loadData]);
 
   // ✅ FIXED: auth-only fields removed, confirmed_at removed
   const handleSave = async () => {
@@ -731,8 +756,8 @@ const Profile = () => {
               <TabsContent value="kyc" className="m-0 p-6">
                 <DocumentsSection
                   documents={documents}
-                  onRefresh={loadData}
-                  kycStatus={profile.kyc_status}
+                  onRefresh={refreshKycData}
+                  kycStatus={kycStatus}
                 />
               </TabsContent>
             </div>
@@ -963,6 +988,8 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
   const [submitting, setSubmitting] = useState(false);
 
   const handleUpload = async (e, type) => {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -1051,6 +1078,7 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
                     </a>
                   </Button>
                   <Button
+                    type="button"
                     variant="ghost"
                     size="icon"
                     className="text-red-400"
@@ -1084,6 +1112,7 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
 
       <div className="mt-8 flex justify-end border-t pt-4">
         <Button
+          type="button"
           className="bg-[#003D82] px-8"
           disabled={submitting || kycStatus === 'SUBMITTED' || kycStatus === 'VERIFIED' || !canSubmitKyc}
           onClick={async () => {
