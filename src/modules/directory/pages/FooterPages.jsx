@@ -1,11 +1,22 @@
 import { submitContactForm } from '@/modules/directory/services/contactApi';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
+import { successStories } from '@/modules/directory/pages/successStoriesData';
 import { Clock, Eye, Heart, Loader, Mail, MapPin, Phone, Search, ShoppingCart, Star } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 
 const buildMailtoLink = (email, subject) =>
   `mailto:${email}?subject=${encodeURIComponent(subject || '')}`;
+
+const buildContactPath = ({ subject = '', message = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (message) params.set('message', message);
+  const query = params.toString();
+  return query ? `/contact?${query}` : '/contact';
+};
+
+const CAREER_OPENINGS_PATH = '/career#career-openings';
 
 // ==================== JOIN SALES PAGE ====================
 export const JoinSales = () => (
@@ -20,7 +31,7 @@ export const JoinSales = () => (
       <div className="max-w-2xl bg-white rounded-lg shadow-sm p-8">
         <h2 className="text-2xl font-bold mb-4">Sales Partnership Opportunities</h2>
         <p className="text-gray-600 mb-6">We are looking for motivated professionals to join our sales team.</p>
-        <Link to="/career" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+        <Link to={CAREER_OPENINGS_PATH} className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
           Apply Now
         </Link>
       </div>
@@ -39,11 +50,11 @@ export const SuccessStories = () => (
     </div>
     <div className="container mx-auto px-4 py-16">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        {[1, 2, 3, 4].map(i => (
-          <div key={i} className="bg-white rounded-lg shadow-sm p-6 hover:shadow-lg transition">
-            <h3 className="text-xl font-bold mb-2">Success Story {i}</h3>
-            <p className="text-gray-600 mb-4">Learn how Company {i} achieved 300% growth using our platform...</p>
-            <Link to="/contact" className="text-blue-600 hover:text-blue-800 font-semibold">
+        {successStories.map((story) => (
+          <div key={story.slug} className="bg-white rounded-lg shadow-sm p-6 hover:shadow-lg transition">
+            <h3 className="text-xl font-bold mb-2">{story.title}</h3>
+            <p className="text-gray-600 mb-4">{story.excerpt}</p>
+            <Link to={`/success-stories/${story.slug}`} className="text-blue-600 hover:text-blue-800 font-semibold">
               Read Full Story →
             </Link>
           </div>
@@ -145,7 +156,13 @@ export const CustomerCare = () => (
           <div className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-xl font-bold text-gray-900 mb-3">Submit a Ticket</h3>
             <p className="text-gray-600 mb-4">Get in touch with our support team for detailed assistance.</p>
-            <Link to="/contact" className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
+            <Link
+              to={buildContactPath({
+                subject: 'Customer Care Support Request',
+                message: 'Hi team, I need support with my account / order / listing. Please contact me.',
+              })}
+              className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
+            >
               Submit Ticket
             </Link>
           </div>
@@ -167,7 +184,13 @@ export const CustomerCare = () => (
         <h2 className="text-3xl font-bold text-gray-900 mb-6">Give Us Feedback</h2>
         <div className="bg-white rounded-lg shadow-sm p-8">
           <p className="text-gray-600 mb-6">We value your feedback. Let us know how we can improve our services.</p>
-          <Link to="/contact" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+          <Link
+            to={buildContactPath({
+              subject: 'Customer Care Feedback',
+              message: 'Hi team, I would like to share feedback about my experience with IndianTradeMart.',
+            })}
+            className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700"
+          >
             Share Feedback
           </Link>
         </div>
@@ -189,7 +212,13 @@ export const Complaints = () => (
       <div className="bg-white rounded-lg shadow-sm p-8 max-w-2xl mx-auto">
         <h2 className="text-2xl font-bold mb-4">File a Complaint</h2>
         <p className="text-gray-600 mb-6">We take complaints seriously. Let us know how we can improve.</p>
-        <Link to="/contact" className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700">
+        <Link
+          to={buildContactPath({
+            subject: 'Complaint / Grievance Submission',
+            message: 'Hi team, I would like to file a complaint. Please review the issue described below.',
+          })}
+          className="inline-flex bg-blue-600 text-white px-8 py-3 rounded-lg hover:bg-blue-700"
+        >
           File Complaint
         </Link>
       </div>
@@ -212,7 +241,7 @@ export const Jobs = () => (
           <div key={i} className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-bold mb-2">{job}</h3>
             <p className="text-gray-600 mb-4">Location: India</p>
-            <Link to="/career" className="text-blue-600 hover:text-blue-800 font-semibold">
+            <Link to={CAREER_OPENINGS_PATH} className="text-blue-600 hover:text-blue-800 font-semibold">
               Apply Now →
             </Link>
           </div>
@@ -224,6 +253,7 @@ export const Jobs = () => (
 
 // ==================== CONTACT PAGE ====================
 export const ContactPage = () => {
+  const [searchParams] = useSearchParams();
   const normalizePhone = (value) =>
     String(value || '')
       .replace(/\D/g, '')
@@ -234,12 +264,20 @@ export const ContactPage = () => {
     lastName: '',
     email: '',
     phone: '',
-    subject: '',
-    message: ''
+    subject: searchParams.get('subject') || '',
+    message: searchParams.get('message') || ''
   });
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+
+  useEffect(() => {
+    setFormData((prev) => ({
+      ...prev,
+      subject: searchParams.get('subject') || '',
+      message: searchParams.get('message') || '',
+    }));
+  }, [searchParams]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -547,7 +585,13 @@ export const LearningCentre = () => (
           <div key={i} className="bg-white rounded-lg shadow-sm p-6">
             <h3 className="text-lg font-bold mb-2">{course}</h3>
             <p className="text-gray-600 mb-4">Learn from industry experts</p>
-            <Link to="/contact" className="text-blue-600 hover:text-blue-800 font-semibold">
+            <Link
+              to={buildContactPath({
+                subject: `Learning Centre Enrollment - ${course}`,
+                message: `Hi team, I want to know more about the "${course}" learning module.`,
+              })}
+              className="text-blue-600 hover:text-blue-800 font-semibold"
+            >
               Enroll Now →
             </Link>
           </div>

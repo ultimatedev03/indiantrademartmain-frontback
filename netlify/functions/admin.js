@@ -163,6 +163,119 @@ function buildBuyerStatusUpdates(current, { isActive, reason = "" }) {
   return updates;
 }
 
+function isUniqueViolationError(error) {
+  const code = String(error?.code || "").trim();
+  const message = String(error?.message || "").toLowerCase();
+  return code === "23505" || message.includes("duplicate key") || message.includes("unique constraint");
+}
+
+async function ensureEmployeePublicUser({
+  preferredId,
+  email,
+  full_name,
+  role,
+  phone,
+  password_hash = null,
+}) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new Error("Missing public user email");
+  }
+
+  const now = nowIso();
+  const resolvedName = String(full_name || "").trim() || normalizedEmail.split("@")[0];
+  const resolvedRole = String(role || "DATA_ENTRY").trim().toUpperCase() || "DATA_ENTRY";
+  const resolvedPhone = String(phone || "").trim() || null;
+
+  const { data: existingByEmail, error: existingByEmailError } = await supabase
+    .from("users")
+    .select("*")
+    .ilike("email", normalizedEmail)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingByEmailError) {
+    throw new Error(existingByEmailError.message || "Failed to fetch public user");
+  }
+
+  const updates = {
+    full_name: resolvedName,
+    role: resolvedRole,
+    phone: resolvedPhone,
+    updated_at: now,
+  };
+
+  if (password_hash && (existingByEmail?.password_hash !== password_hash || !existingByEmail?.password_hash)) {
+    updates.password_hash = password_hash;
+  }
+
+  if (existingByEmail?.id) {
+    const { data, error } = await supabase
+      .from("users")
+      .update(updates)
+      .eq("id", existingByEmail.id)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message || "Failed to update public user");
+    }
+
+    return data || { ...existingByEmail, ...updates };
+  }
+
+  const payload = {
+    id: preferredId || randomUUID(),
+    email: normalizedEmail,
+    full_name: resolvedName,
+    role: resolvedRole,
+    phone: resolvedPhone,
+    password_hash: password_hash || null,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from("users")
+    .insert([payload])
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    if (isUniqueViolationError(error)) {
+      const { data: recovered, error: recoveredError } = await supabase
+        .from("users")
+        .select("*")
+        .ilike("email", normalizedEmail)
+        .limit(1)
+        .maybeSingle();
+
+      if (recoveredError) {
+        throw new Error(recoveredError.message || "Failed to recover public user");
+      }
+
+      if (recovered?.id) {
+        const { data: merged, error: mergeError } = await supabase
+          .from("users")
+          .update(updates)
+          .eq("id", recovered.id)
+          .select("*")
+          .maybeSingle();
+
+        if (mergeError) {
+          throw new Error(mergeError.message || "Failed to merge public user");
+        }
+
+        return merged || { ...recovered, ...updates };
+      }
+    }
+
+    throw new Error(error.message || "Failed to create public user");
+  }
+
+  return data || payload;
+}
+
 async function syncPublicUserPassword(employee, authUserId, password) {
   const email = normalizeEmail(employee?.email);
   if (!authUserId && !email) {
@@ -338,13 +451,6 @@ async function resolveEmployeeAuthUser(employee) {
     authUser = await findAuthUserByEmail(email);
   }
 
-  if (authUser && authUser.id && authUser.id !== employee.user_id) {
-    await supabase
-      .from("employees")
-      .update({ user_id: authUser.id })
-      .eq("id", employee.id);
-  }
-
   return authUser;
 }
 
@@ -376,10 +482,6 @@ async function ensureEmployeeAuthUser(employee, password) {
     }
 
     authUser = data.user;
-  }
-
-  if (authUser?.id && authUser.id !== employee.user_id) {
-    await supabase.from("employees").update({ user_id: authUser.id }).eq("id", employee.id);
   }
 
   return authUser;
@@ -483,46 +585,34 @@ export async function handler(event) {
           }
         }
 
-        const userId = authUser.id;
+        const authUserId = authUser.id;
+        const password_hash = await hashPassword(password);
 
-        const { data: existingPublicUser, error: existingPublicUserError } = await supabase
-          .from("users")
-          .select("*")
-          .ilike("email", email)
-          .limit(1)
-          .maybeSingle();
-        if (existingPublicUserError) return fail("Failed to sync public user", existingPublicUserError.message);
-
-        if (existingPublicUser?.id) {
-          const { error: updatePublicUserError } = await supabase
-            .from("users")
-            .update({
-              full_name,
-              role,
-              phone: phone || null,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existingPublicUser.id);
-          if (updatePublicUserError) return fail("Failed to sync public user", updatePublicUserError.message);
-        } else {
-          const { error: insertPublicUserError } = await supabase
-            .from("users")
-            .insert([
-              {
-                id: userId,
-                email,
-                full_name,
-                role,
-                phone: phone || null,
-                created_at: new Date().toISOString(),
-                updated_at: new Date().toISOString(),
-              },
-            ]);
-          if (insertPublicUserError) return fail("Failed to sync public user", insertPublicUserError.message);
+        let publicUser = null;
+        try {
+          publicUser = await ensureEmployeePublicUser({
+            preferredId: authUserId,
+            email,
+            full_name,
+            role,
+            phone,
+            password_hash,
+          });
+        } catch (publicUserError) {
+          if (createdAuthUser) {
+            try {
+              await supabase.auth.admin.deleteUser(authUserId);
+            } catch {
+              // ignore
+            }
+          }
+          return fail("Failed to sync public user", publicUserError?.message || String(publicUserError));
         }
 
+        const profileUserId = publicUser.id;
+
         const empPayload = {
-          user_id: userId,
+          user_id: profileUserId,
           full_name,
           email,
           phone: phone || null,
@@ -535,7 +625,7 @@ export async function handler(event) {
         const { data: existingByUserId, error: existingByUserIdError } = await supabase
           .from("employees")
           .select("*")
-          .eq("user_id", userId)
+          .eq("user_id", profileUserId)
           .maybeSingle();
         if (existingByUserIdError) return fail("Failed to fetch employee", existingByUserIdError.message);
 
@@ -575,7 +665,7 @@ export async function handler(event) {
         if (empErr) {
           try {
             if (createdAuthUser) {
-              await supabase.auth.admin.deleteUser(userId);
+              await supabase.auth.admin.deleteUser(authUserId);
             }
           } catch {
             // ignore
@@ -587,11 +677,11 @@ export async function handler(event) {
           action: existingEmployee?.id ? "STAFF_UPSERT" : "STAFF_CREATE",
           entity_type: "employees",
           entity_id: emp?.id || null,
-          details: { user_id: userId, email, role, department },
+          details: { user_id: profileUserId, auth_user_id: authUserId, email, role, department },
         });
 
         await notifyUser({
-          user_id: userId,
+          user_id: authUserId,
           type: "WELCOME",
           title: "Welcome to the Admin Team",
           message: "Your staff account has been created. Please log in to continue.",
@@ -713,14 +803,18 @@ export async function handler(event) {
         if (empFetchErr) return fail("Failed to fetch employee", empFetchErr.message);
 
         const userId = emp?.user_id || null;
+        const authUser = emp ? await resolveEmployeeAuthUser(emp) : null;
 
         const { error: delEmpErr } = await supabase.from("employees").delete().eq("id", employeeId);
         if (delEmpErr) return fail("Failed to delete employee", delEmpErr.message);
 
         if (userId) {
           await supabase.from("users").delete().eq("id", userId);
+        }
+
+        if (authUser?.id) {
           try {
-            await supabase.auth.admin.deleteUser(userId);
+            await supabase.auth.admin.deleteUser(authUser.id);
           } catch {
             // ignore
           }

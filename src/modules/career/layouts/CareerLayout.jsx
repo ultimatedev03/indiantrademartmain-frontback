@@ -17,7 +17,7 @@ const CareerLayout = () => {
   return (
     <div className="min-h-screen flex flex-col bg-white font-sans">
       <header className="sticky top-0 z-50 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
-        <div className="container flex h-16 items-center justify-between px-4">
+        <div className="container flex h-16 items-center justify-between gap-4 px-4">
           <div className="flex items-center gap-2">
             <Link to={withBase('/')} className="flex items-center space-x-2">
                <div className="bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold rounded-lg w-8 h-8 flex items-center justify-center">
@@ -28,7 +28,7 @@ const CareerLayout = () => {
                </span>
             </Link>
           </div>
-          <nav className="flex items-center gap-6 text-sm font-medium">
+          <nav className="flex items-center gap-3 text-xs font-medium sm:gap-6 sm:text-sm">
             <Link to={withBase('/jobs')} className="transition-colors hover:text-rose-500 text-slate-600">Open Roles</Link>
             <Link to={withBase('/culture')} className="transition-colors hover:text-rose-500 text-slate-600">Life at ITM</Link>
             <Link to={withBase('/internships')} className="transition-colors hover:text-rose-500 text-slate-600">Internships</Link>

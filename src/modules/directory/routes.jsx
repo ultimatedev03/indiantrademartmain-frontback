@@ -28,6 +28,7 @@ const ForgotPassword = lazy(() => import('@/shared/pages/ForgotPassword'));
 
 const JoinSales = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.JoinSales })));
 const SuccessStories = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.SuccessStories })));
+const SuccessStoryDetail = lazy(() => import('@/modules/directory/pages/SuccessStoryDetail'));
 const Help = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Help })));
 const CustomerCare = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.CustomerCare })));
 const Complaints = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Complaints })));
@@ -96,6 +97,7 @@ export const DirectoryRoutes = () => {
         <Route path="investor" element={<Investor />} />
         <Route path="join-sales" element={<JoinSales />} />
         <Route path="success-stories" element={<SuccessStories />} />
+        <Route path="success-stories/:storySlug" element={<SuccessStoryDetail />} />
 
         {/* Support */}
         <Route path="help" element={<Help />} />

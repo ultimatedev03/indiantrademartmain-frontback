@@ -12,6 +12,7 @@ import { toast } from '@/components/ui/use-toast';
 import { useLocation } from 'react-router-dom';
 
 const BUYER_NOTIF_PREFIX = 'buyer_notif:';
+const FALLBACK_POLL_INTERVAL_MS = 30000;
 const TYPE_SCOPE_HINTS = {
   KYC_APPROVAL_REQUESTED: '/admin',
   KYC_VENDOR_FOLLOWUP: '/employee/support',
@@ -404,13 +405,24 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     // Polling fallback (in case realtime is disabled)
     if (pollingRef.current) clearInterval(pollingRef.current);
     pollingRef.current = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       fetchNotifications(targetUserIds);
-    }, 10000);
+    }, FALLBACK_POLL_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchNotifications(targetUserIds);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       channels.forEach((channel) => supabase.removeChannel(channel));
       if (buyerChannel) supabase.removeChannel(buyerChannel);
       if (pollingRef.current) clearInterval(pollingRef.current);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [userId, userRole, buyerId, dashboardScope, userIds.join('|')]);
 

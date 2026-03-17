@@ -14,6 +14,54 @@ const getAdminBase = () => {
 };
 
 export const adminApi = {
+  getDashboardOverview: async () => {
+    const ADMIN_API_BASE = getAdminBase();
+
+    try {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/dashboard/overview`);
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data?.overview ?? data?.data ?? data ?? {};
+
+        return {
+          totalUsers: Number(raw?.totalUsers ?? raw?.users ?? 0) || 0,
+          activeVendors: Number(raw?.activeVendors ?? raw?.vendors ?? 0) || 0,
+          totalOrders: Number(raw?.totalOrders ?? raw?.orders ?? 0) || 0,
+          totalRevenue: Number(raw?.totalRevenue ?? raw?.revenue ?? 0) || 0,
+          totalBuyers: Number(raw?.totalBuyers ?? raw?.buyers ?? 0) || 0,
+          totalProducts: Number(raw?.totalProducts ?? raw?.products ?? 0) || 0,
+          pendingKyc: Number(raw?.pendingKyc ?? raw?.pending_kyc ?? 0) || 0,
+          openTickets: Number(raw?.openTickets ?? raw?.tickets ?? 0) || 0,
+        };
+      }
+    } catch (e) {
+      console.warn('[adminApi.getDashboardOverview] server error:', e);
+    }
+
+    const [stats, counts] = await Promise.all([
+      adminApi.getStats(),
+      adminApi.getDashboardCounts(),
+    ]);
+
+    let openTickets = 0;
+    try {
+      const res = await fetchWithCsrf(apiUrl('/api/support/stats'));
+      if (res.ok) {
+        const data = await res.json();
+        const supportStats = data?.stats || {};
+        openTickets = Number(supportStats.openTickets || 0) + Number(supportStats.inProgressTickets || 0);
+      }
+    } catch {
+      openTickets = 0;
+    }
+
+    return {
+      ...stats,
+      ...counts,
+      openTickets,
+    };
+  },
+
   getStats: async () => {
     const [users, vendors, orders] = await Promise.all([
       supabase.from('users').select('*', { count: 'exact', head: true }),
@@ -89,7 +137,7 @@ export const adminApi = {
       supabase
         .from('vendors')
         .select('*', { count: 'exact', head: true })
-        .eq('kyc_status', 'SUBMITTED'),
+        .in('kyc_status', ['PENDING', 'SUBMITTED']),
     ]);
 
     return {

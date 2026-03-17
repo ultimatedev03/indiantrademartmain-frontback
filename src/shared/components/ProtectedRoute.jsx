@@ -130,7 +130,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
       }
 
       if (wantsInternal) {
-        return <Navigate to="/unauthorized" replace />;
+        return <Navigate to={getDefaultRedirect()} state={{ from: location }} replace />;
       }
 
       const fallback = internalHome(normalizedRole);

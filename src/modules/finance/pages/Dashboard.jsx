@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ const csvEscape = (value) => {
 };
 
 const FinanceDashboard = () => {
+  const location = useLocation();
   const { user: internalUser, isLoading: internalLoading } = useInternalAuth();
   const [summary, setSummary] = useState({ totalGross: 0, totalNet: 0, last30: 0 });
   const [payments, setPayments] = useState([]);
@@ -76,6 +78,21 @@ const FinanceDashboard = () => {
 
     load();
   }, [internalLoading, internalUser?.role]);
+
+  useEffect(() => {
+    if (location.hash !== '#payments') return;
+
+    const scrollToPayments = () => {
+      document.getElementById('payments')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const frameId = window.requestAnimationFrame(scrollToPayments);
+    const timeoutId = window.setTimeout(scrollToPayments, 180);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+    };
+  }, [location.hash, loading]);
 
   const exportCsv = () => {
     const header = ['vendor', 'plan', 'net', 'payment_date', 'coupon'];

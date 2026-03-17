@@ -1283,6 +1283,80 @@ router.put("/staff/:employeeId/password", async (req, res) => {
 });
 
 
+router.get("/dashboard/overview", async (req, res) => {
+  try {
+    const [
+      usersRes,
+      vendorsRes,
+      buyersRes,
+      productsRes,
+      pendingKycRes,
+      ordersRes,
+      leadPurchasesRes,
+      vendorPaymentsRes,
+      openTicketsRes,
+    ] = await Promise.all([
+      supabase.from("users").select("*", { count: "exact", head: true }),
+      supabase.from("vendors").select("*", { count: "exact", head: true }).eq("is_active", true),
+      supabase.from("buyers").select("*", { count: "exact", head: true }),
+      supabase.from("products").select("*", { count: "exact", head: true }),
+      supabase
+        .from("vendors")
+        .select("*", { count: "exact", head: true })
+        .in("kyc_status", ["PENDING", "SUBMITTED"]),
+      supabase.from("lead_purchases").select("*", { count: "exact", head: true }),
+      supabase.from("lead_purchases").select("amount"),
+      supabase.from("vendor_payments").select("amount, net_amount"),
+      supabase
+        .from("support_tickets")
+        .select("*", { count: "exact", head: true })
+        .in("status", ["OPEN", "IN_PROGRESS"]),
+    ]);
+
+    const countErrors = [
+      usersRes.error,
+      vendorsRes.error,
+      buyersRes.error,
+      productsRes.error,
+      pendingKycRes.error,
+      ordersRes.error,
+      leadPurchasesRes.error,
+      vendorPaymentsRes.error,
+      openTicketsRes.error,
+    ].filter(Boolean);
+
+    if (countErrors.length > 0) {
+      return res.status(500).json({ success: false, error: countErrors[0].message });
+    }
+
+    const leadRevenue = (leadPurchasesRes.data || []).reduce(
+      (sum, row) => sum + Number(row?.amount || 0),
+      0
+    );
+    const vendorRevenue = (vendorPaymentsRes.data || []).reduce(
+      (sum, row) => sum + Number(row?.net_amount ?? row?.amount ?? 0),
+      0
+    );
+
+    return res.json({
+      success: true,
+      overview: {
+        totalUsers: usersRes.count || 0,
+        activeVendors: vendorsRes.count || 0,
+        totalOrders: ordersRes.count || 0,
+        totalRevenue: leadRevenue + vendorRevenue,
+        totalBuyers: buyersRes.count || 0,
+        totalProducts: productsRes.count || 0,
+        pendingKyc: pendingKycRes.count || 0,
+        openTickets: openTicketsRes.count || 0,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+
 // Dashboard counts (buyers/products/pending KYC)
 router.get("/dashboard/counts", async (req, res) => {
   try {
@@ -1292,7 +1366,7 @@ router.get("/dashboard/counts", async (req, res) => {
       supabase
         .from("vendors")
         .select("*", { count: "exact", head: true })
-        .eq("kyc_status", "SUBMITTED"),
+        .in("kyc_status", ["PENDING", "SUBMITTED"]),
     ]);
 
     if (buyersRes.error) return res.status(500).json({ success: false, error: buyersRes.error.message });

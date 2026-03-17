@@ -120,6 +120,7 @@ const Login = () => {
                     id="email"
                     type="email"
                     required
+                    autoComplete="username"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className="pl-10 bg-slate-900/50 border-slate-700 focus:border-blue-500 text-white placeholder:text-slate-600"
@@ -154,6 +155,8 @@ const Login = () => {
                     id="password"
                     type={showPassword ? 'text' : 'password'}
                     required
+                    minLength={PASSWORD_MIN_LENGTH}
+                    autoComplete="current-password"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     className="pl-10 pr-10 bg-slate-900/50 border-slate-700 focus:border-blue-500 text-white placeholder:text-slate-600"

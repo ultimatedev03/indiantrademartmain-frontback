@@ -18,6 +18,14 @@ import {
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 
+const buildContactPath = ({ subject = '', message = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (message) params.set('message', message);
+  const query = params.toString();
+  return query ? `/contact?${query}` : '/contact';
+};
+
 const fadeUp = {
   initial: { opacity: 0, y: 16 },
   animate: { opacity: 1, y: 0 },
@@ -78,7 +86,12 @@ const Logistics = () => {
                 logistics.
               </p>
               <div className="flex flex-wrap gap-3">
-                <Link to="/contact">
+                <Link
+                  to={buildContactPath({
+                    subject: 'Logistics Quote Request',
+                    message: 'Hi team, I need a logistics quote for an upcoming shipment. Please contact me.',
+                  })}
+                >
                   <Button className="bg-slate-900 text-white hover:bg-slate-800">
                     Get Logistics Quotes
                     <ArrowRight className="ml-2 h-4 w-4" />
@@ -272,7 +285,12 @@ const Logistics = () => {
                 </p>
               </div>
               <div className="flex flex-wrap gap-3 md:justify-end">
-                <Link to="/contact">
+                <Link
+                  to={buildContactPath({
+                    subject: 'Request Logistics Callback',
+                    message: 'Hi team, please arrange a callback for logistics planning and pricing.',
+                  })}
+                >
                   <Button className="bg-white text-slate-900 hover:bg-slate-100">
                     Request Call Back
                   </Button>

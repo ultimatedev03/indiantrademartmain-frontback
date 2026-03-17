@@ -40,7 +40,7 @@ const AdminDashboard = () => {
     if (internalLoading) return;
 
     const currentRole = String(internalUser?.role || '').toUpperCase();
-    const canLoadDashboard = currentRole === 'ADMIN' || currentRole === 'FINANCE';
+    const canLoadDashboard = currentRole === 'ADMIN';
 
     if (!canLoadDashboard) {
       setLoading(false);
@@ -51,58 +51,11 @@ const AdminDashboard = () => {
 
     const load = async () => {
       try {
-        // Get basic stats
-        const s = await adminApi.getStats();
-        
-        // Get additional stats (prefer server-side counts so RLS can't force 0)
-        let counts = { totalBuyers: 0, totalProducts: 0, pendingKyc: 0 };
-        try {
-          counts = await adminApi.getDashboardCounts();
-        } catch (e) {
-          // Fallback (may show 0 if your buyers/products tables are protected by RLS)
-          const [buyersRes, productsRes, pendingKycRes] = await Promise.all([
-            supabase.from('buyers').select('*', { count: 'exact', head: true }),
-            supabase.from('products').select('*', { count: 'exact', head: true }),
-            supabase.from('vendors').select('*', { count: 'exact', head: true }).eq('kyc_status', 'SUBMITTED')
-          ]);
-          counts = {
-            totalBuyers: buyersRes.count || 0,
-            totalProducts: productsRes.count || 0,
-            pendingKyc: pendingKycRes.count || 0,
-          };
-        }
-
-        let openTicketsCount = 0;
-        try {
-          const res = await fetchWithCsrf(apiUrl('/api/support/stats'));
-          if (res.ok) {
-            const data = await res.json();
-            const stats = data?.stats || {};
-            openTicketsCount = (stats.openTickets || 0) + (stats.inProgressTickets || 0);
-          } else {
-            throw new Error(`Support stats failed: ${res.status}`);
-          }
-        } catch (e) {
-          try {
-            const { count } = await supabase
-              .from('support_tickets')
-              .select('*', { count: 'exact', head: true })
-              .in('status', ['OPEN', 'IN_PROGRESS']);
-            openTicketsCount = count || 0;
-          } catch {
-            openTicketsCount = 0;
-          }
-        }
+        const overview = await adminApi.getDashboardOverview();
         
         if (cancelled) return;
 
-        setStats({
-          ...s,
-          totalBuyers: counts.totalBuyers || 0,
-          totalProducts: counts.totalProducts || 0,
-          pendingKyc: counts.pendingKyc || 0,
-          openTickets: openTicketsCount
-        });
+        setStats(overview);
         
         const o = await adminApi.getRecentOrders();
         if (cancelled) return;

@@ -193,7 +193,7 @@ export const AdminRoutes = () => {
 
       {/* Admin */}
       {isAdminScope ? (
-        <Route element={<ProtectedRoute allowedRoles={['ADMIN', 'FINANCE']} />}>
+        <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
           <Route element={<PortalLayout role="ADMIN" />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />

@@ -28,6 +28,12 @@ const normalizeCouponCode = (value) =>
     .replace(/\s+/g, '')
     .replace(/[^A-Z0-9_-]/g, '');
 
+const getCouponExpiresAtMs = (coupon = {}) => {
+  if (!coupon?.expires_at) return null;
+  const ts = new Date(coupon.expires_at).getTime();
+  return Number.isFinite(ts) ? ts : null;
+};
+
 const GLOBAL_SCOPE_TOKENS = new Set(['ANY', 'ALL', 'GLOBAL', 'NULL', 'NONE']);
 
 const normalizeScope = (value) => String(value || '').trim();
@@ -229,8 +235,8 @@ async function resolveOfferForPayment({
       .maybeSingle();
 
     if (cpn && !couponErr) {
-      const now = new Date();
-      if (cpn.expires_at && new Date(cpn.expires_at) < now) {
+      const expiresAtMs = getCouponExpiresAtMs(cpn);
+      if (expiresAtMs !== null && expiresAtMs <= Date.now()) {
         couponFailureMessage = 'Coupon expired';
       } else if (cpn.max_uses && cpn.max_uses > 0 && cpn.used_count >= cpn.max_uses) {
         couponFailureMessage = 'Coupon usage limit reached';

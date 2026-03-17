@@ -47,24 +47,22 @@ const fmtDateTime = (d) => {
   return date.toLocaleString('en-IN');
 };
 
-const resolveCouponStatusMeta = (coupon = {}) => {
+const resolveCouponStatusMeta = (coupon = {}, nowTs = Date.now()) => {
   const explicitStatus = String(coupon?.effective_status || '').trim().toUpperCase();
-  if (explicitStatus) {
-    if (explicitStatus === 'EXPIRED') return { label: 'Expired', variant: 'destructive' };
-    if (explicitStatus === 'USED_UP') return { label: 'Used Up', variant: 'secondary' };
-    if (explicitStatus === 'INACTIVE') return { label: 'Inactive', variant: 'secondary' };
-    return { label: 'Active', variant: 'default' };
-  }
-
   const expiresAt = coupon?.expires_at ? new Date(coupon.expires_at).getTime() : null;
   const usedCount = Number(coupon?.used_count || 0);
   const maxUses = Number(coupon?.max_uses || 0);
 
-  if (coupon?.is_active === false) return { label: 'Inactive', variant: 'secondary' };
-  if (expiresAt && !Number.isNaN(expiresAt) && expiresAt < Date.now()) {
+  if (coupon?.is_active === false || explicitStatus === 'INACTIVE') {
+    return { label: 'Inactive', variant: 'secondary' };
+  }
+  if (explicitStatus === 'EXPIRED') return { label: 'Expired', variant: 'destructive' };
+  if (expiresAt !== null && !Number.isNaN(expiresAt) && expiresAt <= nowTs) {
     return { label: 'Expired', variant: 'destructive' };
   }
-  if (maxUses > 0 && usedCount >= maxUses) return { label: 'Used Up', variant: 'secondary' };
+  if (explicitStatus === 'USED_UP' || (maxUses > 0 && usedCount >= maxUses)) {
+    return { label: 'Used Up', variant: 'secondary' };
+  }
   return { label: 'Active', variant: 'default' };
 };
 
@@ -103,6 +101,7 @@ const AdminFinance = () => {
   const [cashoutActionLoading, setCashoutActionLoading] = useState({});
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [couponStatusNow, setCouponStatusNow] = useState(() => Date.now());
   const [form, setForm] = useState({
     code: '',
     discount_type: 'PERCENT',
@@ -212,6 +211,11 @@ const AdminFinance = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setCouponStatusNow(Date.now()), 5000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const kpis = useMemo(() => {
     const gross = payments.reduce((s, p) => s + number(p.amount), 0);
     const net = payments.reduce((s, p) => s + number(p.net_amount ?? p.amount), 0);
@@ -271,7 +275,7 @@ const AdminFinance = () => {
         max_uses: Math.trunc(numericMaxUses),
         plan_id: form.plan_id === 'ANY' ? null : form.plan_id,
         vendor_id: form.vendor_id.trim() || null,
-        expires_at: form.expires_at || null,
+        expires_at: toIsoOrNull(form.expires_at),
       };
       const res = await fetchWithCsrf('/api/finance/coupons', {
         method: 'POST',
@@ -280,7 +284,7 @@ const AdminFinance = () => {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed');
       toast({ title: 'Coupon created', description: payload.code });
-      setForm((prev) => ({ ...prev, code: '', value: '', max_uses: '', vendor_id: '' }));
+      setForm((prev) => ({ ...prev, code: '', value: '', max_uses: '', vendor_id: '', expires_at: '' }));
       fetchData(cashoutStatus, false);
     } catch (e) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -626,31 +630,34 @@ const AdminFinance = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {coupons.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-semibold">{c.code}</TableCell>
-                  <TableCell>{c.discount_type === 'PERCENT' ? `${c.value}%` : `₹ ${c.value}`}</TableCell>
-                  <TableCell>
-                    {c.plan_id ? (c.plan?.name || planNameById[c.plan_id] || c.plan_id) : 'Any'}
-                  </TableCell>
-                  <TableCell>
-                    {c.vendor_id
-                      ? (c.vendor?.company_name || c.vendor?.owner_name || c.vendor?.vendor_id || c.vendor_id)
-                      : 'Any'}
-                  </TableCell>
-                  <TableCell>{c.used_count || 0}/{c.max_uses || '∞'}</TableCell>
-                  <TableCell>
-                    <Badge variant={resolveCouponStatusMeta(c).variant}>
-                      {resolveCouponStatusMeta(c).label}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Button size="sm" variant="destructive" onClick={() => deleteCoupon(c.id)}>
-                      Delete
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
+              {coupons.map((c) => {
+                const statusMeta = resolveCouponStatusMeta(c, couponStatusNow);
+                return (
+                  <TableRow key={c.id}>
+                    <TableCell className="font-semibold">{c.code}</TableCell>
+                    <TableCell>{c.discount_type === 'PERCENT' ? `${c.value}%` : `₹ ${c.value}`}</TableCell>
+                    <TableCell>
+                      {c.plan_id ? (c.plan?.name || planNameById[c.plan_id] || c.plan_id) : 'Any'}
+                    </TableCell>
+                    <TableCell>
+                      {c.vendor_id
+                        ? (c.vendor?.company_name || c.vendor?.owner_name || c.vendor?.vendor_id || c.vendor_id)
+                        : 'Any'}
+                    </TableCell>
+                    <TableCell>{c.used_count || 0}/{c.max_uses || '∞'}</TableCell>
+                    <TableCell>
+                      <Badge variant={statusMeta.variant}>
+                        {statusMeta.label}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Button size="sm" variant="destructive" onClick={() => deleteCoupon(c.id)}>
+                        Delete
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </CardContent>

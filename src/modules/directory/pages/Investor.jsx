@@ -2,6 +2,14 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { TrendingUp, FileText, BarChart3 } from 'lucide-react';
 
+const buildContactPath = ({ subject = '', message = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (message) params.set('message', message);
+  const query = params.toString();
+  return query ? `/contact?${query}` : '/contact';
+};
+
 const Investor = () => {
   return (
     <div className="min-h-screen bg-gray-50">
@@ -23,12 +31,15 @@ const Investor = () => {
               <h2 className="text-2xl font-bold">Financial Reports</h2>
             </div>
             <p className="text-gray-600 mb-4">Access our latest financial statements and reports</p>
-            <a
-              href="mailto:investors@indiantrademart.com?subject=Investor%20Reports%20Request"
+            <Link
+              to={buildContactPath({
+                subject: 'Investor Reports Request',
+                message: 'Hi team, I would like to request the latest investor or financial reports.',
+              })}
               className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
             >
               Download Reports
-            </a>
+            </Link>
           </div>
 
           <div className="bg-white rounded-lg shadow-sm p-8">

@@ -94,9 +94,11 @@ const KYCApproval = () => {
         const t = searchTerm.toLowerCase();
         filtered = filtered.filter(
           (v) =>
+            v.vendor_id?.toLowerCase().includes(t) ||
             v.company_name?.toLowerCase().includes(t) ||
             v.owner_name?.toLowerCase().includes(t) ||
-            v.email?.toLowerCase().includes(t)
+            v.email?.toLowerCase().includes(t) ||
+            String(v.phone || '').toLowerCase().includes(t)
         );
       }
 
@@ -255,7 +257,7 @@ const KYCApproval = () => {
       <div className="flex flex-col md:flex-row gap-4 p-4 bg-white rounded-lg border">
         <form onSubmit={handleSearch} className="flex-1 relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-          <Input className="pl-9" placeholder="Search by company name, owner or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <Input className="pl-9" placeholder="Search by vendor ID, company, owner, phone, or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </form>
 
         <Select value={filterStatus} onValueChange={setFilterStatus}>

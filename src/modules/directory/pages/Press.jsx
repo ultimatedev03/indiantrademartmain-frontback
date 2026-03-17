@@ -2,6 +2,14 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Newspaper, Calendar, User } from 'lucide-react';
 
+const buildContactPath = ({ subject = '', message = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (subject) params.set('subject', subject);
+  if (message) params.set('message', message);
+  const query = params.toString();
+  return query ? `/contact?${query}` : '/contact';
+};
+
 const Press = () => {
   const [expandedId, setExpandedId] = useState(null);
   const pressReleases = [
@@ -97,13 +105,22 @@ const Press = () => {
                   <p className="text-gray-600 text-xs">For media inquiries, please contact our press office with relevant details about your story.</p>
                 </div>
                 <div className="flex flex-wrap gap-3 pt-2">
-                  <a
-                    href="mailto:press@indiantrademart.com?subject=Press%20Inquiry"
+                  <Link
+                    to={buildContactPath({
+                      subject: 'Press Inquiry',
+                      message: 'Hi press team, I would like to connect regarding a media or press inquiry.',
+                    })}
                     className="text-sm font-semibold text-blue-600 hover:text-blue-800"
                   >
                     Email Press Team
-                  </a>
-                  <Link to="/contact" className="text-sm font-semibold text-blue-600 hover:text-blue-800">
+                  </Link>
+                  <Link
+                    to={buildContactPath({
+                      subject: 'Press Contact Request',
+                      message: 'Hi team, I need help with a press-related request.',
+                    })}
+                    className="text-sm font-semibold text-blue-600 hover:text-blue-800"
+                  >
                     Contact Form
                   </Link>
                 </div>

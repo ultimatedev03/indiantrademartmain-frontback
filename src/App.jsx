@@ -14,6 +14,7 @@ import { locationService } from '@/shared/services/locationService';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2 } from 'lucide-react';
 import AnalyticsLoader from '@/components/AnalyticsLoader';
+import DeferredAIChatWidget from '@/shared/components/DeferredAIChatWidget';
 
 const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage'));
 
@@ -30,8 +31,6 @@ const SuperAdminDashboard = lazy(() => import('@/modules/admin/pages/superadmin/
 const SuperAdminProtectedRoute = lazy(() => import('@/modules/admin/routes/SuperAdminProtectedRoute'));
 const MigrationTools = lazy(() => import('@/shared/pages/MigrationTools'));
 const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
-const AIChatWidget = lazy(() => import('@/components/AIChatWidget'));
-
 const RouteFallback = () => (
   <div className="min-h-[60vh] flex items-center justify-center">
     <Loader2 className="h-8 w-8 animate-spin text-[#003D82]" />
@@ -369,9 +368,7 @@ function App() {
                             <Suspense fallback={<RouteFallback />}>
                               <AppRoutes />
                             </Suspense>
-                            <Suspense fallback={null}>
-                              <AIChatWidget />
-                            </Suspense>
+                            <DeferredAIChatWidget />
                           </VendorSuspensionGate>
                         </PublicNoticeGate>
                       </SuperAdminProvider>
