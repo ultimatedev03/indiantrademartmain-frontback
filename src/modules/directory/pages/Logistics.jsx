@@ -296,7 +296,10 @@ const Logistics = () => {
                   </Button>
                 </Link>
                 <Link to="/directory">
-                  <Button variant="outline" className="border-white/40 text-white hover:bg-white/10">
+                  <Button
+                    variant="outline"
+                    className="border-white/40 bg-transparent text-white hover:border-white hover:bg-white hover:text-slate-900"
+                  >
                     Explore Suppliers
                   </Button>
                 </Link>

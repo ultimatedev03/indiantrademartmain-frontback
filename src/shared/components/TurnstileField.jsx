@@ -56,6 +56,7 @@ const getStatusMessage = (status) => {
 
 const TurnstileField = ({
   action = 'submit',
+  appearance = 'always',
   className,
   execution = 'render',
   onTokenChange,
@@ -91,7 +92,7 @@ const TurnstileField = ({
         widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
           action,
-          appearance: 'always',
+          appearance,
           execution,
           callback: (token) => {
             if (!active) return;
@@ -150,7 +151,7 @@ const TurnstileField = ({
       }
       onWidgetReady?.(null);
     };
-  }, [action, execution, onTokenChange, onWidgetReady, resetKey]);
+  }, [action, appearance, execution, onTokenChange, onWidgetReady, resetKey]);
 
   if (isCaptchaDevBypass()) {
     return (
@@ -171,9 +172,9 @@ const TurnstileField = ({
   const statusMessage = getStatusMessage(status);
 
   return (
-    <div className={cn('space-y-2', className)}>
-      <div ref={containerRef} />
-      {statusMessage ? <p className="text-xs text-slate-500">{statusMessage}</p> : null}
+    <div className={cn('flex flex-col items-center space-y-2', className)}>
+      <div ref={containerRef} className="flex justify-center" />
+      {statusMessage ? <p className="text-center text-xs text-slate-500">{statusMessage}</p> : null}
     </div>
   );
 };

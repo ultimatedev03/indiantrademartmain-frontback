@@ -229,3 +229,32 @@ Server error: Error: Not allowed by CORS
     at router.process_params (C:\Users\Dipanshu pandey\OneDrive\Desktop\indiantrademartmain-frontback-main\node_modules\express\lib\router\index.js:346:12)
     at next (C:\Users\Dipanshu pandey\OneDrive\Desktop\indiantrademartmain-frontback-main\node_modules\express\lib\router\index.js:280:10)
     at subdomainMiddleware (file:///C:/Users/Dipanshu%20pandey/OneDrive/Desktop/indiantrademartmain-frontback-main/server/middleware/subdomainMiddleware.js:87:3)
+Restarting 'server/server.js'
+Restarting 'server/server.js'
+🚀 Initializing subscription cron jobs...
+✅ Subscription cron jobs initialized
+   - Expiring subscriptions check: Daily at 2 AM UTC
+   - Expired subscriptions check: Daily at 3 AM UTC
+✅ OTP Server running on http://localhost:3001
+📧 Email: ultimatedev2025@gmail.com
+⏱️  OTP Expiry: 2 minutes
+🔢 OTP Length: 6 digits
+Restarting 'server/server.js'
+🚀 Initializing subscription cron jobs...
+✅ Subscription cron jobs initialized
+   - Expiring subscriptions check: Daily at 2 AM UTC
+   - Expired subscriptions check: Daily at 3 AM UTC
+✅ OTP Server running on http://localhost:3001
+📧 Email: ultimatedev2025@gmail.com
+⏱️  OTP Expiry: 2 minutes
+🔢 OTP Length: 6 digits
+Restarting 'server/server.js'
+Restarting 'server/server.js'
+🚀 Initializing subscription cron jobs...
+✅ Subscription cron jobs initialized
+   - Expiring subscriptions check: Daily at 2 AM UTC
+   - Expired subscriptions check: Daily at 3 AM UTC
+✅ OTP Server running on http://localhost:3001
+📧 Email: ultimatedev2025@gmail.com
+⏱️  OTP Expiry: 2 minutes
+🔢 OTP Length: 6 digits

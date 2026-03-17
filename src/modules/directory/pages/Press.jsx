@@ -1,5 +1,10 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import {
+  FooterPageAction,
+  FooterPageCard,
+  FooterPageSection,
+  FooterPageShell,
+} from '@/modules/directory/components/FooterPageShell';
 import { Newspaper, Calendar, User } from 'lucide-react';
 
 const buildContactPath = ({ subject = '', message = '' } = {}) => {
@@ -40,96 +45,101 @@ const Press = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-16">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center gap-3 mb-4">
-            <Newspaper className="w-8 h-8" />
-            <h1 className="text-4xl font-bold">Press Section</h1>
-          </div>
-          <p className="text-xl text-blue-100">Latest news and updates about IndianTradeMart</p>
+    <FooterPageShell
+      eyebrow="Press"
+      title="Press Section"
+      description="Latest news and updates about Indian Trade Mart, now presented with stronger layout balance, cleaner cards, and clearer media contact paths."
+      stats={[
+        { label: 'Press releases', value: `${pressReleases.length}` },
+        { label: 'Primary contact', value: 'press@indiantrademart.com' },
+        { label: 'Coverage', value: 'Platform updates' },
+        { label: 'Audience', value: 'Media' },
+      ]}
+      aside={(
+        <div className="space-y-4">
+          <Newspaper className="h-8 w-8 text-blue-200" />
+          <p className="text-xl font-semibold text-white">A cleaner media-facing surface.</p>
+          <p className="text-sm leading-6 text-slate-300">
+            Press content is now easier to scan, with metadata, summaries, and contact actions grouped more intentionally.
+          </p>
         </div>
-      </div>
-
-      {/* Content */}
-      <div className="container mx-auto px-4 py-16">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Main Content */}
-          <div className="lg:col-span-2">
-            <div className="space-y-8">
-              {pressReleases.map((release) => (
-                <article key={release.id} className="bg-white rounded-lg shadow-sm p-8 hover:shadow-lg transition-shadow">
-                  <h2 className="text-2xl font-bold text-gray-900 mb-3">{release.title}</h2>
-                  
-                  <div className="flex flex-wrap gap-6 text-sm text-gray-500 mb-4">
-                    <div className="flex items-center gap-2">
-                      <Calendar className="w-4 h-4" />
+      )}
+    >
+      <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+        <FooterPageSection
+          title="Latest announcements"
+          description="Browse recent updates, partnerships, and platform milestones."
+        >
+          <div className="space-y-4">
+            {pressReleases.map((release) => (
+              <FooterPageCard key={release.id} className="space-y-4 bg-white">
+                <div className="space-y-3">
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-950">{release.title}</h2>
+                  <div className="flex flex-wrap gap-4 text-sm text-slate-500">
+                    <span className="inline-flex items-center gap-2">
+                      <Calendar className="h-4 w-4" />
                       {release.date}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <User className="w-4 h-4" />
+                    </span>
+                    <span className="inline-flex items-center gap-2">
+                      <User className="h-4 w-4" />
                       {release.author}
-                    </div>
+                    </span>
                   </div>
-                  
-                  <p className="text-gray-700 mb-4">{release.excerpt}</p>
+                  <p className="text-sm leading-6 text-slate-600">{release.excerpt}</p>
                   {expandedId === release.id ? (
-                    <p className="mb-4 text-sm text-gray-600">{release.content}</p>
+                    <p className="text-sm leading-6 text-slate-600">{release.content}</p>
                   ) : null}
-                  <button
-                    className="text-blue-600 hover:text-blue-800 font-semibold"
-                    onClick={() => setExpandedId((current) => (current === release.id ? null : release.id))}
-                  >
-                    {expandedId === release.id ? 'Show Less ↑' : 'Read More →'}
-                  </button>
-                </article>
-              ))}
-            </div>
+                </div>
+                <button
+                  className="text-sm font-semibold text-blue-700 transition hover:text-blue-900"
+                  onClick={() => setExpandedId((current) => (current === release.id ? null : release.id))}
+                >
+                  {expandedId === release.id ? 'Show less' : 'Read more'}
+                </button>
+              </FooterPageCard>
+            ))}
           </div>
+        </FooterPageSection>
 
-          {/* Sidebar */}
-          <div>
-            <div className="bg-white rounded-lg shadow-sm p-6 sticky top-4">
-              <h3 className="text-xl font-bold text-gray-900 mb-4">Press Contacts</h3>
-              <div className="space-y-4 text-sm">
-                <div>
-                  <p className="font-semibold text-gray-900">Media Relations</p>
-                  <p className="text-gray-600">press@indiantrademart.com</p>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-900">Phone</p>
-                  <p className="text-gray-600">+91 XXXX-XXXX-XXX</p>
-                </div>
-                <div className="border-t pt-4 mt-4">
-                  <p className="text-gray-600 text-xs">For media inquiries, please contact our press office with relevant details about your story.</p>
-                </div>
-                <div className="flex flex-wrap gap-3 pt-2">
-                  <Link
-                    to={buildContactPath({
-                      subject: 'Press Inquiry',
-                      message: 'Hi press team, I would like to connect regarding a media or press inquiry.',
-                    })}
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-800"
-                  >
-                    Email Press Team
-                  </Link>
-                  <Link
-                    to={buildContactPath({
-                      subject: 'Press Contact Request',
-                      message: 'Hi team, I need help with a press-related request.',
-                    })}
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-800"
-                  >
-                    Contact Form
-                  </Link>
-                </div>
+        <FooterPageSection
+          title="Press contacts"
+          description="Reach out with the details of your story, deadline, or interview request."
+        >
+          <div className="space-y-4">
+            <FooterPageCard className="space-y-2 bg-white">
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Media Relations</p>
+              <p className="text-base font-semibold text-slate-950">press@indiantrademart.com</p>
+            </FooterPageCard>
+            <FooterPageCard className="space-y-2 bg-white">
+              <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Phone</p>
+              <p className="text-base font-semibold text-slate-950">+91 XXXX-XXXX-XXX</p>
+            </FooterPageCard>
+            <FooterPageCard className="space-y-4 bg-white">
+              <p className="text-sm leading-6 text-slate-600">For media inquiries, please share the publication, topic, and timeline so the right spokesperson can respond quickly.</p>
+              <div className="flex flex-wrap gap-3">
+                <FooterPageAction
+                  to={buildContactPath({
+                    subject: 'Press Inquiry',
+                    message: 'Hi press team, I would like to connect regarding a media or press inquiry.',
+                  })}
+                >
+                  Email press team
+                </FooterPageAction>
+                <FooterPageAction
+                  to={buildContactPath({
+                    subject: 'Press Contact Request',
+                    message: 'Hi team, I need help with a press-related request.',
+                  })}
+                  variant="secondary"
+                >
+                  Contact form
+                </FooterPageAction>
               </div>
-            </div>
+            </FooterPageCard>
           </div>
-        </div>
+        </FooterPageSection>
       </div>
-    </div>
+    </FooterPageShell>
   );
 };
 

@@ -19,7 +19,6 @@ const VendorLogin = () => {
   const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
   const [captchaController, setCaptchaController] = useState(null);
-  const [submitAfterCaptcha, setSubmitAfterCaptcha] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -109,7 +108,6 @@ const VendorLogin = () => {
       window.location.href = '/vendor/dashboard';
 
     } catch (error) {
-      setSubmitAfterCaptcha(false);
       loginCaptcha.resetCaptcha();
       toast({ 
         title: "Login Failed", 
@@ -121,12 +119,18 @@ const VendorLogin = () => {
     }
   };
 
-  React.useEffect(() => {
-    if (!submitAfterCaptcha || !loginCaptcha.captchaToken || loading) return;
-    setSubmitAfterCaptcha(false);
-    void performLogin();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [submitAfterCaptcha, loginCaptcha.captchaToken, loading]);
+  const handleCaptchaVerification = async () => {
+    if (loading || loginCaptcha.captchaToken) return;
+
+    const started = await captchaController?.execute?.();
+    if (!started) {
+      toast({
+        title: 'Captcha Unavailable',
+        description: 'Security verification could not start. Please refresh and try again.',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -134,15 +138,9 @@ const VendorLogin = () => {
 
     const captchaError = loginCaptcha.getCaptchaError();
     if (captchaError) {
-      const started = await captchaController?.execute?.();
-      if (started) {
-        setSubmitAfterCaptcha(true);
-        return;
-      }
-
       toast({
         title: 'Captcha Required',
-        description: captchaError,
+        description: 'Click "Verify Security Check" and complete the CAPTCHA before signing in.',
         variant: 'destructive',
       });
       return;
@@ -196,16 +194,29 @@ const VendorLogin = () => {
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Sign In
             </Button>
 
-            <TurnstileField
-              action="auth_login"
-              execution="execute"
-              onWidgetReady={setCaptchaController}
-              resetKey={loginCaptcha.captchaResetKey}
-              onTokenChange={loginCaptcha.setCaptchaToken}
-            />
-            <p className="text-xs text-gray-500">
-              Security verification runs when you click Sign In.
-            </p>
+            <div className="space-y-3">
+              <TurnstileField
+                action="auth_login"
+                appearance="execute"
+                execution="execute"
+                onWidgetReady={setCaptchaController}
+                resetKey={loginCaptcha.captchaResetKey}
+                onTokenChange={loginCaptcha.setCaptchaToken}
+              />
+              <div className="flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleCaptchaVerification}
+                  disabled={loading || Boolean(loginCaptcha.captchaToken)}
+                >
+                  {loginCaptcha.captchaToken ? 'Verification Complete' : 'Verify Security Check'}
+                </Button>
+              </div>
+              <p className="text-center text-xs text-gray-500">
+                Complete the security check before signing in.
+              </p>
+            </div>
           </form>
         </CardContent>
         <CardFooter className="flex justify-center border-t p-4 bg-gray-50 rounded-b-lg">

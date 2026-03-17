@@ -1,5 +1,10 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import {
+  FooterPageAction,
+  FooterPageCard,
+  FooterPageSection,
+  FooterPageShell,
+} from '@/modules/directory/components/FooterPageShell';
 import { TrendingUp, FileText, BarChart3 } from 'lucide-react';
 
 const buildContactPath = ({ subject = '', message = '' } = {}) => {
@@ -12,63 +17,70 @@ const buildContactPath = ({ subject = '', message = '' } = {}) => {
 
 const Investor = () => {
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-16">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center gap-3 mb-4">
-            <TrendingUp className="w-8 h-8" />
-            <h1 className="text-4xl font-bold">Investor Relations</h1>
-          </div>
-          <p className="text-xl text-blue-100">Information for our investors and stakeholders</p>
+    <FooterPageShell
+      eyebrow="Investor Relations"
+      title="Information for investors and stakeholders"
+      description="The investor page now matches the public site more closely, with clearer cards, cleaner spacing, and better CTA visibility."
+      stats={[
+        { label: 'Report access', value: 'On request' },
+        { label: 'Governance path', value: 'Available' },
+        { label: 'Investor email', value: 'investors@indiantrademart.com' },
+        { label: 'Audience', value: 'Stakeholders' },
+      ]}
+      aside={(
+        <div className="space-y-4">
+          <TrendingUp className="h-8 w-8 text-blue-200" />
+          <p className="text-xl font-semibold text-white">A more credible investor-facing layout.</p>
+          <p className="text-sm leading-6 text-slate-300">
+            Financial and governance content is now presented through balanced sections instead of generic stacked boxes.
+          </p>
         </div>
-      </div>
-
-      <div className="container mx-auto px-4 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-white rounded-lg shadow-sm p-8">
-            <div className="flex items-center gap-3 mb-4">
-              <BarChart3 className="w-6 h-6 text-blue-600" />
-              <h2 className="text-2xl font-bold">Financial Reports</h2>
-            </div>
-            <p className="text-gray-600 mb-4">Access our latest financial statements and reports</p>
-            <Link
+      )}
+    >
+      <FooterPageSection
+        title="Investor resources"
+        description="Access core information paths for reports, governance, and investor communication."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <FooterPageCard className="space-y-4 bg-white">
+            <BarChart3 className="h-6 w-6 text-blue-700" />
+            <h2 className="text-2xl font-semibold text-slate-950">Financial Reports</h2>
+            <p className="text-sm leading-6 text-slate-600">Request the latest financial statements, updates, and investor materials.</p>
+            <FooterPageAction
               to={buildContactPath({
                 subject: 'Investor Reports Request',
                 message: 'Hi team, I would like to request the latest investor or financial reports.',
               })}
-              className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"
             >
-              Download Reports
-            </Link>
-          </div>
+              Request reports
+            </FooterPageAction>
+          </FooterPageCard>
 
-          <div className="bg-white rounded-lg shadow-sm p-8">
-            <div className="flex items-center gap-3 mb-4">
-              <FileText className="w-6 h-6 text-blue-600" />
-              <h2 className="text-2xl font-bold">Governance</h2>
-            </div>
-            <p className="text-gray-600 mb-4">Corporate governance policies and documents</p>
-            <Link to="/about-us" className="inline-flex bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">
-              Learn More
-            </Link>
-          </div>
+          <FooterPageCard className="space-y-4 bg-white">
+            <FileText className="h-6 w-6 text-emerald-600" />
+            <h2 className="text-2xl font-semibold text-slate-950">Governance</h2>
+            <p className="text-sm leading-6 text-slate-600">Review corporate governance policies, background information, and company context.</p>
+            <FooterPageAction to="/about-us" variant="secondary">Learn more</FooterPageAction>
+          </FooterPageCard>
         </div>
+      </FooterPageSection>
 
-        <div className="mt-12 bg-white rounded-lg shadow-sm p-8">
-          <h2 className="text-2xl font-bold mb-6">Contact Investor Relations</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <p className="font-semibold text-gray-900">Email</p>
-              <p className="text-gray-600">investors@indiantrademart.com</p>
-            </div>
-            <div>
-              <p className="font-semibold text-gray-900">Phone</p>
-              <p className="text-gray-600">+91 XXXX-XXXX-XXX</p>
-            </div>
-          </div>
+      <FooterPageSection
+        title="Contact investor relations"
+        description="Use the details below for investor-specific communication and document requests."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <FooterPageCard className="space-y-2 bg-white">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Email</p>
+            <p className="text-base font-semibold text-slate-950">investors@indiantrademart.com</p>
+          </FooterPageCard>
+          <FooterPageCard className="space-y-2 bg-white">
+            <p className="text-sm font-semibold uppercase tracking-[0.24em] text-slate-500">Phone</p>
+            <p className="text-base font-semibold text-slate-950">+91 XXXX-XXXX-XXX</p>
+          </FooterPageCard>
         </div>
-      </div>
-    </div>
+      </FooterPageSection>
+    </FooterPageShell>
   );
 };
 
