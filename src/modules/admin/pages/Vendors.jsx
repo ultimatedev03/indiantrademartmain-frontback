@@ -79,6 +79,57 @@ const kycBadgeClass = (s) => {
   return map[v] || "bg-gray-100 text-gray-800";
 };
 
+const getJoinedDateRange = (filterValue, now = new Date()) => {
+  if (filterValue === "all") return null;
+
+  if (filterValue === "today") {
+    const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const to = new Date(from);
+    to.setDate(to.getDate() + 1);
+    return { from, to };
+  }
+
+  if (filterValue === "week") {
+    const from = new Date(now);
+    from.setDate(now.getDate() - now.getDay());
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 7);
+    return { from, to };
+  }
+
+  if (filterValue === "month") {
+    const from = new Date(now.getFullYear(), now.getMonth(), 1);
+    const to = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    return { from, to };
+  }
+
+  if (filterValue === "year") {
+    const from = new Date(now.getFullYear(), 0, 1);
+    const to = new Date(now.getFullYear() + 1, 0, 1);
+    return { from, to };
+  }
+
+  return null;
+};
+
+const getVendorJoinedAt = (vendor) => {
+  const candidates = [
+    vendor?.created_at,
+    vendor?.createdAt,
+    vendor?.joined_at,
+    vendor?.joinedAt,
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const parsed = new Date(candidate).getTime();
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+
+  return null;
+};
+
 export default function Vendors() {
   const { toast } = useToast();
   const ADMIN_API_BASE = getAdminBase();
@@ -111,7 +162,10 @@ export default function Vendors() {
       if (trimmedSearch) params.set("search", trimmedSearch);
       if (filterKyc !== "all") params.set("kyc", filterKyc);
       if (filterActive !== "all") params.set("active", filterActive);
-      params.set("limit", "1000");
+      const joinedRange = getJoinedDateRange(filterJoined);
+      if (joinedRange?.from) params.set("joined_from", joinedRange.from.toISOString());
+      if (joinedRange?.to) params.set("joined_to", joinedRange.to.toISOString());
+      params.set("limit", "5000");
 
       const queryString = params.toString();
       const url = queryString
@@ -133,7 +187,7 @@ export default function Vendors() {
     } finally {
       setLoading(false);
     }
-  }, [ADMIN_API_BASE, filterActive, filterKyc, searchTerm, toast]);
+  }, [ADMIN_API_BASE, filterActive, filterJoined, filterKyc, searchTerm, toast]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -143,24 +197,13 @@ export default function Vendors() {
   }, [load]);
 
   const filteredVendors = useMemo(() => {
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - now.getDay());
-    startOfWeek.setHours(0, 0, 0, 0);
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime();
+    const joinedRange = getJoinedDateRange(filterJoined);
 
     return (vendors || []).filter((vendor) => {
-      if (filterJoined === "all") return true;
-      const joinedAt = vendor?.created_at ? new Date(vendor.created_at).getTime() : null;
+      if (!joinedRange) return true;
+      const joinedAt = getVendorJoinedAt(vendor);
       if (!joinedAt || Number.isNaN(joinedAt)) return false;
-
-      if (filterJoined === "today") return joinedAt >= startOfToday;
-      if (filterJoined === "week") return joinedAt >= startOfWeek.getTime();
-      if (filterJoined === "month") return joinedAt >= startOfMonth;
-      if (filterJoined === "year") return joinedAt >= startOfYear;
-      return true;
+      return joinedAt >= joinedRange.from.getTime() && joinedAt < joinedRange.to.getTime();
     });
   }, [filterJoined, vendors]);
 
@@ -367,6 +410,11 @@ export default function Vendors() {
             </SelectContent>
           </Select>
         </div>
+        {filterJoined !== "all" ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Time filters use the vendor joined date. Vendors without a joined date are excluded.
+          </p>
+        ) : null}
       </div>
 
       {/* TABLE AREA (only this scrolls) */}

@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { adminApi } from '@/modules/admin/services/adminApi';
 import StatsCard from '@/shared/components/StatsCard';
 import { 
-  Users, ShoppingBag, DollarSign, TrendingUp, ChevronDown, ChevronRight,
-  Package, UserCheck, Ticket, AlertCircle, CheckCircle, Clock, Eye,
+  Users, ShoppingBag, DollarSign, ChevronDown, ChevronRight,
+  Package, UserCheck, Ticket,
   ArrowUpRight, Loader2
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,9 +11,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/customSupabaseClient';
-import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
-import { apiUrl } from '@/lib/apiBase';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 
 const AdminDashboard = () => {
@@ -51,50 +48,20 @@ const AdminDashboard = () => {
 
     const load = async () => {
       try {
-        const overview = await adminApi.getDashboardOverview();
-        
-        if (cancelled) return;
+        const [overview, orders, performance, tickets, vendors] = await Promise.all([
+          adminApi.getDashboardOverview(),
+          adminApi.getRecentOrders(),
+          adminApi.getDataEntryPerformance(),
+          adminApi.getRecentTickets(5),
+          adminApi.getRecentVendors(5),
+        ]);
 
+        if (cancelled) return;
         setStats(overview);
-        
-        const o = await adminApi.getRecentOrders();
-        if (cancelled) return;
-        setRecentOrders(o || []);
-        
-        const p = await adminApi.getDataEntryPerformance();
-        if (cancelled) return;
-        setDataEntryPerf(p || []);
-        
-        // Get recent tickets
-        let tickets = [];
-        try {
-          const res = await fetchWithCsrf(apiUrl('/api/support/tickets?pageSize=5'));
-          if (res.ok) {
-            const data = await res.json();
-            tickets = data?.tickets || [];
-          } else {
-            throw new Error(`Support tickets failed: ${res.status}`);
-          }
-        } catch (e) {
-          const { data } = await supabase
-            .from('support_tickets')
-            .select('*, vendors(company_name), buyers(full_name)')
-            .order('created_at', { ascending: false })
-            .limit(5);
-          tickets = data || [];
-        }
-        if (cancelled) return;
-        setRecentTickets(tickets);
-        
-        // Get recent vendors
-        const { data: vendors } = await supabase
-          .from('vendors')
-          .select('id, company_name, kyc_status, created_at, owner_name')
-          .order('created_at', { ascending: false })
-          .limit(5);
-        if (cancelled) return;
+        setRecentOrders(orders || []);
+        setDataEntryPerf(performance || []);
+        setRecentTickets(tickets || []);
         setRecentVendors(vendors || []);
-        
       } catch (e) {
         console.error(e);
       } finally {

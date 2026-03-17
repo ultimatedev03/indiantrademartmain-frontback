@@ -349,9 +349,15 @@ router.get("/vendors", async (req, res) => {
     const search = rawSearch.replace(/,/g, " ").trim();
     const kycRaw = String(req.query?.kyc || req.query?.kyc_status || "all").trim();
     const activeRaw = String(req.query?.active || req.query?.status || "all").trim();
+    const joinedFromRaw = String(req.query?.joined_from || "").trim();
+    const joinedToRaw = String(req.query?.joined_to || "").trim();
     const parsedLimit = Number(req.query?.limit);
     const parsedOffset = Number(req.query?.offset);
-    const MAX_VENDOR_LIMIT = 1000;
+    const parsedJoinedFrom = joinedFromRaw ? new Date(joinedFromRaw) : null;
+    const parsedJoinedTo = joinedToRaw ? new Date(joinedToRaw) : null;
+    const hasJoinedFrom = parsedJoinedFrom && !Number.isNaN(parsedJoinedFrom.getTime());
+    const hasJoinedTo = parsedJoinedTo && !Number.isNaN(parsedJoinedTo.getTime());
+    const MAX_VENDOR_LIMIT = 5000;
     const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
       ? Math.min(parsedLimit, MAX_VENDOR_LIMIT)
       : MAX_VENDOR_LIMIT;
@@ -384,6 +390,14 @@ router.get("/vendors", async (req, res) => {
       vendorQuery = vendorQuery.or(
         `company_name.ilike.%${search}%,owner_name.ilike.%${search}%,vendor_id.ilike.%${search}%,email.ilike.%${search}%`
       );
+    }
+
+    if (hasJoinedFrom) {
+      vendorQuery = vendorQuery.gte("created_at", parsedJoinedFrom.toISOString());
+    }
+
+    if (hasJoinedTo) {
+      vendorQuery = vendorQuery.lt("created_at", parsedJoinedTo.toISOString());
     }
 
     const { data: vendors, error, count } = await vendorQuery;
@@ -1390,6 +1404,47 @@ router.get("/dashboard/counts", async (req, res) => {
 // -------------------------
 // DASHBOARD DATA (ADMIN)
 // -------------------------
+router.get("/dashboard/recent-support-tickets", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query?.limit || 5), 50);
+    const { data, error } = await supabase
+      .from("support_tickets")
+      .select(
+        "id, subject, priority, status, created_at, vendor_id, buyer_id, vendors(company_name, owner_name), buyers(full_name, company_name)"
+      )
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    return res.json({ success: true, tickets: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get("/dashboard/recent-vendors", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query?.limit || 5), 50);
+    const { data, error } = await supabase
+      .from("vendors")
+      .select("id, company_name, kyc_status, created_at, owner_name")
+      .not("created_at", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    return res.json({ success: true, vendors: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 router.get("/dashboard/recent-lead-purchases", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query?.limit || 10), 50);

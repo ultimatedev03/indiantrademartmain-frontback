@@ -256,6 +256,53 @@ export const adminApi = {
     return performance;
   },
 
+  getRecentTickets: async (limit = 5) => {
+    const ADMIN_API_BASE = getAdminBase();
+    try {
+      const res = await fetchWithCsrf(
+        `${ADMIN_API_BASE}/dashboard/recent-support-tickets?limit=${Math.min(Number(limit || 5), 50)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return data?.tickets || [];
+      }
+    } catch {
+      // fallback below
+    }
+
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .select('id, subject, priority, status, created_at, vendor_id, buyer_id, vendors(company_name, owner_name), buyers(full_name, company_name)')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Number(limit || 5), 50));
+    if (error) throw error;
+    return data || [];
+  },
+
+  getRecentVendors: async (limit = 5) => {
+    const ADMIN_API_BASE = getAdminBase();
+    try {
+      const res = await fetchWithCsrf(
+        `${ADMIN_API_BASE}/dashboard/recent-vendors?limit=${Math.min(Number(limit || 5), 50)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        return data?.vendors || [];
+      }
+    } catch {
+      // fallback below
+    }
+
+    const { data, error } = await supabase
+      .from('vendors')
+      .select('id, company_name, kyc_status, created_at, owner_name')
+      .not('created_at', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(Math.min(Number(limit || 5), 50));
+    if (error) throw error;
+    return data || [];
+  },
+
   getVendorsByCreator: async (creatorId) => {
     const { data, error } = await supabase
       .from('vendors')

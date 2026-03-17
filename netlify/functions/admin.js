@@ -835,11 +835,83 @@ export async function handler(event) {
 
     // -------------------------
     // DASHBOARD DATA (ADMIN)
+    // GET /dashboard/overview
     // GET /dashboard/counts
+    // GET /dashboard/recent-support-tickets
+    // GET /dashboard/recent-vendors
     // GET /dashboard/recent-lead-purchases
     // GET /dashboard/data-entry-performance
     // -------------------------
     if (tail[0] === "dashboard") {
+      if (event.httpMethod === "GET" && tail[1] === "overview") {
+        const [
+          usersRes,
+          vendorsRes,
+          buyersRes,
+          productsRes,
+          pendingKycRes,
+          ordersRes,
+          leadPurchasesRes,
+          vendorPaymentsRes,
+          openTicketsRes,
+        ] = await Promise.all([
+          supabase.from("users").select("*", { count: "exact", head: true }),
+          supabase.from("vendors").select("*", { count: "exact", head: true }).eq("is_active", true),
+          supabase.from("buyers").select("*", { count: "exact", head: true }),
+          supabase.from("products").select("*", { count: "exact", head: true }),
+          supabase
+            .from("vendors")
+            .select("*", { count: "exact", head: true })
+            .in("kyc_status", ["PENDING", "SUBMITTED"]),
+          supabase.from("lead_purchases").select("*", { count: "exact", head: true }),
+          supabase.from("lead_purchases").select("amount"),
+          supabase.from("vendor_payments").select("amount, net_amount"),
+          supabase
+            .from("support_tickets")
+            .select("*", { count: "exact", head: true })
+            .in("status", ["OPEN", "IN_PROGRESS"]),
+        ]);
+
+        const errors = [
+          usersRes.error,
+          vendorsRes.error,
+          buyersRes.error,
+          productsRes.error,
+          pendingKycRes.error,
+          ordersRes.error,
+          leadPurchasesRes.error,
+          vendorPaymentsRes.error,
+          openTicketsRes.error,
+        ].filter(Boolean);
+
+        if (errors.length > 0) {
+          return fail("Failed to fetch dashboard overview", errors[0].message);
+        }
+
+        const leadRevenue = (leadPurchasesRes.data || []).reduce(
+          (sum, row) => sum + Number(row?.amount || 0),
+          0
+        );
+        const vendorRevenue = (vendorPaymentsRes.data || []).reduce(
+          (sum, row) => sum + Number(row?.net_amount ?? row?.amount ?? 0),
+          0
+        );
+
+        return ok({
+          success: true,
+          overview: {
+            totalUsers: usersRes.count || 0,
+            activeVendors: vendorsRes.count || 0,
+            totalOrders: ordersRes.count || 0,
+            totalRevenue: leadRevenue + vendorRevenue,
+            totalBuyers: buyersRes.count || 0,
+            totalProducts: productsRes.count || 0,
+            pendingKyc: pendingKycRes.count || 0,
+            openTickets: openTicketsRes.count || 0,
+          },
+        });
+      }
+
       if (event.httpMethod === "GET" && tail[1] === "counts") {
         const [buyersRes, productsRes, pendingKycRes] = await Promise.all([
           supabase.from("buyers").select("*", { count: "exact", head: true }),
@@ -847,7 +919,7 @@ export async function handler(event) {
           supabase
             .from("vendors")
             .select("*", { count: "exact", head: true })
-            .eq("kyc_status", "SUBMITTED"),
+            .in("kyc_status", ["PENDING", "SUBMITTED"]),
         ]);
 
         if (buyersRes.error) return fail("Failed to fetch buyers count", buyersRes.error.message);
@@ -862,6 +934,33 @@ export async function handler(event) {
             pendingKyc: pendingKycRes.count || 0,
           },
         });
+      }
+
+      if (event.httpMethod === "GET" && tail[1] === "recent-support-tickets") {
+        const limit = Math.min(Number(event.queryStringParameters?.limit || 5), 50);
+        const { data, error } = await supabase
+          .from("support_tickets")
+          .select(
+            "id, subject, priority, status, created_at, vendor_id, buyer_id, vendors(company_name, owner_name), buyers(full_name, company_name)"
+          )
+          .order("created_at", { ascending: false })
+          .limit(limit);
+
+        if (error) return fail("Failed to fetch support tickets", error.message);
+        return ok({ success: true, tickets: data || [] });
+      }
+
+      if (event.httpMethod === "GET" && tail[1] === "recent-vendors") {
+        const limit = Math.min(Number(event.queryStringParameters?.limit || 5), 50);
+        const { data, error } = await supabase
+          .from("vendors")
+          .select("id, company_name, kyc_status, created_at, owner_name")
+          .not("created_at", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+
+        if (error) return fail("Failed to fetch recent vendors", error.message);
+        return ok({ success: true, vendors: data || [] });
       }
 
       if (event.httpMethod === "GET" && tail[1] === "recent-lead-purchases") {
@@ -1126,9 +1225,15 @@ export async function handler(event) {
       const search = rawSearch.replace(/,/g, " ").trim();
       const kycRaw = String(queryParams.kyc || queryParams.kyc_status || "all").trim();
       const activeRaw = String(queryParams.active || queryParams.status || "all").trim();
+      const joinedFromRaw = String(queryParams.joined_from || "").trim();
+      const joinedToRaw = String(queryParams.joined_to || "").trim();
       const parsedLimit = Number(queryParams.limit);
       const parsedOffset = Number(queryParams.offset);
-      const MAX_VENDOR_LIMIT = 1000;
+      const parsedJoinedFrom = joinedFromRaw ? new Date(joinedFromRaw) : null;
+      const parsedJoinedTo = joinedToRaw ? new Date(joinedToRaw) : null;
+      const hasJoinedFrom = parsedJoinedFrom && !Number.isNaN(parsedJoinedFrom.getTime());
+      const hasJoinedTo = parsedJoinedTo && !Number.isNaN(parsedJoinedTo.getTime());
+      const MAX_VENDOR_LIMIT = 5000;
       const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
         ? Math.min(parsedLimit, MAX_VENDOR_LIMIT)
         : MAX_VENDOR_LIMIT;
@@ -1161,6 +1266,14 @@ export async function handler(event) {
         vendorQuery = vendorQuery.or(
           `company_name.ilike.%${search}%,owner_name.ilike.%${search}%,vendor_id.ilike.%${search}%,email.ilike.%${search}%`
         );
+      }
+
+      if (hasJoinedFrom) {
+        vendorQuery = vendorQuery.gte("created_at", parsedJoinedFrom.toISOString());
+      }
+
+      if (hasJoinedTo) {
+        vendorQuery = vendorQuery.lt("created_at", parsedJoinedTo.toISOString());
       }
 
       const { data: vendors, error: vErr, count } = await vendorQuery;
