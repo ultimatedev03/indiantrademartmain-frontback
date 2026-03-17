@@ -11,6 +11,8 @@ import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelecto
 import { otpService } from '@/services/otpService';
 import { isAlreadyRegisteredError } from '@/modules/buyer/services/buyerSession';
 import { validateStrongPassword } from '@/lib/passwordPolicy';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 // âœ… FIX: Default 5 minutes (pehle 1/2 tha)
 const OTP_TIMER_SECONDS = 5 * 60;
@@ -45,6 +47,8 @@ const StepIndicator = ({ step }) => {
 const Register = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
+  const requestOtpCaptcha = useCaptchaGate();
+  const resendOtpCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(OTP_TIMER_SECONDS);
   const [otp, setOtp] = useState('');
@@ -129,18 +133,29 @@ const Register = () => {
     if (loading) return;
     if (!validateStep1()) return;
 
+    const captchaError = requestOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({ title: 'Captcha Required', description: captchaError, variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
     try {
-      const otpResp = await otpService.requestOtp(formData.email);
+      const otpResp = await otpService.requestOtp(formData.email, {
+        captcha_token: requestOtpCaptcha.captchaToken,
+        captcha_action: 'otp_request',
+      });
 
       setStep(2);
       const expiresIn = Number(otpResp?.expiresIn);
       setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TIMER_SECONDS);
       setOtp('');
+      requestOtpCaptcha.resetCaptcha();
 
       toast({ title: 'OTP Sent', description: `Verification code sent to ${formData.email}` });
     } catch (error) {
       console.error('Signup error:', error);
+      requestOtpCaptcha.resetCaptcha();
       toast({ title: 'Registration Failed', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -181,23 +196,13 @@ const Register = () => {
         });
       } catch (err) {
         if (isAlreadyRegisteredError(err)) {
-          // If account already exists, try direct login so user doesn't need to re-enter credentials.
-          const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-            email: normalizedEmail,
-            password: formData.password,
-            options: { data: { role: 'BUYER' } },
-            role: 'BUYER',
+          toast({
+            title: 'Account already exists',
+            description: 'Please login with your email and password.',
+            variant: 'destructive'
           });
-          if (loginError) {
-            toast({
-              title: 'Account already exists',
-              description: 'Please login with your email and password.',
-              variant: 'destructive'
-            });
-            setTimeout(() => navigate('/buyer/login'), 800);
-            return;
-          }
-          authData = loginData;
+          setTimeout(() => navigate('/buyer/login'), 800);
+          return;
         }
         if (!authData) throw err;
       }
@@ -242,14 +247,26 @@ const Register = () => {
   };
   const handleResendOtp = async () => {
     if (loading) return;
+
+    const captchaError = resendOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({ title: 'Captcha Required', description: captchaError, variant: 'destructive' });
+      return;
+    }
+
     setLoading(true);
     try {
-      const otpResp = await otpService.resendOtp(formData.email);
+      const otpResp = await otpService.resendOtp(formData.email, {
+        captcha_token: resendOtpCaptcha.captchaToken,
+        captcha_action: 'otp_resend',
+      });
       const expiresIn = Number(otpResp?.expiresIn);
       setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TIMER_SECONDS);
       setOtp('');
+      resendOtpCaptcha.resetCaptcha();
       toast({ title: 'OTP Resent', description: 'A new 6-digit code has been sent to your email.' });
     } catch (error) {
+      resendOtpCaptcha.resetCaptcha();
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -325,6 +342,12 @@ const Register = () => {
               <Button type="submit" className="w-full flex justify-center py-3 px-4 bg-[#00A699] hover:bg-[#008c81]" disabled={loading}>
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Sign Up & Verify'} <ArrowRight className="ml-2 w-4 h-4" />
               </Button>
+
+              <TurnstileField
+                action="otp_request"
+                resetKey={requestOtpCaptcha.captchaResetKey}
+                onTokenChange={requestOtpCaptcha.setCaptchaToken}
+              />
             </form>
           )}
 
@@ -362,6 +385,12 @@ const Register = () => {
                   )}
                 </div>
               </div>
+
+              <TurnstileField
+                action="otp_resend"
+                resetKey={resendOtpCaptcha.captchaResetKey}
+                onTokenChange={resendOtpCaptcha.setCaptchaToken}
+              />
 
               <div className="pt-4 flex flex-col gap-3">
                 <Button type="submit" className="w-full bg-[#00A699] hover:bg-[#008c81]" disabled={loading || otp.replace(/\D/g, '').length !== 6}>

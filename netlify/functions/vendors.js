@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
+import { assertCaptchaForNetlifyEvent } from '../../server/lib/captcha.js';
 import { consumeLeadForVendorWithCompat } from '../../server/lib/leadConsumptionCompat.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
@@ -2041,6 +2042,9 @@ export const handler = async (event) => {
         return forbidden(event, 'CSRF token mismatch');
       }
 
+      const payload = readBody(event);
+      await assertCaptchaForNetlifyEvent(event, payload, { action: 'lead_submit' });
+
       const { user, error } = requireRole(event);
       if (error) return error;
 
@@ -2064,7 +2068,6 @@ export const handler = async (event) => {
         vendor = vendorRow;
       }
 
-      const payload = readBody(event);
       const requirement = nonEmptyText(payload?.description || payload?.message, 5000);
       if (!requirement || requirement.length < 10) {
         return bad(event, 'Requirement/description must be at least 10 characters');
@@ -2318,6 +2321,10 @@ export const handler = async (event) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[Vendors] Function failed:', error?.message || error);
-    return fail(event, 'Vendors failed', error?.message || String(error));
+    return json(event, error?.statusCode || 500, {
+      success: false,
+      error: error?.message || 'Vendors failed',
+      details: error?.message || String(error),
+    });
   }
 };

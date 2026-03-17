@@ -9,10 +9,13 @@ import Logo from '@/shared/components/Logo';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const Login = () => {
   const navigate = useNavigate();
   const { login } = useEmployeeAuth();
+  const loginCaptcha = useCaptchaGate();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -33,10 +36,19 @@ const Login = () => {
       return;
     }
 
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      setError(captchaError);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
-      const user = await login(formData.email, formData.password);
+      const user = await login(formData.email, formData.password, {
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'auth_login',
+      });
 
       if (user) {
         // ✅ Role-based redirect (covers ADMIN/HR too)
@@ -61,10 +73,12 @@ const Login = () => {
         }
       } else {
         setError('Invalid credentials');
+        loginCaptcha.resetCaptcha();
       }
     } catch (err) {
       console.error(err);
       setError('An unexpected error occurred during login.');
+      loginCaptcha.resetCaptcha();
     } finally {
       setIsLoading(false);
     }
@@ -185,6 +199,12 @@ const Login = () => {
                 )}
                 Access Workspace
               </Button>
+
+              <TurnstileField
+                action="auth_login"
+                resetKey={loginCaptcha.captchaResetKey}
+                onTokenChange={loginCaptcha.setCaptchaToken}
+              />
             </form>
           </CardContent>
 

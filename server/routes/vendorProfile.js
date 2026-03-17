@@ -2,6 +2,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { normalizeEmail } from '../lib/auth.js';
+import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
 import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
@@ -2674,6 +2675,8 @@ router.delete('/:vendorId/favorite', requireAuth({ roles: ['BUYER'] }), async (r
 
 router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
   try {
+    await assertCaptchaForExpressRequest(req, { action: 'lead_submit' });
+
     const rawVendorId = String(req.params?.vendorId || '').trim();
     const isMarketplaceRequest = rawVendorId.toLowerCase() === 'marketplace';
 
@@ -2988,7 +2991,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
 
     return res.status(201).json({ success: true, lead: createdLead, proposal: createdProposal });
   } catch (e) {
-    return res.status(500).json({ success: false, error: e.message });
+    return res.status(e?.statusCode || 500).json({ success: false, error: e.message });
   }
 });
 

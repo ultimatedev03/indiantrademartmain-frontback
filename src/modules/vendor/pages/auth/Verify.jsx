@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const OTP_LENGTH = 6;
 const OTP_TTL_SECONDS = 120;
@@ -15,12 +17,18 @@ const OTP_TTL_SECONDS = 120;
 const Verify = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const otpCaptcha = useCaptchaGate();
+  const captchaToken = otpCaptcha.captchaToken;
+  const captchaResetKey = otpCaptcha.captchaResetKey;
+  const setCaptchaToken = otpCaptcha.setCaptchaToken;
+  const resetCaptcha = otpCaptcha.resetCaptcha;
+  const getCaptchaError = otpCaptcha.getCaptchaError;
 
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const [timer, setTimer] = useState(OTP_TTL_SECONDS);
+  const [timer, setTimer] = useState(0);
   const [initialSent, setInitialSent] = useState(false);
 
   useEffect(() => {
@@ -79,10 +87,10 @@ const Verify = () => {
 
   // ✅ Countdown timer
   useEffect(() => {
-    if (timer <= 0) return;
+    if (!initialSent || timer <= 0) return;
     const interval = setInterval(() => setTimer(prev => prev - 1), 1000);
     return () => clearInterval(interval);
-  }, [timer]);
+  }, [initialSent, timer]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
@@ -107,7 +115,12 @@ const Verify = () => {
           return;
         }
 
-        const otpResp = await otpService.resendOtp(email);
+        if (getCaptchaError()) return;
+
+        const otpResp = await otpService.resendOtp(email, {
+          captcha_token: captchaToken,
+          captcha_action: 'otp_resend',
+        });
         setInitialSent(true);
 
         const expiresIn = Number(otpResp?.expiresIn);
@@ -137,12 +150,13 @@ const Verify = () => {
         });
         setInitialSent(true); // prevent infinite retry loop
       } finally {
+        resetCaptcha();
         setLoading(false);
       }
     };
 
     sendInitialOtp();
-  }, [email, initialSent, location.state]);
+  }, [captchaToken, email, getCaptchaError, initialSent, location.state, resetCaptcha]);
 
   const markVendorVerified = async (emailToVerify) => {
     // Prefer vendorApi if it is server-side (safer with RLS)
@@ -220,12 +234,26 @@ const Verify = () => {
   };
 
   const handleResend = async () => {
+    const captchaError = getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive'
+      });
+      return;
+    }
+
     try {
       setLoading(true);
-      const otpResp = await otpService.resendOtp(email);
+      const otpResp = await otpService.resendOtp(email, {
+        captcha_token: captchaToken,
+        captcha_action: 'otp_resend',
+      });
       const expiresIn = Number(otpResp?.expiresIn);
       setTimer(Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : OTP_TTL_SECONDS);
       setOtp('');
+      resetCaptcha();
 
       if (import.meta.env.DEV && otpResp?.debug_otp) {
         const debugOtp = String(otpResp.debug_otp).trim().slice(0, OTP_LENGTH);
@@ -243,6 +271,7 @@ const Verify = () => {
       });
     } catch (error) {
       console.error('[Verify] resend failed:', error);
+      resetCaptcha();
       toast({
         title: "Error",
         description: error?.message || "Failed to resend OTP.",
@@ -278,9 +307,13 @@ const Verify = () => {
               />
 
               <div className="flex justify-between text-sm text-gray-500">
-                <span>Time remaining: {formatTime(timer)}</span>
+                <span>
+                  {initialSent
+                    ? `Time remaining: ${formatTime(timer)}`
+                    : 'Complete the CAPTCHA to send OTP'}
+                </span>
 
-                {timer === 0 ? (
+                {initialSent && timer === 0 ? (
                   <button
                     type="button"
                     onClick={handleResend}
@@ -290,7 +323,9 @@ const Verify = () => {
                     Resend OTP
                   </button>
                 ) : (
-                  <span className="text-gray-300 cursor-not-allowed">Resend OTP</span>
+                  <span className="text-gray-300 cursor-not-allowed">
+                    {initialSent ? 'Resend OTP' : 'Waiting for OTP'}
+                  </span>
                 )}
               </div>
 
@@ -298,6 +333,12 @@ const Verify = () => {
                 💡 If you don't see the email, check your spam or junk folder
               </p>
             </div>
+
+            <TurnstileField
+              action="otp_resend"
+              resetKey={captchaResetKey}
+              onTokenChange={setCaptchaToken}
+            />
 
             <Button
               type="submit"

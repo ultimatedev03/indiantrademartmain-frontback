@@ -206,7 +206,7 @@ export const InternalAuthProvider = ({ children }) => {
   /**
    * 🔐 FIXED LOGIN
    */
-  const login = async (email, password, expectedRole) => {
+  const login = async (email, password, expectedRole, captcha = {}) => {
     try {
       setIsLoading(true);
       const expectedNormalizedRole = normalizeRoleValue(expectedRole, undefined);
@@ -219,6 +219,8 @@ export const InternalAuthProvider = ({ children }) => {
         await supabase.auth.signInWithPassword({
           email,
           password,
+          ...(captcha?.captcha_token ? { captcha_token: captcha.captcha_token } : {}),
+          ...(captcha?.captcha_action ? { captcha_action: captcha.captcha_action } : {}),
         });
 
       if (authError || !authData?.user) {

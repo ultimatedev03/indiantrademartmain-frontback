@@ -6,6 +6,8 @@ import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import Logo from '@/shared/components/Logo';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import { ArrowRight, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -15,6 +17,7 @@ const BUYER_CREDENTIAL_MESSAGE = 'This email is not registered as buyer';
 const Login = () => {
   const navigate = useNavigate();
   const { signIn } = useAuth();
+  const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
@@ -46,6 +49,15 @@ const Login = () => {
        });
        return;
     }
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
     setLoading(true);
 
     try {
@@ -60,12 +72,17 @@ const Login = () => {
         throw new Error(BUYER_CREDENTIAL_MESSAGE);
       }
 
-      const { error } = await signIn(normalizedEmail, formData.password, { role: 'BUYER' });
+      const { error } = await signIn(normalizedEmail, formData.password, {
+        role: 'BUYER',
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'auth_login',
+      });
       if (error) throw error;
       toast({ title: "Welcome back!", description: "Successfully logged in." });
       navigate('/buyer/dashboard', { replace: true });
     } catch (error) {
       console.error("Login failed", error);
+      loginCaptcha.resetCaptcha();
       const message =
         String(error?.message || '').trim() || "Invalid credentials.";
       toast({
@@ -137,6 +154,12 @@ const Login = () => {
                 {!loading && <ArrowRight className="ml-2 w-4 h-4" />}
               </Button>
             </div>
+
+            <TurnstileField
+              action="auth_login"
+              resetKey={loginCaptcha.captchaResetKey}
+              onTokenChange={loginCaptcha.setCaptchaToken}
+            />
           </form>
 
           <div className="mt-6">

@@ -20,10 +20,15 @@ async function request(path, options) {
 
 export const superAdminServerApi = {
   auth: {
-    login: (email, password) =>
+    login: (email, password, options = {}) =>
       request('/login', {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          ...(options?.captcha_token ? { captcha_token: options.captcha_token } : {}),
+          ...(options?.captcha_action ? { captcha_action: options.captcha_action } : {}),
+        }),
       }),
     me: () => request('/me'),
     changePassword: (current_password, new_password) =>
@@ -134,4 +139,3 @@ export const superAdminServerApi = {
     },
   },
 };
-

@@ -71,10 +71,12 @@ export const employeeApi = {
     /**
      * Auth via backend JWT + cookies.
      */
-    login: async (email, password) => {
+    login: async (email, password, captcha = {}) => {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
-        password
+        password,
+        ...(captcha?.captcha_token ? { captcha_token: captcha.captcha_token } : {}),
+        ...(captcha?.captcha_action ? { captcha_action: captcha.captcha_action } : {}),
       });
 
       if (error) throw new Error(error.message);

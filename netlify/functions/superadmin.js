@@ -2,6 +2,7 @@
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { assertCaptchaForNetlifyEvent } from '../../server/lib/captcha.js';
 
 const TOKEN_KEY = 'superadmin_token';
 
@@ -624,7 +625,9 @@ const requireSuperAdmin = async (event, supabase) => {
   };
 };
 
-const handleLogin = async (supabase, body) => {
+const handleLogin = async (event, supabase, body) => {
+  await assertCaptchaForNetlifyEvent(event, body, { action: 'superadmin_login' });
+
   const email = normalizeEmail(body?.email);
   const password = String(body?.password || '');
   if (!email || !password) return json(400, { success: false, error: 'Email and password are required' });
@@ -680,7 +683,7 @@ export const handler = async (event) => {
     const body = readBody(event);
 
     if (event.httpMethod === 'POST' && tail[0] === 'login') {
-      return handleLogin(supabase, body);
+      return handleLogin(event, supabase, body);
     }
 
     const guard = await requireSuperAdmin(event, supabase);
@@ -1339,6 +1342,13 @@ export const handler = async (event) => {
 
     return json(404, { success: false, error: 'Not found' });
   } catch (error) {
-    return json(500, { success: false, error: error.message || 'Superadmin function failed' });
+    const statusCode = error?.statusCode || 500;
+    return json(statusCode, {
+      success: false,
+      error:
+        statusCode >= 500 && !error?.statusCode
+          ? 'Superadmin function failed'
+          : error?.message || 'Superadmin function failed',
+    });
   }
 };

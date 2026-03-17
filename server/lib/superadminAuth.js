@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { supabase } from './supabaseClient.js';
+import { assertCaptchaForExpressRequest } from './captcha.js';
 import { writeAuditLog } from './audit.js';
 
 const SUPERADMIN_TOKEN_KEY = 'superadmin_token';
@@ -81,6 +82,8 @@ function signSuperAdminToken(superadmin) {
 
 export async function loginSuperAdmin(req, res) {
   try {
+    await assertCaptchaForExpressRequest(req, { action: 'superadmin_login' });
+
     const email = String(req.body?.email || '')
       .trim()
       .toLowerCase();
@@ -151,7 +154,14 @@ export async function loginSuperAdmin(req, res) {
     });
   } catch (error) {
     console.error('[SuperAdminAuth] Login failed:', error?.message || error);
-    return res.status(500).json({ success: false, error: 'Superadmin login failed' });
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({
+      success: false,
+      error:
+        statusCode >= 500 && !error?.statusCode
+          ? 'Superadmin login failed'
+          : error?.message || 'Superadmin login failed',
+    });
   }
 }
 

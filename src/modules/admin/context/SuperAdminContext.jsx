@@ -59,13 +59,13 @@ export const SuperAdminProvider = ({ children }) => {
     })();
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (email, password, captcha = {}) => {
     try {
       setIsLoading(true);
       const safeEmail = String(email || '').trim();
       console.log(`[SuperAdminAuth] Attempting login for: ${safeEmail}`);
 
-      const data = await superAdminServerApi.auth.login(safeEmail, password);
+      const data = await superAdminServerApi.auth.login(safeEmail, password, captcha);
       const normalized = normalizeRow(data?.superadmin, safeEmail);
       if (normalized) {
         setSuperAdmin(normalized);

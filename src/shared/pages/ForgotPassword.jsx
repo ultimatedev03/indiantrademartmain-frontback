@@ -9,11 +9,15 @@ import { Loader2, ArrowRight, Lock } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
 import { passwordResetApi } from '@/services/passwordResetApi';
 import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from '@/lib/passwordPolicy';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const role = searchParams.get('role')?.toUpperCase() || 'BUYER';
+  const requestOtpCaptcha = useCaptchaGate();
+  const resendOtpCaptcha = useCaptchaGate();
 
   // States
   const [step, setStep] = useState(1); // 1: email, 2: otp, 3: password
@@ -51,13 +55,26 @@ const ForgotPassword = () => {
       return;
     }
 
+    const captchaError = requestOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
       // Check if email exists with the specified role
       await passwordResetApi.checkEmailByRole(email, role);
 
       // Request OTP
-      const otpResponse = await passwordResetApi.requestOTP(email);
+      const otpResponse = await passwordResetApi.requestOTP(email, {
+        captcha_token: requestOtpCaptcha.captchaToken,
+        captcha_action: 'otp_request',
+      });
       
       toast({
         title: 'OTP Sent',
@@ -66,7 +83,9 @@ const ForgotPassword = () => {
 
       setOtpExpiry(getOtpSeconds(otpResponse));
       setStep(2);
+      requestOtpCaptcha.resetCaptcha();
     } catch (error) {
+      requestOtpCaptcha.resetCaptcha();
       toast({
         title: 'Error',
         description: error.message || 'Failed to verify email',
@@ -122,9 +141,22 @@ const ForgotPassword = () => {
 
   // Resend OTP
   const handleResendOtp = async () => {
+    const captchaError = resendOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      const resendResponse = await passwordResetApi.resendOTP(email);
+      const resendResponse = await passwordResetApi.resendOTP(email, {
+        captcha_token: resendOtpCaptcha.captchaToken,
+        captcha_action: 'otp_resend',
+      });
       
       toast({
         title: 'OTP Resent',
@@ -133,7 +165,9 @@ const ForgotPassword = () => {
 
       setOtpExpiry(getOtpSeconds(resendResponse));
       setOtp('');
+      resendOtpCaptcha.resetCaptcha();
     } catch (error) {
+      resendOtpCaptcha.resetCaptcha();
       toast({
         title: 'Error',
         description: error.message || 'Failed to resend OTP',
@@ -274,6 +308,12 @@ const ForgotPassword = () => {
                 {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 {loading ? 'Verifying...' : 'Continue'}
               </Button>
+
+              <TurnstileField
+                action="otp_request"
+                resetKey={requestOtpCaptcha.captchaResetKey}
+                onTokenChange={requestOtpCaptcha.setCaptchaToken}
+              />
             </form>
           )}
 
@@ -321,6 +361,12 @@ const ForgotPassword = () => {
               >
                 {otpExpiry > 60 ? `Resend in ${otpExpiry - 60}s` : 'Resend OTP'}
               </Button>
+
+              <TurnstileField
+                action="otp_resend"
+                resetKey={resendOtpCaptcha.captchaResetKey}
+                onTokenChange={resendOtpCaptcha.setCaptchaToken}
+              />
 
               <button
                 type="button"

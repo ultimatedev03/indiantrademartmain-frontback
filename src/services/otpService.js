@@ -41,12 +41,20 @@ const postOtp = async (action, payload, fallbackMessage) => {
 };
 
 export const otpService = {
-  requestOtp: async (email) => {
+  requestOtp: async (email, options = {}) => {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Email is required');
     if (!isValidEmail(normalizedEmail)) throw new Error('Invalid email format');
 
-    return postOtp('request', { email: normalizedEmail }, 'Failed to send OTP');
+    return postOtp(
+      'request',
+      {
+        email: normalizedEmail,
+        ...(options?.captcha_token ? { captcha_token: options.captcha_token } : {}),
+        ...(options?.captcha_action ? { captcha_action: options.captcha_action } : {}),
+      },
+      'Failed to send OTP'
+    );
   },
 
   verifyOtp: async (email, otpCode) => {
@@ -68,12 +76,20 @@ export const otpService = {
     );
   },
 
-  resendOtp: async (email) => {
+  resendOtp: async (email, options = {}) => {
     const normalizedEmail = normalizeEmail(email);
     if (!normalizedEmail) throw new Error('Email is required');
     if (!isValidEmail(normalizedEmail)) throw new Error('Invalid email format');
 
-    return postOtp('resend', { email: normalizedEmail }, 'Failed to resend OTP');
+    return postOtp(
+      'resend',
+      {
+        email: normalizedEmail,
+        ...(options?.captcha_token ? { captcha_token: options.captcha_token } : {}),
+        ...(options?.captcha_action ? { captcha_action: options.captcha_action } : {}),
+      },
+      'Failed to resend OTP'
+    );
   },
 
   createAuthUser: async (email, password, userData = {}) => {

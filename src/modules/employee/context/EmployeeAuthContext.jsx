@@ -53,9 +53,9 @@ export const EmployeeAuthProvider = ({ children }) => {
     };
   }, []);
 
-  const login = async (email, password) => {
+  const login = async (email, password, captcha = {}) => {
     try {
-      const res = await employeeApi.auth.login(email, password);
+      const res = await employeeApi.auth.login(email, password, captcha);
       if (res?.user) {
         setUser(res.user);
 

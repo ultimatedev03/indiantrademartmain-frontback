@@ -6,18 +6,34 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Lock, Shield } from 'lucide-react';
+import { toast } from '@/components/ui/use-toast';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const Login = () => {
   const navigate = useNavigate();
   const { login } = useInternalAuth();
+  const loginCaptcha = useCaptchaGate();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsLoading(true);
     
-    const user = await login(formData.email, formData.password, 'ADMIN');
+    const user = await login(formData.email, formData.password, 'ADMIN', {
+      captcha_token: loginCaptcha.captchaToken,
+      captcha_action: 'auth_login',
+    });
     
     if (user) {
       // Role-based redirection
@@ -40,6 +56,8 @@ const Login = () => {
         default:
           navigate('/admin/dashboard');
       }
+    } else {
+      loginCaptcha.resetCaptcha();
     }
     setIsLoading(false);
   };
@@ -99,6 +117,12 @@ const Login = () => {
                 Sign In
               </Button>
             </div>
+
+            <TurnstileField
+              action="auth_login"
+              resetKey={loginCaptcha.captchaResetKey}
+              onTokenChange={loginCaptcha.setCaptchaToken}
+            />
           </form>
           
           <div className="mt-6">

@@ -45,6 +45,16 @@ const getRoleMismatchMessage = (requestedRole) => {
   return `This email is not registered as ${normalized.toLowerCase()}`;
 };
 
+const getCaptchaField = (source = {}, ...keys) => {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value).trim();
+    }
+  }
+  return '';
+};
+
 const getCsrfToken = () => {
   if (typeof document === 'undefined') return '';
   const token = document.cookie
@@ -220,18 +230,61 @@ const authShim = {
     }
     return { data: { user: cachedUser }, error: null };
   },
-  signInWithPassword: async ({ email, password, options = {}, role, role_hint, roleHint } = {}) => {
+  signInWithPassword: async ({
+    email,
+    password,
+    options = {},
+    role,
+    role_hint,
+    roleHint,
+    captcha_token,
+    captchaToken,
+    captcha_action,
+    captchaAction,
+    turnstile_token,
+    turnstileToken,
+  } = {}) => {
     try {
       const normalizedEmail = String(email || '').trim().toLowerCase();
       const roleFromOptions = options?.data?.role || options?.role;
       const roleValue = role || role_hint || roleHint || roleFromOptions || null;
       const requestedRole = normalizeRole(roleValue);
+      const captchaTokenValue =
+        getCaptchaField(options?.data, 'captcha_token', 'captchaToken', 'turnstile_token', 'turnstileToken') ||
+        getCaptchaField(
+          {
+            captcha_token,
+            captchaToken,
+            turnstile_token,
+            turnstileToken,
+            optionsCaptchaToken: options?.captcha_token,
+          },
+          'captcha_token',
+          'captchaToken',
+          'turnstile_token',
+          'turnstileToken',
+          'optionsCaptchaToken'
+        );
+      const captchaActionValue =
+        getCaptchaField(options?.data, 'captcha_action', 'captchaAction') ||
+        getCaptchaField(
+          {
+            captcha_action,
+            captchaAction,
+            optionsCaptchaAction: options?.captcha_action,
+          },
+          'captcha_action',
+          'captchaAction',
+          'optionsCaptchaAction'
+        );
       const data = await fetchJson('/api/auth/login', {
         method: 'POST',
         body: JSON.stringify({
           email: normalizedEmail,
           password,
           ...(roleValue ? { role: roleValue } : {}),
+          ...(captchaTokenValue ? { captcha_token: captchaTokenValue } : {}),
+          ...(captchaActionValue ? { captcha_action: captchaActionValue } : {}),
         }),
       });
       const returnedUser = sanitizeAuthUser(data?.user || null);
@@ -265,6 +318,8 @@ const authShim = {
   signUp: async ({ email, password, options = {} }) => {
     try {
       const meta = options?.data || {};
+      const captchaToken = getCaptchaField(meta, 'captcha_token', 'captchaToken');
+      const captchaAction = getCaptchaField(meta, 'captcha_action', 'captchaAction');
       const payload = {
         email,
         password,
@@ -272,6 +327,8 @@ const authShim = {
         full_name: meta?.full_name || meta?.fullName,
         role: meta?.role,
         phone: meta?.phone || meta?.mobile_number || meta?.mobileNumber,
+        ...(captchaToken ? { captcha_token: captchaToken } : {}),
+        ...(captchaAction ? { captcha_action: captchaAction } : {}),
       };
       const data = await fetchJson('/api/auth/register', {
         method: 'POST',

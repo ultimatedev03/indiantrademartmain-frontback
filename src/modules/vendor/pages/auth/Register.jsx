@@ -12,6 +12,8 @@ import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { referralApi } from '@/modules/vendor/services/referralApi';
 import { otpService } from '@/services/otpService';
 import { validateStrongPassword } from '@/lib/passwordPolicy';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 // ✅ Logo component
 import Logo from '@/shared/components/Logo';
@@ -56,6 +58,8 @@ const Steps = ({ currentStep }) => (
 const VendorRegister = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const requestOtpCaptcha = useCaptchaGate();
+  const resendOtpCaptcha = useCaptchaGate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [cityLoading, setCityLoading] = useState(false);
@@ -216,17 +220,32 @@ const VendorRegister = () => {
       return;
     }
 
+    const captchaError = requestOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
     try {
-      await otpService.requestOtp(formData.email);
+      await otpService.requestOtp(formData.email, {
+        captcha_token: requestOtpCaptcha.captchaToken,
+        captcha_action: 'otp_request',
+      });
 
       setStep(3);
       setTimer(120);
+      requestOtpCaptcha.resetCaptcha();
       toast({
         title: 'OTP Sent',
         description: 'A 6-digit code has been sent to your email. It will expire in 2 minutes.',
       });
     } catch (error) {
+      requestOtpCaptcha.resetCaptcha();
       toast({ title: 'Registration Failed', description: error.message, variant: 'destructive' });
     } finally {
       setLoading(false);
@@ -254,14 +273,6 @@ const VendorRegister = () => {
 
       if (authData.session) {
         await supabase.auth.setSession(authData.session);
-      } else {
-        const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
-        });
-        if (!loginError && loginData?.session) {
-          await supabase.auth.setSession(loginData.session);
-        }
       }
 
       await vendorApi.registerVendor({
@@ -312,11 +323,13 @@ const VendorRegister = () => {
 
       toast({
         title: 'Registration Successful!',
-        description: 'Your account is verified. Redirecting to dashboard...',
+        description: authData.session
+          ? 'Your account is verified. Redirecting to dashboard...'
+          : 'Your account is verified. Please login to continue.',
         className: 'bg-green-50 border-green-200',
       });
 
-      setTimeout(() => navigate('/vendor/dashboard'), 500);
+      setTimeout(() => navigate(authData.session ? '/vendor/dashboard' : '/vendor/login'), 500);
     } catch (error) {
       console.error('OTP Verification Error:', error);
       toast({
@@ -330,13 +343,28 @@ const VendorRegister = () => {
   };
 
   const resendOtp = async () => {
+    const captchaError = resendOtpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     try {
-      await otpService.resendOtp(formData.email);
+      await otpService.resendOtp(formData.email, {
+        captcha_token: resendOtpCaptcha.captchaToken,
+        captcha_action: 'otp_resend',
+      });
       setTimer(120);
       setFormData((prev) => ({ ...prev, otp: '' }));
+      resendOtpCaptcha.resetCaptcha();
       toast({ title: 'OTP Resent', description: 'A new 6-digit code has been sent to your email.' });
     } catch (e) {
       console.error('Resend OTP Error:', e);
+      resendOtpCaptcha.resetCaptcha();
       toast({
         title: 'Error',
         description: e.message || 'Failed to resend OTP. Please try again.',
@@ -519,6 +547,12 @@ const VendorRegister = () => {
                   {loading ? <Loader2 className="animate-spin mr-2" /> : null} Register
                 </Button>
               </div>
+
+              <TurnstileField
+                action="otp_request"
+                resetKey={requestOtpCaptcha.captchaResetKey}
+                onTokenChange={requestOtpCaptcha.setCaptchaToken}
+              />
             </form>
           )}
 
@@ -560,6 +594,12 @@ const VendorRegister = () => {
                   )}
                 </div>
               </div>
+
+              <TurnstileField
+                action="otp_resend"
+                resetKey={resendOtpCaptcha.captchaResetKey}
+                onTokenChange={resendOtpCaptcha.setCaptchaToken}
+              />
 
               <Button type="submit" className="w-full bg-green-600 hover:bg-green-700" disabled={loading}>
                 {loading ? <Loader2 className="animate-spin mr-2" /> : null} Verify & Create Account

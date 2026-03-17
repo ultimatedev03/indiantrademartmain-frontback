@@ -8,6 +8,8 @@ import Logo from '@/shared/components/Logo';
 import { toast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,6 +40,7 @@ const getInitialLoginTab = () => {
 const Login = () => {
   const navigate = useNavigate();
   const { signIn } = useAuth();
+  const loginCaptcha = useCaptchaGate();
   
   // 'buyer' or 'seller'
   const [activeTab, setActiveTab] = useState(() => getInitialLoginTab());
@@ -62,6 +65,7 @@ const Login = () => {
   const handleTabSwitch = (tab) => {
     if (loading || activeTab === tab) return;
     setActiveTab(tab);
+    loginCaptcha.resetCaptcha();
     if (tab === 'buyer') {
       setFormData({ email: '', password: '' });
     } else {
@@ -95,6 +99,16 @@ const Login = () => {
       return;
     }
 
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -113,7 +127,11 @@ const Login = () => {
         }
       }
 
-      const { error } = await signIn(normalizedEmail, formData.password, { role: roleHint });
+      const { error } = await signIn(normalizedEmail, formData.password, {
+        role: roleHint,
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'auth_login',
+      });
       if (error) throw error;
       
       toast({ title: "Welcome back!", description: "Successfully logged in." });
@@ -123,6 +141,7 @@ const Login = () => {
 
     } catch (error) {
       console.error("Login failed", error);
+      loginCaptcha.resetCaptcha();
       toast({ 
         title: "Login Failed", 
         description: error.message || "Invalid credentials. Please try again.",
@@ -278,6 +297,12 @@ const Login = () => {
                      {loading ? 'Signing In...' : 'Sign In'}
                   </Button>
                </div>
+
+               <TurnstileField
+                  action="auth_login"
+                  resetKey={loginCaptcha.captchaResetKey}
+                  onTokenChange={loginCaptcha.setCaptchaToken}
+               />
             </form>
 
             <div className="mt-8 text-center">

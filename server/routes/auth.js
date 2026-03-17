@@ -23,6 +23,7 @@ import {
   getPublicUserByEmail,
   getPublicUserById,
 } from '../lib/auth.js';
+import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
 import { validateStrongPassword } from '../lib/passwordPolicy.js';
 
 const router = express.Router();
@@ -538,6 +539,8 @@ function parseBuyerProfileUpdates(body = {}) {
 
 router.post('/login', async (req, res) => {
   try {
+    await assertCaptchaForExpressRequest(req, { action: 'auth_login' });
+
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password || '');
     const roleHint = normalizeRole(req.body?.role || req.body?.role_hint || req.body?.roleHint || '');
@@ -719,7 +722,11 @@ router.post('/login', async (req, res) => {
     return res.json({ success: true, user: payload });
   } catch (error) {
     console.error('[Auth] Login failed:', error?.message || error);
-    return res.status(500).json({ success: false, error: 'Login failed' });
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({
+      success: false,
+      error: statusCode >= 500 && !error?.statusCode ? 'Login failed' : error?.message || 'Login failed',
+    });
   }
 });
 

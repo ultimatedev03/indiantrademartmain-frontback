@@ -1,5 +1,6 @@
 import nodemailer from "nodemailer";
 import { createClient } from "@supabase/supabase-js";
+import { assertCaptchaForNetlifyEvent } from "../../server/lib/captcha.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -207,6 +208,10 @@ export const handler = async (event) => {
     const body = parseRequestBody(event);
 
     if (action === "request" || action === "resend") {
+      await assertCaptchaForNetlifyEvent(event, body, {
+        action: action === "resend" ? "otp_resend" : "otp_request"
+      });
+
       const email = normalizeEmail(body?.email);
 
       if (!isValidEmail(email)) {
@@ -283,6 +288,9 @@ export const handler = async (event) => {
     return { statusCode: 404, body: JSON.stringify({ error: "Unknown action" }) };
   } catch (e) {
     console.error("[otp function] Handler error:", e);
-    return { statusCode: 500, body: JSON.stringify({ error: e.message || "Server error" }) };
+    return {
+      statusCode: e?.statusCode || 500,
+      body: JSON.stringify({ error: e?.message || "Server error" })
+    };
   }
 };

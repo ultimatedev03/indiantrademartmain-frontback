@@ -1,6 +1,7 @@
 import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
+import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 120;
@@ -245,6 +246,8 @@ const upsertOtpForEmail = async (email) => {
 // POST /api/otp/request - Request OTP
 router.post('/request', async (req, res) => {
   try {
+    await assertCaptchaForExpressRequest(req, { action: 'otp_request' });
+
     const email = normalizeEmail(req.body?.email);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
@@ -263,7 +266,7 @@ router.post('/request', async (req, res) => {
     }));
   } catch (error) {
     console.error('OTP request error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to send OTP' });
+    return res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to send OTP' });
   }
 });
 
@@ -315,6 +318,8 @@ router.post('/verify', async (req, res) => {
 // POST /api/otp/resend - Resend OTP
 router.post('/resend', async (req, res) => {
   try {
+    await assertCaptchaForExpressRequest(req, { action: 'otp_resend' });
+
     const email = normalizeEmail(req.body?.email);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
@@ -333,7 +338,7 @@ router.post('/resend', async (req, res) => {
     }));
   } catch (error) {
     console.error('Resend OTP error:', error);
-    return res.status(500).json({ error: error.message || 'Failed to resend OTP' });
+    return res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to resend OTP' });
   }
 });
 

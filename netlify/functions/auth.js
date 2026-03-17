@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'crypto';
+import { assertCaptchaForNetlifyEvent } from '../../server/lib/captcha.js';
 import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
 
 const ENABLE_SUPABASE_AUTH_MIGRATION =
@@ -944,6 +945,7 @@ export const handler = async (event) => {
 
     if (event.httpMethod === 'POST' && tail[0] === 'login') {
       const body = readBody(event);
+      await assertCaptchaForNetlifyEvent(event, body, { action: 'auth_login' });
       const email = normalizeEmail(body?.email);
       const password = String(body?.password || '');
       const roleHint = normalizeRole(body?.role || body?.role_hint || body?.roleHint || '');
@@ -1479,6 +1481,11 @@ export const handler = async (event) => {
   } catch (error) {
     // eslint-disable-next-line no-console
     console.error('[Auth] Function failed:', error?.message || error);
-    return fail(event, 'Auth failed', error?.message || String(error));
+    const statusCode = error?.statusCode || 500;
+    return json(event, statusCode, {
+      success: false,
+      error: statusCode >= 500 && !error?.statusCode ? 'Auth failed' : error?.message || 'Auth failed',
+      details: statusCode >= 500 && !error?.statusCode ? undefined : error?.message || String(error),
+    });
   }
 };

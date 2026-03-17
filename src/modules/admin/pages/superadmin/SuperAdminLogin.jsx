@@ -5,20 +5,38 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ShieldAlert, Lock, Fingerprint } from 'lucide-react';
+import { toast } from '@/components/ui/use-toast';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const SuperAdminLogin = () => {
   const navigate = useNavigate();
   const { login } = useSuperAdmin();
+  const loginCaptcha = useCaptchaGate();
   const [formData, setFormData] = useState({ email: '', password: '' });
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
     setLoading(true);
-    const success = await login(formData.email, formData.password);
+    const success = await login(formData.email, formData.password, {
+      captcha_token: loginCaptcha.captchaToken,
+      captcha_action: 'superadmin_login',
+    });
     if (success) {
       // ✅ Keep route consistent with /admin/superadmin/*
       navigate('/admin/superadmin/dashboard');
+    } else {
+      loginCaptcha.resetCaptcha();
     }
     setLoading(false);
   };
@@ -79,6 +97,12 @@ const SuperAdminLogin = () => {
           >
             {loading ? 'Authenticating...' : 'INITIALIZE SESSION'}
           </Button>
+
+          <TurnstileField
+            action="superadmin_login"
+            resetKey={loginCaptcha.captchaResetKey}
+            onTokenChange={loginCaptcha.setCaptchaToken}
+          />
         </form>
 
         <div className="mt-8 text-center">

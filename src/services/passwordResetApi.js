@@ -39,14 +39,18 @@ export const passwordResetApi = {
     );
   },
 
-  requestOTP: async (email) => {
+  requestOTP: async (email, options = {}) => {
     if (!email) {
       throw new Error('Email is required');
     }
 
     return postJson(
       '/api/otp/request',
-      { email: email.toLowerCase().trim() },
+      {
+        email: email.toLowerCase().trim(),
+        ...(options?.captcha_token ? { captcha_token: options.captcha_token } : {}),
+        ...(options?.captcha_action ? { captcha_action: options.captcha_action } : {}),
+      },
       'Failed to send OTP'
     );
   },
@@ -63,14 +67,18 @@ export const passwordResetApi = {
     );
   },
 
-  resendOTP: async (email) => {
+  resendOTP: async (email, options = {}) => {
     if (!email) {
       throw new Error('Email is required');
     }
 
     return postJson(
       '/api/otp/resend',
-      { email: email.toLowerCase().trim() },
+      {
+        email: email.toLowerCase().trim(),
+        ...(options?.captcha_token ? { captcha_token: options.captcha_token } : {}),
+        ...(options?.captcha_action ? { captcha_action: options.captcha_action } : {}),
+      },
       'Failed to resend OTP'
     );
   },

@@ -10,10 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, ArrowRight } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const VendorLogin = () => {
   const navigate = useNavigate();
   const supaAuth = useAuth();
+  const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
@@ -29,41 +32,30 @@ const VendorLogin = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+
+    const captchaError = loginCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setLoading(true);
 
     try {
-      // 1. Authenticate with Supabase
-      let authData = null;
-      let authError = null;
-      
-      ({ data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: String(formData.email || '').trim().toLowerCase(),
         password: formData.password,
-        role: 'VENDOR'
-      }));
+        role: 'VENDOR',
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'auth_login',
+      });
 
       if (authError) {
-        if (authError.message.includes('Email not confirmed') || authError.code === 'email_not_confirmed') {
-           // Try to verify the email in auth table directly
-           try {
-             // This is a workaround - in production, disable email confirmation in Supabase settings
-             toast({ title: "Verifying email...", description: "Please wait." });
-             // Retry the login after a brief delay
-             await new Promise(resolve => setTimeout(resolve, 1000));
-             const { data: retryData, error: retryError } = await supabase.auth.signInWithPassword({
-               email: String(formData.email || '').trim().toLowerCase(),
-               password: formData.password,
-               role: 'VENDOR'
-             });
-             if (retryError) throw retryError;
-             authData = retryData;
-           } catch (retryErr) {
-             toast({ title: "Email Unverified", description: "Your email needs to be verified. Please contact support.", variant: "destructive" });
-             return;
-           }
-        } else {
-          throw authError;
-        }
+        throw authError;
       }
 
       // 2. Ensure vendor profile is linked to this user_id
@@ -127,6 +119,7 @@ const VendorLogin = () => {
       window.location.href = '/vendor/dashboard';
 
     } catch (error) {
+      loginCaptcha.resetCaptcha();
       toast({ 
         title: "Login Failed", 
         description: error.message || "Invalid credentials", 
@@ -181,6 +174,12 @@ const VendorLogin = () => {
             <Button type="submit" className="w-full bg-[#003D82] hover:bg-[#002d62]" disabled={loading}>
               {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null} Sign In
             </Button>
+
+            <TurnstileField
+              action="auth_login"
+              resetKey={loginCaptcha.captchaResetKey}
+              onTokenChange={loginCaptcha.setCaptchaToken}
+            />
           </form>
         </CardContent>
         <CardFooter className="flex justify-center border-t p-4 bg-gray-50 rounded-b-lg">

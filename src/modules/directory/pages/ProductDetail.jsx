@@ -48,11 +48,14 @@ import { productFavorites } from '@/modules/buyer/services/productFavorites';
 import { productRatings, PRODUCT_RATINGS_UPDATED_EVENT } from '@/shared/services/productRatings';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const ProductDetail = () => {
   const { productSlug } = useParams();
   const navigate = useNavigate();
   const { user, userRole, vendorId: currentVendorId } = useAuth();
+  const enquiryCaptcha = useCaptchaGate();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -204,6 +207,7 @@ const ProductDetail = () => {
 
     // Reset form every time modal opens
     setEnquiry({ quantity: '', unit: 'pieces', budget: '', requirement: '' });
+    enquiryCaptcha.resetCaptcha();
     setEnquiryOpen(true);
   };
 
@@ -242,6 +246,16 @@ const ProductDetail = () => {
       '';
     const buyerCompany = user?.user_metadata?.company_name || '';
 
+    const captchaError = enquiryCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: 'Captcha Required',
+        description: captchaError,
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSendingEnquiry(true);
     try {
       const payload = {
@@ -259,6 +273,8 @@ const ProductDetail = () => {
         category: data.micro_categories?.name || 'General',
         category_slug: data.micro_categories?.slug || '',
         location: data.vendors?.city ? `${data.vendors.city}, ${data.vendors.state || ''}`.trim() : null,
+        captcha_token: enquiryCaptcha.captchaToken,
+        captcha_action: 'lead_submit',
       };
 
       const response = await fetchWithCsrf(apiUrl(`/api/vendors/${data.vendors.id}/leads`), {
@@ -272,9 +288,11 @@ const ProductDetail = () => {
 
       toast({ title: 'Enquiry Sent', description: 'Your enquiry has been submitted to the vendor' });
       setEnquiryOpen(false);
+      enquiryCaptcha.resetCaptcha();
       navigate(`/directory/vendor/${data.vendors.id}`);
     } catch (error) {
       console.error('Error creating lead:', error);
+      enquiryCaptcha.resetCaptcha();
       toast({
         title: 'Error',
         description: error?.message || 'Failed to send enquiry',
@@ -663,7 +681,14 @@ const ProductDetail = () => {
       {seoMetaTags}
 
       {/* Enquiry Modal */}
-      <Dialog open={enquiryOpen} onOpenChange={(v) => !sendingEnquiry && setEnquiryOpen(v)}>
+      <Dialog
+        open={enquiryOpen}
+        onOpenChange={(v) => {
+          if (sendingEnquiry) return;
+          if (!v) enquiryCaptcha.resetCaptcha();
+          setEnquiryOpen(v);
+        }}
+      >
         <DialogContent className="sm:max-w-[560px]">
           <DialogHeader>
             <DialogTitle>Send Enquiry</DialogTitle>
@@ -726,6 +751,12 @@ const ProductDetail = () => {
               </div>
             </div>
           </div>
+
+          <TurnstileField
+            action="lead_submit"
+            resetKey={enquiryCaptcha.captchaResetKey}
+            onTokenChange={enquiryCaptcha.setCaptchaToken}
+          />
 
           <DialogFooter>
             <Button
@@ -1139,4 +1170,3 @@ const ProductDetail = () => {
 };
 
 export default ProductDetail;
-

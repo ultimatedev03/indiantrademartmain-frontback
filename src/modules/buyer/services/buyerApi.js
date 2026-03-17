@@ -528,6 +528,8 @@ export const buyerApi = {
       head_category_id: normalizedHeadCategoryId,
       required_by_date: normalizedRequiredByDate,
       vendor_email: resolvedVendorEmail,
+      captcha_token: normalizeOptionalText(proposalData?.captcha_token || proposalData?.captchaToken),
+      captcha_action: normalizeOptionalText(proposalData?.captcha_action || proposalData?.captchaAction),
     });
 
     // Direct vendor proposal path must go through backend API
@@ -570,9 +572,8 @@ export const buyerApi = {
           created_at: createdAt,
         };
       } catch (directProposalError) {
-        console.warn(
-          '[buyerApi.createProposal] direct proposal backend API failed, falling back:',
-          directProposalError?.message || directProposalError
+        throw new Error(
+          directProposalError?.message || 'Failed to create proposal request'
         );
       }
     }
@@ -612,14 +613,12 @@ export const buyerApi = {
           created_at: createdAt,
         };
       }
-      console.warn(
-        '[buyerApi.createProposal] marketplace backend lead API failed, falling back:',
-        marketplaceProposalJson?.error || marketplaceProposalRes.status
+      throw new Error(
+        marketplaceProposalJson?.error || 'Failed to post requirement'
       );
     } catch (marketplaceError) {
-      console.warn(
-        '[buyerApi.createProposal] marketplace backend lead API threw, falling back:',
-        marketplaceError?.message || marketplaceError
+      throw new Error(
+        marketplaceError?.message || 'Failed to post requirement'
       );
     }
 
