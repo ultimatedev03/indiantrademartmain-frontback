@@ -988,6 +988,38 @@ export const ProductsPage = () => {
     return parts.length ? parts[parts.length - 1] : path;
   };
 
+  const normalizeDedupText = (value) =>
+    String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+
+  const buildProductDedupKey = (product) => {
+    const vendorKey = normalizeDedupText(product?.vendorId || product?.supplier);
+    const nameKey = normalizeDedupText(product?.name);
+
+    if (vendorKey && nameKey) {
+      return `${vendorKey}|${nameKey}`;
+    }
+
+    return normalizeDedupText(
+      product?.slug ||
+      product?.id ||
+      `${product?.name}|${product?.supplier}|${product?.location}`
+    );
+  };
+
+  const scoreProductForListing = (product) => {
+    let score = 0;
+    if (product?.inStock) score += 16;
+    if (product?.verified) score += 8;
+    if (product?.image) score += 4;
+    if (product?.slug) score += 2;
+    score += Math.min(Number(product?.reviews) || 0, 50);
+    score += Math.min(String(product?.description || '').trim().length, 120) / 100;
+    return score;
+  };
+
   const getProductDetailPath = (product) =>
     product?.slug ? `/p/${product.slug}` : product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';
 
@@ -1028,21 +1060,19 @@ export const ProductsPage = () => {
             features: normalizeFeatures(p?.specifications),
             inStock: typeof p?.stock === 'number' ? p.stock > 0 : true,
             image: pickFirstImageUrl(p?.images),
+            createdAt: p?.created_at || '',
           };
         });
 
-        const uniqueList = Array.from(
-          new Map(
-            list.map((item) => {
-              const key = String(
-                item.slug ||
-                item.id ||
-                `${item.name}|${item.supplier}|${item.location}`
-              ).toLowerCase();
-              return [key, item];
-            })
-          ).values()
-        );
+        const uniqueMap = new Map();
+        for (const item of list) {
+          const key = buildProductDedupKey(item);
+          const existing = uniqueMap.get(key);
+          if (!existing || scoreProductForListing(item) > scoreProductForListing(existing)) {
+            uniqueMap.set(key, item);
+          }
+        }
+        const uniqueList = Array.from(uniqueMap.values());
 
         if (!alive) return;
         setProducts(uniqueList);
@@ -1180,10 +1210,18 @@ export const ProductsPage = () => {
         ) : (
           <>
             <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {filteredProducts.map((product) => (
-                <div key={product.id} className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
+              {filteredProducts.map((product) => {
+                const productPath = getProductDetailPath(product);
+                const supplierPath = getSupplierPath(product);
+
+                return (
+                <div key={buildProductDedupKey(product)} className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
                   <div className="relative">
-                    <div className="h-48 bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center overflow-hidden">
+                    <Link
+                      to={productPath}
+                      className="block h-48 bg-gradient-to-br from-blue-500 to-purple-600 overflow-hidden"
+                      aria-label={`View ${product.name}`}
+                    >
                       {product.image ? (
                         <img
                           src={product.image}
@@ -1197,19 +1235,19 @@ export const ProductsPage = () => {
                           <div className="text-sm font-medium">{product.category}</div>
                         </div>
                       )}
-                    </div>
+                    </Link>
                     <div className="absolute top-2 right-2 flex gap-1">
                       <Link
-                        to={getSupplierPath(product)}
-                        className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
+                        to={supplierPath}
+                        className="relative z-10 inline-flex p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
                         aria-label="Contact supplier"
                         title="Contact supplier"
                       >
                         <Mail size={16} className="text-gray-600" />
                       </Link>
                       <Link
-                        to={getProductDetailPath(product)}
-                        className="p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
+                        to={productPath}
+                        className="relative z-10 inline-flex p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
                         aria-label="View product"
                         title="View product"
                       >
@@ -1233,7 +1271,9 @@ export const ProductsPage = () => {
                       )}
                     </div>
 
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{product.name}</h3>
+                    <Link to={productPath} className="block text-lg font-semibold text-gray-900 mb-2 hover:text-blue-700">
+                      {product.name}
+                    </Link>
                     <p className="text-gray-600 text-sm mb-3">{product.description}</p>
 
                     {product.rating > 0 ? (
@@ -1281,25 +1321,25 @@ export const ProductsPage = () => {
 
                     <div className="flex gap-2">
                       <Link
-                        to={getProductDetailPath(product)}
-                        className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium text-center transition-colors ${
+                        to={productPath}
+                        className={`relative z-10 inline-flex flex-1 items-center justify-center py-2 px-3 rounded-lg text-sm font-medium text-center transition-colors ${
                           product.inStock
                             ? 'bg-blue-600 text-white hover:bg-blue-700'
-                            : 'bg-gray-300 text-gray-500'
+                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
                         }`}
                       >
                         {product.inStock ? 'View Details' : 'View Product'}
                       </Link>
                       <Link
-                        to={getSupplierPath(product)}
-                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50"
+                        to={supplierPath}
+                        className="relative z-10 inline-flex items-center justify-center px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
                       >
                         Get Quote
                       </Link>
                     </div>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
 
             {filteredProducts.length === 0 && (
