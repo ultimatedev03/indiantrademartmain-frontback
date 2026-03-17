@@ -7,8 +7,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
-import { Eye, Search, Loader2 } from 'lucide-react';
+import { Eye, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
+
+const VENDOR_BATCH_SIZE = 1000;
 
 const normalizeString = (value = '') =>
     String(value)
@@ -53,6 +55,7 @@ const matchesSearch = (vendor, query) => {
 const Vendors = () => {
     const navigate = useNavigate();
     const [vendors, setVendors] = useState([]);
+    const [totalVendors, setTotalVendors] = useState(0);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -63,16 +66,42 @@ const Vendors = () => {
     const loadVendors = async () => {
         try {
             setLoading(true);
-            const { data, error } = await supabase
-                .from('vendors')
-                .select('*')
-                .eq('is_active', true)
-                .order('company_name');
+            const collectedVendors = [];
+            let expectedTotal = 0;
+            let offset = 0;
 
-            if (error) throw error;
-            setVendors(data || []);
+            while (true) {
+                const query = offset === 0
+                    ? supabase.from('vendors').select('*', { count: 'exact' })
+                    : supabase.from('vendors').select('*');
+
+                const { data, error, count } = await query
+                    .order('company_name', { ascending: true })
+                    .order('id', { ascending: true })
+                    .range(offset, offset + VENDOR_BATCH_SIZE - 1);
+
+                if (error) throw error;
+
+                const batch = data || [];
+                if (offset === 0) {
+                    expectedTotal = Number(count) || batch.length;
+                }
+
+                collectedVendors.push(...batch);
+
+                if (batch.length < VENDOR_BATCH_SIZE || collectedVendors.length >= expectedTotal) {
+                    break;
+                }
+
+                offset += VENDOR_BATCH_SIZE;
+            }
+
+            setVendors(collectedVendors);
+            setTotalVendors(expectedTotal || collectedVendors.length);
         } catch (error) {
             console.error(error);
+            setVendors([]);
+            setTotalVendors(0);
             toast({ title: "Error", description: "Failed to load vendors", variant: "destructive" });
         } finally {
             setLoading(false);
@@ -83,6 +112,9 @@ const Vendors = () => {
         if (!searchQuery.trim()) return vendors;
         return vendors.filter((vendor) => matchesSearch(vendor, searchQuery));
     }, [searchQuery, vendors]);
+
+    const displayedTotal = totalVendors || vendors.length;
+    const hasSearchQuery = Boolean(searchQuery.trim());
 
     const handleSearchKeyDown = (event) => {
         if (event.key !== 'Enter') return;
@@ -119,7 +151,7 @@ const Vendors = () => {
             <Card>
                 <CardHeader>
                     <div className="flex justify-between items-center">
-                        <CardTitle>All Vendors ({filteredVendors.length})</CardTitle>
+                        <CardTitle>All Vendors ({displayedTotal})</CardTitle>
                     </div>
                     <div className="mt-4">
                         <Input 
@@ -132,6 +164,11 @@ const Vendors = () => {
                         <p className="mt-2 text-xs text-gray-500">
                             Press Enter to open the vendor directly when there is a single match.
                         </p>
+                        {hasSearchQuery ? (
+                            <p className="mt-1 text-xs text-gray-500">
+                                Showing {filteredVendors.length} matched vendors out of {displayedTotal}.
+                            </p>
+                        ) : null}
                     </div>
                 </CardHeader>
                 <CardContent>

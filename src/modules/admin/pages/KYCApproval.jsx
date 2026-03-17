@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { Search, CheckCircle, XCircle, Eye, FileText, Loader2, ShieldAlert, Building2, Mail, Phone, Filter, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+const KYC_VENDOR_BATCH_SIZE = 1000;
 
 const looksLikePdf = (v = '') => String(v || '').toLowerCase().includes('.pdf');
 
@@ -78,6 +80,7 @@ const matchesSearchValue = (candidate, query) => {
 
 const KYCApproval = () => {
   const [vendors, setVendors] = useState([]);
+  const [totalVendors, setTotalVendors] = useState(0);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -97,45 +100,72 @@ const KYCApproval = () => {
   const loadVendors = useCallback(async () => {
     setLoading(true);
     try {
-      let query = supabase.from('vendors').select('*, products(count)').order('created_at', { ascending: false });
+      const collectedVendors = [];
+      let expectedTotal = 0;
+      let offset = 0;
+      const statusMap = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED', submitted: 'SUBMITTED' };
 
-      if (filterStatus && filterStatus !== 'all') {
-        const statusMap = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED', submitted: 'SUBMITTED' };
-        query = query.eq('kyc_status', statusMap[filterStatus] || filterStatus.toUpperCase());
+      while (true) {
+        let query = offset === 0
+          ? supabase.from('vendors').select('*, products(count)', { count: 'exact' })
+          : supabase.from('vendors').select('*, products(count)');
+
+        if (filterStatus && filterStatus !== 'all') {
+          query = query.eq('kyc_status', statusMap[filterStatus] || filterStatus.toUpperCase());
+        }
+
+        const { data, error, count } = await query
+          .order('created_at', { ascending: false })
+          .range(offset, offset + KYC_VENDOR_BATCH_SIZE - 1);
+
+        if (error) throw error;
+
+        const batch = data || [];
+        if (offset === 0) {
+          expectedTotal = Number(count) || batch.length;
+        }
+
+        collectedVendors.push(...batch);
+
+        if (batch.length < KYC_VENDOR_BATCH_SIZE || collectedVendors.length >= expectedTotal) {
+          break;
+        }
+
+        offset += KYC_VENDOR_BATCH_SIZE;
       }
 
-      const { data, error } = await query;
-      if (error) throw error;
-
-      let filtered = data || [];
-      if (searchTerm) {
-        const t = searchTerm.toLowerCase();
-        filtered = filtered.filter(
-          (v) =>
-            matchesSearchValue(v.vendor_id, t) ||
-            matchesSearchValue(v.company_name, t) ||
-            matchesSearchValue(v.owner_name, t) ||
-            matchesSearchValue(v.email, t) ||
-            matchesSearchValue(v.phone, t)
-        );
-      }
-
-      setVendors(filtered);
+      setVendors(collectedVendors);
+      setTotalVendors(expectedTotal || collectedVendors.length);
     } catch (error) {
       console.error(error);
+      setVendors([]);
+      setTotalVendors(0);
       toast({ title: 'Error', description: 'Failed to load vendors', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, searchTerm, toast]);
+  }, [filterStatus, toast]);
+
+  const filteredVendors = useMemo(() => {
+    const trimmedSearch = String(searchTerm || '').trim().toLowerCase();
+    if (!trimmedSearch) return vendors;
+
+    return vendors.filter(
+      (vendor) =>
+        matchesSearchValue(vendor.vendor_id, trimmedSearch) ||
+        matchesSearchValue(vendor.company_name, trimmedSearch) ||
+        matchesSearchValue(vendor.owner_name, trimmedSearch) ||
+        matchesSearchValue(vendor.email, trimmedSearch) ||
+        matchesSearchValue(vendor.phone, trimmedSearch)
+    );
+  }, [searchTerm, vendors]);
+
+  const hasSearchTerm = Boolean(String(searchTerm || '').trim());
+  const summaryCount = hasSearchTerm ? filteredVendors.length : (totalVendors || vendors.length);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadVendors();
-    }, searchTerm.trim() ? 250 : 0);
-
-    return () => window.clearTimeout(timer);
-  }, [loadVendors, searchTerm]);
+    void loadVendors();
+  }, [loadVendors]);
 
   useEffect(() => {
     const channel = supabase
@@ -158,7 +188,6 @@ const KYCApproval = () => {
 
   const handleSearch = (e) => {
     e.preventDefault();
-    void loadVendors();
   };
 
   const handleApprove = async (vendor) => {
@@ -268,7 +297,7 @@ const KYCApproval = () => {
           <p className="text-gray-500">View and manage all vendors and KYC approvals</p>
         </div>
         <Badge variant="outline" className="text-sm">
-          {vendors.length} Total Vendors
+          {summaryCount} {hasSearchTerm ? 'Matching Vendors' : 'Total Vendors'}
         </Badge>
       </div>
 
@@ -314,7 +343,7 @@ const KYCApproval = () => {
                     <Loader2 className="animate-spin mx-auto h-6 w-6 text-gray-400" />
                   </TableCell>
                 </TableRow>
-              ) : vendors.length === 0 ? (
+              ) : filteredVendors.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8 text-gray-500">
                     <Building2 className="h-12 w-12 mx-auto mb-2 opacity-30" />
@@ -322,7 +351,7 @@ const KYCApproval = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                vendors.map((vendor) => (
+                filteredVendors.map((vendor) => (
                   <TableRow key={vendor.id} className="hover:bg-gray-50">
                     <TableCell>
                       <div className="flex items-center gap-3">
