@@ -11,6 +11,7 @@ import { toast } from '@/components/ui/use-toast';
 import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import PublicSiteHomeLink from '@/shared/components/PublicSiteHomeLink';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -86,6 +87,7 @@ const Login = () => {
 
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center py-12 sm:px-6 lg:px-8 relative overflow-hidden">
+      <PublicSiteHomeLink tone="dark" />
       {/* Background decoration */}
       <div className="absolute top-0 left-0 w-full h-full overflow-hidden z-0">
         <div className="absolute -top-[30%] -right-[10%] w-[800px] h-[800px] rounded-full bg-blue-600/10 blur-3xl"></div>

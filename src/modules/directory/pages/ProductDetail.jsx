@@ -537,9 +537,10 @@ const ProductDetail = () => {
     const load = async () => {
       try {
         let product = null;
+        const normalizedIncomingSlug = String(productSlug || '').trim();
         const slugCandidates = Array.from(
           new Set(
-            [String(productSlug || '').trim(), stripLegacyRandomSlugSuffix(productSlug)]
+            [normalizedIncomingSlug, stripLegacyRandomSlugSuffix(productSlug)]
               .filter(Boolean)
           )
         );
@@ -554,6 +555,17 @@ const ProductDetail = () => {
           if (product) break;
         }
 
+        if (!product && normalizedIncomingSlug) {
+          const { data: rawByLegacySlug } = await supabase
+            .from('products')
+            .select('*, vendors!inner(*)')
+            .eq('metadata->>legacy_slug', normalizedIncomingSlug)
+            .eq('vendors.is_active', true)
+            .maybeSingle();
+
+          product = await hydrateProduct(rawByLegacySlug);
+        }
+
         // If not found (often due to vendor inactive), allow vendor owner to view
         if (!product && userRole === 'VENDOR' && currentVendorId) {
           for (const slugCandidate of slugCandidates) {
@@ -566,6 +578,18 @@ const ProductDetail = () => {
             if (raw && raw.vendor_id === currentVendorId) {
               product = await hydrateProduct(raw);
               break;
+            }
+          }
+
+          if (!product && normalizedIncomingSlug) {
+            const { data: rawByLegacySlug } = await supabase
+              .from('products')
+              .select('*, vendors(*)')
+              .eq('metadata->>legacy_slug', normalizedIncomingSlug)
+              .maybeSingle();
+
+            if (rawByLegacySlug && rawByLegacySlug.vendor_id === currentVendorId) {
+              product = await hydrateProduct(rawByLegacySlug);
             }
           }
         }

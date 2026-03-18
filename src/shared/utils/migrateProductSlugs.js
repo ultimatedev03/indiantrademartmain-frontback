@@ -6,10 +6,29 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { generateUniqueSlug, needsProductSlugNormalization } from '@/shared/utils/slugUtils';
 
+const parseMetadata = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+};
+
 const getProductsBatch = async (from, to) => {
   const { data, error } = await supabase
     .from('products')
-    .select('id, name, slug')
+    .select('id, name, slug, metadata')
     .order('id', { ascending: true })
     .range(from, to);
 
@@ -20,13 +39,30 @@ const getProductsBatch = async (from, to) => {
 const shouldNormalizeProduct = (product) =>
   needsProductSlugNormalization(product?.slug, product?.name);
 
+const buildProductNormalizationPayload = async (product) => {
+  const normalizedSlug = await generateUniqueSlug(product.name, { excludeId: product.id });
+  const currentSlug = String(product?.slug || '').trim();
+
+  if (!shouldNormalizeProduct(product) || !currentSlug) {
+    return { slug: normalizedSlug };
+  }
+
+  const metadata = parseMetadata(product?.metadata);
+  metadata.legacy_slug = currentSlug;
+
+  return {
+    slug: normalizedSlug,
+    metadata,
+  };
+};
+
 export const migrateProductSlugs = async () => {
   try {
     console.log('🔄 Starting product slug normalization...');
 
     const { data: products, error: fetchError } = await supabase
       .from('products')
-      .select('id, name, slug');
+      .select('id, name, slug, metadata');
 
     if (fetchError) throw fetchError;
 
@@ -44,18 +80,18 @@ export const migrateProductSlugs = async () => {
 
     for (const product of productsNeedingNormalization) {
       try {
-        const slug = await generateUniqueSlug(product.name, { excludeId: product.id });
+        const updatePayload = await buildProductNormalizationPayload(product);
 
         const { error: updateError } = await supabase
           .from('products')
-          .update({ slug })
+          .update(updatePayload)
           .eq('id', product.id);
 
         if (updateError) {
           console.error(`❌ Failed to update product ${product.id}:`, updateError);
           failed++;
         } else {
-          console.log(`✅ Updated product "${product.name}" with slug: ${slug}`);
+          console.log(`✅ Updated product "${product.name}" with slug: ${updatePayload.slug}`);
           updated++;
         }
       } catch (error) {
@@ -95,10 +131,10 @@ export const migrateProductSlugsBatch = async (batchSize = 50) => {
         if (!shouldNormalizeProduct(product)) continue;
 
         try {
-          const slug = await generateUniqueSlug(product.name, { excludeId: product.id });
+          const updatePayload = await buildProductNormalizationPayload(product);
           const { error: updateError } = await supabase
             .from('products')
-            .update({ slug })
+            .update(updatePayload)
             .eq('id', product.id);
 
           if (updateError) {
