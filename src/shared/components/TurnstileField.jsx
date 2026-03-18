@@ -51,6 +51,7 @@ const loadTurnstileScript = () => {
 const getStatusMessage = (status) => {
   if (status === 'expired') return 'Captcha expired. Please complete it again.';
   if (status === 'error') return 'Captcha could not load. Please refresh and try again.';
+  if (status === 'timeout') return 'Captcha timed out. Start the security check again.';
   return '';
 };
 
@@ -61,7 +62,10 @@ const TurnstileField = ({
   execution = 'render',
   onTokenChange,
   onWidgetReady,
+  refreshExpired = 'auto',
+  refreshTimeout = 'auto',
   resetKey = 0,
+  retry = 'auto',
 }) => {
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
@@ -96,6 +100,9 @@ const TurnstileField = ({
           action,
           appearance,
           execution,
+          retry,
+          'refresh-expired': refreshExpired,
+          'refresh-timeout': refreshTimeout,
           callback: (token) => {
             if (!active) return;
             if (execution === 'execute' && !canAcceptTokenRef.current) {
@@ -117,6 +124,12 @@ const TurnstileField = ({
             if (!active) return;
             canAcceptTokenRef.current = execution !== 'execute';
             setStatus('error');
+            onTokenChange?.('');
+          },
+          'timeout-callback': () => {
+            if (!active) return;
+            canAcceptTokenRef.current = execution !== 'execute';
+            setStatus('timeout');
             onTokenChange?.('');
           },
         });
@@ -163,7 +176,7 @@ const TurnstileField = ({
       }
       onWidgetReady?.(null);
     };
-  }, [action, appearance, execution, onTokenChange, onWidgetReady, resetKey]);
+  }, [action, appearance, execution, onTokenChange, onWidgetReady, refreshExpired, refreshTimeout, resetKey, retry]);
 
   if (isCaptchaDevBypass()) {
     return (

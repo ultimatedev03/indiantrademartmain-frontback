@@ -231,7 +231,10 @@ const VendorLogin = () => {
                       className="mx-auto w-full max-w-[320px]"
                       execution="execute"
                       onWidgetReady={handleCaptchaWidgetReady}
+                      refreshExpired="never"
+                      refreshTimeout="never"
                       resetKey={loginCaptcha.captchaResetKey}
+                      retry="never"
                       onTokenChange={loginCaptcha.setCaptchaToken}
                     />
                   ) : (
