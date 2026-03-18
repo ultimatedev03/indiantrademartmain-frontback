@@ -17,6 +17,8 @@ const VendorLogin = () => {
   const navigate = useNavigate();
   const supaAuth = useAuth();
   const loginCaptcha = useCaptchaGate();
+  const captchaWidgetRef = React.useRef(null);
+  const captchaExecuteQueuedRef = React.useRef(false);
   const [loading, setLoading] = useState(false);
   const [captchaStarted, setCaptchaStarted] = useState(false);
   const [formData, setFormData] = useState({
@@ -32,9 +34,22 @@ const VendorLogin = () => {
   }, [supaAuth?.userRole, navigate]);
 
   const resetLoginCaptcha = React.useCallback(() => {
+    captchaExecuteQueuedRef.current = false;
+    captchaWidgetRef.current = null;
     loginCaptcha.resetCaptcha();
     setCaptchaStarted(false);
   }, [loginCaptcha]);
+
+  const handleCaptchaWidgetReady = React.useCallback(async (widgetApi) => {
+    captchaWidgetRef.current = widgetApi;
+
+    if (!widgetApi || !captchaExecuteQueuedRef.current) {
+      return;
+    }
+
+    captchaExecuteQueuedRef.current = false;
+    await widgetApi.execute();
+  }, []);
 
   const performLogin = async () => {
     setLoading(true);
@@ -126,6 +141,7 @@ const VendorLogin = () => {
 
   const handleStartCaptcha = () => {
     if (loading) return;
+    captchaExecuteQueuedRef.current = true;
     loginCaptcha.resetCaptcha();
     setCaptchaStarted(true);
   };
@@ -195,27 +211,32 @@ const VendorLogin = () => {
             <div className="flex flex-col items-center space-y-3">
               <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-col items-center space-y-3">
-                  {!captchaStarted ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={handleStartCaptcha}
-                      disabled={loading}
-                    >
-                      Start Security Check
-                    </Button>
-                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleStartCaptcha}
+                    disabled={loading}
+                  >
+                    {loginCaptcha.captchaToken
+                      ? 'Run Security Check Again'
+                      : captchaStarted
+                        ? 'Retry Security Check'
+                        : 'Start Security Check'}
+                  </Button>
 
                   {captchaStarted ? (
                     <TurnstileField
                       action="auth_login"
+                      appearance="execute"
                       className="mx-auto w-full max-w-[320px]"
+                      execution="execute"
+                      onWidgetReady={handleCaptchaWidgetReady}
                       resetKey={loginCaptcha.captchaResetKey}
                       onTokenChange={loginCaptcha.setCaptchaToken}
                     />
                   ) : (
                     <p className="text-center text-xs text-gray-500">
-                      Cloudflare verification will load only after you start it manually.
+                      Cloudflare verification will stay idle until you start it manually.
                     </p>
                   )}
 
