@@ -1,6 +1,7 @@
 import React, { lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 import Home from '@/modules/directory/pages/Home';
 const Directory = lazy(() => import('@/modules/directory/pages/Directory'));
@@ -37,6 +38,11 @@ const ContactPage = lazy(() => import('@/modules/directory/pages/FooterPages').t
 const BuyLeads = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.BuyLeads })));
 const LearningCentre = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.LearningCentre })));
 const ProductsPage = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.ProductsPage })));
+
+const LegacyProductRedirect = () => {
+  const { productSlug } = useParams();
+  return <Navigate to={getProductDetailPath(productSlug) || '/directory'} replace />;
+};
 
 export const DirectoryRoutes = () => {
   return (
@@ -80,7 +86,9 @@ export const DirectoryRoutes = () => {
         <Route path="directory/:fullSlug" element={<DynamicCategory />} />
 
         {/* Product Detail */}
-        <Route path="p/:productSlug" element={<ProductDetail />} />
+        <Route path="product/:productSlug" element={<ProductDetail />} />
+        <Route path="p/:productSlug" element={<LegacyProductRedirect />} />
+        <Route path="products/:productSlug" element={<LegacyProductRedirect />} />
 
         {/* Auth */}
         <Route path="auth/login" element={<Login />} />

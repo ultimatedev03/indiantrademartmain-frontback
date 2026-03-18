@@ -139,7 +139,8 @@ const generateProductsSitemap = async () => {
     const urls = products.map((p) => {
       const lastmodRaw = p.updated_at || p.created_at;
       const lastmod = lastmodRaw ? lastmodRaw.split('T')[0] : getCurrentDate();
-      return createUrlEntry(`${BASE_URL}/products/${p.id}`, lastmod, '0.8', 'weekly');
+      const slugOrId = String(p.slug || p.id || '').trim();
+      return createUrlEntry(`${BASE_URL}/product/${encodeURIComponent(slugOrId)}`, lastmod, '0.8', 'weekly');
     });
 
     return `${xmlHeader}\n${urls.join('\n')}\n${xmlFooter}`;

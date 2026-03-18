@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { getProductDetailPath as buildProductDetailPath } from '@/shared/utils/productRoutes';
 
 const buildMailtoLink = (email, subject) =>
   `mailto:${email}?subject=${encodeURIComponent(subject || '')}`;
@@ -1021,7 +1022,7 @@ export const ProductsPage = () => {
   };
 
   const getProductDetailPath = (product) =>
-    product?.slug ? `/p/${product.slug}` : product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';
+    buildProductDetailPath(product) || (product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact');
 
   const getSupplierPath = (product) =>
     product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';

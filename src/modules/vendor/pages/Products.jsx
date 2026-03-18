@@ -9,6 +9,7 @@ import { Plus, Search, Edit, Trash2, Eye, MapPin, Tag, Package, Copy, CheckCircl
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { shareUtils } from '@/shared/utils/shareUtils';
+import { getProductDetailPath, getProductDetailUrl } from '@/shared/utils/productRoutes';
 
 const Products = () => {
   const [products, setProducts] = useState([]);
@@ -18,7 +19,7 @@ const Products = () => {
   const location = useLocation();
 
   const handleCopyProductLink = async (slug) => {
-    const url = `${window.location.origin}/p/${slug}`;
+    const url = getProductDetailUrl(slug, window.location.origin);
     const success = await shareUtils.copyToClipboard(url);
     if (success) {
       setCopiedId(slug);
@@ -198,7 +199,7 @@ const Products = () => {
 
                     <div className="flex flex-col gap-2">
                       <Button size="sm" variant="outline" asChild className="justify-start">
-                        <Link to={`/p/${p.slug || p.id}`} target="_blank">
+                        <Link to={getProductDetailPath(p) || '/directory'} target="_blank">
                           <Eye className="w-4 h-4 mr-2" /> View Product
                         </Link>
                       </Button>

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { supabase } from '@/lib/customSupabaseClient';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
@@ -50,10 +50,12 @@ import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { getProductDetailPath, getProductDetailUrl } from '@/shared/utils/productRoutes';
 
 const ProductDetail = () => {
   const { productSlug } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, userRole, vendorId: currentVendorId } = useAuth();
   const enquiryCaptcha = useCaptchaGate();
 
@@ -83,6 +85,10 @@ const ProductDetail = () => {
     budget: '',
     requirement: '',
   });
+  const canonicalProductUrl = useMemo(
+    () => getProductDetailUrl(data || productSlug),
+    [data, productSlug]
+  );
 
   const unitOptions = useMemo(
     () => [
@@ -171,7 +177,7 @@ const ProductDetail = () => {
   };
 
   const handleCopyLink = async () => {
-    const url = shareUtils.getCurrentUrl();
+    const url = canonicalProductUrl || shareUtils.getCurrentUrl();
     const success = await shareUtils.copyToClipboard(url);
     if (success) {
       setCopied(true);
@@ -565,6 +571,11 @@ const ProductDetail = () => {
           if (product?.status === 'DRAFT') {
             setIsDraft(true);
           }
+
+          const nextCanonicalPath = getProductDetailPath(product);
+          if (nextCanonicalPath && location.pathname !== nextCanonicalPath) {
+            navigate(nextCanonicalPath, { replace: true });
+          }
         } else {
           console.error('Product not found by slug or ID');
         }
@@ -575,7 +586,7 @@ const ProductDetail = () => {
       }
     };
     if (productSlug) load();
-  }, [productSlug, userRole, currentVendorId]);
+  }, [productSlug, userRole, currentVendorId, location.pathname, navigate]);
 
   if (loading)
     return (
@@ -656,10 +667,11 @@ const ProductDetail = () => {
         <title>{seoTitle}</title>
         <meta name="description" content={seoDescription} />
         <meta name="keywords" content={allKeywords} />
+        {canonicalProductUrl ? <link rel="canonical" href={canonicalProductUrl} /> : null}
         <meta property="og:title" content={seoTitle} />
         <meta property="og:description" content={seoDescription} />
         {images[0] && <meta property="og:image" content={images[0]} />}
-        <meta property="og:url" content={shareUtils.getCurrentUrl()} />
+        <meta property="og:url" content={canonicalProductUrl || shareUtils.getCurrentUrl()} />
       </Helmet>
     );
   } catch (error) {
@@ -667,11 +679,12 @@ const ProductDetail = () => {
     seoMetaTags = (
       <Helmet>
         <title>{`${data.name} | IndianTradeMart`}</title>
+        {canonicalProductUrl ? <link rel="canonical" href={canonicalProductUrl} /> : null}
         <meta
           name="description"
           content={data.description?.replace(/<[^>]*>/g, '').substring(0, 160) || data.name}
         />
-        <meta property="og:url" content={shareUtils.getCurrentUrl()} />
+        <meta property="og:url" content={canonicalProductUrl || shareUtils.getCurrentUrl()} />
       </Helmet>
     );
   }
@@ -936,7 +949,7 @@ const ProductDetail = () => {
               <div className="flex gap-1 flex-wrap justify-end">
                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-50" asChild>
                   <a
-                    href={shareUtils.getWhatsAppUrl(data.name, shareUtils.getCurrentUrl())}
+                    href={shareUtils.getWhatsAppUrl(data.name, canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on WhatsApp"
@@ -946,7 +959,7 @@ const ProductDetail = () => {
                 </Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-blue-50" asChild>
                   <a
-                    href={shareUtils.getFacebookUrl(shareUtils.getCurrentUrl())}
+                    href={shareUtils.getFacebookUrl(canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on Facebook"
@@ -956,7 +969,7 @@ const ProductDetail = () => {
                 </Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-blue-100" asChild>
                   <a
-                    href={shareUtils.getLinkedInUrl(shareUtils.getCurrentUrl(), data.name)}
+                    href={shareUtils.getLinkedInUrl(canonicalProductUrl || shareUtils.getCurrentUrl(), data.name)}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on LinkedIn"
@@ -966,7 +979,7 @@ const ProductDetail = () => {
                 </Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-sky-50" asChild>
                   <a
-                    href={shareUtils.getTwitterUrl(data.name, shareUtils.getCurrentUrl())}
+                    href={shareUtils.getTwitterUrl(data.name, canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on Twitter"

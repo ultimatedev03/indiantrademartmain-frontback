@@ -8,6 +8,7 @@ import {
   productFavorites,
   PRODUCT_FAVORITES_UPDATED_EVENT,
 } from '@/modules/buyer/services/productFavorites';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 const formatPrice = (value) => {
   if (value === null || value === undefined || value === '') return 'Price on request';
@@ -79,7 +80,7 @@ const Favorites = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {favorites.map((fav) => {
             const location = [fav.vendorCity, fav.vendorState].filter(Boolean).join(', ');
-            const productPath = `/p/${fav.slug || fav.productId}`;
+            const productPath = getProductDetailPath(fav) || '/directory';
 
             return (
               <Card key={fav.productId} className="overflow-hidden hover:shadow-md transition-shadow group">

@@ -5,6 +5,7 @@ import { Star, MapPin, BadgeCheck, PackageX, Phone } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/shared/components/Badge';
 import { productRatings, PRODUCT_RATINGS_UPDATED_EVENT } from '@/shared/services/productRatings';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 const SearchResultsList = ({ products, query, city, category }) => {
   const navigate = useNavigate();
@@ -39,11 +40,6 @@ const SearchResultsList = ({ products, query, city, category }) => {
     () => productRatings.getSummaryMap(productIds),
     [productIds, ratingsVersion]
   );
-
-  const getProductDetailPath = (product) => {
-    const slugOrId = product?.slug || product?.productSlug || product?.id;
-    return slugOrId ? `/p/${slugOrId}` : '/directory';
-  };
 
   const safeFirstImage = (product) => {
     const raw = product?.images;
@@ -297,7 +293,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
               transition={{ duration: 0.5, delay: index * 0.05 }}
               whileHover={{ y: -4 }}
               className="bg-white rounded-lg shadow-md hover:shadow-xl transition-all border border-neutral-200 overflow-hidden cursor-pointer flex flex-col"
-              onClick={() => navigate(getProductDetailPath(product))}
+              onClick={() => navigate(getProductDetailPath(product) || '/directory')}
             >
               <div className="relative h-48 overflow-hidden bg-gray-100">
                 <img
@@ -339,7 +335,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
                     className="bg-[#00796B] hover:bg-[#00695C] text-white h-9 px-4"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(getProductDetailPath(product));
+                      navigate(getProductDetailPath(product) || '/directory');
                     }}
                   >
                     Contact Supplier
@@ -387,7 +383,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
                     className="text-[#0A7C65] text-sm font-semibold inline-flex items-center gap-2 hover:underline"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(getProductDetailPath(product));
+                      navigate(getProductDetailPath(product) || '/directory');
                     }}
                   >
                     <Phone className="h-4 w-4" />
@@ -406,7 +402,7 @@ const SearchResultsList = ({ products, query, city, category }) => {
                     className="w-full bg-[#003D82] hover:bg-[#00254E] text-white"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(getProductDetailPath(product));
+                      navigate(getProductDetailPath(product) || '/directory');
                     }}
                   >
                     View Details

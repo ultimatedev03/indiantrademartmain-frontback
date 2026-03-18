@@ -31,4 +31,4 @@ Indian Trade Mart is a B2B marketplace platform connecting buyers and suppliers 
 
 - Directory pages follow the pattern: /directory/{service}-in-{city}-{state}
 - Vendor profiles: /directory/vendor/{vendorId}
-- Product pages: /products/{productId}
+- Product pages: /product/{productSlug}

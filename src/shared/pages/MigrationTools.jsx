@@ -114,7 +114,7 @@ const MigrationTools = () => {
                 {result.success && (
                   <div className="text-sm text-green-700 bg-white p-2 rounded border border-green-200">
                     <p>✅ All product slugs are now active!</p>
-                    <p>Check your product pages at /p/product-name-xxx</p>
+                    <p>Check your product pages at /product/product-name-xxx</p>
                   </div>
                 )}
               </div>

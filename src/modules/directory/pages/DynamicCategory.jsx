@@ -9,6 +9,7 @@ import PillBreadcrumbs from '@/shared/components/PillBreadcrumbs';
 import SearchResultsList from '@/modules/directory/components/SearchResultsList';
 import { Loader2, Folder, ArrowRight, MapPin, Home, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 const DynamicCategory = () => {
   const { fullSlug, slug: urlSlug } = useParams();
@@ -194,7 +195,7 @@ const DynamicCategory = () => {
                   {products.map((product) => (
                     <Link
                       key={product.id}
-                      to={`/p/${product.slug}`}
+                      to={getProductDetailPath(product) || '/directory'}
                       className="bg-white rounded-lg border hover:border-blue-500 hover:shadow-lg transition-all group overflow-hidden"
                     >
                       <div className="aspect-square bg-gray-100 overflow-hidden">

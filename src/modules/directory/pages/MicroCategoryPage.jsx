@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { directoryApi } from '@/modules/directory/api/directoryApi';
 import { ChevronRight, Home, Image as ImageIcon, Loader2, ExternalLink } from 'lucide-react';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 const safeStr = (v) => (typeof v === 'string' ? v.trim() : '');
 const safeImg = (url) => (typeof url === 'string' && url.trim().length > 0 ? url.trim() : null);
@@ -88,12 +89,12 @@ const ProductMiniCard = ({ product }) => {
   const price = formatINR(product?.price);
   const slug = product?.slug || product?.id;
 
-  return (
-    <Link
-      to={slug ? `/p/${slug}` : '/directory'}
-      className="group bg-white rounded-lg border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all overflow-hidden"
-      title={product?.name}
-    >
+    return (
+      <Link
+        to={getProductDetailPath(slug) || '/directory'}
+        className="group bg-white rounded-lg border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all overflow-hidden"
+        title={product?.name}
+      >
       <div className="h-28 bg-slate-50 overflow-hidden flex items-center justify-center">
         {img ? (
           <img
