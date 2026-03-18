@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
+import { writeAuditLog } from '../lib/audit.js';
 import { hashPassword, normalizeEmail, normalizeRole, upsertPublicUser } from '../lib/auth.js';
 import { validateStrongPassword } from '../lib/passwordPolicy.js';
 import { requireAuth } from '../middleware/requireAuth.js';

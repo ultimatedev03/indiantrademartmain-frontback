@@ -66,6 +66,8 @@ async function safeReadJson(res) {
 }
 
 const norm = (v) => String(v || "").toUpperCase();
+const VENDOR_PAGE_SIZE = 10;
+const VENDOR_EXPORT_LIMIT = 5000;
 
 const kycBadgeClass = (s) => {
   const v = norm(s || "PENDING");
@@ -113,30 +115,15 @@ const getJoinedDateRange = (filterValue, now = new Date()) => {
   return null;
 };
 
-const getVendorJoinedAt = (vendor) => {
-  const candidates = [
-    vendor?.created_at,
-    vendor?.createdAt,
-    vendor?.joined_at,
-    vendor?.joinedAt,
-  ];
-
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const parsed = new Date(candidate).getTime();
-    if (!Number.isNaN(parsed)) return parsed;
-  }
-
-  return null;
-};
-
 export default function Vendors() {
   const { toast } = useToast();
   const ADMIN_API_BASE = getAdminBase();
 
   const [vendors, setVendors] = useState([]);
   const [serverTotal, setServerTotal] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterKyc, setFilterKyc] = useState("all");
@@ -155,9 +142,8 @@ export default function Vendors() {
     [terminationReason]
   );
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
+  const buildVendorQueryParams = useCallback(
+    ({ limit = VENDOR_PAGE_SIZE, offset = 0 } = {}) => {
       const params = new URLSearchParams();
       const trimmedSearch = searchTerm.trim();
       if (trimmedSearch) params.set("search", trimmedSearch);
@@ -166,8 +152,16 @@ export default function Vendors() {
       const joinedRange = getJoinedDateRange(filterJoined);
       if (joinedRange?.from) params.set("joined_from", joinedRange.from.toISOString());
       if (joinedRange?.to) params.set("joined_to", joinedRange.to.toISOString());
-      params.set("limit", "5000");
+      params.set("limit", String(limit));
+      params.set("offset", String(Math.max(offset, 0)));
+      return params;
+    },
+    [filterActive, filterJoined, filterKyc, searchTerm]
+  );
 
+  const fetchVendorPage = useCallback(
+    async ({ limit = VENDOR_PAGE_SIZE, offset = 0 } = {}) => {
+      const params = buildVendorQueryParams({ limit, offset });
       const queryString = params.toString();
       const url = queryString
         ? `${ADMIN_API_BASE}/vendors?${queryString}`
@@ -178,8 +172,25 @@ export default function Vendors() {
       if (!data?.success) throw new Error(data?.error || "Failed");
 
       const nextVendors = Array.isArray(data.vendors) ? data.vendors : [];
+      return {
+        vendors: nextVendors,
+        total: Number(data.total) || nextVendors.length,
+      };
+    },
+    [ADMIN_API_BASE, buildVendorQueryParams]
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const offset = (currentPage - 1) * VENDOR_PAGE_SIZE;
+      const { vendors: nextVendors, total } = await fetchVendorPage({
+        limit: VENDOR_PAGE_SIZE,
+        offset,
+      });
+
       setVendors(nextVendors);
-      setServerTotal(Number(data.total) || nextVendors.length);
+      setServerTotal(total);
     } catch (e) {
       console.error(e);
       toast({
@@ -187,11 +198,12 @@ export default function Vendors() {
         description: e.message || "Failed to load vendors",
         variant: "destructive",
       });
+      setVendors([]);
       setServerTotal(0);
     } finally {
       setLoading(false);
     }
-  }, [ADMIN_API_BASE, filterActive, filterJoined, filterKyc, searchTerm, toast]);
+  }, [currentPage, fetchVendorPage, toast]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -200,18 +212,22 @@ export default function Vendors() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const filteredVendors = useMemo(() => {
-    const joinedRange = getJoinedDateRange(filterJoined);
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(serverTotal / VENDOR_PAGE_SIZE));
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, serverTotal]);
 
-    return (vendors || []).filter((vendor) => {
-      if (!joinedRange) return true;
-      const joinedAt = getVendorJoinedAt(vendor);
-      if (!joinedAt || Number.isNaN(joinedAt)) return false;
-      return joinedAt >= joinedRange.from.getTime() && joinedAt < joinedRange.to.getTime();
-    });
-  }, [filterJoined, vendors]);
-
-  const visibleCount = useMemo(() => filteredVendors.length, [filteredVendors]);
+  const visibleCount = vendors.length;
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(serverTotal / VENDOR_PAGE_SIZE)),
+    [serverTotal]
+  );
+  const pageStart = serverTotal === 0 ? 0 : (currentPage - 1) * VENDOR_PAGE_SIZE + 1;
+  const pageEnd = serverTotal === 0
+    ? 0
+    : Math.min(serverTotal, pageStart + Math.max(visibleCount - 1, 0));
   const hasActiveFilters = useMemo(
     () =>
       Boolean(searchTerm.trim()) ||
@@ -221,7 +237,9 @@ export default function Vendors() {
     [filterActive, filterJoined, filterKyc, searchTerm]
   );
 
-  const exportVendors = () => {
+  const exportVendors = async () => {
+    if (serverTotal === 0) return;
+
     const header = [
       "vendor_id",
       "company_name",
@@ -243,35 +261,64 @@ export default function Vendors() {
       return text;
     };
 
-    const rows = filteredVendors.map((vendor) =>
-      [
-        vendor?.vendor_id || "",
-        vendor?.company_name || "",
-        vendor?.owner_name || "",
-        vendor?.email || "",
-        vendor?.phone || "",
-        norm(vendor?.kyc_status || "PENDING"),
-        vendor?.package?.plan_name || "FREE",
-        vendor?.product_count || 0,
-        vendor?.created_at ? new Date(vendor.created_at).toLocaleDateString("en-GB") : "",
-        vendor?.is_active !== false ? "ACTIVE" : "TERMINATED",
-      ]
-        .map(escapeCsv)
-        .join(",")
-    );
+    setExporting(true);
+    try {
+      const exportLimit = Math.min(Math.max(serverTotal, VENDOR_PAGE_SIZE), VENDOR_EXPORT_LIMIT);
+      const { vendors: exportRows } = await fetchVendorPage({
+        limit: exportLimit,
+        offset: 0,
+      });
 
-    const csv = [header.join(","), ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "vendors-export.csv";
-    link.click();
-    window.URL.revokeObjectURL(url);
+      const rows = exportRows.map((vendor) =>
+        [
+          vendor?.vendor_id || "",
+          vendor?.company_name || "",
+          vendor?.owner_name || "",
+          vendor?.email || "",
+          vendor?.phone || "",
+          norm(vendor?.kyc_status || "PENDING"),
+          vendor?.package?.plan_name || "FREE",
+          vendor?.product_count || 0,
+          vendor?.created_at ? new Date(vendor.created_at).toLocaleDateString("en-GB") : "",
+          vendor?.is_active !== false ? "ACTIVE" : "TERMINATED",
+        ]
+          .map(escapeCsv)
+          .join(",")
+      );
+
+      const csv = [header.join(","), ...rows].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "vendors-export.csv";
+      link.click();
+      window.URL.revokeObjectURL(url);
+
+      if (serverTotal > VENDOR_EXPORT_LIMIT) {
+        toast({
+          title: "Export capped",
+          description: `CSV export includes the first ${VENDOR_EXPORT_LIMIT} vendors.`,
+        });
+      }
+    } catch (e) {
+      console.error(e);
+      toast({
+        title: "Error",
+        description: e.message || "Failed to export vendors",
+        variant: "destructive",
+      });
+    } finally {
+      setExporting(false);
+    }
   };
 
   const onSearch = (e) => {
     e.preventDefault();
+    if (currentPage !== 1) {
+      setCurrentPage(1);
+      return;
+    }
     load();
   };
 
@@ -362,15 +409,23 @@ export default function Vendors() {
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-sm">
-              {hasActiveFilters ? `${visibleCount} Shown` : `${serverTotal || visibleCount} Total Vendors`}
+              {serverTotal === 0 ? "No Vendors" : `Showing ${pageStart}-${pageEnd} of ${serverTotal}`}
             </Badge>
             {hasActiveFilters ? (
               <Badge variant="secondary" className="text-sm">
-                {serverTotal || visibleCount} Total Vendors
+                Filters Active
               </Badge>
             ) : null}
-            <Button variant="outline" size="sm" onClick={exportVendors} disabled={visibleCount === 0}>
-              <Download className="mr-2 h-4 w-4" />
+            <Badge variant="secondary" className="text-sm">
+              Page {currentPage} of {totalPages}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportVendors}
+              disabled={serverTotal === 0 || exporting}
+            >
+              {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Export CSV
             </Button>
           </div>
@@ -383,11 +438,20 @@ export default function Vendors() {
               className="pl-9 h-9"
               placeholder="Search by company, owner, vendor id or email..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setCurrentPage(1);
+              }}
             />
           </form>
 
-          <Select value={filterKyc} onValueChange={setFilterKyc}>
+          <Select
+            value={filterKyc}
+            onValueChange={(value) => {
+              setFilterKyc(value);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-full md:w-[180px] h-9">
               <Filter className="h-4 w-4 mr-2" />
               <SelectValue placeholder="KYC Status" />
@@ -401,7 +465,13 @@ export default function Vendors() {
             </SelectContent>
           </Select>
 
-          <Select value={filterActive} onValueChange={setFilterActive}>
+          <Select
+            value={filterActive}
+            onValueChange={(value) => {
+              setFilterActive(value);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-full md:w-[180px] h-9">
               <ShieldCheck className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Vendor Status" />
@@ -413,7 +483,13 @@ export default function Vendors() {
             </SelectContent>
           </Select>
 
-          <Select value={filterJoined} onValueChange={setFilterJoined}>
+          <Select
+            value={filterJoined}
+            onValueChange={(value) => {
+              setFilterJoined(value);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-full md:w-[180px] h-9">
               <Filter className="h-4 w-4 mr-2" />
               <SelectValue placeholder="Joined On" />
@@ -460,7 +536,7 @@ export default function Vendors() {
                         <Loader2 className="animate-spin mx-auto h-6 w-6 text-gray-400" />
                       </TableCell>
                     </TableRow>
-                  ) : filteredVendors.length === 0 ? (
+                  ) : vendors.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center py-7 text-gray-500">
                         <Building2 className="h-12 w-12 mx-auto mb-2 opacity-30" />
@@ -468,7 +544,7 @@ export default function Vendors() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredVendors.map((v) => {
+                    vendors.map((v) => {
                       const active = v.is_active !== false;
                       const planName = v.package?.plan_name || "FREE";
                       const planPrice = Number(v.package?.price || 0);
@@ -605,6 +681,30 @@ export default function Vendors() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      <div className="shrink-0 flex items-center justify-between gap-3">
+        <p className="text-sm text-gray-500">
+          {serverTotal === 0 ? "No vendors to display" : `Page ${currentPage} of ${totalPages}`}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+            disabled={loading || currentPage === 1}
+          >
+            Previous
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+            disabled={loading || currentPage >= totalPages}
+          >
+            Next
+          </Button>
+        </div>
       </div>
 
       {/* Vendor Details Modal */}

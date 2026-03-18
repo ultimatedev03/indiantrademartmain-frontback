@@ -276,3 +276,4 @@ Restarting 'server/server.js'
 📧 Email: ultimatedev2025@gmail.com
 ⏱️  OTP Expiry: 2 minutes
 🔢 OTP Length: 6 digits
+Failed running 'server/server.js'. Waiting for file changes before restarting...
