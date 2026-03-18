@@ -9,6 +9,7 @@ import {
   PRODUCT_FAVORITES_UPDATED_EVENT,
 } from '@/modules/buyer/services/productFavorites';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const formatPrice = (value) => {
   if (value === null || value === undefined || value === '') return 'Price on request';
@@ -81,6 +82,10 @@ const Favorites = () => {
           {favorites.map((fav) => {
             const location = [fav.vendorCity, fav.vendorState].filter(Boolean).join(', ');
             const productPath = getProductDetailPath(fav) || '/directory';
+            const vendorPath = getVendorProfilePath({
+              slug: fav.vendorSlug,
+              id: fav.vendorId,
+            });
 
             return (
               <Card key={fav.productId} className="overflow-hidden hover:shadow-md transition-shadow group">
@@ -121,8 +126,8 @@ const Favorites = () => {
                           View Service <ExternalLink className="h-3 w-3 ml-2" />
                         </Button>
                      </Link>
-                     {fav.vendorId ? (
-                      <Link to={`/directory/vendor/${fav.vendorId}`} className="flex-1 min-w-[140px]">
+                     {vendorPath ? (
+                      <Link to={vendorPath} className="flex-1 min-w-[140px]">
                         <Button variant="outline" className="w-full h-9 text-xs">
                           View Profile <ExternalLink className="h-3 w-3 ml-2" />
                         </Button>

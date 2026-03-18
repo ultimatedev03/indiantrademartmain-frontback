@@ -15,7 +15,7 @@ const MigrationTools = () => {
   const [showResults, setShowResults] = useState(false);
 
   const handleMigrateProductSlugs = async () => {
-    if (!window.confirm('This will normalize product slugs to readable SEO-friendly URLs. Continue?')) return;
+    if (!window.confirm('This will recanonicalize all product slugs to readable SEO-friendly URLs and keep old slugs as aliases. Continue?')) return;
     
     setMigrating(true);
     setShowResults(false);
@@ -73,8 +73,8 @@ const MigrationTools = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-gray-600">
-              This tool will generate readable SEO-friendly slugs for products that are missing one
-              or still use the old random suffix format.
+              This tool will recanonicalize all products to readable SEO-friendly slugs based on the
+              current product name and preserve older slugs as working aliases.
             </p>
             
             <Button 

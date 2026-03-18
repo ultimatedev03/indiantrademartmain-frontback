@@ -38,6 +38,10 @@ const MIME_EXT = {
 };
 
 const isValidId = (v) => typeof v === 'string' && v.trim().length > 0;
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuidLike = (value = '') => UUID_LIKE_RE.test(String(value || '').trim());
+const isMissingColumnError = (error) =>
+  error?.code === '42703' || /column .* does not exist/i.test(String(error?.message || ''));
 
 const parseDataUrl = (value = '') => {
   const raw = String(value || '').trim();
@@ -235,6 +239,59 @@ async function resolveBuyerProfileForUser(user = {}) {
   }
 
   return null;
+}
+
+async function fetchVendorByPublicSlug(slug) {
+  const normalizedSlug = String(slug || '').trim().toLowerCase();
+  if (!normalizedSlug) return { vendor: null, error: null };
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .select('*')
+    .eq('slug', normalizedSlug)
+    .maybeSingle();
+
+  if (error && isMissingColumnError(error)) {
+    return { vendor: null, error: null };
+  }
+
+  return { vendor: data || null, error };
+}
+
+async function fetchVendorById(vendorId) {
+  const normalizedId = String(vendorId || '').trim();
+  if (!normalizedId) return { vendor: null, error: null };
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .select('*')
+    .eq('id', normalizedId)
+    .maybeSingle();
+
+  return { vendor: data || null, error };
+}
+
+async function resolvePublicVendorRecord(identifier) {
+  const normalized = String(identifier || '').trim();
+  if (!normalized) return { vendor: null, error: null };
+
+  const resolvers = isUuidLike(normalized)
+    ? [
+        () => fetchVendorById(normalized),
+        () => fetchVendorByPublicSlug(normalized),
+      ]
+    : [
+        () => fetchVendorByPublicSlug(normalized),
+        () => fetchVendorById(normalized),
+      ];
+
+  for (const resolveVendor of resolvers) {
+    const result = await resolveVendor();
+    if (result?.error) return result;
+    if (result?.vendor) return result;
+  }
+
+  return { vendor: null, error: null };
 }
 
 const nonEmptyText = (value, maxLen = 500) => {
@@ -2399,11 +2456,7 @@ router.get('/:vendorId', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Invalid vendor id' });
     }
 
-    const { data: vendor, error } = await supabase
-      .from('vendors')
-      .select('*')
-      .eq('id', vendorId)
-      .maybeSingle();
+    const { vendor, error } = await resolvePublicVendorRecord(vendorId);
 
     if (error) return res.status(500).json({ success: false, error: error.message });
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });

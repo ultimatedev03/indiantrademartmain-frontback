@@ -4,6 +4,7 @@ import { vendorService } from "@/modules/directory/services/vendorService";
 import Card from "@/shared/components/Card";
 import { Button } from "@/components/ui/button";
 import { MapPin, Star, ShieldCheck, Search } from "lucide-react";
+import { getVendorProfilePath } from "@/shared/utils/vendorRoutes";
 
 const VendorListing = () => {
   const navigate = useNavigate();
@@ -238,7 +239,7 @@ const VendorListing = () => {
             <Card
               key={vendor.id}
               className="group hover:shadow-md transition-all cursor-pointer border border-slate-200"
-              onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
+              onClick={() => navigate(getVendorProfilePath(vendor) || '/directory/vendor')}
             >
               <Card.Content className="p-0">
                 <div className="p-2">
@@ -283,7 +284,7 @@ const VendorListing = () => {
                     className="w-full h-7 text-[11px] mt-auto"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/directory/vendor/${vendor.id}`);
+                      navigate(getVendorProfilePath(vendor) || '/directory/vendor');
                     }}
                   >
                     View Profile

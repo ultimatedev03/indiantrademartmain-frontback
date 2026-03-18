@@ -94,7 +94,7 @@ function generateLlmsTxt(pages, routes) {
 
   llmsContent += `\n## Important Notes\n\n`;
   llmsContent += `- Directory pages follow the pattern: /directory/{service}-in-{city}-{state}\n`;
-  llmsContent += `- Vendor profiles: /directory/vendor/{vendorId}\n`;
+  llmsContent += `- Vendor profiles: /directory/vendor/{vendorSlug}\n`;
   llmsContent += `- Product pages: /product/{productSlug}\n`;
 
   return llmsContent;

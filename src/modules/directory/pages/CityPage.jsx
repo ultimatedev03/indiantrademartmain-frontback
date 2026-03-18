@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import DirectorySearchBar from '@/modules/directory/components/DirectorySearchBar';
 import { vendorService } from '@/modules/directory/services/vendorService';
 import Card from '@/shared/components/Card';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const CityPage = () => {
   const navigate = useNavigate();
@@ -214,7 +215,7 @@ const CityPage = () => {
                   <Card
                     key={vendor.id}
                     className="hover:shadow-lg transition-shadow cursor-pointer"
-                    onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
+                    onClick={() => navigate(getVendorProfilePath(vendor) || '/directory/vendor')}
                   >
                     <Card.Content className="p-0">
                       <div className="h-40 bg-slate-100 relative overflow-hidden">
@@ -244,7 +245,7 @@ const CityPage = () => {
                           className="w-full"
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/directory/vendor/${vendor.id}`);
+                            navigate(getVendorProfilePath(vendor) || '/directory/vendor');
                           }}
                         >
                           View Profile

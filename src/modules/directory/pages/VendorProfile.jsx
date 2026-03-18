@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 // Internal Mock Data to ensure page is never blank
 const FALLBACK_VENDORS = [
@@ -105,9 +106,10 @@ const maskPhoneNumber = (phone) => {
 };
 
 const VendorProfileContent = () => {
-  const { vendorId } = useParams();
+  const { vendorSlugOrId } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const searchParamsString = searchParams.toString();
   const { user, userRole } = useAuth();
   const isBuyer = userRole === 'BUYER' && !!user;
 
@@ -125,20 +127,23 @@ const VendorProfileContent = () => {
   const [showAllProducts, setShowAllProducts] = useState(false);
   const [selectedCollectionKey, setSelectedCollectionKey] = useState('');
   const [showAllServiceCollections, setShowAllServiceCollections] = useState(false);
+  const requestedVendorKey = String(vendorSlugOrId || '').trim();
+  const vendorRecordId = String(vendor?.id || '').trim();
 
   useEffect(() => {
     // Fetch vendor data from backend APIs
     const fetchVendor = async () => {
       setLoading(true);
       try {
-        const vendorRes = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}`));
+        const vendorRes = await fetchWithCsrf(apiUrl(`/api/vendors/${requestedVendorKey}`));
         if (!vendorRes.ok) throw new Error('Vendor not found');
         const vendorJson = await vendorRes.json();
         const vendorData = vendorJson?.vendor;
 
         if (vendorData) {
-          setVendor({
+          const nextVendor = {
             id: vendorData.id,
+            slug: vendorData.slug || '',
             company_name: vendorData.company_name,
             name: vendorData.owner_name || vendorData.first_name,
             city: vendorData.city,
@@ -156,12 +161,19 @@ const VendorProfileContent = () => {
             website: vendorData.website_url,
             profile_image: vendorData.profile_image,
             annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover
-          });
+          };
+          setVendor(nextVendor);
+
+          const canonicalPath = getVendorProfilePath(vendorData);
+          const currentPath = getVendorProfilePath(requestedVendorKey);
+          if (vendorData.slug && canonicalPath && canonicalPath !== currentPath) {
+            navigate(searchParamsString ? `${canonicalPath}?${searchParamsString}` : canonicalPath, { replace: true });
+          }
 
           const [productsRes, servicesRes, categoriesRes] = await Promise.all([
-            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/products`)),
-            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/services`)),
-            fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/service-categories`)),
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorData.id}/products`)),
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorData.id}/services`)),
+            fetchWithCsrf(apiUrl(`/api/vendors/${vendorData.id}/service-categories`)),
           ]);
 
           if (productsRes.ok) {
@@ -186,7 +198,7 @@ const VendorProfileContent = () => {
             setServiceCategories([]);
           }
         } else {
-          setVendor(FALLBACK_VENDORS[0]);
+          setVendor(null);
           setProducts([]);
           setServices([]);
           setServiceCategories([]);
@@ -194,7 +206,7 @@ const VendorProfileContent = () => {
         }
       } catch (e) {
         console.error("Vendor fetch failed", e);
-        setVendor(FALLBACK_VENDORS[0]);
+        setVendor(null);
         setProducts([]);
         setServices([]);
         setServiceCategories([]);
@@ -204,18 +216,18 @@ const VendorProfileContent = () => {
       }
     };
 
-    if (vendorId) {
+    if (requestedVendorKey) {
       fetchVendor();
     }
-  }, [vendorId]);
+  }, [requestedVendorKey, navigate, searchParamsString]);
 
   // ✅ Load favorite status
   useEffect(() => {
     const loadFavoriteStatus = async () => {
-      if (!isBuyer || !user?.id || !vendorId) return;
+      if (!isBuyer || !user?.id || !vendorRecordId) return;
 
       try {
-        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`));
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorRecordId}/favorite`));
         if (!res.ok) return;
         const data = await res.json();
         setIsFavorite(!!data?.isFavorite);
@@ -225,7 +237,7 @@ const VendorProfileContent = () => {
     };
 
     loadFavoriteStatus();
-  }, [vendorId, isBuyer, user?.id]);
+  }, [vendorRecordId, isBuyer, user?.id]);
 
   const toggleFavorite = async () => {
     if (!isBuyer) {
@@ -234,12 +246,12 @@ const VendorProfileContent = () => {
       return;
     }
 
-    if (!vendorId || favLoading) return;
+    if (!vendorRecordId || favLoading) return;
     setFavLoading(true);
 
     try {
       if (isFavorite) {
-        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`), {
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorRecordId}/favorite`), {
           method: 'DELETE',
         });
         if (!res.ok) throw new Error('Failed to remove favorite');
@@ -247,7 +259,7 @@ const VendorProfileContent = () => {
         setIsFavorite(false);
         toast({ title: 'Removed from Favorites' });
       } else {
-        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/favorite`), {
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorRecordId}/favorite`), {
           method: 'POST',
         });
         if (!res.ok) throw new Error('Failed to add favorite');
@@ -266,10 +278,10 @@ const VendorProfileContent = () => {
   // Load leads submitted by buyer to this vendor
   useEffect(() => {
     const loadLeads = async () => {
-      if (!isBuyer || !user?.id) return;
+      if (!isBuyer || !user?.id || !vendorRecordId) return;
 
       try {
-        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorId}/leads`));
+        const res = await fetchWithCsrf(apiUrl(`/api/vendors/${vendorRecordId}/leads`));
         if (!res.ok) return;
         const data = await res.json();
         if (data?.leads) setLeads(data.leads);
@@ -279,7 +291,7 @@ const VendorProfileContent = () => {
     };
 
     loadLeads();
-  }, [vendorId, isBuyer, user]);
+  }, [vendorRecordId, isBuyer, user]);
 
   // Always use fallback if no vendor, but not for products
   const displayVendor = vendor || FALLBACK_VENDORS[0];
@@ -323,10 +335,15 @@ const VendorProfileContent = () => {
   const visibleCollections = showAllServiceCollections ? collectionList : collectionList.slice(0, 6);
 
   const handleEnquire = (product) => {
+    if (!vendorRecordId) {
+      toast({ title: 'Vendor unavailable', description: 'Vendor profile could not be resolved.' });
+      return;
+    }
+
     const vendorName = encodeURIComponent(displayVendor?.company_name || '');
     const productName = encodeURIComponent(product?.name || '');
     if (isBuyer) {
-      navigate(`/buyer/proposals/new?vendorId=${displayVendor.id}&vendorName=${vendorName}&productName=${productName}`);
+      navigate(`/buyer/proposals/new?vendorId=${vendorRecordId}&vendorName=${vendorName}&productName=${productName}`);
     } else {
       navigate('/buyer/login');
     }
@@ -409,7 +426,11 @@ const VendorProfileContent = () => {
               <Button
                 className="bg-[#00A699] hover:bg-[#008c81]"
                 onClick={() => {
-                  if (isBuyer) navigate(`/buyer/proposals/new?vendorId=${displayVendor.id}&vendorName=${encodeURIComponent(displayVendor.company_name)}`);
+                  if (!vendorRecordId) {
+                    toast({ title: 'Vendor unavailable', description: 'Vendor profile could not be resolved.' });
+                    return;
+                  }
+                  if (isBuyer) navigate(`/buyer/proposals/new?vendorId=${vendorRecordId}&vendorName=${encodeURIComponent(displayVendor.company_name)}`);
                   else navigate('/buyer/login');
                 }}
               >

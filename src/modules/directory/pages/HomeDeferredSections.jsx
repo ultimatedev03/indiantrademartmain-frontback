@@ -7,6 +7,7 @@ import { vendorService } from '@/modules/directory/services/vendorService';
 import { Button } from '@/components/ui/button';
 import { CheckCircle, MapPin, ChevronRight, Loader2 } from 'lucide-react';
 import { categoryApi } from '@/modules/directory/services/categoryApi';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const HomeDeferredSections = () => {
   const navigate = useNavigate();
@@ -210,7 +211,7 @@ const HomeDeferredSections = () => {
               <div
                 key={vendor.id}
                 className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-lg transition-all cursor-pointer group hover:-translate-y-1"
-                onClick={() => navigate(`/directory/vendor/${vendor.id}`)}
+                onClick={() => navigate(getVendorProfilePath(vendor) || '/directory/vendor')}
               >
                 <div className="relative h-32 mb-3 rounded-lg bg-slate-100 overflow-hidden">
                   <VendorImage src={vendor.image} name={vendor.name} />

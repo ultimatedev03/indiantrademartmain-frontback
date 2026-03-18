@@ -150,6 +150,11 @@ const readBody = (event) => {
   }
 };
 
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isUuidLike = (value = '') => UUID_LIKE_RE.test(String(value || '').trim());
+const isMissingColumnError = (error) =>
+  error?.code === '42703' || /column .* does not exist/i.test(String(error?.message || ''));
+
 const parseTail = (eventPath) => {
   const parts = String(eventPath || '').split('/').filter(Boolean);
   const fnIndex = parts.indexOf('vendors');
@@ -270,6 +275,59 @@ const scoreVendorCandidate = (candidate = {}, userId = '', activityMap = new Map
   const updatedTs = new Date(candidate?.updated_at || candidate?.created_at || 0).getTime();
   if (Number.isFinite(updatedTs)) score += Math.floor(updatedTs / 100000000);
   return score;
+};
+
+const fetchVendorByPublicSlug = async (slug) => {
+  const normalizedSlug = String(slug || '').trim().toLowerCase();
+  if (!normalizedSlug) return { vendor: null, error: null };
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .select('*')
+    .eq('slug', normalizedSlug)
+    .maybeSingle();
+
+  if (error && isMissingColumnError(error)) {
+    return { vendor: null, error: null };
+  }
+
+  return { vendor: data || null, error };
+};
+
+const fetchVendorById = async (vendorId) => {
+  const normalizedId = String(vendorId || '').trim();
+  if (!normalizedId) return { vendor: null, error: null };
+
+  const { data, error } = await supabase
+    .from('vendors')
+    .select('*')
+    .eq('id', normalizedId)
+    .maybeSingle();
+
+  return { vendor: data || null, error };
+};
+
+const resolvePublicVendorRecord = async (identifier) => {
+  const normalized = String(identifier || '').trim();
+  if (!normalized) return { vendor: null, error: null };
+
+  const resolvers = isUuidLike(normalized)
+    ? [
+        () => fetchVendorById(normalized),
+        () => fetchVendorByPublicSlug(normalized),
+      ]
+    : [
+        () => fetchVendorByPublicSlug(normalized),
+        () => fetchVendorById(normalized),
+      ];
+
+  for (const resolveVendor of resolvers) {
+    const result = await resolveVendor();
+    if (result?.error) return result;
+    if (result?.vendor) return result;
+  }
+
+  return { vendor: null, error: null };
 };
 
 const resolveVendorForUser = async (user) => {
@@ -1831,11 +1889,7 @@ export const handler = async (event) => {
     const action = tail[1];
 
     if (event.httpMethod === 'GET' && tail.length === 1) {
-      const { data: vendor, error } = await supabase
-        .from('vendors')
-        .select('*')
-        .eq('id', vendorId)
-        .maybeSingle();
+      const { vendor, error } = await resolvePublicVendorRecord(vendorId);
       if (error) return fail(event, error.message || 'Failed to fetch vendor');
       if (!vendor) return bad(event, 'Vendor not found', null, 404);
       return ok(event, { success: true, vendor });

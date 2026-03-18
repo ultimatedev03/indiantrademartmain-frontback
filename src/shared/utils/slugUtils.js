@@ -11,6 +11,32 @@ const clampSlug = (value = '', maxLength = MAX_SLUG_LENGTH) => {
   return trimmed || '';
 };
 
+const parseMetadataObject = (value) => {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+};
+
+const parseLegacySlugArray = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => clampSlug(entry))
+    .filter(Boolean);
+};
+
 /**
  * Generate a URL-friendly slug from text.
  */
@@ -74,6 +100,39 @@ export const needsProductSlugNormalization = (slug, sourceText = '') => {
   const normalizedSlug = clampSlug(slug);
   if (!normalizedSlug) return true;
   return isLegacyRandomizedSlug(normalizedSlug, sourceText);
+};
+
+export const mergeProductSlugAliases = (metadata, slugCandidates = [], canonicalSlug = '') => {
+  const nextMetadata = parseMetadataObject(metadata);
+  const normalizedCanonicalSlug = clampSlug(canonicalSlug);
+  const aliases = [];
+  const seen = new Set();
+
+  const pushAlias = (value) => {
+    const normalizedValue = clampSlug(value);
+    if (!normalizedValue) return;
+    if (normalizedCanonicalSlug && normalizedValue === normalizedCanonicalSlug) return;
+    if (seen.has(normalizedValue)) return;
+    seen.add(normalizedValue);
+    aliases.push(normalizedValue);
+  };
+
+  pushAlias(nextMetadata.legacy_slug);
+  parseLegacySlugArray(nextMetadata.legacy_slugs).forEach(pushAlias);
+  (Array.isArray(slugCandidates) ? slugCandidates : [slugCandidates]).forEach(pushAlias);
+
+  delete nextMetadata.legacy_slug;
+  delete nextMetadata.legacy_slugs;
+
+  if (!aliases.length) {
+    return nextMetadata;
+  }
+
+  return {
+    ...nextMetadata,
+    legacy_slug: aliases[0],
+    legacy_slugs: aliases,
+  };
 };
 
 /**

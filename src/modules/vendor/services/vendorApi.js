@@ -2,7 +2,7 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-import { generateUniqueSlug as generateProductSlug, isLegacyRandomizedSlug } from '@/shared/utils/slugUtils';
+import { generateUniqueSlug, mergeProductSlugAliases } from '@/shared/utils/slugUtils';
 
 // ---------------- HELPERS ----------------
 
@@ -140,6 +140,26 @@ const generateSlug = (text) => {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
 };
+
+const resolveVendorSlugSource = (vendorLike = {}) => {
+  const companyName = String(vendorLike?.company_name || vendorLike?.companyName || '').trim();
+  if (companyName) return companyName;
+
+  const ownerName = String(vendorLike?.owner_name || vendorLike?.ownerName || '').trim();
+  if (ownerName) return ownerName;
+
+  const email = String(vendorLike?.email || '').trim().toLowerCase();
+  if (email) return email.split('@')[0] || email;
+
+  return 'vendor';
+};
+
+const ensureVendorSlug = async (vendorLike = {}, options = {}) =>
+  generateUniqueSlug(resolveVendorSlugSource(vendorLike), {
+    table: 'vendors',
+    fallback: 'vendor',
+    ...options,
+  });
 
 const generateVendorIdString = (ownerName = '', companyName = '', phone = '') => {
   const digits = '0123456789';
@@ -790,7 +810,7 @@ export const vendorApi = {
 
     const { data: existing, error: exErr } = await supabase
       .from('vendors')
-      .select('id, vendor_id')
+      .select('id, vendor_id, slug')
       .eq('user_id', userId)
       .maybeSingle();
 
@@ -819,6 +839,17 @@ export const vendorApi = {
       if (!unique) throw new Error("Failed to generate unique Vendor ID");
     }
 
+    const vendorSlug =
+      String(existing?.slug || '').trim() ||
+      await ensureVendorSlug(
+        {
+          companyName,
+          ownerName,
+          email,
+        },
+        { excludeId: existing?.id || null }
+      );
+
     const vendorData = {
       company_name: companyName,
       gst_number: gstNumber,
@@ -834,7 +865,8 @@ export const vendorApi = {
       kyc_status: 'PENDING',
       profile_completion: calculateProfileCompletion({ company_name: companyName, gst_number: gstNumber, address, owner_name: ownerName, email, phone, state: stateName, city: cityName }),
       updated_at: new Date().toISOString(),
-      vendor_id: vendorId
+      vendor_id: vendorId,
+      slug: vendorSlug,
     };
 
     if (existing) {
@@ -1322,9 +1354,39 @@ export const vendorApi = {
   },
 
   updateVendorProfile: async (userId, updates) => {
+    const { data: existingVendor, error: existingError } = await supabase
+      .from('vendors')
+      .select('id, slug, company_name, owner_name, email')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+
+    const nextUpdates = { ...updates };
+    const shouldRefreshSlug = Boolean(
+      existingVendor?.id &&
+      (
+        !String(existingVendor.slug || '').trim() ||
+        Object.prototype.hasOwnProperty.call(nextUpdates, 'company_name') ||
+        Object.prototype.hasOwnProperty.call(nextUpdates, 'owner_name') ||
+        Object.prototype.hasOwnProperty.call(nextUpdates, 'email')
+      )
+    );
+
+    if (shouldRefreshSlug) {
+      nextUpdates.slug = await ensureVendorSlug(
+        {
+          company_name: nextUpdates.company_name ?? existingVendor.company_name,
+          owner_name: nextUpdates.owner_name ?? existingVendor.owner_name,
+          email: nextUpdates.email ?? existingVendor.email,
+        },
+        { excludeId: existingVendor.id }
+      );
+    }
+
     const { data, error } = await supabase
       .from('vendors')
-      .update(updates)
+      .update(nextUpdates)
       .eq('user_id', userId)
       .select()
       .single();
@@ -1683,11 +1745,7 @@ export const vendorApi = {
 
     create: async (productData) => {
       const vendorId = await getVendorId();
-      const incomingSlug = String(productData?.slug || '').trim();
-      const slug =
-        incomingSlug && !isLegacyRandomizedSlug(incomingSlug, productData?.name)
-          ? incomingSlug
-          : await generateProductSlug(productData.name);
+      const slug = await generateUniqueSlug(productData.name);
 
       const insertData = {
         ...productData,
@@ -1710,11 +1768,23 @@ export const vendorApi = {
     update: async (id, updates) => {
       const updateData = { ...updates };
       if (updates.name) {
-        const incomingSlug = String(updates?.slug || '').trim();
-        updateData.slug =
-          incomingSlug && !isLegacyRandomizedSlug(incomingSlug, updates.name)
-            ? incomingSlug
-            : await generateProductSlug(updates.name, { excludeId: id });
+        const { data: existingProduct, error: existingProductError } = await supabase
+          .from('products')
+          .select('slug, metadata')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (existingProductError) throw existingProductError;
+
+        const nextSlug = await generateUniqueSlug(updates.name, { excludeId: id });
+        const currentSlug = String(existingProduct?.slug || '').trim();
+
+        updateData.slug = nextSlug;
+        updateData.metadata = mergeProductSlugAliases(
+          updateData.metadata ?? existingProduct?.metadata,
+          currentSlug,
+          nextSlug
+        );
       }
       updateData.updated_at = new Date().toISOString();
 

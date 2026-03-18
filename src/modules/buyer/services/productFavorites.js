@@ -36,6 +36,7 @@ const normalizeFavoriteProduct = (item = {}) => {
   const imageFromArray = Array.isArray(item.images) ? item.images.find(Boolean) : null;
   const image = imageFromArray || item.image || '';
   const vendorId = item.vendorId || item.vendor_id || item.vendors?.id || null;
+  const vendorSlug = item.vendorSlug || item.vendors?.slug || '';
   const vendorName = item.vendorName || item.vendors?.company_name || '';
   const vendorCity = item.vendorCity || item.vendors?.city || '';
   const vendorState = item.vendorState || item.vendors?.state || '';
@@ -49,6 +50,7 @@ const normalizeFavoriteProduct = (item = {}) => {
     priceValue,
     image,
     vendorId,
+    vendorSlug,
     vendorName,
     vendorCity,
     vendorState,
@@ -108,4 +110,3 @@ export const productFavorites = {
     return this.list(userId);
   },
 };
-

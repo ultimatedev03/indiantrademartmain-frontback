@@ -52,6 +52,7 @@ import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import { getProductDetailPath, getProductDetailUrl } from '@/shared/utils/productRoutes';
 import { stripLegacyRandomSlugSuffix } from '@/shared/utils/slugUtils';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const ProductDetail = () => {
   const { productSlug } = useParams();
@@ -296,7 +297,7 @@ const ProductDetail = () => {
       toast({ title: 'Enquiry Sent', description: 'Your enquiry has been submitted to the vendor' });
       setEnquiryOpen(false);
       enquiryCaptcha.resetCaptcha();
-      navigate(`/directory/vendor/${data.vendors.id}`);
+      navigate(getVendorProfilePath(data?.vendors) || '/directory/vendor');
     } catch (error) {
       console.error('Error creating lead:', error);
       enquiryCaptcha.resetCaptcha();
@@ -312,7 +313,7 @@ const ProductDetail = () => {
 
   const handleCompanyClick = () => {
     if (data?.vendors?.id) {
-      navigate(`/directory/vendor/${data.vendors.id}`);
+      navigate(getVendorProfilePath(data?.vendors) || '/directory/vendor');
     }
   };
 
@@ -325,6 +326,7 @@ const ProductDetail = () => {
       price: data.price ?? null,
       images: Array.isArray(data.images) ? data.images : [],
       vendorId: data?.vendors?.id || data?.vendor_id || null,
+      vendorSlug: data?.vendors?.slug || '',
       vendorName: data?.vendors?.company_name || '',
       vendorCity: data?.vendors?.city || '',
       vendorState: data?.vendors?.state || '',
@@ -533,6 +535,36 @@ const ProductDetail = () => {
     return product;
   };
 
+  const findProductByLegacySlug = async ({ slug, select, requireActiveVendor = false }) => {
+    if (!slug) return null;
+
+    let query = supabase
+      .from('products')
+      .select(select)
+      .eq('metadata->>legacy_slug', slug);
+
+    if (requireActiveVendor) {
+      query = query.eq('vendors.is_active', true);
+    }
+
+    const { data: byPrimaryLegacySlug } = await query.maybeSingle();
+    if (byPrimaryLegacySlug) {
+      return hydrateProduct(byPrimaryLegacySlug);
+    }
+
+    let aliasQuery = supabase
+      .from('products')
+      .select(select)
+      .contains('metadata', { legacy_slugs: [slug] });
+
+    if (requireActiveVendor) {
+      aliasQuery = aliasQuery.eq('vendors.is_active', true);
+    }
+
+    const { data: byLegacySlugArray } = await aliasQuery.maybeSingle();
+    return hydrateProduct(byLegacySlugArray);
+  };
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -556,14 +588,11 @@ const ProductDetail = () => {
         }
 
         if (!product && normalizedIncomingSlug) {
-          const { data: rawByLegacySlug } = await supabase
-            .from('products')
-            .select('*, vendors!inner(*)')
-            .eq('metadata->>legacy_slug', normalizedIncomingSlug)
-            .eq('vendors.is_active', true)
-            .maybeSingle();
-
-          product = await hydrateProduct(rawByLegacySlug);
+          product = await findProductByLegacySlug({
+            slug: normalizedIncomingSlug,
+            select: '*, vendors!inner(*)',
+            requireActiveVendor: true,
+          });
         }
 
         // If not found (often due to vendor inactive), allow vendor owner to view
@@ -582,14 +611,13 @@ const ProductDetail = () => {
           }
 
           if (!product && normalizedIncomingSlug) {
-            const { data: rawByLegacySlug } = await supabase
-              .from('products')
-              .select('*, vendors(*)')
-              .eq('metadata->>legacy_slug', normalizedIncomingSlug)
-              .maybeSingle();
+            const rawByLegacySlug = await findProductByLegacySlug({
+              slug: normalizedIncomingSlug,
+              select: '*, vendors(*)',
+            });
 
             if (rawByLegacySlug && rawByLegacySlug.vendor_id === currentVendorId) {
-              product = await hydrateProduct(rawByLegacySlug);
+              product = rawByLegacySlug;
             }
           }
         }

@@ -63,7 +63,7 @@ export const DirectoryRoutes = () => {
 
         {/* Vendor */}
         <Route path="directory/vendor" element={<VendorListing />} />
-        <Route path="directory/vendor/:vendorId" element={<VendorProfilePublic />} />
+        <Route path="directory/vendor/:vendorSlugOrId" element={<VendorProfilePublic />} />
 
         {/* Search (MOST specific first) */}
         <Route path="directory/search/:service/:state/:city" element={<SearchResults />} />

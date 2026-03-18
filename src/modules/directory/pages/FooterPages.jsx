@@ -33,6 +33,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getProductDetailPath as buildProductDetailPath } from '@/shared/utils/productRoutes';
+import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const buildMailtoLink = (email, subject) =>
   `mailto:${email}?subject=${encodeURIComponent(subject || '')}`;
@@ -1022,10 +1023,10 @@ export const ProductsPage = () => {
   };
 
   const getProductDetailPath = (product) =>
-    buildProductDetailPath(product) || (product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact');
+    buildProductDetailPath(product) || getVendorProfilePath({ slug: product?.vendorSlug, id: product?.vendorId }) || '/contact';
 
   const getSupplierPath = (product) =>
-    product?.vendorId ? `/directory/vendor/${product.vendorId}` : '/contact';
+    getVendorProfilePath({ slug: product?.vendorSlug, id: product?.vendorId }) || '/contact';
 
   useEffect(() => {
     let alive = true;
@@ -1050,6 +1051,7 @@ export const ProductsPage = () => {
             minOrder: formatMinOrder(p?.min_order_qty ?? p?.moq, p?.qty_unit),
             supplier: vendor?.company_name || '',
             vendorId: vendor?.id || '',
+            vendorSlug: vendor?.slug || '',
             location: location || 'India',
             rating: Number.isFinite(rating) ? rating : 0,
             reviews: Number.isFinite(views) ? views : 0,

@@ -159,7 +159,7 @@ const generateVendorsSitemap = async () => {
 
     ({ data: vendors, error } = await supabase
       .from('vendors')
-      .select('id, updated_at, status')
+      .select('id, slug, updated_at, status')
       .eq('status', 'VERIFIED')
       .order('updated_at', { ascending: false }));
 
@@ -191,7 +191,8 @@ const generateVendorsSitemap = async () => {
     const urls = vendors.map((v) => {
       const lastmodRaw = v.updated_at || v.created_at;
       const lastmod = lastmodRaw ? lastmodRaw.split('T')[0] : getCurrentDate();
-      return createUrlEntry(`${BASE_URL}/directory/vendor/${v.id}`, lastmod, '0.8', 'weekly');
+      const slugOrId = String(v.slug || v.id || '').trim();
+      return createUrlEntry(`${BASE_URL}/directory/vendor/${encodeURIComponent(slugOrId)}`, lastmod, '0.8', 'weekly');
     });
 
     return `${xmlHeader}\n${urls.join('\n')}\n${xmlFooter}`;
