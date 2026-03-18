@@ -67,7 +67,7 @@ async function safeReadJson(res) {
 
 const norm = (v) => String(v || "").toUpperCase();
 const VENDOR_PAGE_SIZE = 10;
-const VENDOR_EXPORT_LIMIT = 5000;
+const VENDOR_EXPORT_BATCH_SIZE = 1000;
 
 const kycBadgeClass = (s) => {
   const v = norm(s || "PENDING");
@@ -263,11 +263,30 @@ export default function Vendors() {
 
     setExporting(true);
     try {
-      const exportLimit = Math.min(Math.max(serverTotal, VENDOR_PAGE_SIZE), VENDOR_EXPORT_LIMIT);
-      const { vendors: exportRows } = await fetchVendorPage({
-        limit: exportLimit,
-        offset: 0,
-      });
+      const exportRows = [];
+      let offset = 0;
+
+      while (offset < serverTotal) {
+        const { vendors: batchRows } = await fetchVendorPage({
+          limit: VENDOR_EXPORT_BATCH_SIZE,
+          offset,
+        });
+
+        if (!batchRows.length) break;
+
+        exportRows.push(...batchRows);
+        offset += batchRows.length;
+
+        if (batchRows.length < VENDOR_EXPORT_BATCH_SIZE) break;
+      }
+
+      if (!exportRows.length) {
+        throw new Error("No vendors available for export");
+      }
+
+      if (exportRows.length < serverTotal) {
+        throw new Error(`Export stopped after ${exportRows.length} of ${serverTotal} vendors`);
+      }
 
       const rows = exportRows.map((vendor) =>
         [
@@ -294,13 +313,6 @@ export default function Vendors() {
       link.download = "vendors-export.csv";
       link.click();
       window.URL.revokeObjectURL(url);
-
-      if (serverTotal > VENDOR_EXPORT_LIMIT) {
-        toast({
-          title: "Export capped",
-          description: `CSV export includes the first ${VENDOR_EXPORT_LIMIT} vendors.`,
-        });
-      }
     } catch (e) {
       console.error(e);
       toast({
