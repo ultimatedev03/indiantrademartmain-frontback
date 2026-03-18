@@ -18,7 +18,7 @@ const VendorLogin = () => {
   const supaAuth = useAuth();
   const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
-  const [captchaController, setCaptchaController] = useState(null);
+  const [captchaStarted, setCaptchaStarted] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
@@ -30,6 +30,11 @@ const VendorLogin = () => {
       navigate('/vendor/dashboard', { replace: true });
     }
   }, [supaAuth?.userRole, navigate]);
+
+  const resetLoginCaptcha = React.useCallback(() => {
+    loginCaptcha.resetCaptcha();
+    setCaptchaStarted(false);
+  }, [loginCaptcha]);
 
   const performLogin = async () => {
     setLoading(true);
@@ -108,7 +113,7 @@ const VendorLogin = () => {
       window.location.href = '/vendor/dashboard';
 
     } catch (error) {
-      loginCaptcha.resetCaptcha();
+      resetLoginCaptcha();
       toast({ 
         title: "Login Failed", 
         description: error.message || "Invalid credentials", 
@@ -119,17 +124,10 @@ const VendorLogin = () => {
     }
   };
 
-  const handleCaptchaVerification = async () => {
-    if (loading || loginCaptcha.captchaToken) return;
-
-    const started = await captchaController?.execute?.();
-    if (!started) {
-      toast({
-        title: 'Captcha Unavailable',
-        description: 'Security verification could not start. Please refresh and try again.',
-        variant: 'destructive',
-      });
-    }
+  const handleStartCaptcha = () => {
+    if (loading) return;
+    loginCaptcha.resetCaptcha();
+    setCaptchaStarted(true);
   };
 
   const handleLogin = async (e) => {
@@ -140,7 +138,7 @@ const VendorLogin = () => {
     if (captchaError) {
       toast({
         title: 'Captcha Required',
-        description: 'Click "Verify Security Check" and complete the CAPTCHA before signing in.',
+        description: 'Start and complete the security check before signing in.',
         variant: 'destructive',
       });
       return;
@@ -195,28 +193,39 @@ const VendorLogin = () => {
             </Button>
 
             <div className="flex flex-col items-center space-y-3">
-              <TurnstileField
-                action="auth_login"
-                appearance="execute"
-                execution="execute"
-                className="mx-auto w-full max-w-[320px]"
-                onWidgetReady={setCaptchaController}
-                resetKey={loginCaptcha.captchaResetKey}
-                onTokenChange={loginCaptcha.setCaptchaToken}
-              />
-              <div className="flex justify-center">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleCaptchaVerification}
-                  disabled={loading || Boolean(loginCaptcha.captchaToken)}
-                >
-                  {loginCaptcha.captchaToken ? 'Verification Complete' : 'Verify Security Check'}
-                </Button>
+              <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col items-center space-y-3">
+                  {!captchaStarted ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleStartCaptcha}
+                      disabled={loading}
+                    >
+                      Start Security Check
+                    </Button>
+                  ) : null}
+
+                  {captchaStarted ? (
+                    <TurnstileField
+                      action="auth_login"
+                      className="mx-auto w-full max-w-[320px]"
+                      resetKey={loginCaptcha.captchaResetKey}
+                      onTokenChange={loginCaptcha.setCaptchaToken}
+                    />
+                  ) : (
+                    <p className="text-center text-xs text-gray-500">
+                      Cloudflare verification will load only after you start it manually.
+                    </p>
+                  )}
+
+                  <p className="text-center text-xs text-gray-500">
+                    {loginCaptcha.captchaToken
+                      ? 'Security verification complete. You can sign in now.'
+                      : 'Complete the security check before signing in.'}
+                  </p>
+                </div>
               </div>
-              <p className="text-center text-xs text-gray-500">
-                Complete the security check before signing in.
-              </p>
             </div>
           </form>
         </CardContent>
