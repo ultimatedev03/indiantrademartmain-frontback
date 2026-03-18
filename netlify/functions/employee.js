@@ -189,6 +189,29 @@ const readBody = (event) => {
   }
 };
 
+const writeAudit = async (
+  supabase,
+  { user_id = null, action, entity_type, entity_id = null, details = {} }
+) => {
+  if (!supabase || !action || !entity_type) return;
+
+  try {
+    await supabase.from('audit_logs').insert([
+      {
+        user_id,
+        action,
+        entity_type,
+        entity_id,
+        details,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+  } catch (error) {
+    // Audit failures should not block staff updates.
+    console.error('[employee function] audit write failed:', error?.message || error);
+  }
+};
+
 const parseDataUrl = (value = '') => {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -672,7 +695,7 @@ export const handler = async (event) => {
         return json(500, { success: false, error: updateError.message || 'Failed to update employee' });
       }
 
-      await writeAudit({
+      await writeAudit(supabase, {
         user_id: authUser.id,
         action: 'STAFF_UPDATE',
         entity_type: 'employees',
