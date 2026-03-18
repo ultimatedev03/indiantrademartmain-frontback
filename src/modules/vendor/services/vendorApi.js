@@ -2,6 +2,7 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
+import { generateUniqueSlug as generateProductSlug, isLegacyRandomizedSlug } from '@/shared/utils/slugUtils';
 
 // ---------------- HELPERS ----------------
 
@@ -138,13 +139,6 @@ const generateSlug = (text) => {
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
-};
-
-// Helper to generate unique slug by appending random string
-const generateUniqueSlug = (text) => {
-  const baseSlug = generateSlug(text);
-  const timestamp = Math.random().toString(36).substring(2, 8);
-  return `${baseSlug}-${timestamp}`.substring(0, 100);
 };
 
 const generateVendorIdString = (ownerName = '', companyName = '', phone = '') => {
@@ -1689,7 +1683,11 @@ export const vendorApi = {
 
     create: async (productData) => {
       const vendorId = await getVendorId();
-      const slug = generateUniqueSlug(productData.name);
+      const incomingSlug = String(productData?.slug || '').trim();
+      const slug =
+        incomingSlug && !isLegacyRandomizedSlug(incomingSlug, productData?.name)
+          ? incomingSlug
+          : await generateProductSlug(productData.name);
 
       const insertData = {
         ...productData,
@@ -1711,7 +1709,13 @@ export const vendorApi = {
 
     update: async (id, updates) => {
       const updateData = { ...updates };
-      if (updates.name) updateData.slug = generateUniqueSlug(updates.name);
+      if (updates.name) {
+        const incomingSlug = String(updates?.slug || '').trim();
+        updateData.slug =
+          incomingSlug && !isLegacyRandomizedSlug(incomingSlug, updates.name)
+            ? incomingSlug
+            : await generateProductSlug(updates.name, { excludeId: id });
+      }
       updateData.updated_at = new Date().toISOString();
 
       const { data, error } = await supabase

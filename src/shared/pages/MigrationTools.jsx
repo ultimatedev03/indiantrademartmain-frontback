@@ -15,7 +15,7 @@ const MigrationTools = () => {
   const [showResults, setShowResults] = useState(false);
 
   const handleMigrateProductSlugs = async () => {
-    if (!window.confirm('This will add slugs to all products without them. Continue?')) return;
+    if (!window.confirm('This will normalize product slugs to readable SEO-friendly URLs. Continue?')) return;
     
     setMigrating(true);
     setShowResults(false);
@@ -69,12 +69,12 @@ const MigrationTools = () => {
         
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Product Slug Migration</CardTitle>
+            <CardTitle className="text-xl">Product Slug Normalization</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-gray-600">
-              This tool will generate unique slugs for all products that don't have one yet. 
-              Slugs are used for shareable product URLs.
+              This tool will generate readable SEO-friendly slugs for products that are missing one
+              or still use the old random suffix format.
             </p>
             
             <Button 
@@ -113,8 +113,8 @@ const MigrationTools = () => {
 
                 {result.success && (
                   <div className="text-sm text-green-700 bg-white p-2 rounded border border-green-200">
-                    <p>✅ All product slugs are now active!</p>
-                    <p>Check your product pages at /product/product-name-xxx</p>
+                    <p>✅ Product slugs are now normalized.</p>
+                    <p>Check your product pages at /product/product-name</p>
                   </div>
                 )}
               </div>

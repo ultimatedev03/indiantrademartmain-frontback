@@ -51,6 +51,7 @@ import { apiUrl } from '@/lib/apiBase';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import { getProductDetailPath, getProductDetailUrl } from '@/shared/utils/productRoutes';
+import { stripLegacyRandomSlugSuffix } from '@/shared/utils/slugUtils';
 
 const ProductDetail = () => {
   const { productSlug } = useParams();
@@ -536,23 +537,36 @@ const ProductDetail = () => {
     const load = async () => {
       try {
         let product = null;
+        const slugCandidates = Array.from(
+          new Set(
+            [String(productSlug || '').trim(), stripLegacyRandomSlugSuffix(productSlug)]
+              .filter(Boolean)
+          )
+        );
 
-        try {
-          product = await directoryApi.getProductDetailBySlug(productSlug);
-        } catch (slugError) {
-          console.warn('Slug lookup failed:', slugError);
+        for (const slugCandidate of slugCandidates) {
+          try {
+            product = await directoryApi.getProductDetailBySlug(slugCandidate);
+          } catch (slugError) {
+            console.warn('Slug lookup failed:', slugError);
+          }
+
+          if (product) break;
         }
 
         // If not found (often due to vendor inactive), allow vendor owner to view
         if (!product && userRole === 'VENDOR' && currentVendorId) {
-          const { data: raw } = await supabase
-            .from('products')
-            .select('*, vendors(*)')
-            .eq('slug', productSlug)
-            .maybeSingle();
+          for (const slugCandidate of slugCandidates) {
+            const { data: raw } = await supabase
+              .from('products')
+              .select('*, vendors(*)')
+              .eq('slug', slugCandidate)
+              .maybeSingle();
 
-          if (raw && raw.vendor_id === currentVendorId) {
-            product = await hydrateProduct(raw);
+            if (raw && raw.vendor_id === currentVendorId) {
+              product = await hydrateProduct(raw);
+              break;
+            }
           }
         }
 

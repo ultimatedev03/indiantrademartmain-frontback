@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/use-toast';
 import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
-import { generateSlug, generateUniqueSlug } from '@/shared/utils/slugUtils';
+import { generateSlug, generateUniqueSlug, needsProductSlugNormalization } from '@/shared/utils/slugUtils';
 import { Switch } from '@/components/ui/switch';
 import { ArrowLeft, Loader2, Upload, X, Plus } from 'lucide-react';
 
@@ -616,8 +616,10 @@ const ProductForm = () => {
       delete payload.micro_category;
       delete payload.product_images;
 
-      if (!payload.slug || payload.slug.trim() === '') {
-        payload.slug = generateUniqueSlug(formData.name);
+      if (needsProductSlugNormalization(payload.slug, formData.name)) {
+        payload.slug = await generateUniqueSlug(formData.name, {
+          excludeId: formProductId || null,
+        });
       }
 
       // Normalize images to plain URL strings (avoid object arrays)
