@@ -9,6 +9,16 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, X, Save } from 'lucide-react';
 import { supabase } from '@/lib/customSupabaseClient';
 
+const dedupeCities = (rows = []) => {
+  const cityMap = new Map();
+  (rows || []).forEach((city) => {
+    const key = String(city?.id || '').trim();
+    if (!key || cityMap.has(key)) return;
+    cityMap.set(key, city);
+  });
+  return Array.from(cityMap.values()).sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')));
+};
+
 const PreferencesSection = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,6 +45,54 @@ const PreferencesSection = () => {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCitiesForPreferredStates = async () => {
+      const stateIds = Array.from(new Set((preferences.preferred_states || []).map((id) => String(id || '').trim()).filter(Boolean)));
+      if (stateIds.length === 0) {
+        if (!cancelled) {
+          setAllCities([]);
+          setPreferences((prev) => (
+            (prev.preferred_cities || []).length > 0
+              ? { ...prev, preferred_cities: [] }
+              : prev
+          ));
+        }
+        return;
+      }
+
+      try {
+        const cityBuckets = await Promise.all(
+          stateIds.map((stateId) => vendorApi.locations.getCities(stateId).catch(() => []))
+        );
+        if (cancelled) return;
+
+        const mergedCities = dedupeCities(cityBuckets.flat());
+        const allowedCityIds = new Set(mergedCities.map((city) => String(city?.id || '').trim()).filter(Boolean));
+
+        setAllCities(mergedCities);
+        setPreferences((prev) => {
+          const nextPreferredCities = (prev.preferred_cities || []).filter((cityId) =>
+            allowedCityIds.has(String(cityId || '').trim())
+          );
+          if (nextPreferredCities.length === (prev.preferred_cities || []).length) return prev;
+          return { ...prev, preferred_cities: nextPreferredCities };
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Error loading cities for preferred states:', error);
+        }
+      }
+    };
+
+    loadCitiesForPreferredStates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [preferences.preferred_states]);
 
   const loadData = async () => {
     setLoading(true);
@@ -75,26 +133,8 @@ const PreferencesSection = () => {
         const prefs = await vendorApi.preferences.get();
         console.log('Preferences loaded:', prefs);
         setPreferences(prefs);
-
-        // Load cities for first selected state
-        if (prefs.preferred_states?.length > 0) {
-          try {
-            const cities = await vendorApi.locations.getCities(prefs.preferred_states[0]);
-            setAllCities(cities || []);
-            console.log('Cities loaded for state:', prefs.preferred_states[0]);
-          } catch (e) {
-            console.error('Error loading cities:', e);
-          }
-        } else if (states && states.length > 0) {
-          // Auto-load cities for first state if no preferences exist
-          try {
-            const cities = await vendorApi.locations.getCities(states[0].id);
-            setAllCities(cities || []);
-            setSelectedStateId(states[0].id);
-            console.log('Auto-loaded cities for first state');
-          } catch (e) {
-            console.error('Error auto-loading cities:', e);
-          }
+        if ((!prefs?.preferred_states || prefs.preferred_states.length === 0) && states && states.length > 0) {
+          setSelectedStateId(String(states[0].id || ''));
         }
       } catch (prefsError) {
         console.error('Error loading preferences:', prefsError);
@@ -129,14 +169,6 @@ const PreferencesSection = () => {
     if (preferences.preferred_states.length >= MAX_STATES) {
       toast({ title: `Maximum ${MAX_STATES} states allowed`, variant: 'destructive' });
       return;
-    }
-
-    // Load cities for this state
-    try {
-      const cities = await vendorApi.locations.getCities(selectedStateId);
-      setAllCities(cities || []);
-    } catch (e) {
-      console.error('Error loading cities:', e);
     }
 
     setPreferences(prev => ({
@@ -246,15 +278,7 @@ const PreferencesSection = () => {
           <div className="flex gap-2">
             <select
               value={selectedStateId}
-              onChange={(e) => {
-                setSelectedStateId(e.target.value);
-                // Auto load cities when state is selected
-                if (e.target.value) {
-                  vendorApi.locations.getCities(e.target.value).then(cities => {
-                    setAllCities(cities || []);
-                  }).catch(err => console.error('Error loading cities:', err));
-                }
-              }}
+              onChange={(e) => setSelectedStateId(e.target.value)}
               className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-gray-900"
               disabled={preferences.preferred_states.length >= MAX_STATES}
             >
@@ -305,7 +329,7 @@ const PreferencesSection = () => {
                   <option key={city.id} value={city.id}>{city.name}</option>
                 ))
               ) : (
-                <option disabled>No cities available - select a state first</option>
+                <option disabled>No cities available - add preferred states first</option>
               )}
             </select>
             <Button onClick={handleAddCity} variant="outline" disabled={!selectedCityId || preferences.preferred_cities.length >= MAX_CITIES}>Add</Button>

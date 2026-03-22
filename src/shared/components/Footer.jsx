@@ -38,7 +38,7 @@ const Footer = () => {
                 <img
                   src="/itm-logo.png"
                   alt="IndianTradeMART Logo"
-                  className="h-16 w-17 sm:h-9 sm:w-9 object-contain flex-shrink-0"
+                  className="h-16 w-16 sm:h-10 sm:w-10 object-contain flex-shrink-0"
                   loading="lazy"
                 />
 
@@ -279,9 +279,9 @@ const Footer = () => {
           </div>
 
           {/* Footer Bar */}
-          <div className="py-8 flex flex-col md:flex-row justify-between items-center text-xs text-gray-400">
+          <div className="py-8 flex flex-col items-center gap-3 text-center text-xs text-gray-400 md:flex-row md:items-center md:justify-between md:text-left">
             <p>&copy; {new Date().getFullYear()} Indian Trade Mart. All rights reserved.</p>
-            <div className="flex gap-6 mt-4 md:mt-0">
+            <div className="flex flex-wrap items-center justify-center gap-4 md:justify-end">
               <Link to="/terms" className="hover:text-gray-200 transition-colors">
                 Terms of Use
               </Link>

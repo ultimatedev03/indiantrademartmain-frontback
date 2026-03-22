@@ -1220,6 +1220,14 @@ export async function handler(event) {
     // GET /vendors  (with product_count + plan)
     // -------------------------
     if (event.httpMethod === "GET" && tail[0] === "vendors" && tail.length === 1) {
+      const REQUIRED_VENDOR_DOCUMENT_TYPES = new Set(["GST", "PAN", "AADHAR", "BANK"]);
+      const normalizeDocumentType = (value) => {
+        const raw = String(value || "").trim().toUpperCase();
+        if (!raw) return "";
+        if (raw === "AADHAAR") return "AADHAR";
+        if (raw.startsWith("BANK")) return "BANK";
+        return raw;
+      };
       const queryParams = event.queryStringParameters || {};
       const rawSearch = String(queryParams.search || "").trim();
       const search = rawSearch.replace(/,/g, " ").trim();
@@ -1248,7 +1256,7 @@ export async function handler(event) {
           { count: "exact" }
         )
         .order("created_at", { ascending: false })
-        .range(safeOffset, safeOffset + safeLimit - 1);
+        .range(0, MAX_VENDOR_LIMIT - 1);
 
       const kyc = kycRaw.toUpperCase();
       if (kyc && kyc !== "ALL") {
@@ -1296,6 +1304,37 @@ export async function handler(event) {
             if (!r.vendor_id) return;
             countMap[r.vendor_id] = (countMap[r.vendor_id] || 0) + 1;
           });
+        }
+      }
+
+      const documentTypeMap = new Map();
+      const collectDocumentRows = (rows = []) => {
+        (rows || []).forEach((row) => {
+          const vendorId = String(row?.vendor_id || "").trim();
+          const docType = normalizeDocumentType(row?.document_type);
+          if (!vendorId || !REQUIRED_VENDOR_DOCUMENT_TYPES.has(docType)) return;
+
+          if (!documentTypeMap.has(vendorId)) {
+            documentTypeMap.set(vendorId, new Set());
+          }
+          documentTypeMap.get(vendorId).add(docType);
+        });
+      };
+
+      if (vendorIds.length) {
+        for (const ids of chunk(vendorIds)) {
+          const { data: vendorDocs, error: vendorDocsError } = await supabase
+            .from("vendor_documents")
+            .select("vendor_id, document_type")
+            .in("vendor_id", ids);
+          if (vendorDocsError) return fail("Failed to fetch vendor documents", vendorDocsError.message);
+          collectDocumentRows(vendorDocs);
+
+          const { data: legacyDocs } = await supabase
+            .from("kyc_documents")
+            .select("vendor_id, document_type")
+            .in("vendor_id", ids);
+          collectDocumentRows(legacyDocs);
         }
       }
 
@@ -1351,8 +1390,11 @@ export async function handler(event) {
       const result = (vendors || []).map((v) => {
         const sub = activeSubByVendor[v.id] || null;
         const plan = sub?.plan_id ? planMap[sub.plan_id] : null;
+        const documentCount = documentTypeMap.get(v.id)?.size || 0;
         return {
           ...v,
+          document_count: documentCount,
+          has_all_required_documents: documentCount >= REQUIRED_VENDOR_DOCUMENT_TYPES.size,
           product_count: countMap[v.id] || 0,
           package: plan
             ? { plan_id: plan.id, plan_name: plan.name, price: plan.price, end_date: sub?.end_date || null }
@@ -1360,9 +1402,25 @@ export async function handler(event) {
         };
       });
 
+      result.sort((a, b) => {
+        const aAllDocs = a?.has_all_required_documents ? 1 : 0;
+        const bAllDocs = b?.has_all_required_documents ? 1 : 0;
+        if (bAllDocs !== aAllDocs) return bAllDocs - aAllDocs;
+
+        const aDocCount = Number(a?.document_count || 0);
+        const bDocCount = Number(b?.document_count || 0);
+        if (bDocCount !== aDocCount) return bDocCount - aDocCount;
+
+        const aCreated = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const bCreated = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return bCreated - aCreated;
+      });
+
+      const paginatedResult = result.slice(safeOffset, safeOffset + safeLimit);
+
       return ok({
         success: true,
-        vendors: result,
+        vendors: paginatedResult,
         total: Number.isFinite(count) ? count : result.length,
         limit: safeLimit,
         offset: safeOffset,

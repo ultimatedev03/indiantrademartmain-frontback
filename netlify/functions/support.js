@@ -519,6 +519,93 @@ export async function handler(event) {
     }
 
     // -------------------------
+    // POST /tickets/:id/escalate
+    // -------------------------
+    if (event.httpMethod === "POST" && root === "tickets" && id && action === "escalate") {
+      const body = readBody(event);
+      const targetRole = normalizeSenderType(body?.targetRole || body?.target_role);
+      const rawMessage = String(body?.message || "").trim();
+
+      if (!["ADMIN", "SALES"].includes(targetRole)) {
+        return bad("targetRole must be ADMIN or SALES");
+      }
+
+      const { data: ticket, error: ticketError } = await supabase
+        .from("support_tickets")
+        .select("id, ticket_display_id, subject, description, vendor_id, buyer_id")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (ticketError || !ticket) {
+        return json(404, { error: "Ticket not found" });
+      }
+
+      const entityLabel = ticket.vendor_id ? "Vendor" : ticket.buyer_id ? "Buyer" : "Customer";
+      const targetLabel = targetRole === "SALES" ? "Sales" : "Admin";
+      const message =
+        rawMessage ||
+        `Support escalated this ${entityLabel.toLowerCase()} issue to ${targetLabel} for review.`;
+      const auditMessage = `[Escalated to ${targetLabel}] ${message}`;
+
+      const { error: messageError } = await supabase
+        .from("ticket_messages")
+        .insert([{
+          ticket_id: id,
+          sender_id: null,
+          sender_type: "SUPPORT",
+          message: auditMessage,
+          created_at: nowIso(),
+        }]);
+
+      if (messageError) {
+        return fail("Failed to record escalation", messageError.message);
+      }
+
+      await supabase
+        .from("support_tickets")
+        .update({ last_reply_at: nowIso(), updated_at: nowIso() })
+        .eq("id", id);
+
+      const title = `${targetLabel} escalation: ${ticket.ticket_display_id || ticket.id}`;
+      const notificationMessage = [
+        `${entityLabel} issue escalated from Support.`,
+        ticket.subject ? `Subject: ${ticket.subject}.` : null,
+        `Note: ${message}`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      if (targetRole === "ADMIN") {
+        await notifyRole("ADMIN", {
+          type: "SUPPORT_ESCALATION",
+          title,
+          message: notificationMessage,
+          link: "/admin/tickets",
+        });
+        await notifyRole("SUPERADMIN", {
+          type: "SUPPORT_ESCALATION",
+          title,
+          message: notificationMessage,
+          link: "/admin/tickets",
+        });
+      } else {
+        await notifyRole("SALES", {
+          type: "SUPPORT_ESCALATION",
+          title,
+          message: notificationMessage,
+          link: `/employee/sales/dashboard?ticket=${encodeURIComponent(ticket.id)}`,
+        });
+      }
+
+      return ok({
+        success: true,
+        ticketId: ticket.id,
+        targetRole,
+        message: auditMessage,
+      });
+    }
+
+    // -------------------------
     // GET /stats
     // -------------------------
     if (event.httpMethod === "GET" && root === "stats") {

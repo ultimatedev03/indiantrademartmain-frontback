@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
+import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { Copy, ExternalLink } from 'lucide-react';
 
@@ -237,6 +238,11 @@ const VendorOnboarding = () => {
       const userId = registerBody?.user?.id;
       if (!userId) throw new Error('User registration did not return user id');
 
+      const {
+        data: { user: currentEmployeeUser },
+      } = await supabase.auth.getUser();
+      const actorUserId = String(currentEmployeeUser?.id || '').trim() || null;
+
       const stateName = states.find((s) => s.id === sanitized.stateId)?.name;
       const cityName = cities.find((c) => c.id === sanitized.cityId)?.name;
 
@@ -252,6 +258,8 @@ const VendorOnboarding = () => {
         cityId: sanitized.cityId,
         stateName,
         cityName,
+        assignedTo: actorUserId,
+        createdByUserId: actorUserId,
       });
 
       const vendor = await vendorApi.getVendorByUserId(userId);

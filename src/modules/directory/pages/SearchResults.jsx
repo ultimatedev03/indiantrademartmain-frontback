@@ -85,19 +85,22 @@ const resolveCategoryContext = async (slug) => {
   const s = String(slug || '').trim();
   if (!s) return { type: 'text' };
 
-  {
-    const { data } = await supabase.from('micro_categories').select('id, sub_category_id').eq('slug', s).maybeSingle();
-    if (data?.id) return { type: 'micro', microId: data.id, subId: data.sub_category_id || null };
+  const [microRes, subRes, headRes] = await Promise.all([
+    supabase.from('micro_categories').select('id, sub_category_id').eq('slug', s).maybeSingle(),
+    supabase.from('sub_categories').select('id, head_category_id').eq('slug', s).maybeSingle(),
+    supabase.from('head_categories').select('id').eq('slug', s).maybeSingle(),
+  ]);
+
+  if (microRes?.data?.id) {
+    return { type: 'micro', microId: microRes.data.id, subId: microRes.data.sub_category_id || null };
   }
 
-  {
-    const { data } = await supabase.from('sub_categories').select('id, head_category_id').eq('slug', s).maybeSingle();
-    if (data?.id) return { type: 'sub', subId: data.id, headId: data.head_category_id || null };
+  if (subRes?.data?.id) {
+    return { type: 'sub', subId: subRes.data.id, headId: subRes.data.head_category_id || null };
   }
 
-  {
-    const { data } = await supabase.from('head_categories').select('id').eq('slug', s).maybeSingle();
-    if (data?.id) return { type: 'head', headId: data.id };
+  if (headRes?.data?.id) {
+    return { type: 'head', headId: headRes.data.id };
   }
 
   return { type: 'text' };
@@ -423,11 +426,12 @@ const SearchResults = () => {
         const serviceSlug = parsedParams.serviceSlug;
         const servicePhrase = normalizeText(serviceSlug.replace(/-/g, ' '));
 
-        const { state, city } = await locationService.getLocationBySlug(parsedParams.stateSlug, parsedParams.citySlug);
+        const [{ state, city }, ctx] = await Promise.all([
+          locationService.getLocationBySlug(parsedParams.stateSlug, parsedParams.citySlug),
+          resolveCategoryContext(serviceSlug),
+        ]);
         const stateId = state?.id || null;
         const cityId = city?.id || null;
-
-        const ctx = await resolveCategoryContext(serviceSlug);
 
         if (ctx.type === 'text') {
           const corrected = await tryAutoCorrect({

@@ -644,6 +644,98 @@ router.post('/tickets/:id/notify-customer', async (req, res) => {
   }
 });
 
+// POST /api/support/tickets/:id/escalate - Notify internal Admin/Sales teams and track escalation
+router.post('/tickets/:id/escalate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const targetRole = normalizeSenderType(req.body?.targetRole || req.body?.target_role);
+    const rawMessage = String(req.body?.message || '').trim();
+
+    if (!['ADMIN', 'SALES'].includes(targetRole)) {
+      return res.status(400).json({ error: 'targetRole must be ADMIN or SALES' });
+    }
+
+    const { data: ticket, error: ticketError } = await supabase
+      .from('support_tickets')
+      .select('id, ticket_display_id, subject, description, vendor_id, buyer_id')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (ticketError || !ticket) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+
+    const entityLabel = ticket.vendor_id ? 'Vendor' : ticket.buyer_id ? 'Buyer' : 'Customer';
+    const targetLabel = targetRole === 'SALES' ? 'Sales' : 'Admin';
+    const message =
+      rawMessage ||
+      `Support escalated this ${entityLabel.toLowerCase()} issue to ${targetLabel} for review.`;
+    const auditMessage = `[Escalated to ${targetLabel}] ${message}`;
+
+    const { error: messageError } = await supabase
+      .from('ticket_messages')
+      .insert([{
+        ticket_id: id,
+        sender_id: null,
+        sender_type: 'SUPPORT',
+        message: auditMessage,
+        created_at: nowIso(),
+      }]);
+
+    if (messageError) {
+      return res.status(500).json({ error: 'Failed to record escalation', details: messageError.message });
+    }
+
+    await supabase
+      .from('support_tickets')
+      .update({ last_reply_at: nowIso(), updated_at: nowIso() })
+      .eq('id', id);
+
+    const title = `${targetLabel} escalation: ${ticket.ticket_display_id || ticket.id}`;
+    const notificationMessage = [
+      `${entityLabel} issue escalated from Support.`,
+      ticket.subject ? `Subject: ${ticket.subject}.` : null,
+      `Note: ${message}`,
+    ]
+      .filter(Boolean)
+      .join(' ');
+
+    if (targetRole === 'ADMIN') {
+      await notifyRole('ADMIN', {
+        type: 'SUPPORT_ESCALATION',
+        title,
+        message: notificationMessage,
+        link: '/admin/tickets',
+      });
+      await notifyRole('SUPERADMIN', {
+        type: 'SUPPORT_ESCALATION',
+        title,
+        message: notificationMessage,
+        link: '/admin/tickets',
+      });
+    } else {
+      await notifyRole('SALES', {
+        type: 'SUPPORT_ESCALATION',
+        title,
+        message: notificationMessage,
+        link: `/employee/sales/dashboard?ticket=${encodeURIComponent(ticket.id)}`,
+      });
+    }
+
+    return res.json({
+      success: true,
+      ticketId: ticket.id,
+      targetRole,
+      message: auditMessage,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'Failed to escalate ticket',
+      details: error.message,
+    });
+  }
+});
+
 // GET /api/support/stats - Get ticket statistics
 router.get('/stats', async (req, res) => {
   try {

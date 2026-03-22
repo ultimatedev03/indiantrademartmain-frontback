@@ -805,18 +805,35 @@ export const vendorApi = {
       stateId,
       cityId,
       stateName,
-      cityName
+      cityName,
+      assignedTo,
+      createdByUserId
     } = payload;
 
-    const { data: existing, error: exErr } = await supabase
+    let { data: existing, error: exErr } = await supabase
       .from('vendors')
-      .select('id, vendor_id, slug')
+      .select('id, user_id, vendor_id, slug, assigned_to, created_by_user_id')
       .eq('user_id', userId)
       .maybeSingle();
 
     if (exErr) throw exErr;
 
+    if (!existing && email) {
+      const { data: existingByEmail, error: emailLookupError } = await supabase
+        .from('vendors')
+        .select('id, user_id, vendor_id, slug, assigned_to, created_by_user_id')
+        .eq('email', email)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (emailLookupError) throw emailLookupError;
+      existing = existingByEmail || null;
+    }
+
     let vendorId = existing?.vendor_id;
+    const assigneeId = String(assignedTo || '').trim() || null;
+    const creatorId = String(createdByUserId || '').trim() || null;
 
     if (!vendorId || vendorId.includes('-') === false) {
       let unique = false;
@@ -869,10 +886,21 @@ export const vendorApi = {
       slug: vendorSlug,
     };
 
+    if (assigneeId) {
+      vendorData.assigned_to = assigneeId;
+    }
+
+    if (creatorId) {
+      vendorData.created_by_user_id = creatorId;
+    }
+
     if (existing) {
       const { error } = await supabase
         .from('vendors')
-        .update(vendorData)
+        .update({
+          ...vendorData,
+          user_id: existing?.user_id || userId,
+        })
         .eq('id', existing.id);
 
       if (error) throw error;

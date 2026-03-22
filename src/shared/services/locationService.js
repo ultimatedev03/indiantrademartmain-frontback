@@ -1,8 +1,35 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
+const LOCATION_CACHE_TTL_MS = 5 * 60 * 1000;
+const statesCache = { data: null, expiresAt: 0 };
+const citiesCache = new Map();
+const locationBySlugCache = new Map();
+
+const isFresh = (expiresAt = 0) => expiresAt > Date.now();
+const rememberStates = (rows = []) => {
+  statesCache.data = rows || [];
+  statesCache.expiresAt = Date.now() + LOCATION_CACHE_TTL_MS;
+};
+const rememberCities = (stateId, rows = []) => {
+  citiesCache.set(String(stateId || '').trim(), {
+    data: rows || [],
+    expiresAt: Date.now() + LOCATION_CACHE_TTL_MS,
+  });
+};
+const rememberLocation = (key, value) => {
+  locationBySlugCache.set(key, {
+    data: value,
+    expiresAt: Date.now() + LOCATION_CACHE_TTL_MS,
+  });
+};
+
 export const locationService = {
   // Fetch all states
   getStates: async () => {
+    if (isFresh(statesCache.expiresAt) && Array.isArray(statesCache.data)) {
+      return statesCache.data;
+    }
+
     const { data, error } = await supabase
       .from('states')
       .select('*')
@@ -13,7 +40,10 @@ export const locationService = {
       console.error('Error fetching states (is_active filter):', error);
     }
 
-    if (Array.isArray(data) && data.length > 0) return data;
+    if (Array.isArray(data) && data.length > 0) {
+      rememberStates(data);
+      return data;
+    }
 
     const { data: fallback, error: fallbackError } = await supabase
       .from('states')
@@ -24,12 +54,19 @@ export const locationService = {
       console.error('Error fetching states:', fallbackError);
       return [];
     }
+    rememberStates(fallback || []);
     return fallback || [];
   },
 
   // Fetch cities for a specific state
   getCities: async (stateId) => {
     if (!stateId) return [];
+
+    const cacheKey = String(stateId || '').trim();
+    const cached = citiesCache.get(cacheKey);
+    if (cached && isFresh(cached.expiresAt)) {
+      return cached.data || [];
+    }
     
     const { data, error } = await supabase
       .from('cities')
@@ -42,7 +79,10 @@ export const locationService = {
       console.error('Error fetching cities (is_active filter):', error);
     }
 
-    if (Array.isArray(data) && data.length > 0) return data;
+    if (Array.isArray(data) && data.length > 0) {
+      rememberCities(cacheKey, data);
+      return data;
+    }
 
     const { data: fallback, error: fallbackError } = await supabase
       .from('cities')
@@ -54,6 +94,7 @@ export const locationService = {
       console.error('Error fetching cities:', fallbackError);
       return [];
     }
+    rememberCities(cacheKey, fallback || []);
     return fallback || [];
   },
 
@@ -62,24 +103,11 @@ export const locationService = {
     if (!stateSlug) return [];
 
     try {
-      // First get state ID
-      const { data: stateData, error: stateError } = await supabase
-        .from('states')
-        .select('id')
-        .eq('slug', stateSlug)
-        .single();
+      const states = await locationService.getStates();
+      const stateData = (states || []).find((state) => String(state?.slug || '').trim() === String(stateSlug || '').trim());
+      if (!stateData?.id) return [];
 
-      if (stateError || !stateData) return [];
-
-      // Then get cities
-      const { data: cities, error: citiesError } = await supabase
-        .from('cities')
-        .select('*')
-        .eq('state_id', stateData.id)
-        .eq('is_active', true)
-        .order('name');
-
-      if (citiesError) return [];
+      const cities = await locationService.getCities(stateData.id);
       
       // Add fake cities if none exist (for demo purposes if DB is empty)
       if (cities.length === 0) {
@@ -101,6 +129,12 @@ export const locationService = {
 
   // Helper to find location details by slug
   getLocationBySlug: async (stateSlug, citySlug) => {
+    const cacheKey = `${String(stateSlug || '').trim()}::${String(citySlug || '').trim()}`;
+    const cached = locationBySlugCache.get(cacheKey);
+    if (cached && isFresh(cached.expiresAt)) {
+      return cached.data || { state: null, city: null };
+    }
+
     let state = null;
     let city = null;
 
@@ -109,12 +143,8 @@ export const locationService = {
 
     if (normalizedStateSlug) {
       try {
-        const { data: stateBySlug } = await supabase
-          .from('states')
-          .select('*')
-          .eq('slug', normalizedStateSlug)
-          .maybeSingle();
-        state = stateBySlug || null;
+        const states = await locationService.getStates();
+        state = (states || []).find((row) => String(row?.slug || '').trim() === normalizedStateSlug) || null;
       } catch (error) {
         console.error('State lookup failed', error);
       }
@@ -122,13 +152,8 @@ export const locationService = {
 
     if (normalizedCitySlug && state?.id) {
       try {
-        const { data: cityBySlug } = await supabase
-          .from('cities')
-          .select('*')
-          .eq('slug', normalizedCitySlug)
-          .eq('state_id', state.id)
-          .maybeSingle();
-        city = cityBySlug || null;
+        const scopedCities = await locationService.getCities(state.id);
+        city = (scopedCities || []).find((row) => String(row?.slug || '').trim() === normalizedCitySlug) || null;
       } catch (error) {
         console.error('City lookup failed (state scoped)', error);
       }
@@ -160,7 +185,9 @@ export const locationService = {
       }
     }
 
-    return { state, city };
+    const resolved = { state, city };
+    rememberLocation(cacheKey, resolved);
+    return resolved;
   },
 
   seedLocations: async () => {

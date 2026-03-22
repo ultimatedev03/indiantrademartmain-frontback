@@ -44,6 +44,9 @@ const Tickets = () => {
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [customerNotice, setCustomerNotice] = useState('');
   const [notifyingCustomer, setNotifyingCustomer] = useState(false);
+  const [escalationTarget, setEscalationTarget] = useState('ADMIN');
+  const [escalationNote, setEscalationNote] = useState('');
+  const [escalating, setEscalating] = useState(false);
 
   const ticketScope = location.pathname.endsWith('/vendor')
     ? 'VENDOR'
@@ -82,6 +85,8 @@ const Tickets = () => {
     setDetailsOpen(true);
     setNewMessage("");
     setCustomerNotice(String(ticket?.description || ticket?.subject || '').trim());
+    setEscalationTarget('ADMIN');
+    setEscalationNote('');
 
     try {
       const msgs = await supportApi.getMessages(ticket.id);
@@ -160,6 +165,40 @@ const Tickets = () => {
       toast({ title: "Error", description: error.message || "Failed to send message", variant: "destructive" });
     } finally {
       setSendingMessage(false);
+    }
+  };
+
+  const handleEscalateTicket = async () => {
+    if (!selectedTicket) return;
+
+    setEscalating(true);
+    try {
+      const message =
+        escalationNote.trim() ||
+        customerNotice.trim() ||
+        selectedTicket.description ||
+        selectedTicket.subject ||
+        'Support escalation';
+
+      await supportApi.escalateTicket(selectedTicket.id, escalationTarget, message);
+      const msgs = await supportApi.getMessages(selectedTicket.id);
+      setTicketMessages(msgs || []);
+      toast({
+        title: 'Escalation sent',
+        description:
+          escalationTarget === 'SALES'
+            ? 'Sales team notified and escalation added to the ticket trail.'
+            : 'Admin team notified and escalation added to the ticket trail.',
+      });
+    } catch (error) {
+      console.error('Failed to escalate ticket:', error);
+      toast({
+        title: 'Escalation failed',
+        description: error?.message || 'Could not notify internal team',
+        variant: 'destructive',
+      });
+    } finally {
+      setEscalating(false);
     }
   };
 
@@ -431,6 +470,39 @@ const Tickets = () => {
                   />
                 </div>
               )}
+
+              <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-violet-900">Internal Escalation</span>
+                  <Select value={escalationTarget} onValueChange={setEscalationTarget}>
+                    <SelectTrigger className="w-[150px] h-9 bg-white">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ADMIN">Notify Admin</SelectItem>
+                      <SelectItem value="SALES">Notify Sales</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    className="bg-violet-700 hover:bg-violet-800"
+                    onClick={handleEscalateTicket}
+                    disabled={escalating}
+                  >
+                    {escalating ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Send className="h-4 w-4 mr-1" />}
+                    Escalate
+                  </Button>
+                </div>
+                <p className="text-xs text-violet-800">
+                  Use Admin for vendor or buyer account issues, and Sales for payment or transaction follow-up.
+                </p>
+                <Textarea
+                  value={escalationNote}
+                  onChange={(e) => setEscalationNote(e.target.value)}
+                  placeholder="Add escalation note for the internal team..."
+                  className="min-h-[80px] bg-white"
+                />
+              </div>
 
               <div className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg">
                 <span className="text-sm font-medium">Update Status:</span>

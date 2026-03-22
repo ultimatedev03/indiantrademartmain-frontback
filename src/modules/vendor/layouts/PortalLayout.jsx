@@ -101,11 +101,16 @@ const PortalLayout = () => {
   const [vendorVerified, setVendorVerified] = useState(true);
 
   const supportPath = resolvePath('support', 'vendor');
+  const referralsPath = resolvePath('referrals', 'vendor');
   const pathName = location.pathname || '';
 
   const isSupportRoute = useMemo(() => {
     return pathName === supportPath || pathName.startsWith(`${supportPath}/`);
   }, [pathName, supportPath]);
+
+  const isReferralsRoute = useMemo(() => {
+    return pathName === referralsPath || pathName.startsWith(`${referralsPath}/`);
+  }, [pathName, referralsPath]);
 
   const isSuspended = useMemo(() => {
     if (statusLoading) return false; // wait until status is known
@@ -349,7 +354,7 @@ const PortalLayout = () => {
         {/* Main Content Wrapper */}
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
           {/* Topbar */}
-          <header className="h-16 bg-white border-b border-neutral-200 flex items-center justify-between px-4 sm:px-6 sticky top-0 z-20 flex-shrink-0 shadow-sm">
+          <header className={`h-16 bg-white border-b border-neutral-200 flex items-center justify-between px-4 sm:px-6 z-20 flex-shrink-0 shadow-sm ${isReferralsRoute ? '' : 'sticky top-0'}`}>
             <div className="flex items-center gap-4">
               <Button
                 variant="ghost"

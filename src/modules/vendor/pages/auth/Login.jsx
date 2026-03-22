@@ -33,6 +33,16 @@ const VendorLogin = () => {
     }
   }, [supaAuth?.userRole, navigate]);
 
+  React.useEffect(() => {
+    if (!loginCaptcha.captchaToken) {
+      return;
+    }
+
+    captchaExecuteQueuedRef.current = false;
+    captchaWidgetRef.current = null;
+    setCaptchaStarted(false);
+  }, [loginCaptcha.captchaToken]);
+
   const resetLoginCaptcha = React.useCallback(() => {
     captchaExecuteQueuedRef.current = false;
     captchaWidgetRef.current = null;

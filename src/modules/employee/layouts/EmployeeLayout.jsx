@@ -17,11 +17,13 @@ import {
   FileText,
   Building2,
   User,
-  MapPin
+  MapPin,
+  ArrowLeft
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { useGlobalInputSanitizer } from '@/shared/hooks/useGlobalInputSanitizer';
+import { getPublicSiteUrl } from '@/shared/lib/publicSite';
 
 const SidebarLink = ({ to, icon: Icon, children, onNavigate }) => (
   <NavLink
@@ -47,6 +49,8 @@ const EmployeeLayout = ({ allowedRole }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const isSupportWorkspace = location.pathname.startsWith('/employee/support');
+  const publicHomeUrl = getPublicSiteUrl(typeof window !== 'undefined' ? window.location : null);
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -192,10 +196,21 @@ const EmployeeLayout = ({ allowedRole }) => {
               {getPageTitle()}
             </h1>
           </div>
-          <NotificationBell
-            userId={user?.user_id || user?.id || null}
-            userEmail={user?.email || null}
-          />
+          <div className="flex items-center gap-3">
+            {isSupportWorkspace ? (
+              <a
+                href={publicHomeUrl}
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to Home</span>
+              </a>
+            ) : null}
+            <NotificationBell
+              userId={user?.user_id || user?.id || null}
+              userEmail={user?.email || null}
+            />
+          </div>
         </header>
 
         <main className="flex-1 min-h-0 p-4 lg:p-8 overflow-y-auto">

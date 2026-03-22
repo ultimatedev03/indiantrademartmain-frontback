@@ -12,6 +12,7 @@ import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
+import { getProductDetailPath } from '@/shared/utils/productRoutes';
 
 // Internal Mock Data to ensure page is never blank
 const FALLBACK_VENDORS = [
@@ -54,6 +55,13 @@ const FALLBACK_PRODUCTS = [
 ];
 
 const FALLBACK_SERVICE_IMAGE = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80";
+
+const normalizeEstablishedYear = (value) => {
+  const year = Number(value);
+  const currentYear = new Date().getFullYear();
+  if (!Number.isFinite(year) || year < 1800 || year > currentYear) return null;
+  return year;
+};
 
 class VendorProfileErrorBoundary extends React.Component {
   constructor(props) {
@@ -155,7 +163,7 @@ const VendorProfileContent = () => {
             description: vendorData.description || vendorData.business_description || vendorData.primary_business_type || "Established business",
             phone: vendorData.phone || "+91-XXXXXXXXXX",
             address: vendorData.registered_address || vendorData.address || "Address available on request",
-            established: vendorData.year_of_establishment || "2020",
+            established: normalizeEstablishedYear(vendorData.year_of_establishment),
             gst: vendorData.gst_number,
             email: vendorData.email,
             website: vendorData.website_url,
@@ -349,6 +357,29 @@ const VendorProfileContent = () => {
     }
   };
 
+  const handleVendorEnquiry = () => {
+    if (!vendorRecordId) {
+      toast({ title: 'Vendor unavailable', description: 'Vendor profile could not be resolved.' });
+      return;
+    }
+
+    if (isBuyer) {
+      navigate(`/buyer/proposals/new?vendorId=${vendorRecordId}&vendorName=${encodeURIComponent(displayVendor.company_name)}`);
+      return;
+    }
+
+    navigate('/buyer/login');
+  };
+
+  const handleOpenProduct = (product) => {
+    const detailPath = getProductDetailPath(product);
+    if (!detailPath) {
+      handleEnquire(product);
+      return;
+    }
+    navigate(detailPath);
+  };
+
   if (loading) {
     return (
       <div className="container mx-auto px-4 py-8 space-y-6">
@@ -370,8 +401,8 @@ const VendorProfileContent = () => {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
         <div className="bg-[#003D82] h-24 w-full"></div>
         <div className="px-8 pb-8">
-          <div className="relative flex flex-col md:flex-row justify-between items-start -mt-10">
-            <div className="flex gap-6 items-end">
+          <div className="relative -mt-10 flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start">
               <div className="h-24 w-24 rounded-lg bg-white p-1 shadow-md border border-gray-100 overflow-hidden">
                 {displayVendor.profile_image ? (
                   <img src={displayVendor.profile_image} alt={displayVendor.company_name} className="h-full w-full object-cover rounded" />
@@ -381,20 +412,24 @@ const VendorProfileContent = () => {
                   </div>
                 )}
               </div>
-              <div className="pb-1">
-                <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <div className="min-w-0 pt-1">
+                <h1 className="flex flex-wrap items-center gap-2 text-3xl font-bold text-gray-900">
                   {displayVendor.company_name || 'Company Name'}
                   {displayVendor.verified && <BadgeCheck className="text-blue-500 h-6 w-6 fill-blue-50" />}
                 </h1>
-                <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
-                  <span className="flex items-center gap-1"><MapPin className="h-4 w-4" /> {displayVendor.city || 'City'}{displayVendor.state ? `, ${displayVendor.state}` : ''}</span>
-                  <span className="flex items-center gap-1"><Star className="h-4 w-4 text-orange-400 fill-orange-400" /> {displayVendor.rating || 4.0} ({displayVendor.reviews || 0} Reviews)</span>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                  <span className="flex items-center gap-1">
+                    <MapPin className="h-4 w-4" /> {displayVendor.city || 'City'}{displayVendor.state ? `, ${displayVendor.state}` : ''}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Star className="h-4 w-4 text-orange-400 fill-orange-400" /> {displayVendor.rating || 4.0} ({displayVendor.reviews || 0} Reviews)
+                  </span>
                 </div>
               </div>
             </div>
 
             {/* ✅ ACTIONS */}
-            <div className="mt-6 md:mt-0 flex gap-3">
+            <div className="flex w-full flex-wrap gap-3 xl:w-auto xl:justify-end">
               {/* ✅ Favorite Button */}
               <Button
                 variant="outline"
@@ -425,14 +460,7 @@ const VendorProfileContent = () => {
 
               <Button
                 className="bg-[#00A699] hover:bg-[#008c81]"
-                onClick={() => {
-                  if (!vendorRecordId) {
-                    toast({ title: 'Vendor unavailable', description: 'Vendor profile could not be resolved.' });
-                    return;
-                  }
-                  if (isBuyer) navigate(`/buyer/proposals/new?vendorId=${vendorRecordId}&vendorName=${encodeURIComponent(displayVendor.company_name)}`);
-                  else navigate('/buyer/login');
-                }}
+                onClick={handleVendorEnquiry}
               >
                 <Send className="h-4 w-4 mr-2" /> Send Enquiry
               </Button>
@@ -458,7 +486,19 @@ const VendorProfileContent = () => {
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {visibleProducts.map(product => (
-                      <Card key={product.id} className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer">
+                      <Card
+                        key={product.id}
+                        className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer"
+                        onClick={() => handleOpenProduct(product)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleOpenProduct(product);
+                          }
+                        }}
+                      >
                         <div className="h-24 bg-gray-100 relative overflow-hidden">
                           <img
                             src={product.image || 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80'}
@@ -477,7 +517,10 @@ const VendorProfileContent = () => {
                               size="sm"
                               variant="secondary"
                               className="h-6 px-2 text-[10px]"
-                              onClick={() => handleEnquire(product)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleEnquire(product);
+                              }}
                             >
                               Enquire
                             </Button>
@@ -638,7 +681,7 @@ const VendorProfileContent = () => {
                     </div>
                     <div>
                       <p className="text-sm text-gray-500 mb-1">Established</p>
-                      <p className="font-medium">{displayVendor.established || '2010'}</p>
+                      <p className="font-medium">{displayVendor.established || 'Not specified'}</p>
                     </div>
                     <div>
                       <p className="text-sm text-gray-500 mb-1">GST Number</p>
@@ -734,7 +777,9 @@ const VendorProfileContent = () => {
               </div>
 
               <div className="pt-2">
-                <Button className="w-full bg-[#003D82]">Contact Supplier</Button>
+                <Button className="w-full bg-[#003D82]" onClick={handleVendorEnquiry}>
+                  Contact Supplier
+                </Button>
               </div>
             </Card.Content>
           </Card>

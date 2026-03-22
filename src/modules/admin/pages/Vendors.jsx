@@ -592,9 +592,14 @@ export default function Vendors() {
                           </TableCell>
 
                           <TableCell className="px-2 py-2">
-                            <Badge className={`${kycBadgeClass(v.kyc_status)} text-xs`}>
-                              {norm(v.kyc_status || "PENDING")}
-                            </Badge>
+                            <div className="space-y-1">
+                              <Badge className={`${kycBadgeClass(v.kyc_status)} text-xs`}>
+                                {norm(v.kyc_status || "PENDING")}
+                              </Badge>
+                              <div className="text-[11px] text-gray-500">
+                                Docs {Number(v.document_count || 0)}/4
+                              </div>
+                            </div>
                           </TableCell>
 
                           <TableCell className="px-2 py-2">

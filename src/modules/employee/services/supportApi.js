@@ -91,6 +91,17 @@ export const supportApi = {
     return data;
   },
 
+  escalateTicket: async (ticketId, targetRole, message) => {
+    const res = await fetchWithCsrf(apiUrl(`/api/support/tickets/${ticketId}/escalate`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetRole, message }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data?.error || 'Failed to escalate ticket');
+    return data;
+  },
+
   getStats: async () => {
     try {
       const response = await fetchWithCsrf(apiUrl(`/api/support/stats`));
