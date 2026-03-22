@@ -5,6 +5,16 @@ const isMissingColumnErr = (error, columnName) => {
   return msg.includes('column') && msg.includes(String(columnName).toLowerCase()) && msg.includes('does not exist');
 };
 
+const HOME_SHOWCASE_TTL_MS = 5 * 60 * 1000;
+const homeShowcaseCache = new Map();
+const homeShowcasePending = new Map();
+
+const getFreshCache = (cache, key) => {
+  const entry = cache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return entry.data;
+  return null;
+};
+
 // PostgREST uses GET query strings for `.in(...)`. If the list is huge,
 // Netlify/edge can reject with 400 (URL too long). So we chunk requests.
 const chunkArray = (arr, size) => {
@@ -128,7 +138,20 @@ export const categoryApi = {
    * ]
    */
   getHomeShowcaseCategories: async (options = {}) => {
-    try {
+    const cacheKey = JSON.stringify({
+      headLimit: Number(options?.headLimit || 0),
+      subLimit: Number(options?.subLimit || 0),
+      microLimit: Number(options?.microLimit || 0),
+    });
+    const cached = getFreshCache(homeShowcaseCache, cacheKey);
+    if (cached) return cached;
+
+    if (homeShowcasePending.has(cacheKey)) {
+      return homeShowcasePending.get(cacheKey);
+    }
+
+    const request = (async () => {
+      try {
       const headLimit = Number(options?.headLimit || 0);
       const subLimit = Number(options?.subLimit || 0);
       const microLimit = Number(options?.microLimit || 0);
@@ -238,13 +261,26 @@ export const categoryApi = {
       }, {});
 
       // Attach subs to heads
-      return heads.map((h) => ({
+      const payload = heads.map((h) => ({
         ...h,
         subcategories: subsByHead[h.id] || []
       }));
+      homeShowcaseCache.set(cacheKey, {
+        data: payload,
+        expiresAt: Date.now() + HOME_SHOWCASE_TTL_MS,
+      });
+      return payload;
     } catch (err) {
       console.error('Unexpected error building showcase categories:', err);
       return [];
+    }
+    })();
+
+    homeShowcasePending.set(cacheKey, request);
+    try {
+      return await request;
+    } finally {
+      homeShowcasePending.delete(cacheKey);
     }
   },
 

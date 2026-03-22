@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import Groq from 'groq-sdk';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const FALLBACK_LANG = 'en';
 const FALLBACK_OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
@@ -92,7 +93,8 @@ const rewriteReplyInHindiWithGroq = async (client, model, text) => {
 const okCors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
-  'Access-Control-Allow-Methods': 'POST,OPTIONS'
+  'Access-Control-Allow-Methods': 'POST,OPTIONS',
+  ...SECURITY_HEADERS,
 };
 
 export const handler = async (event) => {

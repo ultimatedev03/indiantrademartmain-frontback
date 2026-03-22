@@ -5,6 +5,35 @@ const isMissingColumnError = (err) => {
   return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
 };
 
+const FEATURED_VENDOR_COLUMNS = [
+  'id',
+  'company_name',
+  'first_name',
+  'last_name',
+  'owner_name',
+  'profile_image',
+  'image_url',
+  'avatar_url',
+  'city',
+  'state',
+  'seller_rating',
+  'kyc_status',
+  'verification_badge',
+  'is_verified',
+  'is_active',
+  'created_at',
+].join(', ');
+
+const FEATURED_CACHE_TTL_MS = 5 * 60 * 1000;
+const featuredVendorCache = new Map();
+const featuredVendorPending = new Map();
+
+const getFreshCache = (cache, key) => {
+  const entry = cache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return entry.data;
+  return null;
+};
+
 const mapVendorRow = (v) => {
   const companyName =
     v.company_name ||
@@ -68,32 +97,62 @@ export const vendorService = {
   getFeaturedVendors: async (options = {}) => {
     const limit = Math.max(1, Number(options?.limit || 6));
     const onlyActive = options?.onlyActive !== false;
+    const cacheKey = JSON.stringify({ limit, onlyActive });
+    const cached = getFreshCache(featuredVendorCache, cacheKey);
+    if (cached) return cached;
 
-    // NOTE: Avoid selecting columns that may not exist in some DBs.
-    // Fetch all columns and sort/filter client-side to prevent 400 errors.
-    let res = await supabase.from('vendors').select('*').limit(limit);
-
-    if (res.error && isMissingColumnError(res.error)) {
-      // ultra-safe fallback without limit-related SQL issues
-      res = await supabase.from('vendors').select('*');
+    if (featuredVendorPending.has(cacheKey)) {
+      return featuredVendorPending.get(cacheKey);
     }
 
-    if (res.error) {
-      console.error('Error fetching featured vendors:', res.error);
-      return [];
+    const request = (async () => {
+      let query = supabase
+        .from('vendors')
+        .select(FEATURED_VENDOR_COLUMNS)
+        .order('is_verified', { ascending: false })
+        .order('verification_badge', { ascending: false })
+        .order('created_at', { ascending: false })
+        .limit(limit);
+
+      if (onlyActive) {
+        query = query.eq('is_active', true);
+      }
+
+      let res = await query;
+
+      if (res.error && isMissingColumnError(res.error)) {
+        let fallbackQuery = supabase.from('vendors').select('*').limit(limit);
+        if (onlyActive) {
+          fallbackQuery = fallbackQuery.eq('is_active', true);
+        }
+        res = await fallbackQuery;
+      }
+
+      if (res.error) {
+        console.error('Error fetching featured vendors:', res.error);
+        return [];
+      }
+
+      let rows = Array.isArray(res.data) ? res.data : [];
+      const hasIsActive = rows.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'is_active'));
+      if (onlyActive && hasIsActive) {
+        rows = rows.filter((r) => r?.is_active === true);
+      }
+
+      const normalized = sortFeaturedVendors(rows).slice(0, limit).map(mapVendorRow);
+      featuredVendorCache.set(cacheKey, {
+        data: normalized,
+        expiresAt: Date.now() + FEATURED_CACHE_TTL_MS,
+      });
+      return normalized;
+    })();
+
+    featuredVendorPending.set(cacheKey, request);
+    try {
+      return await request;
+    } finally {
+      featuredVendorPending.delete(cacheKey);
     }
-
-    let rows = Array.isArray(res.data) ? res.data : [];
-
-    const hasIsActive = rows.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'is_active'));
-    if (onlyActive && hasIsActive) {
-      rows = rows.filter((r) => r?.is_active === true);
-    }
-
-    rows = sortFeaturedVendors(rows);
-
-    const sliced = rows.slice(0, limit);
-    return sliced.map(mapVendorRow);
   },
 
   getVendorById: async (vendorId) => {

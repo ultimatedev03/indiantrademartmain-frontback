@@ -1,8 +1,11 @@
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
+
 const headers = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Content-Type': 'application/json',
+  ...SECURITY_HEADERS,
 };
 
 const fallbackReply =

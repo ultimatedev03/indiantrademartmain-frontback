@@ -21,6 +21,16 @@ const normalizeMetaRows = (rows = []) =>
     micro_categories: r?.micro_categories ?? r?.micro_category_id ?? null,
   }));
 
+const TOP_CITIES_TTL_MS = 5 * 60 * 1000;
+const topCitiesCache = new Map();
+const topCitiesPending = new Map();
+
+const getFreshCache = (cache, key) => {
+  const entry = cache.get(key);
+  if (entry && entry.expiresAt > Date.now()) return entry.data;
+  return null;
+};
+
 export const directoryApi = {
   getHeadCategories: async () => {
     const { data, error } = await supabase
@@ -546,38 +556,56 @@ export const directoryApi = {
       n = Number(limit.limit || limit.pageSize || limit.size || 200);
     }
     if (!Number.isFinite(n) || n <= 0) n = 200;
+    const cacheKey = `top-cities:${n}`;
+    const cached = getFreshCache(topCitiesCache, cacheKey);
+    if (cached) return cached;
 
-    // 1) try with supplier_count (correct column)
-    let res = await supabase
-      .from('cities')
-      .select('id, name, slug, supplier_count')
-      .order('supplier_count', { ascending: false })
-      .order('name', { ascending: true })
-      .limit(n);
+    if (topCitiesPending.has(cacheKey)) {
+      return topCitiesPending.get(cacheKey);
+    }
 
-    // 2) fallback: no count (order by name only)
-    if (res?.error) {
-      res = await supabase
+    const request = (async () => {
+      let res = await supabase
         .from('cities')
-        .select('id, name, slug')
+        .select('id, name, slug, supplier_count')
+        .order('supplier_count', { ascending: false })
         .order('name', { ascending: true })
         .limit(n);
-    }
 
-    if (res?.error) {
-      console.error('[directoryApi.getTopCities] error:', res.error);
-      return [];
-    }
+      if (res?.error) {
+        res = await supabase
+          .from('cities')
+          .select('id, name, slug')
+          .order('name', { ascending: true })
+          .limit(n);
+      }
 
-    const data = res?.data || [];
-    return (Array.isArray(data) ? data : []).map((c) => {
-      const count = Number(c?.supplier_count ?? 0) || 0;
-      return {
-        ...c,
-        slug: c?.slug || slugify(c?.name),
-        supplier_count: count,
-      };
-    });
+      if (res?.error) {
+        console.error('[directoryApi.getTopCities] error:', res.error);
+        return [];
+      }
+
+      const data = (Array.isArray(res?.data) ? res.data : []).map((c) => {
+        const count = Number(c?.supplier_count ?? 0) || 0;
+        return {
+          ...c,
+          slug: c?.slug || slugify(c?.name),
+          supplier_count: count,
+        };
+      });
+      topCitiesCache.set(cacheKey, {
+        data,
+        expiresAt: Date.now() + TOP_CITIES_TTL_MS,
+      });
+      return data;
+    })();
+
+    topCitiesPending.set(cacheKey, request);
+    try {
+      return await request;
+    } finally {
+      topCitiesPending.delete(cacheKey);
+    }
   },
 
   getHeadCategoryBySlug: async (headSlug) => {

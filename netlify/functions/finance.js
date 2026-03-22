@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { getReferralSettings } from '../../server/lib/referralProgram.js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const json = (statusCode, body, extraHeaders = {}) => ({
   statusCode,
@@ -8,6 +9,7 @@ const json = (statusCode, body, extraHeaders = {}) => ({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    ...SECURITY_HEADERS,
     ...extraHeaders,
   },
   body: JSON.stringify(body),

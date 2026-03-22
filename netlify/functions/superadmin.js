@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { assertCaptchaForNetlifyEvent } from '../../server/lib/captcha.js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const TOKEN_KEY = 'superadmin_token';
 
@@ -13,6 +14,7 @@ const json = (statusCode, body) => ({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
     'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
+    ...SECURITY_HEADERS,
   },
   body: JSON.stringify(body),
 });

@@ -6,6 +6,7 @@ import {
   linkReferralForVendor,
   normalizeReferralCode,
 } from '../../server/lib/referralProgram.js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
 
@@ -16,6 +17,7 @@ const json = (statusCode, body, extraHeaders = {}) => ({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    ...SECURITY_HEADERS,
     ...extraHeaders,
   },
   body: JSON.stringify(body),

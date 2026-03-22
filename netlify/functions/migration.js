@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -7,6 +8,7 @@ const json = (statusCode, body) => ({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
     'Access-Control-Allow-Methods': 'POST,OPTIONS',
+    ...SECURITY_HEADERS,
   },
   body: JSON.stringify(body),
 });

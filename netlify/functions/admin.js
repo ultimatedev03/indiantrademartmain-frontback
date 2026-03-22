@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import { validateStrongPassword } from "../../server/lib/passwordPolicy.js";
+import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,6 +24,7 @@ const json = (statusCode, body) => ({
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    ...SECURITY_HEADERS,
   },
   body: JSON.stringify(body),
 });

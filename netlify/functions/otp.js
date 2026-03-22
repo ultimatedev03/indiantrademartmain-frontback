@@ -2,6 +2,7 @@ import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
 import { assertCaptchaForNetlifyEvent } from "../../server/lib/captcha.js";
+import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -14,6 +15,20 @@ const supabase = createClient(
   SUPABASE_URL || "",
   SUPABASE_SERVICE_ROLE_KEY || ""
 );
+
+const JSON_HEADERS = {
+  "Content-Type": "application/json",
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CSRF-Token",
+  "Access-Control-Allow-Methods": "POST,OPTIONS",
+  ...SECURITY_HEADERS,
+};
+
+const json = (statusCode, body) => ({
+  statusCode,
+  headers: JSON_HEADERS,
+  body: JSON.stringify(body),
+});
 
 const sanitizeEnvValue = (value) => {
   if (typeof value !== "string") return "";
@@ -259,14 +274,11 @@ async function sendOtpEmail(email, otp) {
 export const handler = async (event) => {
   try {
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-      return {
-        statusCode: 500,
-        body: JSON.stringify({ error: "Server is missing Supabase configuration." })
-      };
+      return json(500, { error: "Server is missing Supabase configuration." });
     }
 
     if (event.httpMethod !== "POST") {
-      return { statusCode: 405, body: JSON.stringify({ error: "Method not allowed" }) };
+      return json(405, { error: "Method not allowed" });
     }
 
     const path = event.path || "";
@@ -276,7 +288,7 @@ export const handler = async (event) => {
       path.endsWith("/resend") ? "resend" : null;
 
     if (!action) {
-      return { statusCode: 404, body: JSON.stringify({ error: "Invalid OTP route" }) };
+      return json(404, { error: "Invalid OTP route" });
     }
 
     const body = parseRequestBody(event);
@@ -285,7 +297,7 @@ export const handler = async (event) => {
       const email = normalizeEmail(body?.email);
 
       if (!isValidEmail(email)) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Invalid email format" }) };
+        return json(400, { error: "Invalid email format" });
       }
 
       if (!shouldBypassCaptcha(event, email)) {
@@ -310,19 +322,16 @@ export const handler = async (event) => {
 
       if (dbError) {
         console.error("[otp function] Failed to insert OTP:", dbError);
-        return { statusCode: 500, body: JSON.stringify({ error: "Failed to generate OTP" }) };
+        return json(500, { error: "Failed to generate OTP" });
       }
 
       await sendOtpEmail(email, otp);
 
-      return {
-        statusCode: 200,
-        body: JSON.stringify({
-          success: true,
-          message: action === "resend" ? "New OTP sent to your email" : "OTP sent successfully to your email",
-          expiresIn: 120
-        })
-      };
+      return json(200, {
+        success: true,
+        message: action === "resend" ? "New OTP sent to your email" : "OTP sent successfully to your email",
+        expiresIn: 120,
+      });
     }
 
     if (action === "verify") {
@@ -330,7 +339,7 @@ export const handler = async (event) => {
       const otpCode = String(body?.otp_code || "").trim();
 
       if (!email || !otpCode) {
-        return { statusCode: 400, body: JSON.stringify({ error: "Email and OTP code are required" }) };
+        return json(400, { error: "Email and OTP code are required" });
       }
 
       const { data, error } = await supabase
@@ -346,27 +355,21 @@ export const handler = async (event) => {
 
       if (error) {
         console.error("[otp function] Verification query failed:", error);
-        return { statusCode: 500, body: JSON.stringify({ error: "Verification failed" }) };
+        return json(500, { error: "Verification failed" });
       }
 
       if (!data) {
-        return { statusCode: 401, body: JSON.stringify({ error: "Invalid or expired OTP code" }) };
+        return json(401, { error: "Invalid or expired OTP code" });
       }
 
       await supabase.from("auth_otps").update({ used: true }).eq("id", data.id);
 
-      return {
-        statusCode: 200,
-        body: JSON.stringify({ success: true, message: "OTP verified successfully", email })
-      };
+      return json(200, { success: true, message: "OTP verified successfully", email });
     }
 
-    return { statusCode: 404, body: JSON.stringify({ error: "Unknown action" }) };
+    return json(404, { error: "Unknown action" });
   } catch (e) {
     console.error("[otp function] Handler error:", e);
-    return {
-      statusCode: e?.statusCode || 500,
-      body: JSON.stringify({ error: e?.message || "Server error" })
-    };
+    return json(e?.statusCode || 500, { error: e?.message || "Server error" });
   }
 };

@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import nodemailer from "nodemailer";
+import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,6 +21,7 @@ const json = (statusCode, body) => ({
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CSRF-Token",
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    ...SECURITY_HEADERS,
   },
   body: JSON.stringify(body),
 });

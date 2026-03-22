@@ -38,8 +38,11 @@ const Footer = () => {
                 <img
                   src="/itm-logo.png"
                   alt="IndianTradeMART Logo"
+                  width="64"
+                  height="64"
                   className="h-16 w-16 sm:h-10 sm:w-10 object-contain flex-shrink-0"
                   loading="lazy"
+                  decoding="async"
                 />
 
                 {/* min-w-0 is important so text can shrink and not force wrap */}
@@ -144,6 +147,11 @@ const Footer = () => {
                 <li>
                   <Link to="/success-stories" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Success Stories
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/blog" className="text-gray-300 hover:text-blue-400 transition-colors">
+                    Blog & Insights
                   </Link>
                 </li>
               </ul>

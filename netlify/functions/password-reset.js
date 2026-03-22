@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,6 +21,13 @@ const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
 const json = (statusCode, body) => ({
   statusCode,
+  headers: {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
+    'Access-Control-Allow-Methods': 'POST,OPTIONS',
+    ...SECURITY_HEADERS,
+  },
   body: JSON.stringify(body),
 });
 

@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { randomBytes, randomUUID } from 'crypto';
 import { assertCaptchaForNetlifyEvent } from '../../server/lib/captcha.js';
 import { validateStrongPassword } from '../../server/lib/passwordPolicy.js';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const ENABLE_SUPABASE_AUTH_MIGRATION =
   String(process.env.ENABLE_SUPABASE_AUTH_MIGRATION || 'true').toLowerCase() !== 'false';
@@ -245,13 +246,6 @@ const getOrigin = (event) =>
   event?.headers?.origin ||
   event?.headers?.Origin ||
   '*';
-
-const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* wss:; frame-src 'self' https://checkout.razorpay.com https://api.razorpay.com https://challenges.cloudflare.com; media-src 'self' data: blob: https:; worker-src 'self' blob:",
-  'X-Frame-Options': 'SAMEORIGIN',
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'strict-origin-when-cross-origin',
-};
 
 const baseHeaders = (event) => ({
   'Content-Type': 'application/json',

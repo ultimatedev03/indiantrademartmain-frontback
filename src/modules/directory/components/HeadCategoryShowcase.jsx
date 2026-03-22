@@ -2,14 +2,16 @@ import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Loader2 } from 'lucide-react';
+import { optimizeImageUrl } from '@/shared/utils/imageUrl';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
-const safeImg = (url) => (typeof url === 'string' && url.trim().length > 0 ? url.trim() : null);
+const safeImg = (url, options) =>
+  (typeof url === 'string' && url.trim().length > 0 ? optimizeImageUrl(url.trim(), options) : null);
 
-const ImgOrFallback = ({ src, alt, className }) => {
-  const s = safeImg(src);
-  if (!s) {
+const ImgOrFallback = ({ src, alt, className, width, height, sizes }) => {
+  const safeSource = safeImg(src, { width, height, quality: 72 });
+  if (!safeSource) {
     return (
       <div
         className={cx(
@@ -25,8 +27,11 @@ const ImgOrFallback = ({ src, alt, className }) => {
 
   return (
     <img
-      src={s}
+      src={safeSource}
       alt={alt}
+      width={width}
+      height={height}
+      sizes={sizes}
       loading="lazy"
       decoding="async"
       className={cx('object-cover', className)}
@@ -50,28 +55,17 @@ const ImgOrFallback = ({ src, alt, className }) => {
   );
 };
 
-/**
- * Props:
- *  - head: { id, name, slug, image_url }
- *  - subcategories: [{ id, name, slug, image_url, micros: [{id,name,slug}] }]
- *  - subLimit?: number
- *  - microPreviewLimit?: number
- *  - leftOverlayLimit?: number
- */
 const HeadCategoryShowcase = ({
   head,
   subcategories = [],
   subLimit = 9,
   microPreviewLimit = 3,
-  leftOverlayLimit = 5
+  leftOverlayLimit = 5,
 }) => {
   const headName = head?.name || head?.slug || 'Category';
   const headSlug = head?.slug;
 
-  // ✅ per-head "View more" for subcategories
   const [showAllSubs, setShowAllSubs] = useState(false);
-
-  // ✅ fallback micro fetch if micros missing
   const [microMap, setMicroMap] = useState({});
   const [microLoading, setMicroLoading] = useState(false);
 
@@ -83,18 +77,16 @@ const HeadCategoryShowcase = ({
   }, [allSubs, showAllSubs, subLimit]);
 
   const leftOverlayItems = useMemo(() => allSubs.slice(0, leftOverlayLimit), [allSubs, leftOverlayLimit]);
-
   const hasMoreSubs = allSubs.length > subLimit;
 
-  // ✅ if micros not coming from API, fetch once here
   useEffect(() => {
     const needFallback =
       visibleSubs.length > 0 &&
-      visibleSubs.some((s) => !Array.isArray(s.micros) || s.micros.length === 0);
+      visibleSubs.some((sub) => !Array.isArray(sub.micros) || sub.micros.length === 0);
 
     if (!needFallback) return;
 
-    const subIds = visibleSubs.map((s) => s.id).filter(Boolean);
+    const subIds = visibleSubs.map((sub) => sub.id).filter(Boolean);
     if (subIds.length === 0) return;
 
     let cancelled = false;
@@ -115,9 +107,9 @@ const HeadCategoryShowcase = ({
         }
 
         const map = {};
-        for (const m of data || []) {
-          if (!map[m.sub_category_id]) map[m.sub_category_id] = [];
-          map[m.sub_category_id].push({ id: m.id, name: m.name, slug: m.slug });
+        for (const item of data || []) {
+          if (!map[item.sub_category_id]) map[item.sub_category_id] = [];
+          map[item.sub_category_id].push({ id: item.id, name: item.name, slug: item.slug });
         }
 
         if (!cancelled) setMicroMap(map);
@@ -135,7 +127,6 @@ const HeadCategoryShowcase = ({
 
   return (
     <section className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      {/* Header */}
       <div className="px-4 sm:px-5 py-4 border-b bg-white flex items-center justify-between gap-3">
         <Link
           to={headSlug ? `/directory/${headSlug}` : '/directory'}
@@ -155,23 +146,29 @@ const HeadCategoryShowcase = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12">
-        {/* Left image block */}
         <div className="lg:col-span-4 border-r border-slate-200">
           <div className="relative h-[260px] sm:h-[300px] lg:h-full min-h-[320px] bg-slate-50">
-            <ImgOrFallback src={head?.image_url} alt={headName} className="w-full h-full" />
+            <ImgOrFallback
+              src={head?.image_url}
+              alt={headName}
+              className="w-full h-full"
+              width={960}
+              height={640}
+              sizes="(min-width: 1024px) 33vw, 100vw"
+            />
 
             <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-transparent" />
 
             <div className="absolute left-4 bottom-16 right-4">
               <div className="space-y-2">
-                {leftOverlayItems.map((s) => (
+                {leftOverlayItems.map((sub) => (
                   <Link
-                    key={s.id || s.slug}
-                    to={headSlug && s?.slug ? `/directory/${headSlug}/${s.slug}` : '/directory'}
+                    key={sub.id || sub.slug}
+                    to={headSlug && sub?.slug ? `/directory/${headSlug}/${sub.slug}` : '/directory'}
                     className="block text-white/95 text-sm hover:text-white transition-colors line-clamp-1 drop-shadow"
-                    title={s?.name}
+                    title={sub?.name}
                   >
-                    {s?.name}
+                    {sub?.name}
                   </Link>
                 ))}
               </div>
@@ -188,17 +185,13 @@ const HeadCategoryShowcase = ({
           </div>
         </div>
 
-        {/* Right subcategory tiles */}
         <div className="lg:col-span-8 p-4 sm:p-5 bg-white">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {visibleSubs.map((sub) => {
               const subName = sub?.name || sub?.slug || 'Subcategory';
               const subSlug = sub?.slug;
-
-              // ✅ micros priority: API-provided -> fallback map
               const microsRaw =
                 (Array.isArray(sub?.micros) && sub.micros.length > 0 ? sub.micros : microMap[sub?.id]) || [];
-
               const microList = microsRaw.slice(0, microPreviewLimit);
               const hasMoreMicros = microsRaw.length > microPreviewLimit;
 
@@ -212,7 +205,14 @@ const HeadCategoryShowcase = ({
                     className="flex gap-3 p-3 group"
                   >
                     <div className="w-14 h-14 bg-slate-50 border border-slate-200 overflow-hidden shrink-0">
-                      <ImgOrFallback src={sub?.image_url} alt={subName} className="w-full h-full" />
+                      <ImgOrFallback
+                        src={sub?.image_url}
+                        alt={subName}
+                        className="w-full h-full"
+                        width={112}
+                        height={112}
+                        sizes="56px"
+                      />
                     </div>
 
                     <div className="min-w-0 flex-1">
@@ -221,19 +221,19 @@ const HeadCategoryShowcase = ({
                       </div>
 
                       <div className="mt-2 space-y-1">
-                        {microList.map((m) => (
+                        {microList.map((micro) => (
                           <span
-                            key={m.id || m.slug}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (headSlug && subSlug && m?.slug) {
-                                window.location.href = `/directory/${headSlug}/${subSlug}/${m.slug}`;
+                            key={micro.id || micro.slug}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (headSlug && subSlug && micro?.slug) {
+                                window.location.href = `/directory/${headSlug}/${subSlug}/${micro.slug}`;
                               }
                             }}
                             className="block text-sm text-slate-700 hover:text-blue-700 line-clamp-1 cursor-pointer"
-                            title={m?.name}
+                            title={micro?.name}
                           >
-                            {m?.name}
+                            {micro?.name}
                           </span>
                         ))}
 
@@ -250,8 +250,8 @@ const HeadCategoryShowcase = ({
 
                         {hasMoreMicros && (
                           <span
-                            onClick={(e) => {
-                              e.stopPropagation();
+                            onClick={(event) => {
+                              event.stopPropagation();
                               if (headSlug && subSlug) {
                                 window.location.href = `/directory/${headSlug}/${subSlug}`;
                               } else {
@@ -275,12 +275,11 @@ const HeadCategoryShowcase = ({
             )}
           </div>
 
-          {/* ✅ "View more" under (for subcategories) */}
           {hasMoreSubs && (
             <div className="flex justify-center mt-6">
               <button
                 type="button"
-                onClick={() => setShowAllSubs((v) => !v)}
+                onClick={() => setShowAllSubs((value) => !value)}
                 className="px-6 py-2.5 rounded-md bg-white border border-slate-200 hover:border-blue-500 hover:shadow-md transition-all font-semibold text-slate-800"
               >
                 {showAllSubs ? 'View less' : `View more (${allSubs.length - subLimit})`}

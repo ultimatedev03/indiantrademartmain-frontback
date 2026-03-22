@@ -16,9 +16,12 @@ const SearchResults = lazy(() => import('@/modules/directory/pages/SearchResults
 
 const AboutUs = lazy(() => import('@/modules/directory/pages/AboutUs'));
 const BecomeVendor = lazy(() => import('@/modules/directory/pages/BecomeVendor'));
+const Blog = lazy(() => import('@/modules/directory/pages/Blog'));
 const Pricing = lazy(() => import('@/modules/directory/pages/Pricing'));
 const Login = lazy(() => import('@/modules/directory/pages/Login'));
 const Logistics = lazy(() => import('@/modules/directory/pages/Logistics'));
+const PrivacyPolicy = lazy(() => import('@/modules/directory/pages/PrivacyPolicy'));
+const TermsOfUse = lazy(() => import('@/modules/directory/pages/TermsOfUse'));
 
 const VendorListing = lazy(() => import('@/modules/directory/pages/VendorListing'));
 const VendorProfilePublic = lazy(() => import('@/modules/directory/pages/VendorProfile'));
@@ -97,9 +100,15 @@ export const DirectoryRoutes = () => {
 
         {/* Static Pages */}
         <Route path="about-us" element={<AboutUs />} />
+        <Route path="blog" element={<Blog />} />
+        <Route path="insights" element={<Blog />} />
         <Route path="become-a-vendor" element={<BecomeVendor />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="logistics" element={<Logistics />} />
+        <Route path="privacy" element={<PrivacyPolicy />} />
+        <Route path="privacy-policy" element={<PrivacyPolicy />} />
+        <Route path="terms" element={<TermsOfUse />} />
+        <Route path="terms-of-service" element={<TermsOfUse />} />
 
         {/* Footer Info */}
         <Route path="press" element={<Press />} />

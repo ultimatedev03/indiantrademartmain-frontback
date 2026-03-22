@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
 
@@ -10,6 +11,7 @@ const json = (statusCode, body) => ({
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-CSRF-Token',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    ...SECURITY_HEADERS,
   },
   body: JSON.stringify(body),
 });
