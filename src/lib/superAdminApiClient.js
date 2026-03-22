@@ -25,7 +25,20 @@ export function clearSuperAdminSession() {
 
 export function getSuperAdminBase() {
   const override = import.meta.env.VITE_SUPERADMIN_API_BASE;
-  if (override && String(override).trim()) return String(override).trim();
+  if (override && String(override).trim()) {
+    const normalized = String(override).trim();
+    if (!import.meta.env.DEV) {
+      try {
+        const parsed = new URL(normalized);
+        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '::1') {
+          return '/api/superadmin';
+        }
+      } catch {
+        // Ignore invalid override URLs and fall back below.
+      }
+    }
+    return normalized;
+  }
   return '/api/superadmin';
 }
 
@@ -56,6 +69,7 @@ export async function superAdminFetch(path, options = {}) {
     !path.startsWith('http') &&
     response.status === 404 &&
     isLocalDevHost() &&
+    import.meta.env.DEV &&
     !import.meta.env.VITE_SUPERADMIN_API_BASE
   ) {
     const fallbackBase = 'http://localhost:3001/api/superadmin';

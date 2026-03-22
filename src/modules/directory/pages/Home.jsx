@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Helmet } from 'react-helmet';
 import HeroSection from '@/modules/directory/components/HeroSection';
-import HomeDeferredSections from './HomeDeferredSections';
+
+const HomeDeferredSections = lazy(() => import('./HomeDeferredSections'));
 
 const HOME_SEO = {
   title: 'Indian Trade Mart | B2B Marketplace for Manufacturers, Suppliers & Exporters in India',
@@ -74,6 +75,45 @@ const STRUCTURED_DATA = {
 };
 
 const Home = () => {
+  const [loadDeferredSections, setLoadDeferredSections] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      setLoadDeferredSections(true);
+      return undefined;
+    }
+
+    let timeoutId = null;
+    let idleId = null;
+
+    const enable = () => setLoadDeferredSections(true);
+    const schedule = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(enable, { timeout: 2500 });
+        return;
+      }
+      timeoutId = window.setTimeout(enable, 800);
+    };
+
+    if (document.readyState === 'complete') {
+      schedule();
+    } else {
+      const onLoad = () => {
+        window.removeEventListener('load', onLoad);
+        schedule();
+      };
+      window.addEventListener('load', onLoad, { once: true });
+      timeoutId = window.setTimeout(onLoad, 1500);
+    }
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      if (idleId && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId);
+      }
+    };
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col font-sans bg-slate-50">
       <Helmet>
@@ -102,7 +142,13 @@ const Home = () => {
       </Helmet>
 
       <HeroSection />
-      <HomeDeferredSections />
+      <Suspense fallback={<div className="min-h-[960px] bg-slate-50" aria-hidden="true" />}>
+        {loadDeferredSections ? (
+          <HomeDeferredSections />
+        ) : (
+          <div className="min-h-[960px] bg-slate-50" aria-hidden="true" />
+        )}
+      </Suspense>
     </div>
   );
 };

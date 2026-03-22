@@ -17,8 +17,10 @@ const FALLBACK_SERVICE_IMAGE =
 
 const ALLOWED_UPLOAD_BUCKETS = new Set(['avatars', 'product-images', 'product-media']);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const GENERIC_IMAGE_MIN_BYTES = 2 * 1024;
 const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024;
 const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024;
+const KYC_DOC_MIN_BYTES = 100 * 1024;
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
@@ -1096,6 +1098,7 @@ export const handler = async (event) => {
         const dataUrl = String(body?.data_url || body?.dataUrl || '').trim();
         const originalName = String(body?.file_name || body?.fileName || '').trim();
         const explicitType = String(body?.content_type || body?.contentType || '').trim();
+        const uploadPurpose = String(body?.upload_purpose || body?.uploadPurpose || '').trim().toUpperCase();
 
         if (!dataUrl) return bad(event, 'data_url is required');
 
@@ -1115,6 +1118,9 @@ export const handler = async (event) => {
 
         const buffer = Buffer.from(parsed.base64, 'base64');
         if (!buffer?.length) return bad(event, 'Empty upload payload');
+        if (isImage && bucket !== 'product-images' && uploadPurpose !== 'KYC_DOCUMENT' && buffer.length < GENERIC_IMAGE_MIN_BYTES) {
+          return bad(event, 'Image too small (minimum 2KB)');
+        }
         if (buffer.length > MAX_UPLOAD_BYTES) {
           return json(event, 413, { success: false, error: 'File too large (max 10MB)' });
         }
@@ -1125,6 +1131,9 @@ export const handler = async (event) => {
           if (buffer.length > PRODUCT_IMAGE_MAX_BYTES) {
             return json(event, 413, { success: false, error: 'Image too large (maximum 800KB)' });
           }
+        }
+        if (uploadPurpose === 'KYC_DOCUMENT' && buffer.length < KYC_DOC_MIN_BYTES) {
+          return bad(event, 'KYC image too small (minimum 100KB)');
         }
 
         const objectPath = buildUploadPath({

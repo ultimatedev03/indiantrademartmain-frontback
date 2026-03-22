@@ -2,6 +2,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { resolveBuyerId, resolveBuyerProfile, getAuthUserOrThrow } from '@/modules/buyer/services/buyerSession';
+import { MIN_IMAGE_UPLOAD_BYTES, validateImageFile } from '@/shared/utils/fileValidation';
 
 // Helper to get current buyer ID from auth user
 const getBuyerId = async () => {
@@ -256,22 +257,34 @@ export const buyerApi = {
   },
 
   uploadAvatar: async (file) => {
-    const buyerId = await getBuyerId();
-    const fileExt = file.name.split('.').pop();
-    const fileName = `buyer-avatars/${buyerId}_${Date.now()}.${fileExt}`;
+    validateImageFile(file, {
+      minBytes: MIN_IMAGE_UPLOAD_BYTES,
+      maxBytes: 5 * 1024 * 1024,
+      label: 'Profile image',
+      allowedMimeTypes: ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'],
+      mimeMessage: 'Unsupported image type. Use JPG/PNG/WebP/GIF.',
+    });
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(fileName, file, { upsert: true });
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
 
-    if (uploadError) throw uploadError;
-
-    const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
-
-    // Update buyer profile with avatar via backend (bypasses RLS)
-    await buyerApi.updateProfile({ avatar_url: data.publicUrl });
-
-    return data.publicUrl;
+    const res = await fetchWithCsrf(apiUrl('/api/auth/buyer/profile/avatar'), {
+      method: 'POST',
+      body: JSON.stringify({
+        file_name: file.name || 'avatar',
+        content_type: file.type || '',
+        data_url: dataUrl,
+      }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.success === false) {
+      throw new Error(json?.error || 'Failed to upload avatar');
+    }
+    return String(json?.publicUrl || '').trim();
   },
 
   // --- STATISTICS ---

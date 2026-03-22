@@ -8,17 +8,11 @@ const isMissingColumnError = (err) => {
 const FEATURED_VENDOR_COLUMNS = [
   'id',
   'company_name',
-  'first_name',
-  'last_name',
   'owner_name',
   'profile_image',
-  'image_url',
-  'avatar_url',
   'city',
   'state',
-  'seller_rating',
   'kyc_status',
-  'verification_badge',
   'is_verified',
   'is_active',
   'created_at',
@@ -37,7 +31,6 @@ const getFreshCache = (cache, key) => {
 const mapVendorRow = (v) => {
   const companyName =
     v.company_name ||
-    `${v.first_name || ''} ${v.last_name || ''}`.trim() ||
     v.owner_name ||
     'Supplier';
 
@@ -45,8 +38,7 @@ const mapVendorRow = (v) => {
   const stateName = v?.state_ref?.name || v.state || '';
 
   const kyc = String(v.kyc_status || '').toUpperCase();
-  const verified =
-    Boolean(v.is_verified) || Boolean(v.verification_badge) || kyc === 'APPROVED';
+  const verified = Boolean(v.is_verified) || kyc === 'APPROVED';
 
   return {
     ...v,
@@ -56,7 +48,7 @@ const mapVendorRow = (v) => {
     state: stateName,
     verified,
     // best-effort fields used by older UI blocks
-    rating: v.seller_rating ?? null,
+    rating: null,
     reviews: null,
     description: v.primary_business_type || v.secondary_business || '',
   };
@@ -64,7 +56,7 @@ const mapVendorRow = (v) => {
 
 const isVerifiedVendor = (v) => {
   const kyc = String(v?.kyc_status || '').toUpperCase();
-  return Boolean(v?.is_verified) || Boolean(v?.verification_badge) || kyc === 'APPROVED';
+  return Boolean(v?.is_verified) || kyc === 'APPROVED';
 };
 
 const sortFeaturedVendors = (rows = []) => {
@@ -109,8 +101,6 @@ export const vendorService = {
       let query = supabase
         .from('vendors')
         .select(FEATURED_VENDOR_COLUMNS)
-        .order('is_verified', { ascending: false })
-        .order('verification_badge', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(limit);
 

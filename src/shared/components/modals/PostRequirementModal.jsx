@@ -10,8 +10,6 @@ const safe = (value) => (value == null ? '' : String(value).trim());
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 
 const PostRequirementModal = ({ isOpen, onClose }) => {
-  // Debug log
-  console.log('PostRequirementModal isOpen:', isOpen);
   const [formData, setFormData] = useState({
     buyerName: '',
     title: '',

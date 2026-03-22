@@ -34,6 +34,7 @@ const ENABLE_SUPABASE_AUTH_MIGRATION =
 const ENABLE_SUPABASE_AUTH_SIGNUP =
   String(process.env.ENABLE_SUPABASE_AUTH_SIGNUP || 'true').toLowerCase() !== 'false';
 const BUYER_NOT_REGISTERED_MESSAGE = 'This email is not registered as buyer';
+const BUYER_AVATAR_MIN_BYTES = 2 * 1024;
 const BUYER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 const BUYER_AVATAR_ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -1044,6 +1045,9 @@ router.post('/buyer/profile/avatar', requireAuth({ roles: ['BUYER'] }), async (r
 
     if (!buffer || buffer.length === 0) {
       return res.status(400).json({ success: false, error: 'Empty upload payload' });
+    }
+    if (buffer.length < BUYER_AVATAR_MIN_BYTES) {
+      return res.status(400).json({ success: false, error: 'Image too small (minimum 2KB)' });
     }
     if (buffer.length > BUYER_AVATAR_MAX_BYTES) {
       return res.status(400).json({ success: false, error: 'Image too large (max 5MB)' });

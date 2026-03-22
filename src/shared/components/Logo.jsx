@@ -31,8 +31,12 @@ const Logo = ({
         <img
           src="/itm-logo.png"
           alt="IndianTradeMART Logo"
+          width="160"
+          height="160"
           className="h-full w-auto object-contain"
-          loading="lazy"
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
         />
       </div>
 

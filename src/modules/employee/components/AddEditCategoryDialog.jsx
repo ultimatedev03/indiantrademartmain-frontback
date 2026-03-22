@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui/use-toast';
 import { ChevronLeft, ChevronRight, Images, Trash2, X } from 'lucide-react';
+import { MIN_IMAGE_UPLOAD_BYTES, formatFileSize } from '@/shared/utils/fileValidation';
 
 
 const IMAGE_MAX_BYTES = 800 * 1024; // 800KB
@@ -275,6 +276,11 @@ const AddEditCategoryDialog = ({
     for (const file of files) {
       if (!String(file?.type || '').startsWith('image/')) {
         setErrors((prev) => ({ ...prev, image_file: 'Only image files are allowed' }));
+        resetFileInput();
+        return;
+      }
+      if (file.size < MIN_IMAGE_UPLOAD_BYTES) {
+        setErrors((prev) => ({ ...prev, image_file: `Image must be at least ${formatFileSize(MIN_IMAGE_UPLOAD_BYTES)}` }));
         resetFileInput();
         return;
       }
@@ -657,6 +663,8 @@ const AddEditCategoryDialog = ({
                 </div>
 
                 <p className="text-[11px] text-slate-500">
+                  Min {formatFileSize(MIN_IMAGE_UPLOAD_BYTES)}.
+                  {' '}
                   Max {formatKb(IMAGE_MAX_BYTES)}.
                   {' '}
                   Maximum {maxImages} image{maxImages > 1 ? 's' : ''}.

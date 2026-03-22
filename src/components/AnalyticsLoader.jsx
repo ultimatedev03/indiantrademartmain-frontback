@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-const GTAG_ID = import.meta.env.VITE_GTAG_ID || 'G-XGPYTMRKW2';
+const GTAG_ID = String(import.meta.env.VITE_GTAG_ID || '').trim();
 
 const loadGtag = () => {
   if (!GTAG_ID) return;
@@ -18,16 +18,47 @@ const loadGtag = () => {
   }
   window.gtag = window.gtag || gtag;
   window.gtag('js', new Date());
-  window.gtag('config', GTAG_ID, { anonymize_ip: true, transport_type: 'beacon' });
+  window.gtag('consent', 'default', {
+    ad_storage: 'denied',
+    ad_user_data: 'denied',
+    ad_personalization: 'denied',
+    analytics_storage: 'denied',
+    functionality_storage: 'denied',
+    personalization_storage: 'denied',
+    security_storage: 'granted',
+  });
+  window.gtag('config', GTAG_ID, {
+    anonymize_ip: true,
+    allow_google_signals: false,
+    allow_ad_personalization_signals: false,
+    client_storage: 'none',
+    send_page_view: false,
+    transport_type: 'beacon',
+  });
 };
 
 const scheduleLoad = () => {
   if (typeof window === 'undefined') return;
-  if ('requestIdleCallback' in window) {
-    window.requestIdleCallback(loadGtag, { timeout: 2000 });
-  } else {
-    setTimeout(loadGtag, 1200);
+
+  const runWhenIdle = () => {
+    if ('requestIdleCallback' in window) {
+      window.requestIdleCallback(loadGtag, { timeout: 4000 });
+      return;
+    }
+    window.setTimeout(loadGtag, 3000);
+  };
+
+  if (document.readyState === 'complete') {
+    runWhenIdle();
+    return;
   }
+
+  const onLoad = () => {
+    window.removeEventListener('load', onLoad);
+    runWhenIdle();
+  };
+
+  window.addEventListener('load', onLoad, { once: true });
 };
 
 const AnalyticsLoader = () => {

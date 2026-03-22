@@ -87,7 +87,9 @@ const HomeDeferredSections = () => {
         setHasMoreHeads(nextCategories.length > HEAD_INITIAL_LIMIT);
         setHomeCategories(nextCategories);
       } catch (error) {
-        console.error('Failed to load home categories:', error);
+        if (import.meta.env.DEV) {
+          console.error('Failed to load home categories:', error);
+        }
         setHasMoreHeads(false);
       } finally {
         setLoadingCategories(false);
@@ -104,7 +106,9 @@ const HomeDeferredSections = () => {
         const vendors = await vendorService.getFeaturedVendors({ limit: FEATURED_LIMIT });
         setFeaturedVendors(vendors || []);
       } catch (error) {
-        console.error('Failed to load featured vendors:', error);
+        if (import.meta.env.DEV) {
+          console.error('Failed to load featured vendors:', error);
+        }
       } finally {
         setLoadingVendors(false);
       }
@@ -202,10 +206,19 @@ const HomeDeferredSections = () => {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {visibleFeaturedVendors.map((vendor) => (
-              <div
+              <article
                 key={vendor.id}
                 className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-lg transition-all cursor-pointer group hover:-translate-y-1"
+                role="link"
+                tabIndex={0}
+                aria-label={`Open ${vendor.name} supplier profile`}
                 onClick={() => navigate(getVendorProfilePath(vendor) || '/directory/vendor')}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    navigate(getVendorProfilePath(vendor) || '/directory/vendor');
+                  }
+                }}
               >
                 <div className="relative h-32 mb-3 rounded-lg bg-slate-100 overflow-hidden">
                   <VendorImage src={vendor.image} name={vendor.name} />
@@ -227,7 +240,7 @@ const HomeDeferredSections = () => {
                 <Button className="w-full bg-white border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all font-medium h-8 text-xs">
                   Contact Supplier
                 </Button>
-              </div>
+              </article>
             ))}
 
             {featuredVendors.length === 0 && (

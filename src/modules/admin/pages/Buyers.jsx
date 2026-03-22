@@ -51,7 +51,7 @@ const getConfiguredApiBase = () => {
 
   try {
     const parsed = new URL(raw);
-    if (!isLocalHost() && isLocalAddress(parsed.hostname)) return "";
+    if (isLocalAddress(parsed.hostname)) return "";
   } catch {
     return "";
   }

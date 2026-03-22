@@ -28,7 +28,6 @@ const SupportModal = ({ isOpen, onClose }) => {
     setLoading(true);
     
     try {
-      console.log('Support ticket submitted:', formData);
       toast({
         title: 'Support request submitted',
         description: 'Our team will contact you within 24 hours.',
@@ -70,6 +69,7 @@ const SupportModal = ({ isOpen, onClose }) => {
           <button
             onClick={onClose}
             className="p-2 hover:bg-blue-500 rounded-lg transition-colors"
+            aria-label="Close support modal"
           >
             <X className="w-6 h-6" />
           </button>

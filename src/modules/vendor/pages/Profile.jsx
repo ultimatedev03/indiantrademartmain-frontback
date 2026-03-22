@@ -986,6 +986,8 @@ const BankingSection = ({ banks, onRefresh }) => {
 const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
   const [uploadingType, setUploadingType] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const normalizedKycStatus = String(kycStatus || '').trim().toUpperCase();
+  const kycLocked = normalizedKycStatus === 'VERIFIED' || normalizedKycStatus === 'APPROVED';
 
   const handleUpload = async (e, type) => {
     e?.preventDefault?.();
@@ -1005,6 +1007,10 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
 
     setUploadingType(type);
     try {
+      const existingDoc = documents.find((doc) => String(doc?.document_type || '').toUpperCase() === type);
+      if (existingDoc?.id) {
+        await vendorApi.documents.delete(existingDoc.id);
+      }
       await vendorApi.documents.upload(file, type);
       await onRefresh();
       toast({ title: "Document uploaded successfully" });
@@ -1052,7 +1058,8 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {docTypes.map(type => {
-          const doc = documents.find(d => d.document_type === type.id);
+          const doc = documents.find((d) => String(d?.document_type || '').trim().toUpperCase() === type.id);
+          const allowReplacement = Boolean(doc && !kycLocked);
 
           return (
             <div key={type.id} className="border rounded-lg p-4 flex items-center justify-between bg-white">
@@ -1073,31 +1080,48 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
               {doc ? (
                 <div className="flex gap-2">
                   <Button variant="ghost" size="icon" asChild>
-                    <a href={doc.document_url} target="_blank" rel="noreferrer">
+                    <a href={doc.document_url} target="_blank" rel="noreferrer" aria-label={`View ${type.label}`}>
                       <ExternalLink className="w-4 h-4" />
                     </a>
                   </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="text-red-400"
-                    onClick={() => handleDelete(doc.id)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                  {allowReplacement ? (
+                    <label className="cursor-pointer">
+                      <div className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+                        Replace
+                      </div>
+                      <input
+                        type="file"
+                        className="hidden"
+                        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                        onChange={e => handleUpload(e, type.id)}
+                        disabled={!!uploadingType}
+                      />
+                    </label>
+                  ) : null}
+                  {!kycLocked && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="text-red-400"
+                      aria-label={`Delete ${type.label}`}
+                      onClick={() => handleDelete(doc.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <label className="cursor-pointer">
                   <div className={`px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded ${uploadingType === type.id ? 'opacity-50' : ''}`}>
-                    {uploadingType === type.id ? 'Uploading...' : 'Upload'}
+                    {uploadingType === type.id ? 'Uploading...' : normalizedKycStatus === 'REJECTED' ? 'Re-upload' : 'Upload'}
                   </div>
                   <input
                     type="file"
                     className="hidden"
                     accept=".jpg,.jpeg,.png,image/jpeg,image/png"
                     onChange={e => handleUpload(e, type.id)}
-                    disabled={!!uploadingType}
+                    disabled={!!uploadingType || kycLocked}
                   />
                 </label>
               )}
@@ -1110,11 +1134,17 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
         KYC upload rules: only JPG/PNG, minimum 100KB, maximum 2MB, and exactly 4 required document slots.
       </p>
 
+      {normalizedKycStatus === 'REJECTED' && (
+        <p className="mt-2 text-xs text-amber-700">
+          Your KYC was rejected. Replace the required documents and submit again.
+        </p>
+      )}
+
       <div className="mt-8 flex justify-end border-t pt-4">
         <Button
           type="button"
           className="bg-[#003D82] px-8"
-          disabled={submitting || kycStatus === 'SUBMITTED' || kycStatus === 'VERIFIED' || !canSubmitKyc}
+          disabled={submitting || normalizedKycStatus === 'SUBMITTED' || kycLocked || !canSubmitKyc}
           onClick={async () => {
             setSubmitting(true);
             try {
@@ -1134,7 +1164,7 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
               Submitting...
             </>
           ) : (
-            (kycStatus === 'SUBMITTED' ? 'Verification In Progress' : 'Submit for Verification')
+            (normalizedKycStatus === 'SUBMITTED' ? 'Verification In Progress' : 'Submit for Verification')
           )}
         </Button>
       </div>

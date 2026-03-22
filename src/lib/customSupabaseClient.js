@@ -64,6 +64,8 @@ const getCsrfToken = () => {
   return token ? decodeURIComponent(token) : '';
 };
 
+const hasReadableAuthSessionHint = () => Boolean(getCsrfToken());
+
 const emit = (event, session) => {
   listeners.forEach((cb) => {
     try {
@@ -151,6 +153,9 @@ const buildSession = (user) => (user ? { user, access_token: null } : null);
 const refreshSession = async (force = false) => {
   const now = Date.now();
   if (!force) {
+    if (!cachedUser && !hasReadableAuthSessionHint()) {
+      return buildSession(null);
+    }
     if (refreshCooldownUntil && now < refreshCooldownUntil) {
       return buildSession(cachedUser);
     }

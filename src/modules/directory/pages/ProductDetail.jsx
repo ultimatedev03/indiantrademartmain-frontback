@@ -178,6 +178,15 @@ const ProductDetail = () => {
     });
   };
 
+  const getPlainDescription = (value) =>
+    String(value || '')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+
   const handleCopyLink = async () => {
     const url = canonicalProductUrl || shareUtils.getCurrentUrl();
     const success = await shareUtils.copyToClipboard(url);
@@ -1094,10 +1103,9 @@ const ProductDetail = () => {
             </div>
           </div>
 
-          <div
-            className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border break-words whitespace-pre-wrap overflow-hidden"
-            dangerouslySetInnerHTML={{ __html: data.description || 'No description available.' }}
-          />
+          <div className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border break-words whitespace-pre-wrap overflow-hidden">
+            {getPlainDescription(data.description) || 'No description available.'}
+          </div>
 
           {recentFeedback.length > 0 && (
             <div className="bg-white rounded border p-4 shadow-sm">

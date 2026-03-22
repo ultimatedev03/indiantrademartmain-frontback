@@ -145,7 +145,9 @@ const VendorSuspensionGate = ({ children }) => {
             if (logout) await logout();
             else await supabase.auth.signOut();
           } catch (e) {
-            console.error('Logout failed:', e);
+            if (import.meta.env.DEV) {
+              console.error('Logout failed:', e);
+            }
           } finally {
             window.location.replace('/');
           }
@@ -177,7 +179,9 @@ const MaintenanceGate = ({ children }) => {
         setIsMaintenance(data?.maintenance_mode === true);
         setMessage(data?.maintenance_message || '');
       } catch (e) {
-        console.error('[MaintenanceGate] fetch failed:', e);
+        if (import.meta.env.DEV) {
+          console.error('[MaintenanceGate] fetch failed:', e);
+        }
         setIsMaintenance(false);
         setMessage('');
       } finally {
@@ -238,7 +242,9 @@ const PublicNoticeGate = ({ children }) => {
           variant: data?.public_notice_variant || 'info',
         });
       } catch (e) {
-        console.error('[PublicNoticeGate] fetch failed:', e);
+        if (import.meta.env.DEV) {
+          console.error('[PublicNoticeGate] fetch failed:', e);
+        }
         setNotice({ maintenance: false, enabled: false, message: '', variant: 'info' });
       } finally {
         setLoading(false);
@@ -344,7 +350,11 @@ const AppRoutes = () => {
 
 function App() {
   useEffect(() => {
-    locationService.seedLocations().catch((err) => console.error('Location seeding failed', err));
+    locationService.seedLocations().catch((err) => {
+      if (import.meta.env.DEV) {
+        console.error('Location seeding failed', err);
+      }
+    });
   }, []);
 
   return (

@@ -43,11 +43,9 @@ const DynamicCategory = () => {
       // Check if this is a location-based search
       if (isLocation) {
         setIsLocationBased(true);
-        console.log('Location-based search:', { serviceSlug, location });
         
         // Fetch micro-category by slug
         const micro = await directoryApi.getMicroCategoryBySlug(serviceSlug);
-        console.log('Fetched micro-category:', micro);
         if (micro) {
           setCategory(micro);
 

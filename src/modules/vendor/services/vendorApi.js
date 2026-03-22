@@ -3,6 +3,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { generateUniqueSlug, mergeProductSlugAliases } from '@/shared/utils/slugUtils';
+import { MIN_IMAGE_UPLOAD_BYTES, validateImageFile } from '@/shared/utils/fileValidation';
 
 // ---------------- HELPERS ----------------
 
@@ -1256,14 +1257,17 @@ export const vendorApi = {
       const isProductImage = String(bucket || '').trim() === 'product-images';
 
       if (isProductImage) {
-        if (file.size < PRODUCT_MIN_BYTES) {
-          throw new Error('Image too small (minimum 100KB)');
-        }
-        if (file.size > PRODUCT_MAX_BYTES) {
-          throw new Error('Image too large (maximum 800KB)');
-        }
-      } else if (file.size > DEFAULT_MAX_BYTES) {
-        throw new Error('File too large (max 10MB)');
+        validateImageFile(file, {
+          minBytes: PRODUCT_MIN_BYTES,
+          maxBytes: PRODUCT_MAX_BYTES,
+          label: 'Product image',
+        });
+      } else {
+        validateImageFile(file, {
+          minBytes: MIN_IMAGE_UPLOAD_BYTES,
+          maxBytes: DEFAULT_MAX_BYTES,
+          label: 'Image',
+        });
       }
 
       const hasCsrfCookie = () =>

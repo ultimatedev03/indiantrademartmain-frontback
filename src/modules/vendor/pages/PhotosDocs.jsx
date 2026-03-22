@@ -1,6 +1,7 @@
-
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
+import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { MIN_IMAGE_UPLOAD_BYTES, validateImageFile } from '@/shared/utils/fileValidation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -22,57 +23,48 @@ const getVendorId = async () => {
   return vendor.id;
 };
 
-const documentsApi = {
-  upload: async (file, type) => {
-    const vendorId = await getVendorId();
-    if (!vendorId) throw new Error('No vendor found');
+const uploadGeneralDocument = async (file) => {
+  const vendorId = await getVendorId();
+  if (!vendorId) throw new Error('No vendor found');
 
-    // Upload file to storage
-    const fileExt = file.name.split('.').pop();
-    const fileName = `kyc/${vendorId}/${type}_${Date.now()}.${fileExt}`;
-    const { error: uploadError } = await supabase.storage
-      .from('objects')
-      .upload(fileName, file);
-    if (uploadError) throw uploadError;
-
-    const { data: urlData } = supabase.storage.from('objects').getPublicUrl(fileName);
-
-    // Save document record
-    const { data, error } = await supabase
-      .from('vendor_documents')
-      .insert([{
-        vendor_id: vendorId,
-        document_type: type,
-        document_url: urlData.publicUrl,
-        original_name: file.name,
-        verification_status: 'PENDING'
-      }])
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
-  },
-  
-  list: async () => {
-    const vendorId = await getVendorId();
-    if (!vendorId) return [];
-    const { data, error } = await supabase
-      .from('vendor_documents')
-      .select('*')
-      .eq('vendor_id', vendorId)
-      .order('created_at', { ascending: false });
-    if (error) throw error;
-    return data || [];
-  },
-  
-  delete: async (id) => {
-    const { error } = await supabase
-      .from('vendor_documents')
-      .delete()
-      .eq('id', id);
-    if (error) throw error;
+  if (String(file?.type || '').toLowerCase().startsWith('image/')) {
+    validateImageFile(file, {
+      minBytes: MIN_IMAGE_UPLOAD_BYTES,
+      maxBytes: 10 * 1024 * 1024,
+      label: 'Image',
+    });
   }
+
+  const fileExt = file.name.split('.').pop();
+  const fileName = `vendor-documents/${vendorId}/general_${Date.now()}.${fileExt}`;
+  const { error: uploadError } = await supabase.storage
+    .from('objects')
+    .upload(fileName, file);
+  if (uploadError) throw uploadError;
+
+  const { data: urlData } = supabase.storage.from('objects').getPublicUrl(fileName);
+
+  const { data, error } = await supabase
+    .from('vendor_documents')
+    .insert([{
+      vendor_id: vendorId,
+      document_type: 'GENERAL',
+      document_url: urlData.publicUrl,
+      original_name: file.name,
+      verification_status: 'PENDING'
+    }])
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 };
+
+const KYC_DOCS = [
+  { key: 'gst', apiType: 'GST', label: 'GST' },
+  { key: 'pan', apiType: 'PAN', label: 'PAN' },
+  { key: 'aadhar', apiType: 'AADHAR', label: 'Aadhar' },
+  { key: 'bank_statement', apiType: 'BANK', label: 'Bank Statement' },
+];
 
 const PhotosDocs = () => {
   const [documents, setDocuments] = useState([]);
@@ -99,7 +91,6 @@ const PhotosDocs = () => {
               filter: `user_id=eq.${user.id}`
             },
             (payload) => {
-              console.log('🔄 KYC status updated:', payload);
               if (payload.new?.kyc_status) {
                 setKycStatus(payload.new.kyc_status);
               }
@@ -137,7 +128,7 @@ const PhotosDocs = () => {
 
   const loadDocs = async () => {
     try {
-      const data = await documentsApi.list();
+      const data = await vendorApi.documents.list();
       setDocuments(data || []);
     } catch (error) {
       console.error('Error loading documents:', error);
@@ -155,9 +146,24 @@ const PhotosDocs = () => {
 
     setUploading(true);
     try {
-      await documentsApi.upload(file, type);
+      if (String(type || '').trim().toUpperCase() === 'GENERAL') {
+        await uploadGeneralDocument(file);
+        toast({ title: "Upload successful" });
+        await loadDocs();
+        return;
+      }
+
+      const existingDoc = documents.find(
+        (doc) => String(doc?.document_type || '').trim().toUpperCase() === String(type || '').trim().toUpperCase()
+      );
+
+      if (existingDoc?.id) {
+        await vendorApi.documents.delete(existingDoc.id);
+      }
+
+      await vendorApi.documents.upload(file, type);
       toast({ title: "Upload successful" });
-      loadDocs();
+      await loadDocs();
     } catch (error) {
       console.error('Upload error:', error);
       toast({ title: "Upload failed", description: error.message, variant: "destructive" });
@@ -170,7 +176,7 @@ const PhotosDocs = () => {
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure?")) return;
     try {
-      await documentsApi.delete(id);
+      await vendorApi.documents.delete(id);
       setDocuments(documents.filter(d => d.id !== id));
       toast({ title: "Deleted successfully" });
     } catch (error) {
@@ -179,8 +185,19 @@ const PhotosDocs = () => {
     }
   };
 
-  const kycDocs = documents.filter(d => ['gst', 'pan', 'aadhar', 'bank_statement'].includes(d.document_type));
-  const otherDocs = documents.filter(d => !['gst', 'pan', 'aadhar', 'bank_statement'].includes(d.document_type));
+  const normalizedKycStatus = String(kycStatus || '').trim().toUpperCase();
+  const kycLocked = ['VERIFIED', 'APPROVED'].includes(normalizedKycStatus);
+  const kycRejected = normalizedKycStatus === 'REJECTED';
+  const kycDocs = useMemo(
+    () =>
+      documents.filter((doc) =>
+        KYC_DOCS.some((item) => item.apiType === String(doc?.document_type || '').trim().toUpperCase())
+      ),
+    [documents]
+  );
+  const otherDocs = documents.filter(
+    (doc) => !KYC_DOCS.some((item) => item.apiType === String(doc?.document_type || '').trim().toUpperCase())
+  );
 
   if (loading) return <div>Loading documents...</div>;
 
@@ -214,40 +231,79 @@ const PhotosDocs = () => {
 
         <TabsContent value="kyc" className="space-y-6">
            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {['gst', 'pan', 'aadhar', 'bank_statement'].map(type => (
-                  <Card key={type} className="border-dashed border-2 hover:border-blue-500 transition-colors">
+              {KYC_DOCS.map(({ key, apiType, label }) => {
+                  const existingDoc = kycDocs.find(
+                    (doc) => String(doc?.document_type || '').trim().toUpperCase() === apiType
+                  );
+                  const docStatus = String(existingDoc?.verification_status || 'PENDING').trim().toUpperCase();
+                  const canReplace = Boolean(existingDoc && !kycLocked);
+                  return (
+                  <Card key={key} className="border-dashed border-2 hover:border-blue-500 transition-colors">
                       <CardContent className="p-6 flex flex-col items-center text-center space-y-4">
                           <div className="bg-blue-50 p-3 rounded-full">
                               <FileText className="w-6 h-6 text-blue-600" />
                           </div>
-                          <h3 className="font-semibold capitalize">{type.replace('_', ' ')}</h3>
+                          <h3 className="font-semibold capitalize">{label}</h3>
                           
-                          {kycDocs.find(d => d.document_type === type) ? (
+                          {existingDoc ? (
                               <div className="w-full space-y-2">
-                                  <Badge variant="success" className="w-full justify-center">Uploaded</Badge>
+                                  <Badge variant="success" className="w-full justify-center">
+                                    {docStatus === 'REJECTED' ? 'Rejected' : docStatus === 'VERIFIED' ? 'Verified' : 'Uploaded'}
+                                  </Badge>
                                   <div className="flex gap-2 justify-center">
                                       <Button size="sm" variant="outline" asChild>
-                                          <a href={kycDocs.find(d => d.document_type === type).document_url} target="_blank" rel="noreferrer">
+                                          <a
+                                            href={existingDoc.document_url}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            aria-label={`View ${label} document`}
+                                          >
                                               <Eye className="w-3 h-3" />
                                           </a>
                                       </Button>
-                                      <Button type="button" size="sm" variant="destructive" onClick={() => handleDelete(kycDocs.find(d => d.document_type === type).id)}>
+                                      {canReplace ? (
+                                        <Button asChild size="sm" variant="secondary" disabled={uploading}>
+                                          <label className="cursor-pointer">
+                                            {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                            <input
+                                              type="file"
+                                              className="hidden"
+                                              accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                              onChange={(event) => handleUpload(event, apiType)}
+                                            />
+                                          </label>
+                                        </Button>
+                                      ) : null}
+                                      {!kycLocked && (
+                                      <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="destructive"
+                                        aria-label={`Delete ${label} document`}
+                                        onClick={() => handleDelete(existingDoc.id)}
+                                      >
                                           <Trash2 className="w-3 h-3" />
                                       </Button>
+                                      )}
                                   </div>
                               </div>
                           ) : (
-                              <Button asChild className="w-full" disabled={uploading}>
+                              <Button asChild className="w-full" disabled={uploading || kycLocked}>
                                   <label className="cursor-pointer">
                                       {uploading ? <Loader2 className="w-3 h-3 animate-spin mr-2" /> : <Upload className="w-3 h-3 mr-2" />}
-                                      Upload
-                                      <input type="file" className="hidden" onChange={(e) => handleUpload(e, type)} />
+                                      {kycRejected ? 'Re-upload' : 'Upload'}
+                                      <input
+                                        type="file"
+                                        className="hidden"
+                                        accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                                        onChange={(event) => handleUpload(event, apiType)}
+                                      />
                                   </label>
                               </Button>
                           )}
                       </CardContent>
                   </Card>
-              ))}
+              )})}
            </div>
         </TabsContent>
 
@@ -261,7 +317,7 @@ const PhotosDocs = () => {
                   type="file" 
                   accept=".pdf,.doc,.docx,.jpg,.png" 
                   className="hidden"
-                  onChange={(e) => handleUpload(e, 'general')}
+                  onChange={(e) => handleUpload(e, 'GENERAL')}
                   disabled={uploading}
                 />
               </label>

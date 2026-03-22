@@ -52,10 +52,12 @@ const PremiumBrandsSection = () => {
         <div className="marquee-wrap">
           <div className="marquee-track gap-2 items-center py-1">
             {items.map((brand, idx) => (
-              <div
+              <button
+                type="button"
                 key={`${brand.id}-${idx}`}
-                className="flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300"
+                className="flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300 border-0 bg-transparent p-0"
                 title={brand.name}
+                aria-label={`Open ${brand.name} brand page`}
                 onClick={() => navigate(`/directory/brand/${brand.slug}`)}
               >
                 <img
@@ -71,7 +73,7 @@ const PremiumBrandsSection = () => {
                     event.currentTarget.style.display = 'none';
                   }}
                 />
-              </div>
+              </button>
             ))}
           </div>
         </div>

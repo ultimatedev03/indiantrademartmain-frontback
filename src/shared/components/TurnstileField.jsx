@@ -94,7 +94,7 @@ const TurnstileField = ({
         const turnstile = await loadTurnstileScript();
         if (!active || !containerRef.current) return;
 
-        containerRef.current.innerHTML = '';
+        containerRef.current.replaceChildren();
         widgetIdRef.current = turnstile.render(containerRef.current, {
           sitekey: TURNSTILE_SITE_KEY,
           action,

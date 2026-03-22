@@ -839,6 +839,7 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
         <Button
           variant="ghost"
           size="icon"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : 'Notifications'}
           className={cn(
             "relative text-gray-500 hover:text-[#003D82] hover:bg-blue-50",
             unreadCount > 0 && "text-[#003D82]",
@@ -883,6 +884,7 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Close notifications"
               className="h-6 w-6 text-gray-500 hover:text-gray-700"
               onClick={() => setIsOpen(false)}
             >
@@ -968,6 +970,7 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label="Delete notification"
                         className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity text-gray-400 hover:text-red-600"
                         onClick={(e) => deleteNotification(notif.id, e)}
                       >

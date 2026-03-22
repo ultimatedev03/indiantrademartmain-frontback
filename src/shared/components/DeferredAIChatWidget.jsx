@@ -29,22 +29,43 @@ const DeferredAIChatWidget = () => {
 
     let cancelled = false;
     let timeoutId = null;
+    let idleId = null;
 
     const enableMount = () => {
       if (!cancelled) setShouldMount(true);
     };
 
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const idleId = window.requestIdleCallback(enableMount, { timeout: 1800 });
-      return () => {
-        cancelled = true;
-        window.cancelIdleCallback(idleId);
-      };
-    }
+    const scheduleIdleMount = () => {
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(enableMount, { timeout: 5000 });
+        return;
+      }
+      timeoutId = window.setTimeout(enableMount, 4000);
+    };
 
-    timeoutId = window.setTimeout(enableMount, 1200);
+    const cleanupListeners = () => {
+      if (typeof window === 'undefined') return;
+      window.removeEventListener('pointerdown', onFirstInteraction);
+      window.removeEventListener('keydown', onFirstInteraction);
+      window.removeEventListener('touchstart', onFirstInteraction);
+    };
+
+    const onFirstInteraction = () => {
+      cleanupListeners();
+      scheduleIdleMount();
+    };
+
+    window.addEventListener('pointerdown', onFirstInteraction, { once: true, passive: true });
+    window.addEventListener('keydown', onFirstInteraction, { once: true });
+    window.addEventListener('touchstart', onFirstInteraction, { once: true, passive: true });
+    timeoutId = window.setTimeout(onFirstInteraction, 6000);
+
     return () => {
       cancelled = true;
+      cleanupListeners();
+      if (idleId && typeof window !== 'undefined' && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId);
+      }
       if (timeoutId) window.clearTimeout(timeoutId);
     };
   }, [location.pathname]);

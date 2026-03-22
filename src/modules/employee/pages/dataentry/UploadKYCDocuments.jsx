@@ -16,8 +16,14 @@ const UploadKYCDocuments = ({ vendorId, onSuccess }) => {
   const handleFileChange = (e) => {
       const f = e.target.files[0];
       if (f) {
+          if (f.size < 2 * 1024) {
+              toast({ title: "Error", description: "File too small (minimum 2KB)", variant: "destructive" });
+              try { e.target.value = ''; } catch (_) {}
+              return;
+          }
           if (f.size > 5 * 1024 * 1024) {
-              toast({ title: "Error", description: "File too large (Max 5MB)", variant: "destructive" });
+              toast({ title: "Error", description: "File too large (maximum 5MB)", variant: "destructive" });
+              try { e.target.value = ''; } catch (_) {}
               return;
           }
           setFile(f);
@@ -74,7 +80,7 @@ const UploadKYCDocuments = ({ vendorId, onSuccess }) => {
                       <span className="text-sm font-medium text-gray-600">
                           {file ? file.name : "Click to select file"}
                       </span>
-                      <span className="text-xs text-gray-400">Max 5MB (PDF, JPG, PNG)</span>
+                      <span className="text-xs text-gray-400">Min 2KB, max 5MB (PDF, JPG, PNG)</span>
                   </div>
               </Label>
           </div>

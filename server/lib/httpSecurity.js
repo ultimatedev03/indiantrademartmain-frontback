@@ -4,6 +4,8 @@ export const CONTENT_SECURITY_POLICY = [
   "object-src 'none'",
   "frame-ancestors 'self'",
   "form-action 'self'",
+  "require-trusted-types-for 'script'",
+  "trusted-types default react-dom",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://checkout.razorpay.com https://challenges.cloudflare.com https://www.googletagmanager.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob: https: https://www.google-analytics.com",
@@ -33,6 +35,9 @@ export const PERMISSIONS_POLICY = [
 
 export const SECURITY_HEADERS = {
   'Content-Security-Policy': CONTENT_SECURITY_POLICY,
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Resource-Policy': 'same-site',
+  'Origin-Agent-Cluster': '?1',
   'Permissions-Policy': PERMISSIONS_POLICY,
   'Strict-Transport-Security': STRICT_TRANSPORT_SECURITY,
   'X-Frame-Options': 'SAMEORIGIN',

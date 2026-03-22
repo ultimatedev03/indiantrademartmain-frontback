@@ -72,7 +72,12 @@ const Header = () => {
             <div className="md:hidden">
               <Sheet>
                 <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="text-gray-300 hover:text-white">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-gray-300 hover:text-white"
+                    aria-label="Open navigation menu"
+                  >
                     <Menu className="h-6 w-6" />
                   </Button>
                 </SheetTrigger>
@@ -142,7 +147,12 @@ const Header = () => {
           
           {/* Desktop Actions */}
           <div className="flex items-center gap-2 sm:gap-4">
-             <Link to="/directory/search" className="text-gray-400 hover:text-white transition-colors p-2">
+             <Link
+               to="/directory/search"
+               className="text-gray-400 hover:text-white transition-colors p-2"
+               aria-label="Search products and suppliers"
+               title="Search"
+             >
                 <Search className="w-5 h-5" />
              </Link>
             
@@ -163,7 +173,13 @@ const Header = () => {
                          Dashboard
                       </Button>
                    </Link>
-                   <Button variant="ghost" size="sm" onClick={handleLogout} className="text-gray-300 hover:text-white hover:bg-slate-800">
+                   <Button
+                     variant="ghost"
+                     size="sm"
+                     onClick={handleLogout}
+                     className="text-gray-300 hover:text-white hover:bg-slate-800"
+                     aria-label="Log out"
+                   >
                       <LogOut className="w-4 h-4" />
                    </Button>
                 </div>
