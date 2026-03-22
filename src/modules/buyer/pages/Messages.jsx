@@ -97,8 +97,17 @@ const resolveVendorCompany = (row) =>
   row?.vendor_name ||
   '';
 
+const normalizeVerificationLabel = (value) => {
+  const badge = String(value || '').trim();
+  if (!badge) return '';
+  const normalized = badge.toLowerCase();
+  if (normalized === 'true') return 'Verified';
+  if (normalized === 'false') return 'Unverified';
+  return badge;
+};
+
 const resolveVendorVerificationLabel = (row) => {
-  const badge = String(row?.vendors?.verification_badge || '').trim();
+  const badge = normalizeVerificationLabel(row?.vendors?.verification_badge);
   if (badge) return badge;
   const kycStatus = String(row?.vendors?.kyc_status || '').trim().toUpperCase();
   if (row?.vendors?.is_verified === true || kycStatus === 'APPROVED') {
@@ -108,8 +117,10 @@ const resolveVendorVerificationLabel = (row) => {
 };
 
 const isVendorVerified = (row) => {
-  const badge = String(row?.vendors?.verification_badge || '').trim().toLowerCase();
-  if (badge && badge !== 'unverified') return true;
+  const badge = normalizeVerificationLabel(row?.vendors?.verification_badge).toLowerCase();
+  if (badge === 'verified') return true;
+  if (badge === 'unverified') return false;
+  if (badge) return true;
   const kycStatus = String(row?.vendors?.kyc_status || '').trim().toUpperCase();
   return row?.vendors?.is_verified === true || kycStatus === 'APPROVED';
 };

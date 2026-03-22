@@ -9,8 +9,6 @@ import { buyerApi } from '@/modules/buyer/services/buyerApi';
 import { toast } from '@/components/ui/use-toast';
 import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
 import { StateDropdown, CityDropdown } from '@/shared/components/LocationSelectors';
-import TurnstileField from '@/shared/components/TurnstileField';
-import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import {
   ArrowLeft,
   Building2,
@@ -41,7 +39,6 @@ const formatVendorSearchLabel = (vendor = {}) => {
 
 const CreateProposal = () => {
   const navigate = useNavigate();
-  const proposalCaptcha = useCaptchaGate();
   const [searchParams] = useSearchParams();
   const vendorId = normalizeText(searchParams.get('vendorId') || searchParams.get('vendor_id')) || null;
   const vendorName = normalizeText(searchParams.get('vendorName') || searchParams.get('vendor_name'));
@@ -271,16 +268,6 @@ const CreateProposal = () => {
       return;
     }
 
-    const captchaError = proposalCaptcha.getCaptchaError();
-    if (captchaError) {
-      toast({
-        title: 'Captcha Required',
-        description: captchaError,
-        variant: 'destructive',
-      });
-      return;
-    }
-
     const effectiveVendor = selectedVendor || null;
     const location = [cityName, stateName].filter(Boolean).join(', ');
 
@@ -307,8 +294,6 @@ const CreateProposal = () => {
         city_id: normalizeText(formData.city_id),
         pincode,
         description,
-        captcha_token: proposalCaptcha.captchaToken,
-        captcha_action: 'lead_submit',
       });
 
       toast({
@@ -549,12 +534,6 @@ const CreateProposal = () => {
                 onChange={(event) => handleChange('description', event.target.value)}
               />
             </div>
-
-            <TurnstileField
-              action="lead_submit"
-              resetKey={proposalCaptcha.captchaResetKey}
-              onTokenChange={proposalCaptcha.setCaptchaToken}
-            />
 
             <div className="flex justify-end gap-2 pt-1">
               <Button type="button" variant="outline" onClick={() => navigate(-1)}>

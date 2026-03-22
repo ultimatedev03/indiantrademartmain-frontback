@@ -174,6 +174,12 @@ const Proposals = () => {
         if (!best) return p;
         return { ...p, __replyTo: best };
       });
+      const vendorQuoteByReplyId = new Map();
+      attachReplyInfo.forEach((row) => {
+        const replyRowId = String(row?.__replyTo?.__rowId || '').trim();
+        if (!replyRowId || row?.__type !== 'QUOTATION' || vendorQuoteByReplyId.has(replyRowId)) return;
+        vendorQuoteByReplyId.set(replyRowId, row);
+      });
 
       const merged = [...attachReplyInfo, ...normalizedLeads].sort((a, b) => {
         const da = new Date(a.__createdAt || 0).getTime();
@@ -181,7 +187,12 @@ const Proposals = () => {
         return db - da;
       });
 
-      setItems(merged || []);
+      const mergedWithQuoteLinks = merged.map((row) => ({
+        ...row,
+        __vendorQuote: row.__type === 'QUOTATION' ? row : vendorQuoteByReplyId.get(row.__rowId) || null,
+      }));
+
+      setItems(mergedWithQuoteLinks || []);
       if (proposalsRes.status === 'rejected' && leadsRes.status === 'rejected') {
         toast({ title: 'Error', description: 'Failed to load your enquiries/proposals', variant: 'destructive' });
       }
@@ -291,6 +302,8 @@ const Proposals = () => {
               'Item';
 
             const typeBadge = getBadge(kind);
+            const ownQuotePath = kind === 'REQUEST' ? `/buyer/proposals/${item.id}` : null;
+            const vendorQuotePath = item?.__vendorQuote?.id ? `/buyer/proposals/${item.__vendorQuote.id}` : null;
 
             const actionRight =
               kind === 'QUOTATION'
@@ -311,15 +324,49 @@ const Proposals = () => {
 
                     <Link to={`/buyer/proposals/${item.id}`}>
                       <Button variant="outline" size="sm">
-                        View Quotation
+                        Vendor Quote
                       </Button>
                     </Link>
                   </div>
                 )
+                : kind === 'REQUEST'
+                  ? (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                      <Link to={ownQuotePath}>
+                        <Button variant="outline" size="sm">
+                          Your Quote
+                        </Button>
+                      </Link>
+                      {vendorQuotePath ? (
+                        <Link to={vendorQuotePath}>
+                          <Button variant="outline" size="sm">
+                            Vendor Quote
+                          </Button>
+                        </Link>
+                      ) : (
+                        <Button variant="outline" size="sm" disabled>
+                          Vendor Quote
+                        </Button>
+                      )}
+                    </div>
+                  )
                 : (
-                  <Button variant="outline" size="sm" disabled>
-                    View Quotes
-                  </Button>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <Button variant="outline" size="sm" disabled>
+                      Your Enquiry
+                    </Button>
+                    {vendorQuotePath ? (
+                      <Link to={vendorQuotePath}>
+                        <Button variant="outline" size="sm">
+                          Vendor Quote
+                        </Button>
+                      </Link>
+                    ) : (
+                      <Button variant="outline" size="sm" disabled>
+                        Vendor Quote
+                      </Button>
+                    )}
+                  </div>
                 );
 
             return (

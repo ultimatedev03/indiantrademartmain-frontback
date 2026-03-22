@@ -189,6 +189,143 @@ const generateVendorIdString = (ownerName = '', companyName = '', phone = '') =>
 
 // Convert camelCase -> snake_case
 const toSnake = (key) => key.replace(/([A-Z])/g, '_$1').toLowerCase().replace(/^_/, '');
+const normalizeLookupId = (value) => String(value ?? '').trim();
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuidLike = (value) => UUID_LIKE_RE.test(normalizeLookupId(value));
+
+const isReadableCategoryPath = (value) => {
+  const path = String(value || '').trim();
+  if (!path) return false;
+  const segments = path.split('>').map((segment) => segment.trim()).filter(Boolean);
+  if (!segments.length) return false;
+  return segments.some((segment) => /[a-z]/i.test(segment) && !isUuidLike(segment));
+};
+
+const buildCategoryPathFromLookups = (product = {}, lookup = {}) => {
+  const microId = normalizeLookupId(product?.micro_category_id);
+  const subId = normalizeLookupId(product?.sub_category_id);
+  const headId = normalizeLookupId(product?.head_category_id);
+
+  const micro = microId ? lookup?.microMap?.get(microId) || null : null;
+  const subFromMicro = micro?.sub_categories || null;
+  const sub = subId
+    ? lookup?.subMap?.get(subId) || subFromMicro || null
+    : subFromMicro || null;
+  const headFromMicro = subFromMicro?.head_categories || null;
+  const headFromSub = sub?.head_categories || null;
+  const head = headId
+    ? lookup?.headMap?.get(headId) || headFromMicro || headFromSub || null
+    : headFromMicro || headFromSub || null;
+
+  const parts = [head?.name, sub?.name, micro?.name]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  if (parts.length) return parts.join(' > ');
+
+  const fallbackPath = String(product?.category_path || '').trim();
+  if (isReadableCategoryPath(fallbackPath)) return fallbackPath;
+
+  return String(product?.category_other || '').trim();
+};
+
+const enrichProductsWithCategoryNames = async (rows = []) => {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return list;
+
+  try {
+    const microIds = new Set();
+    const subIds = new Set();
+    const headIds = new Set();
+
+    list.forEach((row) => {
+      const microId = normalizeLookupId(row?.micro_category_id);
+      const subId = normalizeLookupId(row?.sub_category_id);
+      const headId = normalizeLookupId(row?.head_category_id);
+      if (microId) microIds.add(microId);
+      if (subId) subIds.add(subId);
+      if (headId) headIds.add(headId);
+
+      const extras = Array.isArray(row?.extra_micro_categories) ? row.extra_micro_categories : [];
+      extras.forEach((item) => {
+        const extraId =
+          typeof item === 'string'
+            ? normalizeLookupId(item)
+            : normalizeLookupId(item?.id || item?.micro_category_id);
+        if (extraId) microIds.add(extraId);
+      });
+    });
+
+    const [microRes, subRes, headRes] = await Promise.all([
+      microIds.size
+        ? supabase
+            .from('micro_categories')
+            .select('id, name, sub_categories(id, name, head_categories(id, name))')
+            .in('id', Array.from(microIds))
+        : Promise.resolve({ data: [], error: null }),
+      subIds.size
+        ? supabase
+            .from('sub_categories')
+            .select('id, name, head_categories(id, name)')
+            .in('id', Array.from(subIds))
+        : Promise.resolve({ data: [], error: null }),
+      headIds.size
+        ? supabase
+            .from('head_categories')
+            .select('id, name')
+            .in('id', Array.from(headIds))
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+    if (microRes?.error) throw microRes.error;
+    if (subRes?.error) throw subRes.error;
+    if (headRes?.error) throw headRes.error;
+
+    const microMap = new Map(
+      (microRes?.data || []).map((row) => [normalizeLookupId(row?.id), row])
+    );
+    const subMap = new Map(
+      (subRes?.data || []).map((row) => [normalizeLookupId(row?.id), row])
+    );
+    const headMap = new Map(
+      (headRes?.data || []).map((row) => [normalizeLookupId(row?.id), row])
+    );
+
+    return list.map((row) => {
+      const derivedCategoryPath = buildCategoryPathFromLookups(row, { microMap, subMap, headMap });
+      const nextCategoryPath = derivedCategoryPath || String(row?.category_path || '').trim();
+      const extraMicroCategories = Array.isArray(row?.extra_micro_categories)
+        ? row.extra_micro_categories.map((item) => {
+            if (item && typeof item === 'object') {
+              const extraId = normalizeLookupId(item?.id || item?.micro_category_id);
+              const micro = extraId ? microMap.get(extraId) || null : null;
+              return {
+                ...item,
+                ...(extraId ? { id: extraId } : {}),
+                name: String(item?.name || micro?.name || extraId || '').trim() || null,
+              };
+            }
+
+            const extraId = normalizeLookupId(item);
+            const micro = extraId ? microMap.get(extraId) || null : null;
+            return micro?.name
+              ? { id: extraId, name: micro.name }
+              : item;
+          })
+        : row?.extra_micro_categories;
+
+      return {
+        ...row,
+        category_path: nextCategoryPath,
+        extra_micro_categories: extraMicroCategories,
+      };
+    });
+  } catch (error) {
+    console.warn('[vendorApi] product category enrichment failed:', error?.message || error);
+    return list;
+  }
+};
 
 // Calculate profile completion percentage based on filled fields
 const calculateProfileCompletion = (vendorData) => {
@@ -1744,7 +1881,7 @@ export const vendorApi = {
 
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return enrichProductsWithCategoryNames(data || []);
     },
 
     listByStatus: async (status = 'ACTIVE') => {
@@ -1756,7 +1893,7 @@ export const vendorApi = {
         .eq('status', status)
         .order('created_at', { ascending: false });
       if (error) throw error;
-      return data || [];
+      return enrichProductsWithCategoryNames(data || []);
     },
 
     get: async (id) => {
@@ -1768,7 +1905,8 @@ export const vendorApi = {
         .maybeSingle();
       if (error) throw error;
       if (!data) throw new Error('Product not found');
-      return data;
+      const [enriched] = await enrichProductsWithCategoryNames([data]);
+      return enriched || data;
     },
 
     create: async (productData) => {

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart, Wallet, User as UserIcon, RefreshCw, Ban, MapPin, FolderKanban, MessageSquare
+  BarChart, Wallet, User as UserIcon, RefreshCw, Ban, MapPin, FolderKanban, MessageSquare, Home
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
@@ -12,6 +12,7 @@ import { vendorApi } from '@/modules/vendor/services/vendorApi';
 import { useSubdomain } from '@/contexts/SubdomainContext';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { useGlobalInputSanitizer } from '@/shared/hooks/useGlobalInputSanitizer';
+import { getPublicSiteUrl } from '@/shared/lib/publicSite';
 
 import {
   DropdownMenu,
@@ -378,6 +379,13 @@ const PortalLayout = () => {
             </div>
 
             <div className="flex items-center gap-3 sm:gap-5">
+              <Button variant="outline" size="sm" asChild>
+                <a href={getPublicSiteUrl(window.location)}>
+                  <Home className="mr-2 h-4 w-4" />
+                  Home
+                </a>
+              </Button>
+
               <NotificationBell
                 userId={user?.user_id || user?.id || null}
                 userEmail={user?.email || null}

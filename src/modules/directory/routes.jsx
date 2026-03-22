@@ -35,6 +35,7 @@ const CustomerCare = lazy(() => import('@/modules/directory/pages/FooterPages').
 const Complaints = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Complaints })));
 const Jobs = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.Jobs })));
 const ContactPage = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.ContactPage })));
+const LinkToUs = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.LinkToUs })));
 const BuyLeads = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.BuyLeads })));
 const LearningCentre = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.LearningCentre })));
 const ProductsPage = lazy(() => import('@/modules/directory/pages/FooterPages').then((m) => ({ default: m.ProductsPage })));
@@ -113,6 +114,7 @@ export const DirectoryRoutes = () => {
         <Route path="complaints" element={<Complaints />} />
         <Route path="jobs" element={<Jobs />} />
         <Route path="contact" element={<ContactPage />} />
+        <Route path="link-to-us" element={<LinkToUs />} />
 
         {/* Toolkits */}
         <Route path="buyleads" element={<BuyLeads />} />

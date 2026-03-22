@@ -2,6 +2,7 @@ import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
+import { getAuthCookieNames, getCookie, normalizeEmail as normalizeAuthEmail, verifyAuthToken } from '../lib/auth.js';
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 120;
@@ -36,6 +37,33 @@ const parseBoolean = (value, fallback = false) => {
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const isValidEmail = (email) => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const parseBearerToken = (req) => {
+  const header = req.headers?.authorization || req.headers?.Authorization;
+  if (!header || typeof header !== 'string' || !header.startsWith('Bearer ')) return null;
+  return header.replace('Bearer ', '').trim();
+};
+
+const getOptionalAuthUser = (req) => {
+  try {
+    const { AUTH_COOKIE_NAME } = getAuthCookieNames();
+    const token = parseBearerToken(req) || getCookie(req, AUTH_COOKIE_NAME);
+    if (!token) return null;
+    const decoded = verifyAuthToken(token);
+    if (!decoded?.sub) return null;
+    return {
+      id: decoded.sub,
+      email: normalizeAuthEmail(decoded.email || ''),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const shouldBypassCaptcha = (req, email) => {
+  const authUser = getOptionalAuthUser(req);
+  return !!authUser?.email && authUser.email === normalizeEmail(email);
+};
 
 function generateOtp() {
   let otp = '';
@@ -246,11 +274,13 @@ const upsertOtpForEmail = async (email) => {
 // POST /api/otp/request - Request OTP
 router.post('/request', async (req, res) => {
   try {
-    await assertCaptchaForExpressRequest(req, { action: 'otp_request' });
-
     const email = normalizeEmail(req.body?.email);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (!shouldBypassCaptcha(req, email)) {
+      await assertCaptchaForExpressRequest(req, { action: 'otp_request' });
     }
 
     const { otp, expiresAt } = await upsertOtpForEmail(email);
@@ -318,11 +348,13 @@ router.post('/verify', async (req, res) => {
 // POST /api/otp/resend - Resend OTP
 router.post('/resend', async (req, res) => {
   try {
-    await assertCaptchaForExpressRequest(req, { action: 'otp_resend' });
-
     const email = normalizeEmail(req.body?.email);
     if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    if (!shouldBypassCaptcha(req, email)) {
+      await assertCaptchaForExpressRequest(req, { action: 'otp_resend' });
     }
 
     const { otp, expiresAt } = await upsertOtpForEmail(email);

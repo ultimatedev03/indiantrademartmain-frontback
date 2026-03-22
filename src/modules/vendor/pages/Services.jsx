@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -201,6 +202,7 @@ const planIcon = (name) => {
 };
 
 const Services = () => {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const [plans, setPlans] = useState([]);
   const [currentSub, setCurrentSub] = useState(null);
@@ -652,35 +654,7 @@ const Services = () => {
   };
 
   const buyLeads = async () => {
-    if (!vendorId) {
-      toast({ title: 'Error', description: 'Vendor ID not found', variant: 'destructive' });
-      return;
-    }
-
-    // ✅ Check if subscription is active and not expired
-    if (!isSubscriptionActive(currentSub)) {
-      toast({
-        title: 'No Active Subscription',
-        description: 'Please subscribe to a plan to purchase additional leads.',
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    if (window.confirm('Buy 10 additional leads for ₹1500?')) {
-      try {
-        await supabase.from('vendor_additional_leads').insert({
-          vendor_id: vendorId,
-          leads_purchased: 10,
-          leads_remaining: 10,
-          amount_paid: 1500,
-        });
-        toast({ title: 'Leads Purchased', description: '10 leads added to your account.' });
-        loadData();
-      } catch (e) {
-        toast({ title: 'Error', description: e.message, variant: 'destructive' });
-      }
-    }
+    navigate('/vendor/leads');
   };
 
   const openPlanDetails = (plan) => {
@@ -1073,7 +1047,7 @@ const Services = () => {
 
       {/* ✅ Plan Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="w-full sm:w-[86vw] md:w-[76vw] lg:w-[66vw] max-w-2xl md:max-w-[1100px] overflow-hidden p-0 pb-1 mx-auto">
+        <DialogContent className="mx-auto flex max-h-[90vh] w-[calc(100vw-1.5rem)] max-w-2xl flex-col overflow-hidden p-0 sm:w-[86vw] md:max-w-[1100px] md:w-[76vw] lg:w-[66vw]">
           {!selectedPlan ? null : (
             <>
               <DialogHeader className="pb-1 px-3 pt-3">
@@ -1150,7 +1124,7 @@ const Services = () => {
                 </div>
               </DialogHeader>
 
-              <div className="mt-2 px-3 pb-1 space-y-1.5">
+              <div className="mt-2 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
                 {/* lead limits */}
                 <div className="rounded-2xl border bg-slate-50 p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -1214,7 +1188,7 @@ const Services = () => {
                 </div>
               </div>
 
-              <DialogFooterUI className="mt-2 flex flex-col gap-2 px-3 pb-3">
+              <DialogFooterUI className="mt-0 flex flex-col gap-2 border-t bg-white px-3 py-3">
                 <div className="w-full rounded-2xl border bg-gradient-to-br from-slate-50 via-white to-slate-50 p-3 space-y-2.5 shadow-sm">
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 items-stretch">
                     <div className="rounded-2xl bg-white border px-3.5 py-3 shadow-inner space-y-2.5">
@@ -1317,6 +1291,13 @@ const Services = () => {
                   </div>
                 </div>
                 <div className="flex flex-col sm:flex-row gap-2 w-full">
+                  <Button
+                    variant="outline"
+                    className="w-full h-12"
+                    onClick={() => setDetailsOpen(false)}
+                  >
+                    Cancel
+                  </Button>
                   <Button
                     className={cx(
                       'w-full rounded-xl h-12 font-semibold text-base',

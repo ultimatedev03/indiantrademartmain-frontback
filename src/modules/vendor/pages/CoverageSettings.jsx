@@ -10,6 +10,7 @@ import { MapPin, Layers, X, Zap } from 'lucide-react';
 const TRIAL_PLAN_ID = '7fee24d0-de18-44d3-a357-be7b40492a1a';
 const TRIAL_DURATION_DAYS = 30;
 const DEFAULT_LIMITS = { states: 2, cities: 20, categories: 5 };
+const normalizeId = (value) => String(value ?? '').trim();
 
 const CoverageSettings = () => {
   const [vendorId, setVendorId] = useState(null);
@@ -133,9 +134,9 @@ const CoverageSettings = () => {
           .select('preferred_states, preferred_cities, preferred_micro_categories')
           .eq('vendor_id', vendorId)
           .maybeSingle();
-        const prefStates = prefs?.preferred_states || [];
-        const prefCities = prefs?.preferred_cities || [];
-        const prefCats = prefs?.preferred_micro_categories || [];
+        const prefStates = (prefs?.preferred_states || []).map((id) => normalizeId(id)).filter(Boolean);
+        const prefCities = (prefs?.preferred_cities || []).map((id) => normalizeId(id)).filter(Boolean);
+        const prefCats = (prefs?.preferred_micro_categories || []).map((id) => normalizeId(id)).filter(Boolean);
 
         // Trim if previous selection exceeds current plan limits
         if (prefStates.length > limits.states) {
@@ -161,17 +162,18 @@ const CoverageSettings = () => {
         setStates(stateList || []);
 
         // cities for selected states
-        const selectedStateIds = prefs?.preferred_states || [];
-        if (selectedStateIds.length) {
-          const { data: cities } = await supabase
-            .from('cities')
-            .select('id, name, state_id')
-            .in('state_id', selectedStateIds)
-            .eq('is_active', true);
+          const selectedStateIds = prefStates;
+          if (selectedStateIds.length) {
+            const { data: cities } = await supabase
+              .from('cities')
+              .select('id, name, state_id')
+              .in('state_id', selectedStateIds)
+              .eq('is_active', true);
           const grouped = {};
           (cities || []).forEach((c) => {
-            grouped[c.state_id] = grouped[c.state_id] || [];
-            grouped[c.state_id].push(c);
+            const stateKey = normalizeId(c?.state_id);
+            grouped[stateKey] = grouped[stateKey] || [];
+            grouped[stateKey].push(c);
           });
           setStateCities(grouped);
         }
@@ -210,32 +212,34 @@ const CoverageSettings = () => {
 
   // ---------- handlers ----------
   const addState = async (stateId) => {
-    if (!stateId) return;
-    if (selectedStates.includes(stateId)) return;
+    const normalizedStateId = normalizeId(stateId);
+    if (!normalizedStateId) return;
+    if (selectedStates.includes(normalizedStateId)) return;
     if (selectedStates.length >= coverageLimits.states) {
       toast({ title: 'Limit reached', description: `Max ${coverageLimits.states} states allowed in ${planName} plan.` });
       return;
     }
-    setSelectedStates((p) => [...p, stateId]);
-    if (!stateCities[stateId]) {
+    setSelectedStates((p) => [...p, normalizedStateId]);
+    if (!stateCities[normalizedStateId]) {
       const { data: cities } = await supabase
         .from('cities')
         .select('id, name, state_id')
-        .eq('state_id', stateId)
+        .eq('state_id', normalizedStateId)
         .eq('is_active', true)
         .order('name');
-      setStateCities((prev) => ({ ...prev, [stateId]: cities || [] }));
+      setStateCities((prev) => ({ ...prev, [normalizedStateId]: cities || [] }));
     }
   };
 
   const addCity = (cityId) => {
-    if (!cityId) return;
-    if (selectedCities.includes(cityId)) return;
+    const normalizedCityId = normalizeId(cityId);
+    if (!normalizedCityId) return;
+    if (selectedCities.includes(normalizedCityId)) return;
     if (selectedCities.length >= coverageLimits.cities) {
       toast({ title: 'Limit reached', description: `Max ${coverageLimits.cities} cities allowed in ${planName} plan.` });
       return;
     }
-    setSelectedCities((p) => [...p, cityId]);
+    setSelectedCities((p) => [...p, normalizedCityId]);
   };
 
   const saveCoverage = async () => {
@@ -520,11 +524,11 @@ const CoverageSettings = () => {
             </select>
             <div className="flex flex-wrap gap-2 mt-2">
               {selectedStates.map((sid) => {
-                const st = states.find((s) => s.id === sid);
+                const st = states.find((s) => normalizeId(s?.id) === normalizeId(sid));
                 return (
                   <Badge key={sid} variant="secondary" className="px-3 py-1 flex items-center gap-1">
-                    {st?.name || sid}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectedStates((p) => p.filter((id) => id !== sid))} />
+                    {st?.name || 'Unknown state'}
+                    <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectedStates((p) => p.filter((id) => normalizeId(id) !== normalizeId(sid)))} />
                   </Badge>
                 );
               })}
@@ -543,17 +547,17 @@ const CoverageSettings = () => {
               disabled={coverageLimits.cities === 0 || selectedCities.length >= coverageLimits.cities || selectedStates.length === 0}
             >
               <option value="">Select a city</option>
-              {selectedStates.flatMap((sid) => stateCities[sid] || []).map((city) => (
+              {selectedStates.flatMap((sid) => stateCities[normalizeId(sid)] || []).map((city) => (
                 <option key={city.id} value={city.id}>{city.name}</option>
               ))}
             </select>
             <div className="flex flex-wrap gap-2 mt-2">
               {selectedCities.map((cid) => {
-                const city = Object.values(stateCities).flat().find((c) => c.id === cid);
+                const city = Object.values(stateCities).flat().find((c) => normalizeId(c?.id) === normalizeId(cid));
                 return (
                   <Badge key={cid} variant="outline" className="px-3 py-1 flex items-center gap-1">
-                    {city?.name || cid}
-                    <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectedCities((p) => p.filter((id) => id !== cid))} />
+                    {city?.name || 'Loading city...'}
+                    <X className="w-3 h-3 cursor-pointer" onClick={() => setSelectedCities((p) => p.filter((id) => normalizeId(id) !== normalizeId(cid)))} />
                   </Badge>
                 );
               })}

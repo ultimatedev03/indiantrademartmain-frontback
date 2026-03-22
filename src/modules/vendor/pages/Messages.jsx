@@ -21,6 +21,7 @@ import { apiUrl } from '@/lib/apiBase';
 import { supabase } from '@/lib/customSupabaseClient';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
+import { useLocation } from 'react-router-dom';
 
 const safeDate = (value) => {
   if (!value) return '';
@@ -580,6 +581,7 @@ const normalizeChatBlockStatus = (value) => {
 };
 
 const Messages = () => {
+  const location = useLocation();
   const { portalPresenceByUserId } = useAuth();
   const { toast } = useToast();
   const [conversations, setConversations] = useState([]);
@@ -610,11 +612,25 @@ const Messages = () => {
   const presenceChannelRef = useRef(null);
   const typingTimerRef = useRef(null);
   const typingStateRef = useRef(false);
+  const focusProposalId = String(location.state?.focusProposalId || '').trim();
 
   const selectedChat = useMemo(
     () => conversations.find((item) => item.id === selectedChatId) || null,
     [conversations, selectedChatId]
   );
+  useEffect(() => {
+    if (!focusProposalId || !conversations.length) return;
+
+    const targetConversation = conversations.find((chat) => {
+      if (String(chat?.id || '').trim() === focusProposalId) return true;
+      return Array.isArray(chat?.proposal_ids) && chat.proposal_ids.some((id) => String(id || '').trim() === focusProposalId);
+    });
+
+    if (targetConversation?.id) {
+      setSelectedChatId(targetConversation.id);
+    }
+  }, [conversations, focusProposalId]);
+
   const selectedBuyerIdentity = useMemo(() => {
     const proposalId = String(selectedChatId || '').trim();
     if (!proposalId) return null;

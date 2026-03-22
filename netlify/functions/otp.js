@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
 import { assertCaptchaForNetlifyEvent } from "../../server/lib/captcha.js";
 
@@ -120,6 +121,79 @@ const parseRequestBody = (event) => {
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
+const parseCookies = (cookieHeader = "") => {
+  const out = {};
+  if (!cookieHeader || typeof cookieHeader !== "string") return out;
+  cookieHeader.split(";").forEach((part) => {
+    const idx = part.indexOf("=");
+    if (idx < 0) return;
+    const key = decodeURIComponent(part.slice(0, idx).trim());
+    const value = decodeURIComponent(part.slice(idx + 1).trim());
+    if (key) out[key] = value;
+  });
+  return out;
+};
+
+const getCookie = (event, name) => {
+  const header = event?.headers?.cookie || event?.headers?.Cookie || "";
+  const cookies = parseCookies(header);
+  return cookies[name];
+};
+
+const parseBearerToken = (headers = {}) => {
+  const header = headers.Authorization || headers.authorization;
+  if (!header || typeof header !== "string" || !header.startsWith("Bearer ")) return null;
+  return header.replace("Bearer ", "").trim();
+};
+
+let warnedMissingJwtSecret = false;
+const getJwtSecret = () => {
+  const secret =
+    process.env.JWT_SECRET ||
+    process.env.SUPABASE_JWT_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!secret) {
+    throw new Error("Missing JWT_SECRET (or fallback secret) in environment");
+  }
+
+  if (!process.env.JWT_SECRET && !warnedMissingJwtSecret) {
+    console.warn("[otp function] JWT_SECRET missing. Falling back to another secret. Configure a dedicated JWT_SECRET.");
+    warnedMissingJwtSecret = true;
+  }
+
+  return secret;
+};
+
+const verifyAuthToken = (token) => {
+  try {
+    return jwt.verify(token, getJwtSecret());
+  } catch {
+    return null;
+  }
+};
+
+const getOptionalAuthUser = (event) => {
+  try {
+    const authCookieName = process.env.AUTH_COOKIE_NAME || "itm_access";
+    const token = parseBearerToken(event?.headers || {}) || getCookie(event, authCookieName);
+    if (!token) return null;
+    const decoded = verifyAuthToken(token);
+    if (!decoded?.sub) return null;
+    return {
+      id: decoded.sub,
+      email: normalizeEmail(decoded.email || ""),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const shouldBypassCaptcha = (event, email) => {
+  const authUser = getOptionalAuthUser(event);
+  return !!authUser?.email && authUser.email === normalizeEmail(email);
+};
+
 function generateOtp() {
   let otp = "";
   for (let i = 0; i < 6; i++) otp += Math.floor(Math.random() * 10);
@@ -208,14 +282,16 @@ export const handler = async (event) => {
     const body = parseRequestBody(event);
 
     if (action === "request" || action === "resend") {
-      await assertCaptchaForNetlifyEvent(event, body, {
-        action: action === "resend" ? "otp_resend" : "otp_request"
-      });
-
       const email = normalizeEmail(body?.email);
 
       if (!isValidEmail(email)) {
         return { statusCode: 400, body: JSON.stringify({ error: "Invalid email format" }) };
+      }
+
+      if (!shouldBypassCaptcha(event, email)) {
+        await assertCaptchaForNetlifyEvent(event, body, {
+          action: action === "resend" ? "otp_resend" : "otp_request"
+        });
       }
 
       const otp = generateOtp();

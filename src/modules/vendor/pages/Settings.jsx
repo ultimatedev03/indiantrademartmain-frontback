@@ -10,11 +10,8 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from '@/lib/passwordPolicy';
-import TurnstileField from '@/shared/components/TurnstileField';
-import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const VendorSettings = () => {
-  const otpCaptcha = useCaptchaGate();
   const [passwords, setPasswords] = useState({
     newPassword: '',
     confirmPassword: ''
@@ -62,23 +59,12 @@ const VendorSettings = () => {
       return;
     }
 
-    const captchaError = otpCaptcha.getCaptchaError();
-    if (captchaError) {
-      toast({ title: 'Captcha Required', description: captchaError, variant: 'destructive' });
-      return;
-    }
-
     setSendingOtp(true);
     try {
-      await otpService.requestOtp(userEmail, {
-        captcha_token: otpCaptcha.captchaToken,
-        captcha_action: 'otp_request',
-      });
+      await otpService.requestOtp(userEmail);
       setOtpSent(true);
-      otpCaptcha.resetCaptcha();
       toast({ title: "OTP sent", description: `Code sent to ${userEmail}` });
     } catch (e) {
-      otpCaptcha.resetCaptcha();
       toast({ title: "Failed to send OTP", description: e?.message || "Try again", variant: "destructive" });
     } finally {
       setSendingOtp(false);
@@ -169,11 +155,6 @@ const VendorSettings = () => {
                   {otpSent ? 'Resend OTP' : 'Send OTP'}
                 </Button>
               </div>
-              <TurnstileField
-                action="otp_request"
-                resetKey={otpCaptcha.captchaResetKey}
-                onTokenChange={otpCaptcha.setCaptchaToken}
-              />
               <Input
                 type="text"
                 inputMode="numeric"

@@ -449,6 +449,13 @@ const LeadDetail = () => {
   const isDirect = String(lead?.__source || '').toLowerCase() === 'direct';
   const purchasedAt = isPurchased ? safeDate(lead?.__purchaseDate) : null;
   const purchasedAtLabel = purchasedAt ? formatDateTime(purchasedAt) : null;
+  const isRegisteredBuyer = Boolean(
+    lead?.buyer_id ||
+    lead?.buyer_user_id ||
+    lead?.buyers?.id ||
+    lead?.buyers?.user_id ||
+    lead?.proposal_id
+  );
 
   const logContactSafe = async (type) => {
     try {
@@ -511,12 +518,19 @@ const LeadDetail = () => {
     navigate('/vendor/proposals/send', { state: { prefill } });
   };
 
-  const handleCallNow = async () => {
-    const ok = await logContactSafe('CALL');
-    if (!ok) return;
-    if (meta?.buyer?.phone) {
-      window.location.href = `tel:${meta.buyer.phone}`;
+  const handleOpenChat = () => {
+    if (!isRegisteredBuyer || !lead?.proposal_id) {
+      toast({
+        title: 'Chat unavailable',
+        description: 'Chat is available only for registered buyers with an active conversation thread.',
+        variant: 'destructive',
+      });
+      return;
     }
+
+    navigate('/vendor/messages', {
+      state: { focusProposalId: String(lead.proposal_id) },
+    });
   };
 
   const handleSaveLeadStatus = async () => {
@@ -815,13 +829,13 @@ const LeadDetail = () => {
               ) : null}
 
               <div className="pt-3 border-t border-green-200 flex flex-wrap gap-2">
-                {meta.buyer.phone ? (
+                {isRegisteredBuyer && lead?.proposal_id ? (
                   <Button
                     size="sm"
                     className="bg-green-600 hover:bg-green-700"
-                    onClick={handleCallNow}
+                    onClick={handleOpenChat}
                   >
-                    Call Now
+                    Chat
                   </Button>
                 ) : null}
 

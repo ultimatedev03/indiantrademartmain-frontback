@@ -20,6 +20,7 @@ import {
   Heart,
   Loader,
   Mail,
+  Link2,
   MapPin,
   Phone,
   Rocket,
@@ -817,6 +818,67 @@ export const ContactPage = () => {
     </FooterPageShell>
   );
 };
+
+// ==================== LINK TO US PAGE ====================
+export const LinkToUs = () => (
+  <FooterPageShell
+    eyebrow="Partnership Links"
+    title="Link to Indian Trade Mart"
+    description="Use these linking guidelines if you want to reference Indian Trade Mart from your website, blog, partner portal, or supplier resource page."
+    stats={[
+      { label: 'Preferred target', value: 'Homepage' },
+      { label: 'Suggested text', value: 'Indian Trade Mart' },
+      { label: 'Use case', value: 'SEO + referrals' },
+      { label: 'Link type', value: 'Direct' },
+    ]}
+    aside={(
+      <div className="space-y-4">
+        <Link2 className="h-8 w-8 text-blue-200" />
+        <p className="text-xl font-semibold text-white">Give visitors a clear route to the marketplace.</p>
+        <p className="text-sm leading-6 text-slate-300">
+          Link to the homepage or a relevant category page when you want buyers and suppliers to discover Indian Trade Mart through your content.
+        </p>
+      </div>
+    )}
+  >
+    <div className="grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+      <FooterPageSection
+        title="Recommended linking options"
+        description="Use simple, descriptive anchor text and route visitors to the most relevant public page."
+      >
+        <div className="grid gap-4 md:grid-cols-2">
+          <FooterPageCard className="space-y-3 bg-white">
+            <h3 className="text-lg font-semibold text-slate-950">Homepage link</h3>
+            <p className="text-sm leading-6 text-slate-600">Best for general references, directory roundups, and marketplace mentions.</p>
+            <code className="block rounded-xl bg-slate-950 px-4 py-3 text-xs text-slate-100">https://indiantrademart.com/</code>
+          </FooterPageCard>
+          <FooterPageCard className="space-y-3 bg-white">
+            <h3 className="text-lg font-semibold text-slate-950">Supplier discovery link</h3>
+            <p className="text-sm leading-6 text-slate-600">Use this when your audience specifically wants to browse sellers and compare suppliers.</p>
+            <code className="block rounded-xl bg-slate-950 px-4 py-3 text-xs text-slate-100">https://indiantrademart.com/directory/vendor</code>
+          </FooterPageCard>
+        </div>
+      </FooterPageSection>
+
+      <FooterPageSection
+        title="Suggested anchor text"
+        description="Keep anchor text natural, relevant, and easy to understand."
+      >
+        <FooterPageBulletList
+          items={[
+            'Indian Trade Mart',
+            'Find suppliers on Indian Trade Mart',
+            'Explore B2B products and vendors',
+            'Browse Indian Trade Mart marketplace listings',
+          ]}
+        />
+        <div className="mt-6">
+          <FooterPageAction to="/contact" variant="secondary">Request partnership support</FooterPageAction>
+        </div>
+      </FooterPageSection>
+    </div>
+  </FooterPageShell>
+);
 
 // ==================== BUY LEADS PAGE ====================
 export const BuyLeads = () => (
