@@ -223,7 +223,7 @@ const VendorRegister = () => {
     const captchaError = requestOtpCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: requestOtpCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
@@ -346,7 +346,7 @@ const VendorRegister = () => {
     const captchaError = resendOtpCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: resendOtpCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
@@ -550,6 +550,7 @@ const VendorRegister = () => {
 
               <TurnstileField
                 action="otp_request"
+                onStatusChange={requestOtpCaptcha.setCaptchaStatus}
                 resetKey={requestOtpCaptcha.captchaResetKey}
                 onTokenChange={requestOtpCaptcha.setCaptchaToken}
               />
@@ -597,6 +598,7 @@ const VendorRegister = () => {
 
               <TurnstileField
                 action="otp_resend"
+                onStatusChange={resendOtpCaptcha.setCaptchaStatus}
                 resetKey={resendOtpCaptcha.captchaResetKey}
                 onTokenChange={resendOtpCaptcha.setCaptchaToken}
               />

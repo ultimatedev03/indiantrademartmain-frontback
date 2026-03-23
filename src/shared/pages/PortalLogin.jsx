@@ -111,7 +111,7 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
       }
     } catch (err) {
       console.error(err);
-      setError('System error. Please try again.');
+      setError(err?.message || 'System error. Please try again.');
       loginCaptcha.resetCaptcha();
     } finally {
       setIsLoading(false);
@@ -199,6 +199,7 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
 
             <TurnstileField
               action="auth_login"
+              onStatusChange={loginCaptcha.setCaptchaStatus}
               resetKey={loginCaptcha.captchaResetKey}
               onTokenChange={loginCaptcha.setCaptchaToken}
             />

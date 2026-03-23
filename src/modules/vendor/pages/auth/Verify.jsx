@@ -23,6 +23,8 @@ const Verify = () => {
   const setCaptchaToken = otpCaptcha.setCaptchaToken;
   const resetCaptcha = otpCaptcha.resetCaptcha;
   const getCaptchaError = otpCaptcha.getCaptchaError;
+  const getCaptchaErrorTitle = otpCaptcha.getCaptchaErrorTitle;
+  const setCaptchaStatus = otpCaptcha.setCaptchaStatus;
 
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
@@ -237,7 +239,7 @@ const Verify = () => {
     const captchaError = getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive'
       });
@@ -336,6 +338,7 @@ const Verify = () => {
 
             <TurnstileField
               action="otp_resend"
+              onStatusChange={setCaptchaStatus}
               resetKey={captchaResetKey}
               onTokenChange={setCaptchaToken}
             />

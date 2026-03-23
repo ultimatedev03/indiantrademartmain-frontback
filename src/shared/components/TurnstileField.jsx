@@ -1,14 +1,52 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
+  CAPTCHA_STATUS,
   TURNSTILE_SITE_KEY,
+  canRetryCaptcha,
+  getCaptchaStatusMessage,
+  getInitialCaptchaStatus,
   isCaptchaConfigured,
   isCaptchaDevBypass,
+  getCaptchaValidationTitle,
 } from '@/shared/lib/captcha';
 
 const TURNSTILE_SCRIPT_SRC = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+const TURNSTILE_SCRIPT_SELECTOR = 'script[data-turnstile-script="true"]';
+const TURNSTILE_LOAD_TIMEOUT_MS = 10000;
 
 let turnstileScriptPromise = null;
+
+const findTurnstileScript = () =>
+  document.querySelector(
+    `${TURNSTILE_SCRIPT_SELECTOR}, script[src="${TURNSTILE_SCRIPT_SRC}"]`
+  );
+
+const waitForTurnstile = (timeoutMs = TURNSTILE_LOAD_TIMEOUT_MS) =>
+  new Promise((resolve, reject) => {
+    if (window.turnstile?.render) {
+      resolve(window.turnstile);
+      return;
+    }
+
+    const startedAt = Date.now();
+
+    const check = () => {
+      if (window.turnstile?.render) {
+        resolve(window.turnstile);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        reject(new Error('Turnstile did not initialize.'));
+        return;
+      }
+
+      window.setTimeout(check, 100);
+    };
+
+    check();
+  });
 
 const loadTurnstileScript = () => {
   if (typeof window === 'undefined') {
@@ -21,38 +59,45 @@ const loadTurnstileScript = () => {
 
   if (!turnstileScriptPromise) {
     turnstileScriptPromise = new Promise((resolve, reject) => {
-      const existingScript = document.querySelector(`script[src="${TURNSTILE_SCRIPT_SRC}"]`);
+      let existingScript = findTurnstileScript();
 
-      if (existingScript) {
-        existingScript.addEventListener('load', () => resolve(window.turnstile), { once: true });
-        existingScript.addEventListener('error', () => reject(new Error('Failed to load Turnstile.')), { once: true });
-        return;
-      }
+      const fail = (error) => {
+        turnstileScriptPromise = null;
+        reject(error);
+      };
 
-      const script = document.createElement('script');
-      script.src = TURNSTILE_SCRIPT_SRC;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
-        if (window.turnstile?.render) {
-          resolve(window.turnstile);
+      if (!existingScript) {
+        const script = document.createElement('script');
+        script.src = TURNSTILE_SCRIPT_SRC;
+        script.async = true;
+        script.defer = true;
+        script.dataset.turnstileScript = 'true';
+
+        try {
+          document.head.appendChild(script);
+          existingScript = script;
+        } catch (error) {
+          fail(new Error('Captcha script was blocked before it could load.'));
           return;
         }
-        reject(new Error('Turnstile did not initialize.'));
-      };
-      script.onerror = () => reject(new Error('Failed to load Turnstile.'));
-      document.head.appendChild(script);
+      }
+
+      const handleError = () => fail(new Error('Failed to load Turnstile.'));
+      existingScript.addEventListener('error', handleError, { once: true });
+
+      waitForTurnstile()
+        .then((turnstile) => {
+          existingScript?.removeEventListener('error', handleError);
+          resolve(turnstile);
+        })
+        .catch((error) => {
+          existingScript?.removeEventListener('error', handleError);
+          fail(error instanceof Error ? error : new Error('Failed to load Turnstile.'));
+        });
     });
   }
 
   return turnstileScriptPromise;
-};
-
-const getStatusMessage = (status) => {
-  if (status === 'expired') return 'Captcha expired. Please complete it again.';
-  if (status === 'error') return 'Captcha could not load. Please refresh and try again.';
-  if (status === 'timeout') return 'Captcha timed out. Start the security check again.';
-  return '';
 };
 
 const TurnstileField = ({
@@ -61,6 +106,7 @@ const TurnstileField = ({
   className,
   execution = 'render',
   onTokenChange,
+  onStatusChange,
   onWidgetReady,
   refreshExpired = 'auto',
   refreshTimeout = 'auto',
@@ -70,25 +116,28 @@ const TurnstileField = ({
   const containerRef = useRef(null);
   const widgetIdRef = useRef(null);
   const canAcceptTokenRef = useRef(execution !== 'execute');
-  const [status, setStatus] = useState(() => {
-    if (isCaptchaDevBypass()) return 'dev_bypass';
-    if (!isCaptchaConfigured()) return 'unavailable';
-    return 'idle';
-  });
+  const [status, setStatus] = useState(() => getInitialCaptchaStatus());
+  const [retryKey, setRetryKey] = useState(0);
+
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [onStatusChange, status]);
 
   useEffect(() => {
     if (!isCaptchaConfigured()) {
       onTokenChange?.('');
       onWidgetReady?.(null);
+      setStatus(CAPTCHA_STATUS.UNAVAILABLE);
       return undefined;
     }
 
     let active = true;
+    const nextStatusAfterRender = CAPTCHA_STATUS.IDLE;
 
     const renderWidget = async () => {
       canAcceptTokenRef.current = execution !== 'execute';
       onTokenChange?.('');
-      setStatus('loading');
+      setStatus(CAPTCHA_STATUS.LOADING);
 
       try {
         const turnstile = await loadTurnstileScript();
@@ -106,30 +155,30 @@ const TurnstileField = ({
           callback: (token) => {
             if (!active) return;
             if (execution === 'execute' && !canAcceptTokenRef.current) {
-              setStatus('idle');
+              setStatus(CAPTCHA_STATUS.IDLE);
               onTokenChange?.('');
               return;
             }
             canAcceptTokenRef.current = execution !== 'execute';
-            setStatus('ready');
+            setStatus(CAPTCHA_STATUS.READY);
             onTokenChange?.(token || '');
           },
           'expired-callback': () => {
             if (!active) return;
             canAcceptTokenRef.current = execution !== 'execute';
-            setStatus('expired');
+            setStatus(CAPTCHA_STATUS.EXPIRED);
             onTokenChange?.('');
           },
           'error-callback': () => {
             if (!active) return;
             canAcceptTokenRef.current = execution !== 'execute';
-            setStatus('error');
+            setStatus(CAPTCHA_STATUS.ERROR);
             onTokenChange?.('');
           },
           'timeout-callback': () => {
             if (!active) return;
             canAcceptTokenRef.current = execution !== 'execute';
-            setStatus('timeout');
+            setStatus(CAPTCHA_STATUS.TIMEOUT);
             onTokenChange?.('');
           },
         });
@@ -139,7 +188,7 @@ const TurnstileField = ({
             if (widgetIdRef.current === null || !window.turnstile?.execute) return false;
             canAcceptTokenRef.current = true;
             onTokenChange?.('');
-            setStatus('loading');
+            setStatus(CAPTCHA_STATUS.LOADING);
             if (window.turnstile?.reset) {
               window.turnstile.reset(widgetIdRef.current);
             }
@@ -150,18 +199,16 @@ const TurnstileField = ({
             if (widgetIdRef.current === null || !window.turnstile?.reset) return false;
             canAcceptTokenRef.current = execution !== 'execute';
             onTokenChange?.('');
-            setStatus('idle');
+            setStatus(CAPTCHA_STATUS.IDLE);
             window.turnstile.reset(widgetIdRef.current);
             return true;
           },
         });
 
-        if (execution === 'execute') {
-          setStatus('idle');
-        }
+        setStatus(nextStatusAfterRender);
       } catch (error) {
         if (!active) return;
-        setStatus('error');
+        setStatus(CAPTCHA_STATUS.ERROR);
         onTokenChange?.('');
       }
     };
@@ -176,7 +223,26 @@ const TurnstileField = ({
       }
       onWidgetReady?.(null);
     };
-  }, [action, appearance, execution, onTokenChange, onWidgetReady, refreshExpired, refreshTimeout, resetKey, retry]);
+  }, [
+    action,
+    appearance,
+    execution,
+    onTokenChange,
+    onWidgetReady,
+    refreshExpired,
+    refreshTimeout,
+    resetKey,
+    retry,
+    retryKey,
+  ]);
+
+  const handleRetry = () => {
+    turnstileScriptPromise = null;
+    onTokenChange?.('');
+    onWidgetReady?.(null);
+    setStatus(CAPTCHA_STATUS.LOADING);
+    setRetryKey((prev) => prev + 1);
+  };
 
   if (isCaptchaDevBypass()) {
     return (
@@ -188,18 +254,39 @@ const TurnstileField = ({
 
   if (!isCaptchaConfigured()) {
     return (
-      <div className={cn('rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700', className)}>
-        Captcha is unavailable in this environment. Configure `VITE_TURNSTILE_SITE_KEY` to enable it.
+      <div className={cn('flex w-full flex-col items-center space-y-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700', className)}>
+        <p className="text-center">Captcha failed to load. Use Reload CAPTCHA to try again.</p>
+        <button
+          type="button"
+          onClick={handleRetry}
+          className="font-medium text-blue-600 transition-colors hover:text-blue-800"
+        >
+          Reload CAPTCHA
+        </button>
       </div>
     );
   }
 
-  const statusMessage = getStatusMessage(status);
+  const statusMessage = getCaptchaStatusMessage(status);
 
   return (
     <div className={cn('flex w-full flex-col items-center space-y-2', className)}>
       <div ref={containerRef} className="flex w-full justify-center" />
       {statusMessage ? <p className="text-center text-xs text-slate-500">{statusMessage}</p> : null}
+      {canRetryCaptcha(status) ? (
+        <button
+          type="button"
+          onClick={handleRetry}
+          className="text-xs font-medium text-blue-600 transition-colors hover:text-blue-800"
+        >
+          Reload CAPTCHA
+        </button>
+      ) : null}
+      {status === CAPTCHA_STATUS.ERROR ? (
+        <p className="text-center text-[11px] text-slate-400">
+          {getCaptchaValidationTitle(status)}: retry the security check without refreshing the whole page.
+        </p>
+      ) : null}
     </div>
   );
 };

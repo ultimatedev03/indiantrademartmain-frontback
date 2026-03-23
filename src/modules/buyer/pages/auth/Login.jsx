@@ -52,7 +52,7 @@ const Login = () => {
     const captchaError = loginCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: loginCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
@@ -157,6 +157,7 @@ const Login = () => {
 
             <TurnstileField
               action="auth_login"
+              onStatusChange={loginCaptcha.setCaptchaStatus}
               resetKey={loginCaptcha.captchaResetKey}
               onTokenChange={loginCaptcha.setCaptchaToken}
             />

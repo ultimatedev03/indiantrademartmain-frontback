@@ -74,7 +74,7 @@ export const EmployeeAuthProvider = ({ children }) => {
         description: error.message || 'Invalid credentials. Please try again.',
         variant: 'destructive'
       });
-      return null;
+      throw error;
     }
   };
 

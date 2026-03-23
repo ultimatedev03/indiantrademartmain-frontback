@@ -266,7 +266,7 @@ const ProductDetail = () => {
     const captchaError = enquiryCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: enquiryCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
@@ -842,6 +842,7 @@ const ProductDetail = () => {
 
           <TurnstileField
             action="lead_submit"
+            onStatusChange={enquiryCaptcha.setCaptchaStatus}
             resetKey={enquiryCaptcha.captchaResetKey}
             onTokenChange={enquiryCaptcha.setCaptchaToken}
           />

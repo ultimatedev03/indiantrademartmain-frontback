@@ -317,17 +317,19 @@ export const InternalAuthProvider = ({ children }) => {
 
       return normalized;
     } catch (error) {
+      const normalizedError =
+        error instanceof Error ? error : new Error('Login failed');
       await supabase.auth.signOut();
       setUser(null);
       setIsAuthenticated(false);
 
       toast({
         title: 'Login Failed',
-        description: 'Invalid email or password',
+        description: normalizedError.message || 'Invalid email or password',
         variant: 'destructive',
       });
 
-      return null;
+      throw normalizedError;
     } finally {
       setIsLoading(false);
     }

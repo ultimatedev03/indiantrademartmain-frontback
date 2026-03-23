@@ -163,8 +163,8 @@ const VendorLogin = () => {
     const captchaError = loginCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
-        description: 'Start and complete the security check before signing in.',
+        title: loginCaptcha.getCaptchaErrorTitle(),
+        description: captchaError,
         variant: 'destructive',
       });
       return;
@@ -240,6 +240,7 @@ const VendorLogin = () => {
                       appearance="execute"
                       className="mx-auto w-full max-w-[320px]"
                       execution="execute"
+                      onStatusChange={loginCaptcha.setCaptchaStatus}
                       onWidgetReady={handleCaptchaWidgetReady}
                       refreshExpired="never"
                       refreshTimeout="never"
@@ -256,7 +257,7 @@ const VendorLogin = () => {
                   <p className="text-center text-xs text-gray-500">
                     {loginCaptcha.captchaToken
                       ? 'Security verification complete. You can sign in now.'
-                      : 'Complete the security check before signing in.'}
+                      : loginCaptcha.getCaptchaError() || 'Complete the security check before signing in.'}
                   </p>
                 </div>
               </div>

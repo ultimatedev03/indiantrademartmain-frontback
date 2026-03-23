@@ -58,7 +58,7 @@ const ForgotPassword = () => {
     const captchaError = requestOtpCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: requestOtpCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive'
       });
@@ -144,7 +144,7 @@ const ForgotPassword = () => {
     const captchaError = resendOtpCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: resendOtpCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive'
       });
@@ -311,6 +311,7 @@ const ForgotPassword = () => {
 
               <TurnstileField
                 action="otp_request"
+                onStatusChange={requestOtpCaptcha.setCaptchaStatus}
                 resetKey={requestOtpCaptcha.captchaResetKey}
                 onTokenChange={requestOtpCaptcha.setCaptchaToken}
               />
@@ -364,6 +365,7 @@ const ForgotPassword = () => {
 
               <TurnstileField
                 action="otp_resend"
+                onStatusChange={resendOtpCaptcha.setCaptchaStatus}
                 resetKey={resendOtpCaptcha.captchaResetKey}
                 onTokenChange={resendOtpCaptcha.setCaptchaToken}
               />

@@ -78,7 +78,7 @@ const Login = () => {
       }
     } catch (err) {
       console.error(err);
-      setError('An unexpected error occurred during login.');
+      setError(err?.message || 'An unexpected error occurred during login.');
       loginCaptcha.resetCaptcha();
     } finally {
       setIsLoading(false);
@@ -204,6 +204,7 @@ const Login = () => {
 
               <TurnstileField
                 action="auth_login"
+                onStatusChange={loginCaptcha.setCaptchaStatus}
                 resetKey={loginCaptcha.captchaResetKey}
                 onTokenChange={loginCaptcha.setCaptchaToken}
               />

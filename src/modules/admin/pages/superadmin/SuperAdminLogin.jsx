@@ -21,24 +21,27 @@ const SuperAdminLogin = () => {
     const captchaError = loginCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: loginCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
       return;
     }
     setLoading(true);
-    const success = await login(formData.email, formData.password, {
-      captcha_token: loginCaptcha.captchaToken,
-      captcha_action: 'superadmin_login',
-    });
-    if (success) {
-      // ✅ Keep route consistent with /admin/superadmin/*
-      navigate('/admin/superadmin/dashboard');
-    } else {
+    try {
+      const success = await login(formData.email, formData.password, {
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'superadmin_login',
+      });
+      if (success) {
+        // ✅ Keep route consistent with /admin/superadmin/*
+        navigate('/admin/superadmin/dashboard');
+      }
+    } catch (error) {
       loginCaptcha.resetCaptcha();
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
@@ -100,6 +103,7 @@ const SuperAdminLogin = () => {
 
           <TurnstileField
             action="superadmin_login"
+            onStatusChange={loginCaptcha.setCaptchaStatus}
             resetKey={loginCaptcha.captchaResetKey}
             onTokenChange={loginCaptcha.setCaptchaToken}
           />

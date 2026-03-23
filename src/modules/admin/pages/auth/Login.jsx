@@ -22,44 +22,47 @@ const Login = () => {
     const captchaError = loginCaptcha.getCaptchaError();
     if (captchaError) {
       toast({
-        title: 'Captcha Required',
+        title: loginCaptcha.getCaptchaErrorTitle(),
         description: captchaError,
         variant: 'destructive',
       });
       return;
     }
     setIsLoading(true);
-    
-    const user = await login(formData.email, formData.password, 'ADMIN', {
-      captcha_token: loginCaptcha.captchaToken,
-      captcha_action: 'auth_login',
-    });
-    
-    if (user) {
-      // Role-based redirection
-      switch(user.role) {
-        case 'ADMIN':
-          navigate('/admin/dashboard');
-          break;
-        case 'HR':
-          navigate('/hr/dashboard');
-          break;
-        case 'DATAENTRY':
-          navigate('/employee/dataentry/dashboard');
-          break;
-        case 'SUPPORT':
-          navigate('/employee/support/dashboard');
-          break;
-        case 'SALES':
-          navigate('/employee/sales/dashboard');
-          break;
-        default:
-          navigate('/admin/dashboard');
+
+    try {
+      const user = await login(formData.email, formData.password, 'ADMIN', {
+        captcha_token: loginCaptcha.captchaToken,
+        captcha_action: 'auth_login',
+      });
+
+      if (user) {
+        // Role-based redirection
+        switch(user.role) {
+          case 'ADMIN':
+            navigate('/admin/dashboard');
+            break;
+          case 'HR':
+            navigate('/hr/dashboard');
+            break;
+          case 'DATAENTRY':
+            navigate('/employee/dataentry/dashboard');
+            break;
+          case 'SUPPORT':
+            navigate('/employee/support/dashboard');
+            break;
+          case 'SALES':
+            navigate('/employee/sales/dashboard');
+            break;
+          default:
+            navigate('/admin/dashboard');
+        }
       }
-    } else {
+    } catch (error) {
       loginCaptcha.resetCaptcha();
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
@@ -120,6 +123,7 @@ const Login = () => {
 
             <TurnstileField
               action="auth_login"
+              onStatusChange={loginCaptcha.setCaptchaStatus}
               resetKey={loginCaptcha.captchaResetKey}
               onTokenChange={loginCaptcha.setCaptchaToken}
             />

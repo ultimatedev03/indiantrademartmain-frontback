@@ -88,7 +88,7 @@ export const SuperAdminProvider = ({ children }) => {
         description: error?.message || "Invalid credentials. Check console for details.",
         variant: "destructive"
       });
-      return false;
+      throw (error instanceof Error ? error : new Error('Invalid credentials'));
     } finally {
       setIsLoading(false);
     }
