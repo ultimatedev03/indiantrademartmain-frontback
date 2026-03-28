@@ -56,10 +56,18 @@ const Tickets = () => {
       ? 'BUYER'
       : 'ALL';
   const internalRole = String(internalUser?.role || '').toUpperCase();
-  const canEscalateToAdmin = internalRole !== 'ADMIN';
-  const escalationHelpText = canEscalateToAdmin
-    ? 'Use Admin for vendor or buyer account issues, and Sales for payment or transaction follow-up.'
-    : 'Admin-to-admin escalation is disabled here. Use Sales for payment or transaction follow-up.';
+  const escalationOptions = internalRole === 'ADMIN'
+    ? [
+        { value: 'SUPPORT', label: 'Notify Support' },
+        { value: 'SALES', label: 'Notify Sales' },
+      ]
+    : [
+        { value: 'ADMIN', label: 'Notify Admin' },
+        { value: 'SALES', label: 'Notify Sales' },
+      ];
+  const escalationHelpText = internalRole === 'ADMIN'
+    ? 'Use Support for ticket follow-up and Sales for payment or transaction handoff.'
+    : 'Use Admin for vendor or buyer account issues, and Sales for payment or transaction follow-up.';
 
   useEffect(() => {
     fetchTickets();
@@ -67,10 +75,10 @@ const Tickets = () => {
   }, [statusFilter, priorityFilter, searchTerm, ticketScope]);
 
   useEffect(() => {
-    if (!canEscalateToAdmin && escalationTarget === 'ADMIN') {
-      setEscalationTarget('SALES');
+    if (!escalationOptions.some((option) => option.value === escalationTarget)) {
+      setEscalationTarget(escalationOptions[0]?.value || 'ADMIN');
     }
-  }, [canEscalateToAdmin, escalationTarget]);
+  }, [escalationOptions, escalationTarget]);
 
   const fetchTickets = async () => {
     try {
@@ -98,7 +106,7 @@ const Tickets = () => {
     setDetailsOpen(true);
     setNewMessage("");
     setCustomerNotice(String(ticket?.description || ticket?.subject || '').trim());
-    setEscalationTarget(canEscalateToAdmin ? 'ADMIN' : 'SALES');
+    setEscalationTarget(escalationOptions[0]?.value || 'ADMIN');
     setEscalationNote('');
 
     try {
@@ -492,8 +500,11 @@ const Tickets = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {canEscalateToAdmin ? <SelectItem value="ADMIN">Notify Admin</SelectItem> : null}
-                      <SelectItem value="SALES">Notify Sales</SelectItem>
+                      {escalationOptions.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <Button

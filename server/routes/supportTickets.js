@@ -652,13 +652,18 @@ router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', '
     const actorRole = normalizeSenderType(req.actor?.role || req.user?.role);
     const targetRole = normalizeSenderType(req.body?.targetRole || req.body?.target_role);
     const rawMessage = String(req.body?.message || '').trim();
+    const targetLabels = {
+      ADMIN: 'Admin',
+      SUPPORT: 'Support',
+      SALES: 'Sales',
+    };
 
-    if (!['ADMIN', 'SALES'].includes(targetRole)) {
-      return res.status(400).json({ error: 'targetRole must be ADMIN or SALES' });
+    if (!['ADMIN', 'SUPPORT', 'SALES'].includes(targetRole)) {
+      return res.status(400).json({ error: 'targetRole must be ADMIN, SUPPORT or SALES' });
     }
 
-    if (actorRole === 'ADMIN' && targetRole === 'ADMIN') {
-      return res.status(409).json({ error: 'Admins cannot escalate a ticket to themselves. Please choose Sales.' });
+    if (actorRole === targetRole && ['ADMIN', 'SUPPORT', 'SALES'].includes(actorRole)) {
+      return res.status(409).json({ error: `Cannot escalate a ticket to the same ${targetLabels[targetRole] || 'team'}.` });
     }
 
     const { data: ticket, error: ticketError } = await supabase
@@ -672,7 +677,7 @@ router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', '
     }
 
     const entityLabel = ticket.vendor_id ? 'Vendor' : ticket.buyer_id ? 'Buyer' : 'Customer';
-    const targetLabel = targetRole === 'SALES' ? 'Sales' : 'Admin';
+    const targetLabel = targetLabels[targetRole] || 'Internal Team';
     const message =
       rawMessage ||
       `Support escalated this ${entityLabel.toLowerCase()} issue to ${targetLabel} for review.`;
@@ -683,7 +688,7 @@ router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', '
       .insert([{
         ticket_id: id,
         sender_id: null,
-        sender_type: actorRole || 'SUPPORT',
+        sender_type: 'SUPPORT',
         message: auditMessage,
         created_at: nowIso(),
       }]);
@@ -718,6 +723,15 @@ router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', '
         title,
         message: notificationMessage,
         link: '/admin/tickets',
+      });
+    } else if (targetRole === 'SUPPORT') {
+      await notifyRole('SUPPORT', {
+        type: 'SUPPORT_ESCALATION',
+        title,
+        message: notificationMessage,
+        link: ticket.vendor_id
+          ? '/employee/support/tickets/vendor'
+          : '/employee/support/tickets/buyer',
       });
     } else {
       await notifyRole('SALES', {

@@ -647,15 +647,20 @@ export async function handler(event) {
       const body = readBody(event);
       const targetRole = normalizeSenderType(body?.targetRole || body?.target_role);
       const rawMessage = String(body?.message || "").trim();
+      const targetLabels = {
+        ADMIN: "Admin",
+        SUPPORT: "Support",
+        SALES: "Sales",
+      };
 
-      if (!["ADMIN", "SALES"].includes(targetRole)) {
-        return bad("targetRole must be ADMIN or SALES");
+      if (!["ADMIN", "SUPPORT", "SALES"].includes(targetRole)) {
+        return bad("targetRole must be ADMIN, SUPPORT or SALES");
       }
 
-      if (actor.role === "ADMIN" && targetRole === "ADMIN") {
+      if (actor.role === targetRole && ["ADMIN", "SUPPORT", "SALES"].includes(actor.role)) {
         return json(409, {
           success: false,
-          error: "Admins cannot escalate a ticket to themselves. Please choose Sales.",
+          error: `Cannot escalate a ticket to the same ${targetLabels[targetRole] || "team"}.`,
         });
       }
 
@@ -670,7 +675,7 @@ export async function handler(event) {
       }
 
       const entityLabel = ticket.vendor_id ? "Vendor" : ticket.buyer_id ? "Buyer" : "Customer";
-      const targetLabel = targetRole === "SALES" ? "Sales" : "Admin";
+      const targetLabel = targetLabels[targetRole] || "Internal Team";
       const message =
         rawMessage ||
         `Support escalated this ${entityLabel.toLowerCase()} issue to ${targetLabel} for review.`;
@@ -681,7 +686,7 @@ export async function handler(event) {
         .insert([{
           ticket_id: id,
           sender_id: null,
-          sender_type: actor.role || "SUPPORT",
+          sender_type: "SUPPORT",
           message: auditMessage,
           created_at: nowIso(),
         }]);
@@ -716,6 +721,15 @@ export async function handler(event) {
           title,
           message: notificationMessage,
           link: "/admin/tickets",
+        });
+      } else if (targetRole === "SUPPORT") {
+        await notifyRole("SUPPORT", {
+          type: "SUPPORT_ESCALATION",
+          title,
+          message: notificationMessage,
+          link: ticket.vendor_id
+            ? "/employee/support/tickets/vendor"
+            : "/employee/support/tickets/buyer",
         });
       } else {
         await notifyRole("SALES", {

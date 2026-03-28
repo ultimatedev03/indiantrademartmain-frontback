@@ -256,6 +256,7 @@ const DirectorySearchBar = ({
   const heightCls = compact ? 'h-11' : 'h-12'; // h-11 ≈ screenshot
   const iconTop = compact ? 'top-3' : 'top-3.5';
   const btnPx = compact ? 'px-10 text-sm' : 'px-12';
+  const cityPlaceholder = selectedStateSlug ? 'All Cities' : 'Select City';
 
   return (
     <div
@@ -321,7 +322,7 @@ const DirectorySearchBar = ({
             }}
             disabled={loadingStates}
           >
-            <option value="">All India</option>
+            <option value="">Select State</option>
             {states.map((s) => (
               <option key={s.id} value={s.slug}>
                 {s.name}
@@ -347,8 +348,9 @@ const DirectorySearchBar = ({
             value={selectedCitySlug}
             onChange={(e) => setSelectedCitySlug(e.target.value)}
             disabled={!selectedStateSlug || loadingCities}
+            aria-label={cityPlaceholder}
           >
-            <option value="">{selectedStateSlug ? 'All Cities' : 'Select State first'}</option>
+            <option value="">{cityPlaceholder}</option>
             {cities.map((c) => (
               <option key={c.id} value={c.slug}>
                 {c.name}
