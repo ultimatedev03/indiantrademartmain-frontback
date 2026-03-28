@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { supportApi } from '@/modules/employee/services/supportApi';
+import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +31,7 @@ import {
 
 const Tickets = () => {
   const location = useLocation();
+  const { user: internalUser } = useInternalAuth();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,11 +55,22 @@ const Tickets = () => {
     : location.pathname.endsWith('/buyer')
       ? 'BUYER'
       : 'ALL';
+  const internalRole = String(internalUser?.role || '').toUpperCase();
+  const canEscalateToAdmin = internalRole !== 'ADMIN';
+  const escalationHelpText = canEscalateToAdmin
+    ? 'Use Admin for vendor or buyer account issues, and Sales for payment or transaction follow-up.'
+    : 'Admin-to-admin escalation is disabled here. Use Sales for payment or transaction follow-up.';
 
   useEffect(() => {
     fetchTickets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, priorityFilter, searchTerm, ticketScope]);
+
+  useEffect(() => {
+    if (!canEscalateToAdmin && escalationTarget === 'ADMIN') {
+      setEscalationTarget('SALES');
+    }
+  }, [canEscalateToAdmin, escalationTarget]);
 
   const fetchTickets = async () => {
     try {
@@ -85,7 +98,7 @@ const Tickets = () => {
     setDetailsOpen(true);
     setNewMessage("");
     setCustomerNotice(String(ticket?.description || ticket?.subject || '').trim());
-    setEscalationTarget('ADMIN');
+    setEscalationTarget(canEscalateToAdmin ? 'ADMIN' : 'SALES');
     setEscalationNote('');
 
     try {
@@ -479,7 +492,7 @@ const Tickets = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="ADMIN">Notify Admin</SelectItem>
+                      {canEscalateToAdmin ? <SelectItem value="ADMIN">Notify Admin</SelectItem> : null}
                       <SelectItem value="SALES">Notify Sales</SelectItem>
                     </SelectContent>
                   </Select>
@@ -494,7 +507,7 @@ const Tickets = () => {
                   </Button>
                 </div>
                 <p className="text-xs text-violet-800">
-                  Use Admin for vendor or buyer account issues, and Sales for payment or transaction follow-up.
+                  {escalationHelpText}
                 </p>
                 <Textarea
                   value={escalationNote}

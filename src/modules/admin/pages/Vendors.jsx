@@ -122,6 +122,7 @@ export default function Vendors() {
   const [vendors, setVendors] = useState([]);
   const [serverTotal, setServerTotal] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageJumpValue, setPageJumpValue] = useState("1");
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
 
@@ -237,6 +238,10 @@ export default function Vendors() {
     [filterActive, filterJoined, filterKyc, searchTerm]
   );
 
+  useEffect(() => {
+    setPageJumpValue(String(currentPage));
+  }, [currentPage]);
+
   const exportVendors = async () => {
     if (serverTotal === 0) return;
 
@@ -332,6 +337,19 @@ export default function Vendors() {
       return;
     }
     load();
+  };
+
+  const handlePageJumpSubmit = (e) => {
+    e.preventDefault();
+    const requestedPage = Number.parseInt(pageJumpValue, 10);
+    const nextPage = Number.isFinite(requestedPage)
+      ? Math.min(Math.max(requestedPage, 1), totalPages)
+      : currentPage;
+
+    setPageJumpValue(String(nextPage));
+    if (nextPage !== currentPage) {
+      setCurrentPage(nextPage);
+    }
   };
 
   const openVendor = (v) => {
@@ -704,7 +722,42 @@ export default function Vendors() {
         <p className="text-sm text-gray-500">
           {serverTotal === 0 ? "No vendors to display" : `Page ${currentPage} of ${totalPages}`}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <form onSubmit={handlePageJumpSubmit} className="flex items-center gap-2">
+            <span className="text-sm text-gray-500">Jump to page</span>
+            <Input
+              value={pageJumpValue}
+              onChange={(e) => {
+                const digitsOnly = e.target.value.replace(/[^\d]/g, "");
+                setPageJumpValue(digitsOnly);
+              }}
+              onBlur={() => {
+                if (!pageJumpValue) {
+                  setPageJumpValue(String(currentPage));
+                }
+              }}
+              className="h-9 w-20 text-center"
+              inputMode="numeric"
+              aria-label="Jump to page"
+              placeholder="Page"
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              size="sm"
+              disabled={loading || serverTotal === 0 || !pageJumpValue}
+            >
+              Go
+            </Button>
+          </form>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(1)}
+            disabled={loading || currentPage === 1}
+          >
+            First
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -720,6 +773,14 @@ export default function Vendors() {
             disabled={loading || currentPage >= totalPages}
           >
             Next
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(totalPages)}
+            disabled={loading || currentPage >= totalPages}
+          >
+            Last
           </Button>
         </div>
       </div>

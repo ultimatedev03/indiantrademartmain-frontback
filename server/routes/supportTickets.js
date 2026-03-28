@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
+import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = express.Router();
 
@@ -645,14 +646,19 @@ router.post('/tickets/:id/notify-customer', async (req, res) => {
 });
 
 // POST /api/support/tickets/:id/escalate - Notify internal Admin/Sales teams and track escalation
-router.post('/tickets/:id/escalate', async (req, res) => {
+router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', 'SUPERADMIN', 'SALES'] }), async (req, res) => {
   try {
     const { id } = req.params;
+    const actorRole = normalizeSenderType(req.actor?.role || req.user?.role);
     const targetRole = normalizeSenderType(req.body?.targetRole || req.body?.target_role);
     const rawMessage = String(req.body?.message || '').trim();
 
     if (!['ADMIN', 'SALES'].includes(targetRole)) {
       return res.status(400).json({ error: 'targetRole must be ADMIN or SALES' });
+    }
+
+    if (actorRole === 'ADMIN' && targetRole === 'ADMIN') {
+      return res.status(409).json({ error: 'Admins cannot escalate a ticket to themselves. Please choose Sales.' });
     }
 
     const { data: ticket, error: ticketError } = await supabase
@@ -677,7 +683,7 @@ router.post('/tickets/:id/escalate', async (req, res) => {
       .insert([{
         ticket_id: id,
         sender_id: null,
-        sender_type: 'SUPPORT',
+        sender_type: actorRole || 'SUPPORT',
         message: auditMessage,
         created_at: nowIso(),
       }]);
@@ -693,7 +699,7 @@ router.post('/tickets/:id/escalate', async (req, res) => {
 
     const title = `${targetLabel} escalation: ${ticket.ticket_display_id || ticket.id}`;
     const notificationMessage = [
-      `${entityLabel} issue escalated from Support.`,
+      `${entityLabel} issue escalated from ${actorRole === 'ADMIN' ? 'Admin' : 'Support'}.`,
       ticket.subject ? `Subject: ${ticket.subject}.` : null,
       `Note: ${message}`,
     ]

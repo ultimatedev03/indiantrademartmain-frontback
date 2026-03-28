@@ -1,6 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
+import jwt from "jsonwebtoken";
 import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 
+const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || "itm_access";
+const CSRF_COOKIE_NAME = process.env.AUTH_CSRF_COOKIE || "itm_csrf";
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -27,6 +30,8 @@ const json = (statusCode, body) => ({
 
 const ok = (b) => json(200, b);
 const bad = (msg, details) => json(400, { success: false, error: msg, details });
+const unauthorized = (msg, details) => json(401, { success: false, error: msg || "Unauthorized", details });
+const forbidden = (msg, details) => json(403, { success: false, error: msg || "Forbidden", details });
 const fail = (msg, details) => json(500, { success: false, error: msg, details });
 const SUPPORT_TICKET_SELECT =
   "*, vendors(company_name, email, owner_name, vendor_id), buyers(id, full_name, email, company_name)";
@@ -40,6 +45,110 @@ function parseTail(eventPath) {
 
 const nowIso = () => new Date().toISOString();
 const normalizeSenderType = (v) => String(v || "").trim().toUpperCase();
+const normalizeRole = (role) => {
+  const raw = String(role || "").trim().toUpperCase();
+  if (raw === "DATAENTRY") return "DATA_ENTRY";
+  if (raw === "FINACE") return "FINANCE";
+  return raw;
+};
+
+const parseCookies = (cookieHeader = "") => {
+  const out = {};
+  if (!cookieHeader || typeof cookieHeader !== "string") return out;
+  cookieHeader.split(";").forEach((part) => {
+    const idx = part.indexOf("=");
+    if (idx < 0) return;
+    const key = decodeURIComponent(part.slice(0, idx).trim());
+    const value = decodeURIComponent(part.slice(idx + 1).trim());
+    if (key) out[key] = value;
+  });
+  return out;
+};
+
+const getCookie = (event, name) => {
+  const header = event?.headers?.cookie || event?.headers?.Cookie || "";
+  const cookies = parseCookies(header);
+  return cookies[name];
+};
+
+const parseBearerToken = (headers = {}) => {
+  const header = headers.Authorization || headers.authorization;
+  if (!header || typeof header !== "string" || !header.startsWith("Bearer ")) return null;
+  return header.replace("Bearer ", "").trim();
+};
+
+let warnedMissingJwtSecret = false;
+const getJwtSecret = () => {
+  const secret =
+    process.env.JWT_SECRET ||
+    process.env.SUPABASE_JWT_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!secret) {
+    throw new Error("Missing JWT_SECRET (or fallback secret) in environment");
+  }
+
+  if (!process.env.JWT_SECRET && !warnedMissingJwtSecret) {
+    console.warn(
+      "[support function] JWT_SECRET missing. Falling back to another secret. Configure a dedicated JWT_SECRET."
+    );
+    warnedMissingJwtSecret = true;
+  }
+
+  return secret;
+};
+
+const verifyAuthToken = (token) => {
+  try {
+    return jwt.verify(token, getJwtSecret());
+  } catch {
+    return null;
+  }
+};
+
+const ensureCsrfValid = (event) => {
+  const cookieToken = getCookie(event, CSRF_COOKIE_NAME);
+  const header =
+    event?.headers?.["x-csrf-token"] ||
+    event?.headers?.["x-xsrf-token"] ||
+    event?.headers?.["csrf-token"];
+  return !!cookieToken && !!header && String(cookieToken) === String(header);
+};
+
+const readBody = (event) => {
+  if (!event?.body) return {};
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64").toString("utf8")
+      : event.body;
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+};
+
+const getActorFromEvent = (event) => {
+  const bearer = parseBearerToken(event?.headers || {});
+  const tokenFromCookie = getCookie(event, AUTH_COOKIE_NAME);
+  const token = bearer || tokenFromCookie;
+  if (!token) {
+    return { actor: null, tokenSource: null };
+  }
+
+  const decoded = verifyAuthToken(token);
+  if (!decoded?.sub) {
+    return { actor: null, tokenSource: bearer ? "bearer" : "cookie" };
+  }
+
+  return {
+    actor: {
+      id: decoded.sub,
+      email: decoded.email || null,
+      role: normalizeRole(decoded.role || "USER"),
+    },
+    tokenSource: bearer ? "bearer" : "cookie",
+  };
+};
 
 async function notifyUser({ user_id, type, title, message, link }) {
   try {
@@ -524,12 +633,30 @@ export async function handler(event) {
     // POST /tickets/:id/escalate
     // -------------------------
     if (event.httpMethod === "POST" && root === "tickets" && id && action === "escalate") {
+      const { actor, tokenSource } = getActorFromEvent(event);
+      if (!actor) {
+        return unauthorized("Unauthorized");
+      }
+      if (tokenSource !== "bearer" && !ensureCsrfValid(event)) {
+        return forbidden("CSRF token mismatch");
+      }
+      if (!["ADMIN", "SUPPORT", "SUPERADMIN", "SALES"].includes(actor.role)) {
+        return forbidden("Forbidden");
+      }
+
       const body = readBody(event);
       const targetRole = normalizeSenderType(body?.targetRole || body?.target_role);
       const rawMessage = String(body?.message || "").trim();
 
       if (!["ADMIN", "SALES"].includes(targetRole)) {
         return bad("targetRole must be ADMIN or SALES");
+      }
+
+      if (actor.role === "ADMIN" && targetRole === "ADMIN") {
+        return json(409, {
+          success: false,
+          error: "Admins cannot escalate a ticket to themselves. Please choose Sales.",
+        });
       }
 
       const { data: ticket, error: ticketError } = await supabase
@@ -554,7 +681,7 @@ export async function handler(event) {
         .insert([{
           ticket_id: id,
           sender_id: null,
-          sender_type: "SUPPORT",
+          sender_type: actor.role || "SUPPORT",
           message: auditMessage,
           created_at: nowIso(),
         }]);
@@ -570,7 +697,7 @@ export async function handler(event) {
 
       const title = `${targetLabel} escalation: ${ticket.ticket_display_id || ticket.id}`;
       const notificationMessage = [
-        `${entityLabel} issue escalated from Support.`,
+        `${entityLabel} issue escalated from ${actor.role === "ADMIN" ? "Admin" : "Support"}.`,
         ticket.subject ? `Subject: ${ticket.subject}.` : null,
         `Note: ${message}`,
       ]

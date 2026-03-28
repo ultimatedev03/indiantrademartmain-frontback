@@ -67,6 +67,15 @@ const toLeadStatus = (value, fallback = 'ACTIVE') => {
 
 const formatLeadStatusLabel = (value) => LEAD_STATUS_LABEL_MAP[toLeadStatus(value)];
 
+const buildDialablePhone = (value) => {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const hasPlusPrefix = raw.startsWith('+');
+  const digitsOnly = raw.replace(/\D/g, '');
+  if (!digitsOnly) return '';
+  return hasPlusPrefix ? `+${digitsOnly}` : digitsOnly;
+};
+
 
 // Combine images from product_images table + products.images jsonb
 const getProductImageUrls = (p) => {
@@ -533,6 +542,23 @@ const LeadDetail = () => {
     });
   };
 
+  const handleCallBuyer = async () => {
+    const dialablePhone = buildDialablePhone(meta?.buyer?.phone);
+    if (!dialablePhone) {
+      toast({
+        title: 'Buyer phone missing',
+        description: 'Phone number is not available for this lead.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const ok = await logContactSafe('CALL');
+    if (!ok) return;
+
+    window.location.href = `tel:${dialablePhone}`;
+  };
+
   const handleSaveLeadStatus = async () => {
     if (!lead?.id) return;
     const nextStatus = toLeadStatus(statusValue, 'ACTIVE');
@@ -829,7 +855,7 @@ const LeadDetail = () => {
               ) : null}
 
               <div className="pt-3 border-t border-green-200 flex flex-wrap gap-2">
-                {isRegisteredBuyer && lead?.proposal_id ? (
+                {isRegisteredBuyer ? (
                   <Button
                     size="sm"
                     className="bg-green-600 hover:bg-green-700"
@@ -838,6 +864,15 @@ const LeadDetail = () => {
                     Chat
                   </Button>
                 ) : null}
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-green-600 text-green-700 hover:bg-green-100"
+                  onClick={handleCallBuyer}
+                >
+                  Call
+                </Button>
 
                 <Button
                   size="sm"

@@ -413,7 +413,7 @@ const VendorProfileContent = () => {
                 )}
               </div>
               <div className="min-w-0 pt-1">
-                <h1 className="flex flex-wrap items-center gap-2 text-3xl font-bold text-gray-900">
+                <h1 className="inline-flex w-fit flex-wrap items-center gap-2 rounded-lg bg-slate-950/30 px-3 py-2 text-3xl font-bold text-white shadow-sm backdrop-blur-sm">
                   {displayVendor.company_name || 'Company Name'}
                   {displayVendor.verified && <BadgeCheck className="text-blue-500 h-6 w-6 fill-blue-50" />}
                 </h1>
