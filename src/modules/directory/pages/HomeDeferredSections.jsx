@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { Suspense, lazy, useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import TopCitiesSection from '@/modules/directory/components/TopCitiesSection';
 import PremiumBrandsSection from '@/modules/directory/components/PremiumBrandsSection';
@@ -14,6 +14,7 @@ const FEATURED_LIMIT = 8;
 const HEAD_INITIAL_LIMIT = 3;
 const SUB_INITIAL_LIMIT = 9;
 const MICRO_PREVIEW_LIMIT = 3;
+const PostRequirementModal = lazy(() => import('@/shared/components/modals/PostRequirementModal'));
 
 const CategorySkeleton = () => (
   <div className="space-y-6" aria-hidden="true">
@@ -72,6 +73,7 @@ const HomeDeferredSections = () => {
   const [loadingVendors, setLoadingVendors] = useState(true);
   const [showAllHeads, setShowAllHeads] = useState(false);
   const [hasMoreHeads, setHasMoreHeads] = useState(false);
+  const [showPostRequirement, setShowPostRequirement] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -129,6 +131,15 @@ const HomeDeferredSections = () => {
 
   return (
     <>
+      {showPostRequirement && (
+        <Suspense fallback={null}>
+          <PostRequirementModal
+            isOpen={showPostRequirement}
+            onClose={() => setShowPostRequirement(false)}
+          />
+        </Suspense>
+      )}
+
       <section className="bg-white py-12 shadow-sm relative z-10 -mt-8 rounded-t-3xl border-t border-slate-100 mx-4 lg:mx-0">
         <div className="container mx-auto px-4">
           <div className="flex items-center justify-between gap-4 mb-8 flex-wrap">
@@ -248,6 +259,58 @@ const HomeDeferredSections = () => {
             )}
           </div>
         )}
+      </section>
+
+      <section className="container mx-auto px-4 pb-16">
+        <div className="overflow-hidden rounded-[2rem] border border-slate-200 bg-gradient-to-br from-slate-950 via-[#0b3c7c] to-sky-700 px-6 py-10 shadow-xl md:px-10">
+          <div className="grid gap-8 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+            <div className="space-y-4">
+              <span className="inline-flex w-fit rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-sky-100">
+                Quick Requirement Desk
+              </span>
+              <div className="space-y-3">
+                <h2 className="max-w-2xl text-3xl font-extrabold tracking-tight text-white md:text-4xl">
+                  Tell us your requirement and let verified suppliers come to you.
+                </h2>
+                <p className="max-w-2xl text-sm leading-6 text-sky-100/85 md:text-base">
+                  Share your product, quantity, and location once. The marketplace team can route your enquiry to relevant suppliers without making you browse page by page.
+                </p>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Button
+                  type="button"
+                  onClick={() => setShowPostRequirement(true)}
+                  className="h-12 rounded-full bg-white px-6 text-sm font-semibold text-slate-950 hover:bg-sky-50"
+                >
+                  Tell Us Your Requirement
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => navigate('/directory')}
+                  className="h-12 rounded-full border-white/30 bg-transparent px-6 text-sm font-semibold text-white hover:bg-white/10"
+                >
+                  Browse Categories
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-100/70">Step 1</p>
+                <p className="mt-2 text-sm font-semibold text-white">Describe what you need</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-100/70">Step 2</p>
+                <p className="mt-2 text-sm font-semibold text-white">Add quantity and delivery city</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur-sm">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-100/70">Step 3</p>
+                <p className="mt-2 text-sm font-semibold text-white">Receive responses from suppliers</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
     </>
   );

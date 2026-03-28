@@ -315,11 +315,16 @@ export const CustomerCare = () => (
           <p className="text-sm text-slate-600">Speak with the support team for urgent marketplace issues.</p>
           <a href="tel:+917290010051" className="text-sm font-semibold text-slate-900 hover:text-emerald-700">+91 7290010051</a>
         </FooterPageCard>
-        <FooterPageCard className="space-y-3 bg-white">
+        <FooterPageCard className="min-w-0 space-y-3 bg-white">
           <Mail className="h-6 w-6 text-blue-700" />
           <h3 className="text-lg font-semibold text-slate-950">Email us</h3>
           <p className="text-sm text-slate-600">Share the full issue context so the right team can respond accurately.</p>
-          <a href="mailto:support@indiantrademart.com" className="text-sm font-semibold text-slate-900 hover:text-blue-700">support@indiantrademart.com</a>
+          <a
+            href="mailto:support@indiantrademart.com"
+            className="block max-w-full break-all text-sm font-semibold leading-6 text-slate-900 hover:text-blue-700"
+          >
+            support@indiantrademart.com
+          </a>
         </FooterPageCard>
         <FooterPageCard className="space-y-3 bg-white">
           <MapPin className="h-6 w-6 text-slate-900" />

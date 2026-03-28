@@ -688,12 +688,13 @@ const SearchResults = () => {
       </Helmet>
 
       <div className="min-h-screen bg-neutral-50 pb-16">
-        <div className="bg-white border-b sticky top-16 z-10 shadow-sm">
-          <div className="container mx-auto px-4 py-2">
-            <PillBreadcrumbs className="mb-2" overrideParams={parsedParams} />
+        <div className="sticky top-16 z-10 border-b bg-white/95 shadow-sm backdrop-blur">
+          <div className="container mx-auto px-4 py-1.5 md:py-2">
+            <PillBreadcrumbs className="mb-1.5" overrideParams={parsedParams} />
 
-            <div className="max-w-4xl mb-2">
+            <div className="mb-1.5 max-w-4xl">
               <DirectorySearchBar
+                compact
                 enableSuggestions
                 className="shadow-sm"
                 initialService={parsedParams.serviceSlug}
@@ -717,7 +718,7 @@ const SearchResults = () => {
             </div>
 
             {parsedParams.stateSlug && (
-              <div className="mt-0 overflow-x-auto scrollbar-hide">
+              <div className="mt-1 overflow-x-auto scrollbar-hide">
                 <div className="min-w-max">
                   <NearbyLocationNav
                     serviceSlug={parsedParams.serviceSlug}
@@ -730,7 +731,7 @@ const SearchResults = () => {
           </div>
         </div>
 
-        <div className="container mx-auto px-4 py-5">
+        <div className="container mx-auto px-4 py-4">
           <div className="flex flex-col lg:flex-row gap-6">
             <aside className="w-full lg:w-64 flex-shrink-0 hidden lg:block">
               <SearchFilters filters={filters} setFilters={setFilters} priceBounds={priceBounds} />

@@ -76,6 +76,7 @@ const ProductDetail = () => {
   const [myRatingUpdatedAt, setMyRatingUpdatedAt] = useState('');
   const [ratingSummary, setRatingSummary] = useState({ average: 0, count: 0 });
   const [recentFeedback, setRecentFeedback] = useState([]);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const isBuyer = String(userRole || user?.role || '').toUpperCase() === 'BUYER';
 
   // Enquiry modal
@@ -186,6 +187,16 @@ const ProductDetail = () => {
       .replace(/\n{3,}/g, '\n\n')
       .replace(/[ \t]{2,}/g, ' ')
       .trim();
+
+  const plainDescription = useMemo(() => getPlainDescription(data?.description), [data?.description]);
+  const descriptionNeedsClamp = useMemo(() => {
+    if (!plainDescription) return false;
+    return plainDescription.length > 700 || plainDescription.split('\n').length > 12;
+  }, [plainDescription]);
+
+  useEffect(() => {
+    setDescriptionExpanded(false);
+  }, [data?.id]);
 
   const handleCopyLink = async () => {
     const url = canonicalProductUrl || shareUtils.getCurrentUrl();
@@ -1104,8 +1115,25 @@ const ProductDetail = () => {
             </div>
           </div>
 
-          <div className="prose prose-sm max-w-none text-slate-600 bg-white p-4 rounded border break-words whitespace-pre-wrap overflow-hidden">
-            {getPlainDescription(data.description) || 'No description available.'}
+          <div className="overflow-hidden rounded border bg-white shadow-sm">
+            <div
+              className={`prose prose-sm max-w-none break-words p-4 text-slate-600 whitespace-pre-wrap ${
+                descriptionExpanded ? 'max-h-[30rem] overflow-y-auto pr-3' : 'max-h-[18rem] overflow-y-auto pr-3'
+              }`}
+            >
+              {plainDescription || 'No description available.'}
+            </div>
+            {descriptionNeedsClamp && (
+              <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                <button
+                  type="button"
+                  onClick={() => setDescriptionExpanded((value) => !value)}
+                  className="text-sm font-semibold text-blue-700 hover:text-blue-900"
+                >
+                  {descriptionExpanded ? 'Show less' : 'Read full description'}
+                </button>
+              </div>
+            )}
           </div>
 
           {recentFeedback.length > 0 && (
