@@ -12,6 +12,8 @@ const FEATURED_VENDOR_COLUMNS = [
   'profile_image',
   'city',
   'state',
+  'city_id',
+  'state_id',
   'kyc_status',
   'is_verified',
   'is_active',

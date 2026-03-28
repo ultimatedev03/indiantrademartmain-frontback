@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { directoryApi } from "@/modules/directory/services/directoryApi";
 import { vendorService } from "@/modules/directory/services/vendorService";
 import Card from "@/shared/components/Card";
 import { Button } from "@/components/ui/button";
@@ -11,12 +12,15 @@ const VendorListing = () => {
 
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [citiesLoading, setCitiesLoading] = useState(false);
 
   // ✅ Filters
   const [q, setQ] = useState(""); // search products/services/company
   const [cityText, setCityText] = useState(""); // city text input
-  const [selectedState, setSelectedState] = useState("ALL");
-  const [selectedCity, setSelectedCity] = useState("ALL");
+  const [selectedStateId, setSelectedStateId] = useState("");
+  const [selectedCityId, setSelectedCityId] = useState("");
 
   // ✅ Trigger "Search" button
   const [applyTick, setApplyTick] = useState(0);
@@ -45,30 +49,66 @@ const VendorListing = () => {
     fetchVendors();
   }, []);
 
-  // ✅ Unique state list from vendors
-  const stateOptions = useMemo(() => {
-    const set = new Set();
-    vendors.forEach((v) => {
-      if (v?.state) set.add(String(v.state).trim());
-    });
-    return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [vendors]);
-
-  // ✅ Unique city list depends on selected state
-  const cityOptions = useMemo(() => {
-    const set = new Set();
-    vendors.forEach((v) => {
-      if (!v?.city) return;
-      if (selectedState !== "ALL" && String(v.state || "").trim() !== selectedState) return;
-      set.add(String(v.city).trim());
-    });
-    return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [vendors, selectedState]);
-
-  // ✅ Auto reset city dropdown when state changes
   useEffect(() => {
-    setSelectedCity("ALL");
-  }, [selectedState]);
+    const fetchStates = async () => {
+      try {
+        const data = await directoryApi.getStates();
+        setStates(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Failed to fetch states:", error);
+        setStates([]);
+      }
+    };
+
+    fetchStates();
+  }, []);
+
+  useEffect(() => {
+    setSelectedCityId("");
+
+    if (!selectedStateId) {
+      setCities([]);
+      setCitiesLoading(false);
+      return;
+    }
+
+    let active = true;
+
+    const fetchCities = async () => {
+      setCitiesLoading(true);
+      try {
+        const data = await directoryApi.getCities(selectedStateId);
+        if (active) {
+          setCities(Array.isArray(data) ? data : []);
+        }
+      } catch (error) {
+        console.error("Failed to fetch cities:", error);
+        if (active) {
+          setCities([]);
+        }
+      } finally {
+        if (active) {
+          setCitiesLoading(false);
+        }
+      }
+    };
+
+    fetchCities();
+
+    return () => {
+      active = false;
+    };
+  }, [selectedStateId]);
+
+  const selectedStateName = useMemo(() => {
+    const match = states.find((state) => String(state?.id || "") === String(selectedStateId || ""));
+    return String(match?.name || "").trim();
+  }, [states, selectedStateId]);
+
+  const selectedCityName = useMemo(() => {
+    const match = cities.find((city) => String(city?.id || "") === String(selectedCityId || ""));
+    return String(match?.name || "").trim();
+  }, [cities, selectedCityId]);
 
   // ✅ filtering logic (applies when applyTick changes OR when vendors change)
   const filteredVendors = useMemo(() => {
@@ -87,8 +127,16 @@ const VendorListing = () => {
       const secondary = String(v?.secondary_business || "").toLowerCase();
 
       // dropdown filters
-      if (selectedState !== "ALL" && String(v?.state || "").trim() !== selectedState) return false;
-      if (selectedCity !== "ALL" && String(v?.city || "").trim() !== selectedCity) return false;
+      if (selectedStateId) {
+        const vendorStateId = String(v?.state_id || "").trim();
+        const vendorStateName = String(v?.state || "").trim();
+        if (vendorStateId !== String(selectedStateId) && vendorStateName !== selectedStateName) return false;
+      }
+      if (selectedCityId) {
+        const vendorCityId = String(v?.city_id || "").trim();
+        const vendorCityName = String(v?.city || "").trim();
+        if (vendorCityId !== String(selectedCityId) && vendorCityName !== selectedCityName) return false;
+      }
 
       // city text input
       if (cityQ && !city.includes(cityQ)) return false;
@@ -106,7 +154,7 @@ const VendorListing = () => {
 
       return true;
     });
-  }, [vendors, q, cityText, selectedState, selectedCity, applyTick]);
+  }, [vendors, q, cityText, selectedStateId, selectedCityId, selectedStateName, selectedCityName, applyTick]);
 
   const VendorImage = ({ src, name }) => {
     const [failed, setFailed] = useState(false);
@@ -138,8 +186,8 @@ const VendorListing = () => {
   const onReset = () => {
     setQ("");
     setCityText("");
-    setSelectedState("ALL");
-    setSelectedCity("ALL");
+    setSelectedStateId("");
+    setSelectedCityId("");
     setApplyTick(0);
   };
 
@@ -199,28 +247,37 @@ const VendorListing = () => {
 
             {/* State dropdown */}
             <select
-              value={selectedState}
-              onChange={(e) => setSelectedState(e.target.value)}
+              value={selectedStateId}
+              onChange={(e) => setSelectedStateId(e.target.value)}
               className="border rounded-lg px-3 h-11 bg-white text-sm"
             >
-              {stateOptions.map((s) => (
-                <option key={s} value={s}>
-                  {s === "ALL" ? "All States" : s}
+              <option value="">All States</option>
+              {states.map((state) => (
+                <option key={state.id} value={state.id}>
+                  {state.name}
                 </option>
               ))}
             </select>
 
             {/* City dropdown */}
             <select
-              value={selectedCity}
-              onChange={(e) => setSelectedCity(e.target.value)}
+              value={selectedCityId}
+              onChange={(e) => setSelectedCityId(e.target.value)}
+              disabled={!selectedStateId || citiesLoading}
               className="border rounded-lg px-3 h-11 bg-white text-sm"
             >
-              {cityOptions.map((c) => (
-                <option key={c} value={c}>
-                  {c === "ALL" ? "All Cities" : c}
-                </option>
-              ))}
+              {!selectedStateId ? (
+                <option value="">Select state first</option>
+              ) : (
+                <>
+                  <option value="">All Cities</option>
+                  {cities.map((city) => (
+                    <option key={city.id} value={city.id}>
+                      {city.name}
+                    </option>
+                  ))}
+                </>
+              )}
             </select>
           </div>
         </div>
