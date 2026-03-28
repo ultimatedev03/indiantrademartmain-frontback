@@ -1007,10 +1007,6 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
 
     setUploadingType(type);
     try {
-      const existingDoc = documents.find((doc) => String(doc?.document_type || '').toUpperCase() === type);
-      if (existingDoc?.id) {
-        await vendorApi.documents.delete(existingDoc.id);
-      }
       await vendorApi.documents.upload(file, type);
       await onRefresh();
       toast({ title: "Document uploaded successfully" });
@@ -1087,7 +1083,7 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
                   {allowReplacement ? (
                     <label className="cursor-pointer">
                       <div className="inline-flex h-9 items-center rounded-md border px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50">
-                        Replace
+                        {normalizedKycStatus === 'REJECTED' ? 'Re-upload' : 'Replace'}
                       </div>
                       <input
                         type="file"
@@ -1164,7 +1160,11 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
               Submitting...
             </>
           ) : (
-            (normalizedKycStatus === 'SUBMITTED' ? 'Verification In Progress' : 'Submit for Verification')
+            (normalizedKycStatus === 'SUBMITTED'
+              ? 'Verification In Progress'
+              : normalizedKycStatus === 'REJECTED'
+                ? 'Resubmit for Verification'
+                : 'Submit for Verification')
           )}
         </Button>
       </div>

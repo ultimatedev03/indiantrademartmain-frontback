@@ -21,6 +21,7 @@ const KYC_DOC_MIN_BYTES = 100 * 1024;
 const KYC_DOC_MAX_BYTES = 2 * 1024 * 1024;
 const KYC_ALLOWED_DOC_TYPES = new Set(['GST', 'PAN', 'AADHAR', 'BANK']);
 const KYC_ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+const KYC_APPROVED_STATUSES = new Set(['APPROVED', 'VERIFIED']);
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
@@ -75,6 +76,17 @@ const isBucketMissingError = (error) => {
   const msg = String(error?.message || '').toLowerCase();
   return msg.includes('bucket not found') || (msg.includes('bucket') && msg.includes('not found'));
 };
+
+const normalizeKycStatus = (value = '') => String(value || '').trim().toUpperCase();
+
+const kycDocumentsAreLocked = (vendor = null) =>
+  KYC_APPROVED_STATUSES.has(normalizeKycStatus(vendor?.kyc_status));
+
+const sendLockedKycResponse = (res) =>
+  res.status(409).json({
+    success: false,
+    error: 'KYC is already approved. Re-upload is disabled.',
+  });
 
 const getUploadBucketCandidates = (bucket) => {
   if (bucket === 'product-images') return ['product-images', 'product-media', 'avatars'];
@@ -1409,6 +1421,9 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
     const isImage = contentType.startsWith('image/');
     const isVideo = bucket === 'product-media' && contentType.startsWith('video/');
     const isPdf = contentType === 'application/pdf';
+    if (uploadPurpose === 'KYC_DOCUMENT' && kycDocumentsAreLocked(vendor)) {
+      return sendLockedKycResponse(res);
+    }
     const isAllowed =
       bucket === 'product-images'
         ? isImage
@@ -1607,6 +1622,9 @@ router.post('/me/documents', requireAuth({ roles: ['VENDOR'] }), async (req, res
   try {
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    if (kycDocumentsAreLocked(vendor)) {
+      return sendLockedKycResponse(res);
+    }
 
     const document_type = String(req.body?.document_type || '').trim().toUpperCase();
     const document_url = String(req.body?.document_url || '').trim();
@@ -1715,6 +1733,9 @@ router.delete('/me/documents/:docId', requireAuth({ roles: ['VENDOR'] }), async 
   try {
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    if (kycDocumentsAreLocked(vendor)) {
+      return sendLockedKycResponse(res);
+    }
 
     const { docId } = req.params;
     if (!isValidId(docId)) {
@@ -1738,6 +1759,9 @@ router.delete('/me/documents', requireAuth({ roles: ['VENDOR'] }), async (req, r
   try {
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    if (kycDocumentsAreLocked(vendor)) {
+      return sendLockedKycResponse(res);
+    }
 
     const docType = String(req.query?.type || '').trim();
     if (!docType) {

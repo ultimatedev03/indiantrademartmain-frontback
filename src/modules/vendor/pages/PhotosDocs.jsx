@@ -153,14 +153,6 @@ const PhotosDocs = () => {
         return;
       }
 
-      const existingDoc = documents.find(
-        (doc) => String(doc?.document_type || '').trim().toUpperCase() === String(type || '').trim().toUpperCase()
-      );
-
-      if (existingDoc?.id) {
-        await vendorApi.documents.delete(existingDoc.id);
-      }
-
       await vendorApi.documents.upload(file, type);
       toast({ title: "Upload successful" });
       await loadDocs();
@@ -205,7 +197,7 @@ const PhotosDocs = () => {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900">Documents & KYC</h1>
       
-      {['VERIFIED', 'APPROVED'].includes(kycStatus) && (
+      {['VERIFIED', 'APPROVED'].includes(normalizedKycStatus) && (
         <Alert className="bg-green-50 border-green-200">
           <CheckCircle className="h-4 w-4 text-green-600" />
           <AlertDescription className="text-green-800 ml-2">
@@ -214,7 +206,7 @@ const PhotosDocs = () => {
         </Alert>
       )}
       
-      {kycStatus === 'REJECTED' && (
+      {normalizedKycStatus === 'REJECTED' && (
         <Alert className="bg-red-50 border-red-200">
           <AlertCircle className="h-4 w-4 text-red-600" />
           <AlertDescription className="text-red-800 ml-2">
@@ -264,7 +256,10 @@ const PhotosDocs = () => {
                                       {canReplace ? (
                                         <Button asChild size="sm" variant="secondary" disabled={uploading}>
                                           <label className="cursor-pointer">
-                                            {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                            <span className="inline-flex items-center gap-1">
+                                              {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                                              {kycRejected ? 'Re-upload' : 'Replace'}
+                                            </span>
                                             <input
                                               type="file"
                                               className="hidden"

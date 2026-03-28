@@ -21,6 +21,10 @@ const GENERIC_IMAGE_MIN_BYTES = 2 * 1024;
 const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024;
 const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024;
 const KYC_DOC_MIN_BYTES = 100 * 1024;
+const KYC_DOC_MAX_BYTES = 2 * 1024 * 1024;
+const KYC_ALLOWED_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png']);
+const KYC_ALLOWED_DOC_TYPES = new Set(['GST', 'PAN', 'AADHAR', 'BANK']);
+const KYC_APPROVED_STATUSES = new Set(['APPROVED', 'VERIFIED']);
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
@@ -429,6 +433,13 @@ const sanitizeFilename = (name) =>
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/^_+/, '')
     .slice(0, 120) || 'upload';
+
+const normalizeKycStatus = (value = '') => String(value || '').trim().toUpperCase();
+
+const kycDocumentsAreLocked = (vendor = null) =>
+  KYC_APPROVED_STATUSES.has(normalizeKycStatus(vendor?.kyc_status));
+
+const badLockedKyc = (event) => bad(event, 'KYC is already approved. Re-upload is disabled.', null, 409);
 
 const buildUploadPath = ({ vendorId, originalName, contentType }) => {
   const safeName = sanitizeFilename(originalName || '');
@@ -1109,6 +1120,9 @@ export const handler = async (event) => {
         const isImage = contentType.startsWith('image/');
         const isVideo = bucket === 'product-media' && contentType.startsWith('video/');
         const isPdf = contentType === 'application/pdf';
+        if (uploadPurpose === 'KYC_DOCUMENT' && kycDocumentsAreLocked(vendor)) {
+          return badLockedKyc(event);
+        }
         const isAllowed =
           bucket === 'product-images'
             ? isImage
@@ -1132,8 +1146,16 @@ export const handler = async (event) => {
             return json(event, 413, { success: false, error: 'Image too large (maximum 800KB)' });
           }
         }
-        if (uploadPurpose === 'KYC_DOCUMENT' && buffer.length < KYC_DOC_MIN_BYTES) {
-          return bad(event, 'KYC image too small (minimum 100KB)');
+        if (uploadPurpose === 'KYC_DOCUMENT') {
+          if (!KYC_ALLOWED_MIME.has(contentType)) {
+            return bad(event, 'KYC accepts only JPG/PNG images');
+          }
+          if (buffer.length < KYC_DOC_MIN_BYTES) {
+            return bad(event, 'KYC image too small (minimum 100KB)');
+          }
+          if (buffer.length > KYC_DOC_MAX_BYTES) {
+            return json(event, 413, { success: false, error: 'KYC image too large (maximum 2MB)' });
+          }
         }
 
         const objectPath = buildUploadPath({
@@ -1199,32 +1221,81 @@ export const handler = async (event) => {
         }
 
         if (event.httpMethod === 'POST' && tail.length === 2) {
+          if (kycDocumentsAreLocked(vendor)) {
+            return badLockedKyc(event);
+          }
+
           const body = readBody(event);
-          const document_type = String(body?.document_type || '').trim();
+          const document_type = String(body?.document_type || '').trim().toUpperCase();
           const document_url = String(body?.document_url || '').trim();
           const original_name = String(body?.original_name || '').trim() || null;
           if (!document_type || !document_url) {
             return bad(event, 'document_type and document_url are required');
           }
+          if (!KYC_ALLOWED_DOC_TYPES.has(document_type)) {
+            return bad(event, 'Invalid document type. Allowed: GST, PAN, AADHAR, BANK');
+          }
 
-          const { data, error: insertErr } = await supabase
+          const { data: existingDocs, error: existingDocsError } = await supabase
             .from('vendor_documents')
-            .insert([{
-              vendor_id: vendor.id,
-              document_type,
-              document_url,
-              original_name,
-              uploaded_at: new Date().toISOString(),
-              verification_status: 'PENDING',
-            }])
-            .select('*')
-            .maybeSingle();
+            .select('id, document_type')
+            .eq('vendor_id', vendor.id);
+          if (existingDocsError) {
+            return fail(event, existingDocsError.message || 'Failed to load existing documents');
+          }
+
+          const sameType = (existingDocs || []).find(
+            (row) => String(row?.document_type || '').trim().toUpperCase() === document_type
+          );
+
+          let data = null;
+          let insertErr = null;
+
+          if (sameType?.id) {
+            const updateRes = await supabase
+              .from('vendor_documents')
+              .update({
+                document_type,
+                document_url,
+                original_name,
+                uploaded_at: new Date().toISOString(),
+                verification_status: 'PENDING',
+              })
+              .eq('id', sameType.id)
+              .eq('vendor_id', vendor.id)
+              .select('*')
+              .maybeSingle();
+            data = updateRes.data;
+            insertErr = updateRes.error;
+          } else {
+            if ((existingDocs || []).length >= 4) {
+              return bad(event, 'Only 4 KYC documents are allowed (GST, PAN, AADHAR, BANK)');
+            }
+
+            const insertRes = await supabase
+              .from('vendor_documents')
+              .insert([{
+                vendor_id: vendor.id,
+                document_type,
+                document_url,
+                original_name,
+                uploaded_at: new Date().toISOString(),
+                verification_status: 'PENDING',
+              }])
+              .select('*')
+              .maybeSingle();
+            data = insertRes.data;
+            insertErr = insertRes.error;
+          }
 
           if (insertErr) return fail(event, insertErr.message || 'Failed to save document');
           return ok(event, { success: true, document: data });
         }
 
         if (event.httpMethod === 'DELETE' && tail.length === 3) {
+          if (kycDocumentsAreLocked(vendor)) {
+            return badLockedKyc(event);
+          }
           const docId = tail[2];
           const { error: delErr } = await supabase
             .from('vendor_documents')
@@ -1249,6 +1320,9 @@ export const handler = async (event) => {
         }
 
         if (event.httpMethod === 'DELETE' && tail.length === 2) {
+          if (kycDocumentsAreLocked(vendor)) {
+            return badLockedKyc(event);
+          }
           const docType = String(event.queryStringParameters?.type || '').trim();
           if (!docType) return bad(event, 'type query param is required');
           const { error: delErr } = await supabase

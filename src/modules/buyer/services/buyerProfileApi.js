@@ -3,6 +3,7 @@ import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { resolveBuyerProfile } from '@/modules/buyer/services/buyerSession';
+import { MIN_IMAGE_UPLOAD_BYTES, validateImageFile } from '@/shared/utils/fileValidation';
 
 export const buyerProfileApi = {
   getProfile: async () => {
@@ -23,9 +24,11 @@ export const buyerProfileApi = {
 
   uploadAvatar: async (file) => {
     if (!file) throw new Error('No file selected');
-    if (file.size > 5 * 1024 * 1024) {
-      throw new Error('Image too large (max 5MB)');
-    }
+    validateImageFile(file, {
+      minBytes: MIN_IMAGE_UPLOAD_BYTES,
+      maxBytes: 5 * 1024 * 1024,
+      label: 'Image',
+    });
 
     const dataUrl = await new Promise((resolve, reject) => {
       const reader = new FileReader();

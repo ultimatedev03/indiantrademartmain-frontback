@@ -1,6 +1,7 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
+import { MIN_IMAGE_UPLOAD_BYTES, validateImageFile } from '@/shared/utils/fileValidation';
 
 // NOTE:
 // In Supabase/PostgREST, `.single()` throws:
@@ -233,19 +234,13 @@ const fileToDataUrl = (file) =>
 const uploadCategoryImage = async ({ level, slug, file }) => {
   if (!file) return null;
 
+  validateImageFile(file, {
+    minBytes: MIN_IMAGE_UPLOAD_BYTES,
+    maxBytes: CATEGORY_IMAGE_MAX_BYTES,
+    label: 'Image',
+  });
+
   const fileType = String(file?.type || '').trim().toLowerCase();
-  if (!fileType.startsWith('image/')) {
-    throw new Error('Only image files are allowed');
-  }
-
- const size = Number(file?.size || 0);
-
-  if (size > CATEGORY_IMAGE_MAX_BYTES) {
-    throw new Error(`Image must be at most ${Math.round(CATEGORY_IMAGE_MAX_BYTES / 1024)}KB`);
-  }
-  if (size > CATEGORY_IMAGE_MAX_BYTES) {
-    throw new Error(`Image must be at most ${Math.round(CATEGORY_IMAGE_MAX_BYTES / 1024)}KB`);
-  }
 
   const safe = safeSlug(slug) || 'category';
   const dataUrl = await fileToDataUrl(file);
