@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,8 +13,61 @@ import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import PublicSiteHomeLink from '@/shared/components/PublicSiteHomeLink';
 
+const PORTAL_CONFIGS = {
+  dataentry: {
+    heading: 'Data Entry Portal',
+    subtitle: 'Restricted access for data operations personnel only',
+    cardTitle: 'Data Entry Login',
+    cardDescription: 'Enter your data entry credentials to continue',
+    submitLabel: 'Access Data Entry Workspace',
+    expectedRole: 'DATA_ENTRY',
+  },
+  support: {
+    heading: 'Support Portal',
+    subtitle: 'Restricted access for support personnel only',
+    cardTitle: 'Support Login',
+    cardDescription: 'Enter your support credentials to continue',
+    submitLabel: 'Access Support Workspace',
+    expectedRole: 'SUPPORT',
+  },
+  sales: {
+    heading: 'Sales Portal',
+    subtitle: 'Restricted access for sales personnel only',
+    cardTitle: 'Sales Login',
+    cardDescription: 'Enter your sales credentials to continue',
+    submitLabel: 'Access Sales Workspace',
+    expectedRole: 'SALES',
+  },
+  manager: {
+    heading: 'Manager Portal',
+    subtitle: 'Restricted access for managers only',
+    cardTitle: 'Manager Login',
+    cardDescription: 'Enter your manager credentials to continue',
+    submitLabel: 'Access Manager Workspace',
+    expectedRole: 'MANAGER',
+  },
+  vp: {
+    heading: 'VP Portal',
+    subtitle: 'Restricted access for VP personnel only',
+    cardTitle: 'VP Login',
+    cardDescription: 'Enter your VP credentials to continue',
+    submitLabel: 'Access VP Workspace',
+    expectedRole: 'VP',
+  },
+};
+
+const DEFAULT_PORTAL_CONFIG = {
+  heading: 'Employee Portal',
+  subtitle: 'Restricted access for authorized personnel only',
+  cardTitle: 'Sign In',
+  cardDescription: 'Enter your staff credentials to continue',
+  submitLabel: 'Access Workspace',
+  expectedRole: '',
+};
+
 const Login = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { login } = useEmployeeAuth();
   const loginCaptcha = useCaptchaGate();
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -22,6 +75,10 @@ const Login = () => {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const showDemoCredentials = Boolean(import.meta.env.DEV);
+  const portalConfig = useMemo(() => {
+    const portalKey = String(searchParams.get('portal') || '').trim().toLowerCase();
+    return PORTAL_CONFIGS[portalKey] || DEFAULT_PORTAL_CONFIG;
+  }, [searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -49,7 +106,7 @@ const Login = () => {
       const user = await login(formData.email, formData.password, {
         captcha_token: loginCaptcha.captchaToken,
         captcha_action: 'auth_login',
-      });
+      }, portalConfig.expectedRole);
 
       if (user) {
         // ✅ Role-based redirect (covers ADMIN/HR too)
@@ -102,19 +159,19 @@ const Login = () => {
         />
 
         <h2 className="mt-6 text-center text-3xl font-extrabold text-white tracking-tight">
-          Employee Portal
+          {portalConfig.heading}
         </h2>
         <p className="mt-2 text-center text-sm text-slate-400">
-          Restricted access for authorized personnel only
+          {portalConfig.subtitle}
         </p>
       </div>
 
       <div className="mt-2 sm:mx-auto sm:w-full sm:max-w-md relative z-10">
         <Card className="border-slate-800 bg-slate-950/50 backdrop-blur-xl shadow-2xl text-slate-200">
           <CardHeader>
-            <CardTitle className="text-xl text-center">Sign In</CardTitle>
+            <CardTitle className="text-xl text-center">{portalConfig.cardTitle}</CardTitle>
             <CardDescription className="text-center text-slate-400">
-              Enter your staff credentials to continue
+              {portalConfig.cardDescription}
             </CardDescription>
           </CardHeader>
 
@@ -199,7 +256,7 @@ const Login = () => {
                 ) : (
                   <Briefcase className="mr-2 h-4 w-4" />
                 )}
-                Access Workspace
+                {portalConfig.submitLabel}
               </Button>
 
               <TurnstileField

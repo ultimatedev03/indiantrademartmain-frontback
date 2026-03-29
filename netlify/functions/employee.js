@@ -88,7 +88,13 @@ const verifyAuthToken = (token) => {
 
 const normalizeRole = (role) => String(role || '').trim().toUpperCase();
 const SALES_ROLES = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
+const MANAGER_APPROVAL_ROLES = new Set(['MANAGER', 'ADMIN', 'SUPERADMIN']);
 const STAFF_MANAGE_ROLES = new Set(['ADMIN', 'HR', 'SUPERADMIN']);
+const PRICING_RULE_ENTITY_TYPE = 'pricing_rule_request';
+const PRICING_RULE_SUBMITTED_ACTION = 'PRICING_RULE_SUBMITTED';
+const PRICING_RULE_APPROVED_ACTION = 'PRICING_RULE_APPROVED';
+const PRICING_RULE_REJECTED_ACTION = 'PRICING_RULE_REJECTED';
+const PRICING_RULE_ALLOWED_TYPES = new Set(['MANUAL', 'DISCOUNT', 'MARKUP', 'SURCHARGE', 'SPECIAL_RATE']);
 const CATEGORY_IMAGE_BUCKET = 'avatars';
 const CATEGORY_IMAGE_LEVELS = new Set(['head', 'sub', 'micro']);
 const CATEGORY_TABLE_BY_LEVEL = {
@@ -292,6 +298,101 @@ const hasStaffManagementAccess = (authRole, employeeRole) => {
   const a = normalizeRole(authRole || '');
   const e = normalizeRole(employeeRole || '');
   return STAFF_MANAGE_ROLES.has(a) || STAFF_MANAGE_ROLES.has(e);
+};
+
+const hasManagerApprovalAccess = (authRole, employeeRole) => {
+  const a = normalizeRole(authRole || '');
+  const e = normalizeRole(employeeRole || '');
+  return MANAGER_APPROVAL_ROLES.has(a) || MANAGER_APPROVAL_ROLES.has(e);
+};
+
+const isMissingColumnError = (error, columnName = '') => {
+  const normalizedColumn = String(columnName || '').trim().toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  return Boolean(
+    normalizedColumn &&
+      message.includes(normalizedColumn) &&
+      (message.includes('column') || message.includes('schema cache'))
+  );
+};
+
+const normalizePricingRuleType = (value = '') => {
+  const normalized = String(value || '').trim().toUpperCase().replace(/\s+/g, '_');
+  return PRICING_RULE_ALLOWED_TYPES.has(normalized) ? normalized : '';
+};
+
+const buildPricingRuleRecord = (entityId, details = {}, createdAt = '') => {
+  const numericValue = Number(details?.value);
+  return {
+    id: String(entityId || '').trim(),
+    rule_name: String(details?.rule_name || details?.name || '').trim() || 'Untitled Rule',
+    type: normalizePricingRuleType(details?.type) || String(details?.type || '').trim().toUpperCase() || '-',
+    value: Number.isFinite(numericValue) ? numericValue : details?.value ?? null,
+    status: String(details?.status || 'PENDING_APPROVAL').trim().toUpperCase() || 'PENDING_APPROVAL',
+    requested_by_name: String(details?.requested_by_name || '').trim() || null,
+    requested_by_email: String(details?.requested_by_email || '').trim() || null,
+    requested_by_role: normalizeRole(details?.requested_by_role || 'SALES') || 'SALES',
+    requester_user_id: String(details?.requester_user_id || '').trim() || null,
+    submitted_at: String(details?.submitted_at || '').trim() || createdAt || new Date().toISOString(),
+    created_at: String(details?.created_at || '').trim() || createdAt || new Date().toISOString(),
+    manager_remarks: String(details?.manager_remarks || details?.remarks || '').trim() || null,
+    decided_at: String(details?.decided_at || '').trim() || null,
+    decided_by_name: String(details?.decided_by_name || '').trim() || null,
+    decided_by_email: String(details?.decided_by_email || '').trim() || null,
+    decided_by_role: normalizeRole(details?.decided_by_role || '') || null,
+    source: 'pricing_rule_request',
+  };
+};
+
+const applyPricingRuleAuditEvent = (currentRule, auditRow) => {
+  const createdAt = String(auditRow?.created_at || '').trim() || new Date().toISOString();
+  const details =
+    auditRow?.details && typeof auditRow.details === 'object' && !Array.isArray(auditRow.details)
+      ? auditRow.details
+      : {};
+  const nextRule = {
+    ...(currentRule || buildPricingRuleRecord(auditRow?.entity_id, details, createdAt)),
+    ...buildPricingRuleRecord(auditRow?.entity_id, details, createdAt),
+  };
+
+  if (!nextRule.created_at) nextRule.created_at = createdAt;
+  if (!nextRule.submitted_at) nextRule.submitted_at = createdAt;
+
+  if (auditRow?.action === PRICING_RULE_SUBMITTED_ACTION) {
+    nextRule.status = 'PENDING_APPROVAL';
+    nextRule.submitted_at = nextRule.submitted_at || createdAt;
+  }
+
+  if (auditRow?.action === PRICING_RULE_APPROVED_ACTION) {
+    nextRule.status = 'APPROVED';
+    nextRule.decided_at = createdAt;
+  }
+
+  if (auditRow?.action === PRICING_RULE_REJECTED_ACTION) {
+    nextRule.status = 'REJECTED';
+    nextRule.decided_at = createdAt;
+  }
+
+  return nextRule;
+};
+
+const hydratePricingRuleRequests = (auditRows = []) => {
+  const byId = new Map();
+  const rows = Array.isArray(auditRows) ? [...auditRows] : [];
+  rows.sort((left, right) => new Date(left?.created_at || 0).getTime() - new Date(right?.created_at || 0).getTime());
+
+  rows.forEach((row) => {
+    const entityId = String(row?.entity_id || '').trim();
+    if (!entityId) return;
+    const existing = byId.get(entityId) || null;
+    byId.set(entityId, applyPricingRuleAuditEvent(existing, row));
+  });
+
+  return Array.from(byId.values()).sort(
+    (left, right) =>
+      new Date(right?.submitted_at || right?.created_at || 0).getTime() -
+      new Date(left?.submitted_at || left?.created_at || 0).getTime()
+  );
 };
 
 const roleToDepartment = (role) => {
@@ -1118,12 +1219,24 @@ export const handler = async (event) => {
 
         payload.updated_at = new Date().toISOString();
 
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('leads')
           .update(payload)
           .eq('id', leadId)
           .select('*')
           .maybeSingle();
+
+        if (error && payload.sales_note !== undefined && isMissingColumnError(error, 'sales_note')) {
+          const retryPayload = { ...payload };
+          delete retryPayload.sales_note;
+
+          ({ data, error } = await supabase
+            .from('leads')
+            .update(retryPayload)
+            .eq('id', leadId)
+            .select('*')
+            .maybeSingle());
+        }
 
         if (error) {
           return json(500, { success: false, error: error.message || 'Failed to update lead' });
@@ -1162,17 +1275,172 @@ export const handler = async (event) => {
 
       // GET /api/employee/sales/pricing-rules
       if (event.httpMethod === 'GET' && tail[1] === 'pricing-rules') {
-        const { data, error } = await supabase
-          .from('vendor_plans')
-          .select('*')
-          .order('created_at', { ascending: false });
+        const [
+          { data: vendorPlans, error: vendorPlanError },
+          { data: auditRows, error: auditError },
+        ] = await Promise.all([
+          supabase
+            .from('vendor_plans')
+            .select('*')
+            .order('created_at', { ascending: false }),
+          supabase
+            .from('audit_logs')
+            .select('action, entity_type, entity_id, details, created_at')
+            .eq('entity_type', PRICING_RULE_ENTITY_TYPE)
+            .order('created_at', { ascending: false }),
+        ]);
 
-        const errText = String(error?.message || '').toLowerCase();
-        if (error && !(error?.code === '42P01' || errText.includes('vendor_plans'))) {
-          return json(500, { success: false, error: error.message || 'Failed to load pricing rules' });
+        const vendorPlanErrorText = String(vendorPlanError?.message || '').toLowerCase();
+        if (vendorPlanError && !(vendorPlanError?.code === '42P01' || vendorPlanErrorText.includes('vendor_plans'))) {
+          return json(500, { success: false, error: vendorPlanError.message || 'Failed to load pricing rules' });
         }
 
-        return json(200, { success: true, rules: data || [] });
+        if (auditError) {
+          return json(500, { success: false, error: auditError.message || 'Failed to load pricing rules' });
+        }
+
+        const employeeUserId = String(employee?.user_id || authUser?.id || '').trim();
+        const employeeEmail = String(employee?.email || authUser?.email || '').trim().toLowerCase();
+        const requestedRules = hydratePricingRuleRequests(auditRows).filter((rule) => {
+          const requesterUserId = String(rule?.requester_user_id || '').trim();
+          const requesterEmail = String(rule?.requested_by_email || '').trim().toLowerCase();
+          return (
+            (employeeUserId && requesterUserId === employeeUserId) ||
+            (employeeEmail && requesterEmail === employeeEmail)
+          );
+        });
+
+        const rules = [...requestedRules, ...(vendorPlans || [])].sort(
+          (left, right) =>
+            new Date(right?.submitted_at || right?.created_at || 0).getTime() -
+            new Date(left?.submitted_at || left?.created_at || 0).getTime()
+        );
+
+        return json(200, { success: true, rules });
+      }
+
+      // POST /api/employee/sales/pricing-rules
+      if (event.httpMethod === 'POST' && tail[1] === 'pricing-rules') {
+        const body = readBody(event);
+        const ruleName = String(body?.name || body?.rule_name || '').trim();
+        const ruleType = normalizePricingRuleType(body?.type);
+        const ruleValue = Number(body?.value);
+
+        if (!ruleName) {
+          return json(400, { success: false, error: 'Rule name is required' });
+        }
+        if (!ruleType) {
+          return json(400, { success: false, error: 'A valid rule type is required' });
+        }
+        if (!Number.isFinite(ruleValue) || ruleValue < 0) {
+          return json(400, { success: false, error: 'Rule value must be a non-negative number' });
+        }
+
+        const ruleId = randomUUID();
+        const submittedAt = new Date().toISOString();
+        const rule = buildPricingRuleRecord(
+          ruleId,
+          {
+            rule_name: ruleName,
+            type: ruleType,
+            value: ruleValue,
+            status: 'PENDING_APPROVAL',
+            requested_by_name: String(employee?.full_name || '').trim() || String(employee?.email || '').trim() || 'Sales',
+            requested_by_email: String(employee?.email || '').trim() || null,
+            requested_by_role: normalizeRole(employee?.role || authUser?.role || 'SALES') || 'SALES',
+            requester_user_id: String(employee?.user_id || authUser?.id || '').trim() || null,
+            submitted_at: submittedAt,
+            created_at: submittedAt,
+          },
+          submittedAt
+        );
+
+        await writeAudit(supabase, {
+          user_id: authUser?.id || null,
+          action: PRICING_RULE_SUBMITTED_ACTION,
+          entity_type: PRICING_RULE_ENTITY_TYPE,
+          entity_id: ruleId,
+          details: rule,
+        });
+
+        return json(201, { success: true, rule });
+      }
+    }
+
+    if (tail[0] === 'manager' && tail[1] === 'pricing-approvals') {
+      const employee = await resolveEmployeeProfile(supabase, authUser);
+      if (!employee) return json(404, { success: false, error: 'Employee profile not found' });
+      if (!hasManagerApprovalAccess(authUser.role, employee.role)) {
+        return json(403, { success: false, error: 'Manager access required' });
+      }
+
+      if (event.httpMethod === 'GET' && tail.length === 2) {
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('action, entity_type, entity_id, details, created_at')
+          .eq('entity_type', PRICING_RULE_ENTITY_TYPE)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          return json(500, { success: false, error: error.message || 'Failed to load pricing approvals' });
+        }
+
+        const rules = hydratePricingRuleRequests(data).filter((rule) => rule.status === 'PENDING_APPROVAL');
+        return json(200, { success: true, rules });
+      }
+
+      if (event.httpMethod === 'POST' && tail[2] && tail[3] === 'decision') {
+        const ruleId = String(tail[2] || '').trim();
+        const body = readBody(event);
+        const decision = String(body?.decision || '').trim().toUpperCase();
+        const remarks = String(body?.remarks || '').trim() || null;
+
+        if (!ruleId) {
+          return json(400, { success: false, error: 'ruleId is required' });
+        }
+        if (!['APPROVE', 'REJECT'].includes(decision)) {
+          return json(400, { success: false, error: 'decision must be APPROVE or REJECT' });
+        }
+
+        const { data, error } = await supabase
+          .from('audit_logs')
+          .select('action, entity_type, entity_id, details, created_at')
+          .eq('entity_type', PRICING_RULE_ENTITY_TYPE)
+          .eq('entity_id', ruleId)
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          return json(500, { success: false, error: error.message || 'Failed to load pricing rule request' });
+        }
+
+        const currentRule = hydratePricingRuleRequests(data)[0];
+        if (!currentRule) {
+          return json(404, { success: false, error: 'Pricing rule request not found' });
+        }
+        if (currentRule.status !== 'PENDING_APPROVAL') {
+          return json(400, { success: false, error: 'Pricing rule request has already been processed' });
+        }
+
+        const decidedAt = new Date().toISOString();
+        const updatedRule = {
+          ...currentRule,
+          status: decision === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+          manager_remarks: remarks,
+          decided_at: decidedAt,
+          decided_by_name: String(employee?.full_name || '').trim() || String(employee?.email || '').trim() || 'Manager',
+          decided_by_email: String(employee?.email || '').trim() || null,
+          decided_by_role: normalizeRole(employee?.role || authUser?.role || 'MANAGER') || 'MANAGER',
+        };
+
+        await writeAudit(supabase, {
+          user_id: authUser?.id || null,
+          action: decision === 'APPROVE' ? PRICING_RULE_APPROVED_ACTION : PRICING_RULE_REJECTED_ACTION,
+          entity_type: PRICING_RULE_ENTITY_TYPE,
+          entity_id: ruleId,
+          details: updatedRule,
+        });
+
+        return json(200, { success: true, rule: updatedRule });
       }
     }
 

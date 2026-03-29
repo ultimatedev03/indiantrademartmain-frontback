@@ -45,6 +45,7 @@ const PricingRules = lazy(() => import('@/modules/employee/pages/sales/PricingRu
 const VpDashboard = lazy(() => import('@/modules/employee/pages/territory/VpDashboard'));
 const ManagerDashboard = lazy(() => import('@/modules/employee/pages/territory/ManagerDashboard'));
 const TerritoryEngagements = lazy(() => import('@/modules/employee/pages/territory/TerritoryEngagements'));
+const ManagerPricingApprovals = lazy(() => import('@/modules/employee/pages/manager/PricingApprovals'));
 
 const PortalLogin = lazy(() => import('@/shared/pages/PortalLogin'));
 import { ShieldCheck, Users } from 'lucide-react';
@@ -291,6 +292,7 @@ export const AdminRoutes = () => {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<ManagerDashboard />} />
           <Route path="territory" element={<ManagerDashboard />} />
+          <Route path="pricing-approvals" element={<ManagerPricingApprovals />} />
           <Route path="engagements" element={<TerritoryEngagements />} />
           <Route path="territory-engagements" element={<TerritoryEngagements />} />
         </Route>

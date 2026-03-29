@@ -64,4 +64,36 @@ export const salesApi = {
     const data = await unwrap(res, 'Failed to load pricing rules');
     return data?.rules || [];
   },
+
+  createPricingRule: async (payload = {}) => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/sales/pricing-rules'), {
+      method: 'POST',
+      body: JSON.stringify(payload || {}),
+    });
+    const data = await unwrap(res, 'Failed to create pricing rule');
+    return data?.rule || null;
+  },
+
+  getManagerPricingApprovals: async () => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/manager/pricing-approvals'));
+    const data = await unwrap(res, 'Failed to load pricing approvals');
+    return data?.rules || [];
+  },
+
+  decidePricingRule: async (ruleId, decision, remarks = '') => {
+    const normalizedRuleId = String(ruleId || '').trim();
+    if (!normalizedRuleId) {
+      throw new Error('ruleId is required');
+    }
+
+    const res = await fetchWithCsrf(apiUrl(`/api/employee/manager/pricing-approvals/${normalizedRuleId}/decision`), {
+      method: 'POST',
+      body: JSON.stringify({
+        decision,
+        remarks,
+      }),
+    });
+    const data = await unwrap(res, 'Failed to update pricing rule approval');
+    return data?.rule || null;
+  },
 };

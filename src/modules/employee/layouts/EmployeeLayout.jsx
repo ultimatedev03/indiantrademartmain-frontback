@@ -42,6 +42,18 @@ const SidebarLink = ({ to, icon: Icon, children, onNavigate }) => (
   </NavLink>
 );
 
+const EMPLOYEE_LOGIN_PATHS = {
+  DATA_ENTRY: '/employee/login?portal=dataentry',
+  DATAENTRY: '/employee/login?portal=dataentry',
+  SUPPORT: '/employee/login?portal=support',
+  SALES: '/employee/login?portal=sales',
+  MANAGER: '/employee/login?portal=manager',
+  VP: '/employee/login?portal=vp',
+};
+
+const getEmployeeLoginPath = (role = '') =>
+  EMPLOYEE_LOGIN_PATHS[String(role || '').trim().toUpperCase()] || '/employee/login';
+
 const EmployeeLayout = ({ allowedRole }) => {
   useGlobalInputSanitizer();
 
@@ -59,7 +71,7 @@ const EmployeeLayout = ({ allowedRole }) => {
   if (isLoading) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-500">Loading workspace...</div>;
   
   if (!user) {
-    return <Navigate to="/employee/login" replace />;
+    return <Navigate to={getEmployeeLoginPath(allowedRole)} replace />;
   }
   
   if (allowedRole && user.role !== allowedRole) {
@@ -78,7 +90,7 @@ const EmployeeLayout = ({ allowedRole }) => {
 
   const handleLogout = () => {
     logout();
-    navigate('/employee/login');
+    navigate(getEmployeeLoginPath(user?.role || allowedRole));
   };
 
   const getPageTitle = () => {
@@ -149,6 +161,7 @@ const EmployeeLayout = ({ allowedRole }) => {
             <>
               <SidebarLink to="/employee/manager/dashboard" icon={LayoutDashboard} onNavigate={() => setIsSidebarOpen(false)}>Dashboard</SidebarLink>
               <SidebarLink to="/employee/manager/territory" icon={Users} onNavigate={() => setIsSidebarOpen(false)}>Team Territory</SidebarLink>
+              <SidebarLink to="/employee/manager/pricing-approvals" icon={Tag} onNavigate={() => setIsSidebarOpen(false)}>Pricing Approvals</SidebarLink>
               <SidebarLink to="/employee/manager/engagements" icon={TrendingUp} onNavigate={() => setIsSidebarOpen(false)}>Engagements</SidebarLink>
             </>
           )}

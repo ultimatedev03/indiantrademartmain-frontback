@@ -129,10 +129,7 @@ const Leads = () => {
 
     setActionLoadingId(`send:${leadId}`);
     try {
-      const updatedLead = await salesApi.updateLead(leadId, {
-        status: 'SENT_TO_VENDOR',
-        sales_note: String(lead?.sales_note || '').trim() || 'Sent to vendor from sales CRM',
-      });
+      const updatedLead = await salesApi.updateLeadStatus(leadId, 'SENT_TO_VENDOR');
       updateLeadRow(updatedLead);
       toast({
         title: 'Lead forwarded',

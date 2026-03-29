@@ -24,6 +24,7 @@ const canonicalizeRole = (value) => {
 };
 
 const isInternalRole = (role) => INTERNAL_ROLES.has(String(role || '').trim().toUpperCase());
+const formatRoleLabel = (role) => String(canonicalizeRole(role) || role || 'Employee').replaceAll('_', ' ');
 
 const buildEmployeeUser = (authUser, empRow) => {
   const name = empRow?.full_name || empRow?.name || authUser?.user_metadata?.full_name || authUser?.email || 'Employee';
@@ -73,7 +74,7 @@ export const employeeApi = {
     /**
      * Auth via backend JWT + cookies.
      */
-    login: async (email, password, captcha = {}) => {
+    login: async (email, password, captcha = {}, expectedRole = '') => {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -90,7 +91,17 @@ export const employeeApi = {
         throw new Error('No employee profile found. Please ask admin to create your employee account.');
       }
 
-      return { user: buildEmployeeUser(data.user, empRow) };
+      const user = buildEmployeeUser(data.user, empRow);
+      const normalizedExpectedRole = canonicalizeRole(expectedRole);
+
+      if (normalizedExpectedRole && user.role !== normalizedExpectedRole) {
+        await supabase.auth.signOut();
+        throw new Error(
+          `${formatRoleLabel(user.role)} accounts must use the ${formatRoleLabel(normalizedExpectedRole)} Login.`
+        );
+      }
+
+      return { user };
     },
 
     logout: async () => {

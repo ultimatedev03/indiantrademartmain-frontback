@@ -64,19 +64,19 @@ const ManagementPortal = () => {
             description="Access for Staff, Support, and Sales Teams"
           >
             <div className="grid gap-3 w-full">
-              <Link to="/employee/login" className="w-full group">
+              <Link to="/employee/login?portal=dataentry" className="w-full group">
                 <Button className="w-full h-12 bg-white text-purple-900 hover:bg-purple-50 font-semibold shadow-lg transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
-                  <Database className="h-4 w-4" /> Data Entry
+                  <Database className="h-4 w-4" /> Data Entry Login
                 </Button>
               </Link>
-              <Link to="/employee/login" className="w-full">
+              <Link to="/employee/login?portal=support" className="w-full">
                 <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
-                  <Headphones className="h-4 w-4" /> Support
+                  <Headphones className="h-4 w-4" /> Support Login
                 </Button>
               </Link>
-              <Link to="/employee/login" className="w-full">
+              <Link to="/employee/login?portal=sales" className="w-full">
                 <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
-                  <TrendingUp className="h-4 w-4" /> Sales
+                  <TrendingUp className="h-4 w-4" /> Sales Login
                 </Button>
               </Link>
             </div>
