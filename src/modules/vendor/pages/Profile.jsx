@@ -38,6 +38,83 @@ const normalizeVendorProfile = (profile = {}) => ({
   ownerDesignation: profile.ownerDesignation || profile.owner_designation,
 });
 
+const PAN_NUMBER_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const AADHAR_NUMBER_RE = /^\d{12}$/;
+const IFSC_CODE_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const normalizePanNumber = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+
+const normalizeAadharNumber = (value = '') =>
+  String(value || '').replace(/\D/g, '').slice(0, 12);
+
+const normalizeIfscCode = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+
+const normalizeShortText = (value = '', maxLength = 120) =>
+  String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+
+const validateVendorIdentityDraft = (draft = {}) => {
+  const rawPanNumber = String(draft.panNumber || draft.pan_number || '').trim();
+  const rawAadharNumber = String(draft.aadharNumber || draft.aadhar_number || '').trim();
+  const panNumber = normalizePanNumber(rawPanNumber);
+  const aadharNumber = normalizeAadharNumber(rawAadharNumber);
+
+  if (rawPanNumber && !PAN_NUMBER_RE.test(panNumber)) {
+    throw new Error('PAN number must be in the format ABCDE1234F.');
+  }
+
+  if (rawAadharNumber && !AADHAR_NUMBER_RE.test(aadharNumber)) {
+    throw new Error('Aadhar number must contain exactly 12 digits.');
+  }
+
+  return {
+    panNumber,
+    aadharNumber,
+  };
+};
+
+const normalizeBankDraft = (bank = {}, index = 0) => {
+  const accountNumber = String(bank.account_number || '').replace(/\D/g, '').slice(0, 30);
+  const ifscCode = normalizeIfscCode(bank.ifsc_code || '');
+  const hasAnyValue = [
+    accountNumber,
+    ifscCode,
+    bank.bank_name,
+    bank.branch_name,
+    bank.account_holder,
+  ].some((value) => String(value || '').trim());
+
+  if (!hasAnyValue) {
+    return null;
+  }
+
+  if (!accountNumber) {
+    throw new Error(`Bank Account ${index + 1}: account number is required.`);
+  }
+
+  if (accountNumber.length < 6) {
+    throw new Error(`Bank Account ${index + 1}: account number must contain at least 6 digits.`);
+  }
+
+  if (!ifscCode) {
+    throw new Error(`Bank Account ${index + 1}: IFSC code is required.`);
+  }
+
+  if (!IFSC_CODE_RE.test(ifscCode)) {
+    throw new Error(`Bank Account ${index + 1}: IFSC code must be in format ABCD0123456.`);
+  }
+
+  return {
+    account_number: accountNumber,
+    ifsc_code: ifscCode,
+    bank_name: normalizeShortText(bank.bank_name || ''),
+    branch_name: normalizeShortText(bank.branch_name || ''),
+    account_holder: normalizeShortText(bank.account_holder || ''),
+    is_primary: bank.is_primary === true,
+  };
+};
+
 const Profile = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -149,8 +226,28 @@ const Profile = () => {
 
   // ✅ FIXED: auth-only fields removed, confirmed_at removed
   const handleSave = async () => {
+    let normalizedIdentity = null;
+    try {
+      normalizedIdentity = validateVendorIdentityDraft(draft);
+    } catch (validationError) {
+      toast({
+        title: "Invalid Details",
+        description: validationError.message,
+        variant: "destructive"
+      });
+      return;
+    }
+
     setSaving(true);
     try {
+      const normalizedDraft = {
+        ...draft,
+        panNumber: normalizedIdentity.panNumber,
+        pan_number: normalizedIdentity.panNumber,
+        aadharNumber: normalizedIdentity.aadharNumber,
+        aadhar_number: normalizedIdentity.aadharNumber,
+      };
+
       // ✅ remove auth-only fields if present (VERY IMPORTANT)
       // eslint-disable-next-line no-unused-vars
       const {
@@ -173,7 +270,7 @@ const Profile = () => {
         business_description,
 
         ...cleanDraft
-      } = draft;
+      } = normalizedDraft;
 
       const updates = { ...cleanDraft };
 
@@ -606,8 +703,13 @@ const Profile = () => {
                     <Input
                       name="pan_number"
                       disabled={editingSection !== 'additional'}
+                      placeholder="ABCDE1234F"
+                      maxLength={10}
                       value={draft.panNumber || draft.pan_number || ''}
-                      onChange={e => setDraft({ ...draft, panNumber: e.target.value, pan_number: e.target.value })}
+                      onChange={e => {
+                        const panNumber = normalizePanNumber(e.target.value);
+                        setDraft({ ...draft, panNumber, pan_number: panNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -617,8 +719,14 @@ const Profile = () => {
                     <Input
                       name="aadhar_number"
                       disabled={editingSection !== 'additional'}
+                      inputMode="numeric"
+                      placeholder="12-digit Aadhar number"
+                      maxLength={12}
                       value={draft.aadharNumber || draft.aadhar_number || ''}
-                      onChange={e => setDraft({ ...draft, aadharNumber: e.target.value, aadhar_number: e.target.value })}
+                      onChange={e => {
+                        const aadharNumber = normalizeAadharNumber(e.target.value);
+                        setDraft({ ...draft, aadharNumber, aadhar_number: aadharNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -853,10 +961,18 @@ const BankingSection = ({ banks, onRefresh }) => {
   const [newBanks, setNewBanks] = useState(banks.length > 0 ? banks : [{ id: generateTempId() }]);
   const [adding, setAdding] = useState(false);
 
+  useEffect(() => {
+    setNewBanks(banks.length > 0 ? banks : [{ id: generateTempId() }]);
+  }, [banks]);
+
   const handleUpdateBank = (index, field, value) => {
     let nextVal = value;
     if (field === 'account_number') {
       nextVal = (value || '').replace(/\D/g, '').slice(0, 30);
+    } else if (field === 'ifsc_code') {
+      nextVal = normalizeIfscCode(value);
+    } else if (field === 'bank_name' || field === 'branch_name' || field === 'account_holder') {
+      nextVal = String(value || '').slice(0, 120);
     }
     const updated = [...newBanks];
     updated[index] = { ...updated[index], [field]: nextVal };
@@ -889,11 +1005,17 @@ const BankingSection = ({ banks, onRefresh }) => {
   const handleSaveAllBanks = async () => {
     setAdding(true);
     try {
-      for (const bank of newBanks) {
+      for (let index = 0; index < newBanks.length; index += 1) {
+        const bank = newBanks[index];
+        const normalizedBank = normalizeBankDraft(bank, index);
+        if (!normalizedBank) {
+          continue;
+        }
+
         if (bank.id?.startsWith('temp-')) {
-          if (bank.account_number && bank.ifsc_code) {
-            await vendorApi.banking.add(bank);
-          }
+          await vendorApi.banking.add(normalizedBank);
+        } else {
+          await vendorApi.banking.update(bank.id, normalizedBank);
         }
       }
       await onRefresh();

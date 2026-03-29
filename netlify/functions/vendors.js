@@ -197,6 +197,96 @@ const sanitizeVendorUpdates = (updates = {}) => {
   return cleaned;
 };
 
+const PAN_NUMBER_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const AADHAR_NUMBER_RE = /^\d{12}$/;
+const IFSC_CODE_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
+const normalizeOptionalText = (value, maxLength = 160) => {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, maxLength) : null;
+};
+
+const normalizePanNumber = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+
+const normalizeAadharNumber = (value = '') =>
+  String(value || '').replace(/\D/g, '').slice(0, 12);
+
+const normalizeIfscCode = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+
+const validateVendorIdentityFields = (updates = {}) => {
+  const normalized = { ...updates };
+  const rawPanNumber = hasOwn(updates, 'pan_number') ? updates.pan_number : updates.panNumber;
+  const rawAadharNumber = hasOwn(updates, 'aadhar_number') ? updates.aadhar_number : updates.aadharNumber;
+
+  if (rawPanNumber !== undefined) {
+    const panNumber = normalizePanNumber(rawPanNumber);
+    if (String(rawPanNumber ?? '').trim() && !PAN_NUMBER_RE.test(panNumber)) {
+      throw new Error('PAN number must be in format ABCDE1234F.');
+    }
+    normalized.pan_number = panNumber || null;
+    delete normalized.panNumber;
+  }
+
+  if (rawAadharNumber !== undefined) {
+    const aadharNumber = normalizeAadharNumber(rawAadharNumber);
+    if (String(rawAadharNumber ?? '').trim() && !AADHAR_NUMBER_RE.test(aadharNumber)) {
+      throw new Error('Aadhar number must contain exactly 12 digits.');
+    }
+    normalized.aadhar_number = aadharNumber || null;
+    delete normalized.aadharNumber;
+  }
+
+  return normalized;
+};
+
+const normalizeVendorBankDetailsPayload = (payload = {}, { requireCoreFields = false, partial = false } = {}) => {
+  const normalized = {};
+
+  if (!partial || hasOwn(payload, 'account_holder') || hasOwn(payload, 'accountHolder')) {
+    normalized.account_holder = normalizeOptionalText(payload.account_holder ?? payload.accountHolder, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'bank_name') || hasOwn(payload, 'bankName')) {
+    normalized.bank_name = normalizeOptionalText(payload.bank_name ?? payload.bankName, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'branch_name') || hasOwn(payload, 'branchName')) {
+    normalized.branch_name = normalizeOptionalText(payload.branch_name ?? payload.branchName, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'account_number') || hasOwn(payload, 'accountNumber')) {
+    const accountNumber = String(payload.account_number ?? payload.accountNumber ?? '').replace(/\D/g, '').slice(0, 30);
+    if (requireCoreFields && !accountNumber) {
+      throw new Error('Account number is required.');
+    }
+    if (accountNumber && accountNumber.length < 6) {
+      throw new Error('Account number must contain at least 6 digits.');
+    }
+    normalized.account_number = accountNumber || null;
+  }
+
+  if (!partial || hasOwn(payload, 'ifsc_code') || hasOwn(payload, 'ifscCode')) {
+    const ifscCode = normalizeIfscCode(payload.ifsc_code ?? payload.ifscCode ?? '');
+    if (requireCoreFields && !ifscCode) {
+      throw new Error('IFSC code is required.');
+    }
+    if (ifscCode && !IFSC_CODE_RE.test(ifscCode)) {
+      throw new Error('IFSC code must be in format ABCD0123456.');
+    }
+    normalized.ifsc_code = ifscCode || null;
+  }
+
+  if (!partial || hasOwn(payload, 'is_primary') || hasOwn(payload, 'isPrimary')) {
+    normalized.is_primary = payload.is_primary === true || payload.isPrimary === true;
+  }
+
+  return normalized;
+};
+
 const listVendorCandidatesForUser = async ({ userId = '', email = '' } = {}) => {
   const byId = new Map();
 
@@ -1079,7 +1169,12 @@ export const handler = async (event) => {
         const vendor = await resolveVendorForUser(user);
         if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
 
-        const payload = sanitizeVendorUpdates(readBody(event));
+        let payload;
+        try {
+          payload = validateVendorIdentityFields(sanitizeVendorUpdates(readBody(event)));
+        } catch (validationError) {
+          return bad(event, validationError.message);
+        }
         payload.updated_at = new Date().toISOString();
 
         const { data, error: updErr } = await supabase
@@ -1091,6 +1186,170 @@ export const handler = async (event) => {
 
         if (updErr) return fail(event, updErr.message || 'Update failed');
         return ok(event, { success: true, vendor: data || { ...vendor, ...payload } });
+      }
+
+      if (tail[1] === 'banks') {
+        const vendor = await resolveVendorForUser(user);
+        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+
+        if (event.httpMethod === 'GET' && tail.length === 2) {
+          const { data, error: listErr } = await supabase
+            .from('vendor_bank_details')
+            .select('*')
+            .eq('vendor_id', vendor.id)
+            .order('is_primary', { ascending: false })
+            .order('created_at', { ascending: false });
+
+          if (listErr) return fail(event, listErr.message || 'Failed to fetch bank details');
+          return ok(event, { success: true, banks: data || [] });
+        }
+
+        if (tail.length === 3 && !isValidId(tail[2])) {
+          return bad(event, 'Invalid bank detail id');
+        }
+
+        if (event.httpMethod === 'GET' && tail.length === 3) {
+          const { data, error: getErr } = await supabase
+            .from('vendor_bank_details')
+            .select('*')
+            .eq('id', tail[2])
+            .eq('vendor_id', vendor.id)
+            .maybeSingle();
+
+          if (getErr) return fail(event, getErr.message || 'Failed to fetch bank detail');
+          if (!data) return bad(event, 'Bank detail not found', null, 404);
+          return ok(event, { success: true, bank: data });
+        }
+
+        if (event.httpMethod === 'POST' && tail.length === 2) {
+          let payload;
+          try {
+            payload = normalizeVendorBankDetailsPayload(readBody(event), { requireCoreFields: true });
+          } catch (validationError) {
+            return bad(event, validationError.message);
+          }
+
+          const { count, error: countErr } = await supabase
+            .from('vendor_bank_details')
+            .select('id', { count: 'exact', head: true })
+            .eq('vendor_id', vendor.id);
+
+          if (countErr) return fail(event, countErr.message || 'Failed to validate bank details');
+
+          const shouldSetPrimary = payload.is_primary === true || !count;
+          if (shouldSetPrimary) {
+            const { error: resetErr } = await supabase
+              .from('vendor_bank_details')
+              .update({ is_primary: false, updated_at: new Date().toISOString() })
+              .eq('vendor_id', vendor.id);
+            if (resetErr) return fail(event, resetErr.message || 'Failed to update primary bank');
+          }
+
+          const nowIso = new Date().toISOString();
+          const { data, error: insertErr } = await supabase
+            .from('vendor_bank_details')
+            .insert([{
+              vendor_id: vendor.id,
+              ...payload,
+              is_primary: shouldSetPrimary,
+              created_at: nowIso,
+              updated_at: nowIso,
+            }])
+            .select('*')
+            .maybeSingle();
+
+          if (insertErr) return fail(event, insertErr.message || 'Failed to save bank details');
+          return json(event, 201, { success: true, bank: data });
+        }
+
+        if (event.httpMethod === 'PUT' && tail.length === 3) {
+          const { data: existingBank, error: existingErr } = await supabase
+            .from('vendor_bank_details')
+            .select('*')
+            .eq('id', tail[2])
+            .eq('vendor_id', vendor.id)
+            .maybeSingle();
+
+          if (existingErr) return fail(event, existingErr.message || 'Failed to fetch bank detail');
+          if (!existingBank) return bad(event, 'Bank detail not found', null, 404);
+
+          let payload;
+          try {
+            payload = normalizeVendorBankDetailsPayload(readBody(event), { partial: true });
+          } catch (validationError) {
+            return bad(event, validationError.message);
+          }
+
+          if (!Object.keys(payload).length) {
+            return bad(event, 'No bank details were provided to update.');
+          }
+
+          if (payload.is_primary === true) {
+            const { error: resetErr } = await supabase
+              .from('vendor_bank_details')
+              .update({ is_primary: false, updated_at: new Date().toISOString() })
+              .eq('vendor_id', vendor.id)
+              .neq('id', tail[2]);
+            if (resetErr) return fail(event, resetErr.message || 'Failed to update primary bank');
+          }
+
+          const { data, error: updateErr } = await supabase
+            .from('vendor_bank_details')
+            .update({
+              ...payload,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', tail[2])
+            .eq('vendor_id', vendor.id)
+            .select('*')
+            .maybeSingle();
+
+          if (updateErr) return fail(event, updateErr.message || 'Failed to update bank details');
+          return ok(event, { success: true, bank: data || { ...existingBank, ...payload } });
+        }
+
+        if (event.httpMethod === 'DELETE' && tail.length === 3) {
+          const { data: existingBank, error: existingErr } = await supabase
+            .from('vendor_bank_details')
+            .select('id, is_primary')
+            .eq('id', tail[2])
+            .eq('vendor_id', vendor.id)
+            .maybeSingle();
+
+          if (existingErr) return fail(event, existingErr.message || 'Failed to fetch bank detail');
+          if (!existingBank) return bad(event, 'Bank detail not found', null, 404);
+
+          const { error: deleteErr } = await supabase
+            .from('vendor_bank_details')
+            .delete()
+            .eq('id', tail[2])
+            .eq('vendor_id', vendor.id);
+
+          if (deleteErr) return fail(event, deleteErr.message || 'Failed to delete bank detail');
+
+          if (existingBank.is_primary) {
+            const { data: fallbackBank, error: fallbackErr } = await supabase
+              .from('vendor_bank_details')
+              .select('id')
+              .eq('vendor_id', vendor.id)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (fallbackErr) return fail(event, fallbackErr.message || 'Failed to reassign primary bank');
+
+            if (fallbackBank?.id) {
+              const { error: resetPrimaryErr } = await supabase
+                .from('vendor_bank_details')
+                .update({ is_primary: true, updated_at: new Date().toISOString() })
+                .eq('id', fallbackBank.id)
+                .eq('vendor_id', vendor.id);
+              if (resetPrimaryErr) return fail(event, resetPrimaryErr.message || 'Failed to reassign primary bank');
+            }
+          }
+
+          return ok(event, { success: true });
+        }
       }
 
       // -------------------------

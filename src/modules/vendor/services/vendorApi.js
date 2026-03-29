@@ -2568,153 +2568,46 @@ export const vendorApi = {
   // --- BANKING API ---
   banking: {
     list: async () => {
-      const vendorId = await getVendorId();
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const response = await fetchVendorJson('/api/vendors/me/banks');
+      return response?.banks || [];
     },
 
     get: async (id) => {
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await fetchVendorJson(`/api/vendors/me/banks/${encodeURIComponent(id)}`);
+      return response?.bank || null;
     },
 
     getPrimary: async () => {
-      const vendorId = await getVendorId();
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('is_primary', true)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
+      const banks = await vendorApi.banking.list();
+      return (banks || []).find((bank) => bank?.is_primary) || null;
     },
 
     add: async (bankData) => {
-      const vendorId = await getVendorId();
-      // Remove temporary ID before sending to database
-      const { id, ...cleanData } = bankData;
-
-      // If this is marked as primary, unset other primary accounts
-      if (cleanData.is_primary) {
-        const { error: updateErr } = await supabase
-          .from('vendor_bank_details')
-          .update({ is_primary: false })
-          .eq('vendor_id', vendorId);
-        if (updateErr) throw updateErr;
-      }
-
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .insert([{
-          ...cleanData,
-          vendor_id: vendorId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const { id, ...cleanData } = bankData || {};
+      const response = await fetchVendorJson('/api/vendors/me/banks', {
+        method: 'POST',
+        body: JSON.stringify(cleanData),
+      });
+      return response?.bank || null;
     },
 
     update: async (id, updates) => {
-      const { data: bankDetail, error: getErr } = await supabase
-        .from('vendor_bank_details')
-        .select('vendor_id')
-        .eq('id', id)
-        .single();
-      if (getErr) throw getErr;
-
-      // If setting as primary, unset other primary accounts
-      if (updates.is_primary) {
-        const { error: updateErr } = await supabase
-          .from('vendor_bank_details')
-          .update({ is_primary: false })
-          .eq('vendor_id', bankDetail.vendor_id)
-          .neq('id', id);
-        if (updateErr) throw updateErr;
-      }
-
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .update({
-          ...updates,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await fetchVendorJson(`/api/vendors/me/banks/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates || {}),
+      });
+      return response?.bank || null;
     },
 
     setPrimary: async (id) => {
-      const { data: bankDetail, error: getErr } = await supabase
-        .from('vendor_bank_details')
-        .select('vendor_id')
-        .eq('id', id)
-        .single();
-      if (getErr) throw getErr;
-
-      // Unset all other primary accounts
-      const { error: updateErr } = await supabase
-        .from('vendor_bank_details')
-        .update({ is_primary: false })
-        .eq('vendor_id', bankDetail.vendor_id)
-        .neq('id', id);
-      if (updateErr) throw updateErr;
-
-      // Set this one as primary
-      const { data, error } = await supabase
-        .from('vendor_bank_details')
-        .update({ is_primary: true, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      return vendorApi.banking.update(id, { is_primary: true });
     },
 
     delete: async (id) => {
-      const { data: bankDetail, error: getErr } = await supabase
-        .from('vendor_bank_details')
-        .select('is_primary')
-        .eq('id', id)
-        .single();
-      if (getErr) throw getErr;
-
-      // If deleting primary account, set another as primary
-      if (bankDetail?.is_primary) {
-        const { data: bankData, error: listErr } = await supabase
-          .from('vendor_bank_details')
-          .select('id')
-          .neq('id', id)
-          .limit(1)
-          .maybeSingle();
-        if (listErr) throw listErr;
-
-        if (bankData?.id) {
-          const { error: setErr } = await supabase
-            .from('vendor_bank_details')
-            .update({ is_primary: true })
-            .eq('id', bankData.id);
-          if (setErr) throw setErr;
-        }
-      }
-
-      const { error } = await supabase.from('vendor_bank_details').delete().eq('id', id);
-      if (error) throw error;
+      await fetchVendorJson(`/api/vendors/me/banks/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      });
+      return true;
     }
   },
 

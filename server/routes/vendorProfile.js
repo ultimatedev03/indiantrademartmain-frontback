@@ -122,6 +122,96 @@ const sanitizeVendorUpdates = (updates = {}) => {
   return cleaned;
 };
 
+const PAN_NUMBER_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+const AADHAR_NUMBER_RE = /^\d{12}$/;
+const IFSC_CODE_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
+
+const normalizeOptionalText = (value, maxLength = 160) => {
+  const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+  return text ? text.slice(0, maxLength) : null;
+};
+
+const normalizePanNumber = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+
+const normalizeAadharNumber = (value = '') =>
+  String(value || '').replace(/\D/g, '').slice(0, 12);
+
+const normalizeIfscCode = (value = '') =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+
+const validateVendorIdentityFields = (updates = {}) => {
+  const normalized = { ...updates };
+  const rawPanNumber = hasOwn(updates, 'pan_number') ? updates.pan_number : updates.panNumber;
+  const rawAadharNumber = hasOwn(updates, 'aadhar_number') ? updates.aadhar_number : updates.aadharNumber;
+
+  if (rawPanNumber !== undefined) {
+    const panNumber = normalizePanNumber(rawPanNumber);
+    if (String(rawPanNumber ?? '').trim() && !PAN_NUMBER_RE.test(panNumber)) {
+      throw new Error('PAN number must be in format ABCDE1234F.');
+    }
+    normalized.pan_number = panNumber || null;
+    delete normalized.panNumber;
+  }
+
+  if (rawAadharNumber !== undefined) {
+    const aadharNumber = normalizeAadharNumber(rawAadharNumber);
+    if (String(rawAadharNumber ?? '').trim() && !AADHAR_NUMBER_RE.test(aadharNumber)) {
+      throw new Error('Aadhar number must contain exactly 12 digits.');
+    }
+    normalized.aadhar_number = aadharNumber || null;
+    delete normalized.aadharNumber;
+  }
+
+  return normalized;
+};
+
+const normalizeVendorBankDetailsPayload = (payload = {}, { requireCoreFields = false, partial = false } = {}) => {
+  const normalized = {};
+
+  if (!partial || hasOwn(payload, 'account_holder') || hasOwn(payload, 'accountHolder')) {
+    normalized.account_holder = normalizeOptionalText(payload.account_holder ?? payload.accountHolder, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'bank_name') || hasOwn(payload, 'bankName')) {
+    normalized.bank_name = normalizeOptionalText(payload.bank_name ?? payload.bankName, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'branch_name') || hasOwn(payload, 'branchName')) {
+    normalized.branch_name = normalizeOptionalText(payload.branch_name ?? payload.branchName, 120);
+  }
+
+  if (!partial || hasOwn(payload, 'account_number') || hasOwn(payload, 'accountNumber')) {
+    const accountNumber = String(payload.account_number ?? payload.accountNumber ?? '').replace(/\D/g, '').slice(0, 30);
+    if (requireCoreFields && !accountNumber) {
+      throw new Error('Account number is required.');
+    }
+    if (accountNumber && accountNumber.length < 6) {
+      throw new Error('Account number must contain at least 6 digits.');
+    }
+    normalized.account_number = accountNumber || null;
+  }
+
+  if (!partial || hasOwn(payload, 'ifsc_code') || hasOwn(payload, 'ifscCode')) {
+    const ifscCode = normalizeIfscCode(payload.ifsc_code ?? payload.ifscCode ?? '');
+    if (requireCoreFields && !ifscCode) {
+      throw new Error('IFSC code is required.');
+    }
+    if (ifscCode && !IFSC_CODE_RE.test(ifscCode)) {
+      throw new Error('IFSC code must be in format ABCD0123456.');
+    }
+    normalized.ifsc_code = ifscCode || null;
+  }
+
+  if (!partial || hasOwn(payload, 'is_primary') || hasOwn(payload, 'isPrimary')) {
+    normalized.is_primary = payload.is_primary === true || payload.isPrimary === true;
+  }
+
+  return normalized;
+};
+
 async function resolveVendorForUser(user) {
   const userId = user?.id || null;
   const email = normalizeEmail(user?.email || '');
@@ -1375,7 +1465,12 @@ router.put('/me', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
-    const payload = sanitizeVendorUpdates(req.body || {});
+    let payload;
+    try {
+      payload = validateVendorIdentityFields(sanitizeVendorUpdates(req.body || {}));
+    } catch (validationError) {
+      return res.status(400).json({ success: false, error: validationError.message });
+    }
     payload.updated_at = new Date().toISOString();
 
     const { data, error } = await supabase
@@ -1387,6 +1482,211 @@ router.put('/me', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
 
     if (error) return res.status(500).json({ success: false, error: error.message });
     return res.json({ success: true, vendor: data || { ...vendor, ...payload } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get('/me/banks', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { data, error } = await supabase
+      .from('vendor_bank_details')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .order('is_primary', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, banks: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get('/me/banks/:bankId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { bankId } = req.params;
+    if (!isValidId(bankId)) {
+      return res.status(400).json({ success: false, error: 'Invalid bank detail id' });
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_bank_details')
+      .select('*')
+      .eq('id', bankId)
+      .eq('vendor_id', vendor.id)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (!data) return res.status(404).json({ success: false, error: 'Bank detail not found' });
+    return res.json({ success: true, bank: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/me/banks', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    let payload;
+    try {
+      payload = normalizeVendorBankDetailsPayload(req.body || {}, { requireCoreFields: true });
+    } catch (validationError) {
+      return res.status(400).json({ success: false, error: validationError.message });
+    }
+
+    const { count, error: countError } = await supabase
+      .from('vendor_bank_details')
+      .select('id', { count: 'exact', head: true })
+      .eq('vendor_id', vendor.id);
+
+    if (countError) return res.status(500).json({ success: false, error: countError.message });
+
+    const shouldSetPrimary = payload.is_primary === true || !count;
+    if (shouldSetPrimary) {
+      const { error: resetError } = await supabase
+        .from('vendor_bank_details')
+        .update({ is_primary: false, updated_at: new Date().toISOString() })
+        .eq('vendor_id', vendor.id);
+      if (resetError) return res.status(500).json({ success: false, error: resetError.message });
+    }
+
+    const nowIso = new Date().toISOString();
+    const { data, error } = await supabase
+      .from('vendor_bank_details')
+      .insert([{
+        vendor_id: vendor.id,
+        ...payload,
+        is_primary: shouldSetPrimary,
+        created_at: nowIso,
+        updated_at: nowIso,
+      }])
+      .select('*')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.status(201).json({ success: true, bank: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.put('/me/banks/:bankId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { bankId } = req.params;
+    if (!isValidId(bankId)) {
+      return res.status(400).json({ success: false, error: 'Invalid bank detail id' });
+    }
+
+    const { data: existingBank, error: existingError } = await supabase
+      .from('vendor_bank_details')
+      .select('*')
+      .eq('id', bankId)
+      .eq('vendor_id', vendor.id)
+      .maybeSingle();
+
+    if (existingError) return res.status(500).json({ success: false, error: existingError.message });
+    if (!existingBank) return res.status(404).json({ success: false, error: 'Bank detail not found' });
+
+    let payload;
+    try {
+      payload = normalizeVendorBankDetailsPayload(req.body || {}, { partial: true });
+    } catch (validationError) {
+      return res.status(400).json({ success: false, error: validationError.message });
+    }
+
+    if (!Object.keys(payload).length) {
+      return res.status(400).json({ success: false, error: 'No bank details were provided to update.' });
+    }
+
+    if (payload.is_primary === true) {
+      const { error: resetError } = await supabase
+        .from('vendor_bank_details')
+        .update({ is_primary: false, updated_at: new Date().toISOString() })
+        .eq('vendor_id', vendor.id)
+        .neq('id', bankId);
+      if (resetError) return res.status(500).json({ success: false, error: resetError.message });
+    }
+
+    const { data, error } = await supabase
+      .from('vendor_bank_details')
+      .update({
+        ...payload,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bankId)
+      .eq('vendor_id', vendor.id)
+      .select('*')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, bank: data || { ...existingBank, ...payload } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.delete('/me/banks/:bankId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { bankId } = req.params;
+    if (!isValidId(bankId)) {
+      return res.status(400).json({ success: false, error: 'Invalid bank detail id' });
+    }
+
+    const { data: existingBank, error: existingError } = await supabase
+      .from('vendor_bank_details')
+      .select('id, is_primary')
+      .eq('id', bankId)
+      .eq('vendor_id', vendor.id)
+      .maybeSingle();
+
+    if (existingError) return res.status(500).json({ success: false, error: existingError.message });
+    if (!existingBank) return res.status(404).json({ success: false, error: 'Bank detail not found' });
+
+    const { error: deleteError } = await supabase
+      .from('vendor_bank_details')
+      .delete()
+      .eq('id', bankId)
+      .eq('vendor_id', vendor.id);
+
+    if (deleteError) return res.status(500).json({ success: false, error: deleteError.message });
+
+    if (existingBank.is_primary) {
+      const { data: fallbackBank, error: fallbackError } = await supabase
+        .from('vendor_bank_details')
+        .select('id')
+        .eq('vendor_id', vendor.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (fallbackError) return res.status(500).json({ success: false, error: fallbackError.message });
+
+      if (fallbackBank?.id) {
+        const { error: resetPrimaryError } = await supabase
+          .from('vendor_bank_details')
+          .update({ is_primary: true, updated_at: new Date().toISOString() })
+          .eq('id', fallbackBank.id)
+          .eq('vendor_id', vendor.id);
+        if (resetPrimaryError) return res.status(500).json({ success: false, error: resetPrimaryError.message });
+      }
+    }
+
+    return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { BadgeCheck, MapPin, Send, Star, Phone, Globe, Building2, User, MessageSquare, Wrench } from 'lucide-react';
+import { BadgeCheck, MapPin, Send, Star, Phone, Globe, Building2, User, MessageSquare, Wrench, Mail } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import Card from '@/shared/components/Card';
@@ -13,54 +13,88 @@ import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
-
-// Internal Mock Data to ensure page is never blank
-const FALLBACK_VENDORS = [
-  {
-    id: '1',
-    company_name: "Aggarwal Enterprises",
-    name: "Rajesh Aggarwal",
-    city: "New Delhi",
-    state: "Delhi",
-    rating: 4.5,
-    reviews: 124,
-    verified: true,
-    description: "Leading supplier of industrial construction materials with over 20 years of experience. We specialize in steel, cement, and safety equipment.",
-    primary_business_type: "Manufacturer, Supplier",
-    annual_turnover: "₹5-10 Cr",
-    phone: "+91-9876543210",
-    email: "contact@aggarwal.com",
-    address: "Plot 45, Okhla Industrial Area, Phase III",
-    established: "1998"
-  },
-  {
-     id: '2',
-     company_name: "Tech Solutions Pvt Ltd",
-    city: "Mumbai",
-    state: "Maharashtra",
-    verified: true,
-    rating: 4.8,
-    reviews: 89,
-    primary_business_type: "IT Services",
-    description: "Technology solutions company offering cloud services, custom software, and IT consulting.",
-    annual_turnover: "₹1-5 Cr"
-  }
-];
-
-const FALLBACK_PRODUCTS = [
-  { id: 101, name: "Industrial Safety Shoes", price: "₹850", category: "Safety Gear", image: "https://images.unsplash.com/photo-1542291026-7eec264c27ff?auto=format&fit=crop&w=300&q=80" },
-  { id: 102, name: "High Grade Cement (50kg)", price: "₹380", category: "Construction", image: "https://images.unsplash.com/photo-1518709414768-a8c55406a779?auto=format&fit=crop&w=300&q=80" },
-  { id: 103, name: "Steel TMT Bars", price: "₹45,000/ton", category: "Raw Material", image: "https://images.unsplash.com/photo-1535813547-99c456a41d4a?auto=format&fit=crop&w=300&q=80" },
-  { id: 104, name: "Safety Helmets", price: "₹120", category: "Safety Gear", image: "https://images.unsplash.com/photo-1595166661134-8c8a164b1d6f?auto=format&fit=crop&w=300&q=80" },
-];
-
-const FALLBACK_SERVICE_IMAGE = "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80";
+import { getPremiumBrandBySlug, getPremiumBrandByVendorSlug } from '@/modules/directory/lib/premiumBrands';
 
 const normalizeEstablishedYear = (value) => {
   const year = Number(value);
   const currentYear = new Date().getFullYear();
   if (!Number.isFinite(year) || year < 1800 || year > currentYear) return null;
   return year;
+};
+
+const buildPremiumBrandFallbackVendor = (brand = null) => {
+  if (!brand) return null;
+
+  return {
+    id: '',
+    slug: brand.vendorSlug || '',
+    brand_slug: brand.slug || '',
+    company_name: brand.name || 'Premium Brand',
+    legal_company_name: '',
+    name: 'Sales Team',
+    city: '',
+    state: '',
+    rating: 4.0,
+    reviews: 0,
+    verified: true,
+    primary_business_type: brand.primaryBusinessType || 'Business Services',
+    description:
+      brand.description ||
+      `${brand.name || 'This premium brand'} is featured on Indian Trade Mart for business enquiries and supplier discovery.`,
+    phone: '',
+    address: 'Address available on request',
+    established: null,
+    gst: '',
+    email: '',
+    website: '',
+    profile_image: brand.logo_url || '',
+    annual_turnover: '',
+    tagline: brand.tagline || '',
+    highlights: Array.isArray(brand.highlights) ? brand.highlights : [],
+    is_brand_fallback: true,
+  };
+};
+
+const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null) => {
+  const brandFallback = buildPremiumBrandFallbackVendor(brand) || {};
+  const legalCompanyName = String(vendorData.company_name || '').trim();
+
+  return {
+    id: vendorData.id || '',
+    slug: vendorData.slug || brand?.vendorSlug || '',
+    brand_slug: brand?.slug || '',
+    company_name: brand?.name || legalCompanyName || brandFallback.company_name || 'Company Name',
+    legal_company_name: legalCompanyName,
+    name: vendorData.owner_name || vendorData.first_name || brandFallback.name || 'Contact',
+    city: vendorData.city || brandFallback.city || '',
+    state: vendorData.state || brandFallback.state || '',
+    rating: vendorData.seller_rating || brandFallback.rating || 4.0,
+    reviews: 0,
+    verified: Boolean(vendorData.verification_badge || vendorData.is_verified || brand),
+    primary_business_type:
+      vendorData.primary_business_type ||
+      brand?.primaryBusinessType ||
+      brandFallback.primary_business_type ||
+      'Business Services',
+    description:
+      vendorData.description ||
+      vendorData.business_description ||
+      brand?.description ||
+      brandFallback.description ||
+      vendorData.primary_business_type ||
+      'Established business',
+    phone: vendorData.phone || '',
+    address: vendorData.registered_address || vendorData.address || brandFallback.address || 'Address available on request',
+    established: normalizeEstablishedYear(vendorData.year_of_establishment),
+    gst: vendorData.gst_number || '',
+    email: vendorData.email || '',
+    website: vendorData.website_url || '',
+    profile_image: vendorData.profile_image || brand?.logo_url || '',
+    annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover || '',
+    tagline: brand?.tagline || '',
+    highlights: Array.isArray(brand?.highlights) ? brand.highlights : [],
+    is_brand_fallback: false,
+  };
 };
 
 class VendorProfileErrorBoundary extends React.Component {
@@ -118,8 +152,13 @@ const VendorProfileContent = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const searchParamsString = searchParams.toString();
+  const requestedBrandSlug = searchParams.get('brand');
   const { user, userRole } = useAuth();
   const isBuyer = userRole === 'BUYER' && !!user;
+  const requestedPremiumBrand = useMemo(
+    () => getPremiumBrandBySlug(requestedBrandSlug) || getPremiumBrandByVendorSlug(vendorSlugOrId),
+    [requestedBrandSlug, vendorSlugOrId]
+  );
 
   // ✅ Favorites (buyer)
   const [isFavorite, setIsFavorite] = useState(false);
@@ -149,27 +188,10 @@ const VendorProfileContent = () => {
         const vendorData = vendorJson?.vendor;
 
         if (vendorData) {
-          const nextVendor = {
-            id: vendorData.id,
-            slug: vendorData.slug || '',
-            company_name: vendorData.company_name,
-            name: vendorData.owner_name || vendorData.first_name,
-            city: vendorData.city,
-            state: vendorData.state,
-            rating: vendorData.seller_rating || 4.0,
-            reviews: 0,
-            verified: vendorData.verification_badge || vendorData.is_verified || false,
-            primary_business_type: vendorData.primary_business_type,
-            description: vendorData.description || vendorData.business_description || vendorData.primary_business_type || "Established business",
-            phone: vendorData.phone || "+91-XXXXXXXXXX",
-            address: vendorData.registered_address || vendorData.address || "Address available on request",
-            established: normalizeEstablishedYear(vendorData.year_of_establishment),
-            gst: vendorData.gst_number,
-            email: vendorData.email,
-            website: vendorData.website_url,
-            profile_image: vendorData.profile_image,
-            annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover
-          };
+          const resolvedPremiumBrand =
+            requestedPremiumBrand ||
+            getPremiumBrandByVendorSlug(vendorData.slug || vendorData.id || requestedVendorKey);
+          const nextVendor = mergeVendorWithPremiumBrand(vendorData, resolvedPremiumBrand);
           setVendor(nextVendor);
 
           const canonicalPath = getVendorProfilePath(vendorData);
@@ -227,7 +249,7 @@ const VendorProfileContent = () => {
     if (requestedVendorKey) {
       fetchVendor();
     }
-  }, [requestedVendorKey, navigate, searchParamsString]);
+  }, [requestedVendorKey, requestedPremiumBrand, navigate, searchParamsString]);
 
   // ✅ Load favorite status
   useEffect(() => {
@@ -301,8 +323,10 @@ const VendorProfileContent = () => {
     loadLeads();
   }, [vendorRecordId, isBuyer, user]);
 
-  // Always use fallback if no vendor, but not for products
-  const displayVendor = vendor || FALLBACK_VENDORS[0];
+  const displayVendor = useMemo(
+    () => vendor || buildPremiumBrandFallbackVendor(requestedPremiumBrand),
+    [vendor, requestedPremiumBrand]
+  );
   const displayProducts = Array.isArray(products) ? products : [];
   const displayServices = Array.isArray(services) ? services : [];
   const visibleProducts = showAllProducts ? displayProducts : displayProducts.slice(0, 6);
@@ -394,6 +418,26 @@ const VendorProfileContent = () => {
     );
   }
 
+  if (!displayVendor) {
+    return (
+      <div className="container mx-auto px-4 py-8 max-w-4xl">
+        <Card>
+          <Card.Content className="p-6 text-center text-gray-600 space-y-3">
+            <div className="text-lg font-semibold text-gray-900">
+              {requestedPremiumBrand?.name || 'Vendor'} details are unavailable
+            </div>
+            <p>
+              We could not load the supplier profile for this page right now. Please try again in a moment.
+            </p>
+            <Button variant="outline" onClick={() => navigate('/directory/vendor')}>
+              Back to Vendor Directory
+            </Button>
+          </Card.Content>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="container mx-auto px-4 py-8 max-w-7xl font-sans">
 
@@ -417,6 +461,13 @@ const VendorProfileContent = () => {
                   {displayVendor.company_name || 'Company Name'}
                   {displayVendor.verified && <BadgeCheck className="text-blue-500 h-6 w-6 fill-blue-50" />}
                 </h1>
+                {displayVendor.brand_slug ? (
+                  <div className="mt-2">
+                    <Badge variant="outline" className="border-white/50 bg-white/10 text-white">
+                      Premium Brand
+                    </Badge>
+                  </div>
+                ) : null}
                 <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
                   <span className="flex items-center gap-1">
                     <MapPin className="h-4 w-4" /> {displayVendor.city || 'City'}{displayVendor.state ? `, ${displayVendor.state}` : ''}
@@ -425,6 +476,11 @@ const VendorProfileContent = () => {
                     <Star className="h-4 w-4 text-orange-400 fill-orange-400" /> {displayVendor.rating || 4.0} ({displayVendor.reviews || 0} Reviews)
                   </span>
                 </div>
+                {displayVendor.tagline ? (
+                  <p className="mt-3 max-w-2xl text-sm text-slate-600">
+                    {displayVendor.tagline}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -435,7 +491,7 @@ const VendorProfileContent = () => {
                 variant="outline"
                 className={`border-gray-300 ${isFavorite ? 'bg-yellow-50' : ''}`}
                 onClick={toggleFavorite}
-                disabled={favLoading}
+                disabled={favLoading || !vendorRecordId}
                 title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
               >
                 <Star
@@ -674,7 +730,20 @@ const VendorProfileContent = () => {
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-6">
+                  {displayVendor.highlights?.length ? (
+                    <div className="mb-6 space-y-2">
+                      <p className="text-sm text-gray-500 font-medium">Brand Highlights</p>
+                      <div className="flex flex-wrap gap-2">
+                        {displayVendor.highlights.map((item) => (
+                          <Badge key={item} variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                            {item}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div>
                       <p className="text-sm text-gray-500 mb-1">Business Type</p>
                       <p className="font-medium">{displayVendor.primary_business_type || 'Manufacturer, Supplier'}</p>
@@ -691,6 +760,31 @@ const VendorProfileContent = () => {
                       <p className="text-sm text-gray-500 mb-1">Annual Turnover</p>
                       <p className="font-medium">{displayVendor.annual_turnover || 'Not provided'}</p>
                     </div>
+                    {displayVendor.legal_company_name && displayVendor.legal_company_name !== displayVendor.company_name ? (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-1">Legal Entity</p>
+                        <p className="font-medium">{displayVendor.legal_company_name}</p>
+                      </div>
+                    ) : null}
+                    {displayVendor.website ? (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-1">Website</p>
+                        <a
+                          href={displayVendor.website}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-medium text-[#003D82] hover:underline break-all"
+                        >
+                          {displayVendor.website}
+                        </a>
+                      </div>
+                    ) : null}
+                    {displayVendor.email ? (
+                      <div>
+                        <p className="text-sm text-gray-500 mb-1">Email</p>
+                        <p className="font-medium break-all">{displayVendor.email}</p>
+                      </div>
+                    ) : null}
                   </div>
                 </Card.Content>
               </Card>
@@ -775,6 +869,33 @@ const VendorProfileContent = () => {
                   <p className="text-sm text-gray-600">{displayVendor.city || 'City'}, {displayVendor.state || 'State'}</p>
                 </div>
               </div>
+
+              {displayVendor.email ? (
+                <div className="flex gap-3 items-start">
+                  <div className="bg-amber-50 p-2 rounded-lg"><Mail className="h-5 w-5 text-amber-600" /></div>
+                  <div>
+                    <p className="text-xs text-gray-500">Email</p>
+                    <p className="font-medium text-sm break-all">{displayVendor.email}</p>
+                  </div>
+                </div>
+              ) : null}
+
+              {displayVendor.website ? (
+                <div className="flex gap-3 items-start">
+                  <div className="bg-indigo-50 p-2 rounded-lg"><Globe className="h-5 w-5 text-indigo-600" /></div>
+                  <div>
+                    <p className="text-xs text-gray-500">Website</p>
+                    <a
+                      href={displayVendor.website}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-medium text-sm break-all text-[#003D82] hover:underline"
+                    >
+                      {displayVendor.website}
+                    </a>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="pt-2">
                 <Button className="w-full bg-[#003D82]" onClick={handleVendorEnquiry}>

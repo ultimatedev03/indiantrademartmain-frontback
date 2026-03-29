@@ -191,6 +191,8 @@ const VendorListing = () => {
     setApplyTick(0);
   };
 
+  const citySelectDisabled = !selectedStateId || citiesLoading;
+
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
@@ -262,12 +264,17 @@ const VendorListing = () => {
             {/* City dropdown */}
             <select
               value={selectedCityId}
+              key={selectedStateId || 'all-states'}
               onChange={(e) => setSelectedCityId(e.target.value)}
-              disabled={!selectedStateId || citiesLoading}
-              className="border rounded-lg px-3 h-11 bg-white text-sm"
+              disabled={citySelectDisabled}
+              aria-disabled={citySelectDisabled}
+              title={!selectedStateId ? "Select a state first" : citiesLoading ? "Loading cities..." : "Select a city"}
+              className="border rounded-lg px-3 h-11 bg-white text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
             >
               {!selectedStateId ? (
                 <option value="">Select state first</option>
+              ) : citiesLoading ? (
+                <option value="">Loading cities...</option>
               ) : (
                 <>
                   <option value="">All Cities</option>
