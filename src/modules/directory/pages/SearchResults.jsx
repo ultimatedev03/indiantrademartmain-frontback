@@ -162,6 +162,52 @@ const applyLocationFilters = (query, stateId, cityId) => {
   return scopedQuery;
 };
 
+const buildKeywordProductQuery = ({ selectString, stateId, cityId }) => {
+  let query = supabase
+    .from('products')
+    .select(selectString)
+    .eq('status', 'ACTIVE')
+    .eq('vendors.is_active', true);
+
+  query = applyLocationFilters(query, stateId, cityId);
+  return query;
+};
+
+const dedupeProducts = (rows = []) => {
+  const seen = new Set();
+  const unique = [];
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.id || row?.slug || row?.name || '').trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push(row);
+  });
+
+  return unique;
+};
+
+const runKeywordQuery = async ({ selectString, stateId, cityId, applyFilter }) => {
+  try {
+    let query = buildKeywordProductQuery({ selectString, stateId, cityId });
+    query = applyFilter(query);
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .limit(300);
+
+    if (error) {
+      if (isBadRequest400(error)) return [];
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    if (isBadRequest400(error)) return [];
+    throw error;
+  }
+};
+
 const SearchResults = () => {
   const [searchParams] = useSearchParams();
   const params = useParams();
@@ -185,6 +231,9 @@ const SearchResults = () => {
   });
 
   const priceBounds = useMemo(() => buildPriceBounds(results), [results]);
+  const rawSearchQuery = String(
+    searchParams.get('q') || searchParams.get('query') || searchParams.get('term') || ''
+  ).trim();
 
   const autoCorrectedRef = useRef(false);
 
@@ -340,41 +389,98 @@ const SearchResults = () => {
     return best;
   };
 
-  const runKeywordProductsQueryWithFallback = async ({ servicePhrase, serviceSlug, selectString, stateId, cityId }) => {
-    const attempts = [
-      [
-        `category_slug.eq.${serviceSlug}`,
-        `name.ilike.%${servicePhrase}%`,
-        `category.ilike.%${servicePhrase}%`,
-        `description.ilike.%${servicePhrase}%`,
-      ],
-      [`category_slug.eq.${serviceSlug}`, `name.ilike.%${servicePhrase}%`, `category.ilike.%${servicePhrase}%`],
-      [`category_slug.eq.${serviceSlug}`, `name.ilike.%${servicePhrase}%`],
-      [`category_slug.eq.${serviceSlug}`],
-    ];
+  const runKeywordProductsQueryWithFallback = async ({
+    rawServiceText,
+    servicePhrase,
+    serviceSlug,
+    serviceQuerySlug,
+    selectString,
+    stateId,
+    cityId,
+  }) => {
+    const exactSlugCandidates = Array.from(
+      new Set([serviceSlug, serviceQuerySlug].map((value) => String(value || '').trim()).filter(Boolean))
+    );
+    const textVariants = Array.from(
+      new Set([rawServiceText, servicePhrase].map((value) => String(value || '').trim()).filter(Boolean))
+    );
 
-    let lastErr = null;
+    const exactMatches = dedupeProducts(
+      (
+        await Promise.all([
+          ...exactSlugCandidates.map((slug) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.eq('slug', slug),
+            })
+          ),
+          ...exactSlugCandidates.map((slug) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.eq('category_slug', slug),
+            })
+          ),
+          ...textVariants.map((text) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('name', text),
+            })
+          ),
+        ])
+      ).flat()
+    );
 
-    for (const orParts of attempts) {
-      let q = supabase
-        .from('products')
-        .select(selectString)
-        .eq('status', 'ACTIVE')
-        .eq('vendors.is_active', true)
-        .or(orParts.join(','));
-
-      q = applyLocationFilters(q, stateId, cityId);
-      q = q.order('created_at', { ascending: false }).limit(300);
-
-      const { data, error } = await q;
-      if (!error) return data || [];
-
-      lastErr = error;
-      if (!isBadRequest400(error)) throw error;
+    if (exactMatches.length > 0) {
+      return exactMatches;
     }
 
-    if (lastErr) throw lastErr;
-    return [];
+    const containsMatches = dedupeProducts(
+      (
+        await Promise.all([
+          ...textVariants.map((text) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('name', `%${text}%`),
+            })
+          ),
+          ...textVariants.map((text) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('category', `%${text}%`),
+            })
+          ),
+        ])
+      ).flat()
+    );
+
+    if (containsMatches.length > 0) {
+      return containsMatches;
+    }
+
+    return dedupeProducts(
+      (
+        await Promise.all(
+          textVariants.map((text) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('description', `%${text}%`),
+            })
+          )
+        )
+      ).flat()
+    );
   };
 
   // ✅ reads plan from correct table name (vendor_plan_subscriptions OR vendor_plan_subcriptions)
@@ -424,7 +530,9 @@ const SearchResults = () => {
       setLoading(true);
       try {
         const serviceSlug = parsedParams.serviceSlug;
-        const servicePhrase = normalizeText(serviceSlug.replace(/-/g, ' '));
+        const rawServiceText = rawSearchQuery || serviceSlug.replace(/-/g, ' ');
+        const servicePhrase = normalizeText(rawServiceText);
+        const serviceQuerySlug = slugify(rawServiceText) || serviceSlug;
 
         const [{ state, city }, ctx] = await Promise.all([
           locationService.getLocationBySlug(parsedParams.stateSlug, parsedParams.citySlug),
@@ -432,18 +540,6 @@ const SearchResults = () => {
         ]);
         const stateId = state?.id || null;
         const cityId = city?.id || null;
-
-        if (ctx.type === 'text') {
-          const corrected = await tryAutoCorrect({
-            wrongSlug: serviceSlug,
-            stateSlug: parsedParams.stateSlug,
-            citySlug: parsedParams.citySlug,
-          });
-          if (corrected) {
-            setResults([]);
-            return;
-          }
-        }
 
         // ✅ IMPORTANT: include vendor meta columns from DB
         const selectString = `
@@ -508,8 +604,10 @@ const SearchResults = () => {
           data = d || [];
         } else {
           data = await runKeywordProductsQueryWithFallback({
+            rawServiceText,
             servicePhrase,
             serviceSlug,
+            serviceQuerySlug,
             selectString,
             stateId,
             cityId,
@@ -621,7 +719,7 @@ const SearchResults = () => {
     };
 
     fetchResults();
-  }, [parsedParams.serviceSlug, parsedParams.stateSlug, parsedParams.citySlug, searchParams]);
+  }, [parsedParams.serviceSlug, parsedParams.stateSlug, parsedParams.citySlug, rawSearchQuery]);
 
   const filteredResults = useMemo(() => {
     let out = Array.isArray(results) ? [...results] : [];
@@ -657,7 +755,7 @@ const SearchResults = () => {
   }, [results, filters, priceBounds.min, priceBounds.max]);
 
   const formatName = (s) => (s ? s.replace(/-/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase()) : '');
-  const serviceName = formatName(parsedParams.serviceSlug);
+  const serviceName = rawSearchQuery || formatName(parsedParams.serviceSlug);
   const cityName = formatName(parsedParams.citySlug);
   const stateName = formatName(parsedParams.stateSlug);
 
@@ -698,6 +796,7 @@ const SearchResults = () => {
                 enableSuggestions
                 className="shadow-sm"
                 initialService={parsedParams.serviceSlug}
+                initialQuery={rawSearchQuery}
                 initialState={parsedParams.stateSlug}
                 initialCity={parsedParams.citySlug}
               />

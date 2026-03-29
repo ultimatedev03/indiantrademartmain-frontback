@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import Modal from '@/shared/components/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Plus, UserCheck, UserCog, UserMinus } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Plus, UserCheck, UserCog, UserMinus } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { hrApi } from '@/modules/hr/services/hrApi';
 import { PASSWORD_POLICY_MESSAGE } from '@/lib/passwordPolicy';
@@ -17,6 +17,7 @@ const ROLE_OPTIONS = [
   { value: 'MANAGER', label: 'Manager', department: 'Territory' },
   { value: 'VP', label: 'VP', department: 'Leadership' },
 ];
+const DEPARTMENT_OPTIONS = Array.from(new Set(ROLE_OPTIONS.map((option) => option.department)));
 
 const DEFAULT_FORM = {
   full_name: '',
@@ -57,6 +58,7 @@ const HrStaff = () => {
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
   const [roleForm, setRoleForm] = useState({ role: 'DATA_ENTRY', department: 'Operations' });
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
 
   const fetchStaff = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -92,6 +94,7 @@ const HrStaff = () => {
 
   const resetForm = () => {
     setFormData(DEFAULT_FORM);
+    setShowCreatePassword(false);
   };
 
   const handleChange = (field, value) => {
@@ -359,23 +362,39 @@ const HrStaff = () => {
           </div>
           <div>
             <Label>Department</Label>
-            <Input
-              className="mt-1"
-              placeholder="e.g. Operations"
+            <select
+              className="mt-1 flex h-10 w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50"
               value={formData.department}
               onChange={(event) => handleChange('department', event.target.value)}
-            />
+            >
+              {DEPARTMENT_OPTIONS.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <Label>Password</Label>
-            <Input
-              type="password"
-              className="mt-1"
-              placeholder="Strong password"
-              required
-              value={formData.password}
-              onChange={(event) => handleChange('password', event.target.value)}
-            />
+            <div className="relative mt-1">
+              <Input
+                type={showCreatePassword ? 'text' : 'password'}
+                className="pr-10"
+                placeholder="Strong password"
+                required
+                autoComplete="new-password"
+                value={formData.password}
+                onChange={(event) => handleChange('password', event.target.value)}
+              />
+              <button
+                type="button"
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-neutral-500 hover:text-neutral-700"
+                onClick={() => setShowCreatePassword((prev) => !prev)}
+                aria-label={showCreatePassword ? 'Hide password' : 'Show password'}
+              >
+                {showCreatePassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
             <p className="mt-2 text-xs text-neutral-500">{PASSWORD_POLICY_MESSAGE}</p>
           </div>
           <div className="flex justify-end pt-4">
@@ -420,13 +439,19 @@ const HrStaff = () => {
 
           <div>
             <Label>Department</Label>
-            <Input
-              className="mt-1"
+            <select
+              className="mt-1 flex h-10 w-full rounded-md border border-neutral-200 bg-white px-3 py-2 text-sm ring-offset-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-neutral-950 disabled:cursor-not-allowed disabled:opacity-50"
               value={roleForm.department}
               onChange={(event) =>
                 setRoleForm((prev) => ({ ...prev, department: event.target.value }))
               }
-            />
+            >
+              {DEPARTMENT_OPTIONS.map((department) => (
+                <option key={department} value={department}>
+                  {department}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div className="flex justify-end gap-2 pt-2">

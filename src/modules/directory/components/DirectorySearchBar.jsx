@@ -99,6 +99,7 @@ const resolveLocationSlugs = async (locText) => {
 
 const DirectorySearchBar = ({
   initialService = '',
+  initialQuery = '',
   initialState = '',
   initialCity = '',
   className = '',
@@ -128,11 +129,11 @@ const DirectorySearchBar = ({
   useEffect(() => {
     const s = initialService || '';
     setServiceSlug(s);
-    setServiceText(s ? s.replace(/-/g, ' ') : '');
+    setServiceText(initialQuery || (s ? s.replace(/-/g, ' ') : ''));
 
     setSelectedStateSlug(initialState || '');
     setSelectedCitySlug(initialCity || '');
-  }, [initialService, initialState, initialCity]);
+  }, [initialCity, initialQuery, initialService, initialState]);
 
   useEffect(() => {
     const load = async () => {
@@ -201,6 +202,21 @@ const DirectorySearchBar = ({
     [enableSuggestions, showSuggestions, suggestions.length]
   );
 
+  const buildSearchUrl = (serviceSlugValue, stateSlugValue = '', citySlugValue = '', extraParams = {}) => {
+    const baseUrl = urlParser.createStructuredUrl(serviceSlugValue, stateSlugValue, citySlugValue);
+    const params = new URLSearchParams();
+
+    Object.entries(extraParams || {}).forEach(([key, value]) => {
+      const normalizedValue = String(value || '').trim();
+      if (normalizedValue) {
+        params.set(key, normalizedValue);
+      }
+    });
+
+    const query = params.toString();
+    return query ? `${baseUrl}?${query}` : baseUrl;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitting) return;
@@ -219,8 +235,15 @@ const DirectorySearchBar = ({
     const finalServiceSlug = serviceSlug || slugify(finalServiceText);
     if (!finalServiceSlug) return;
 
+    const searchParams = { q: finalServiceText };
+
     if (selectedStateSlug || selectedCitySlug) {
-      const url = urlParser.createStructuredUrl(finalServiceSlug, selectedStateSlug || '', selectedCitySlug || '');
+      const url = buildSearchUrl(
+        finalServiceSlug,
+        selectedStateSlug || '',
+        selectedCitySlug || '',
+        searchParams
+      );
       navigate(url);
       return;
     }
@@ -234,11 +257,17 @@ const DirectorySearchBar = ({
         setServiceSlug('');
 
         if (resolved?.stateSlug || resolved?.citySlug) {
-          const url = urlParser.createStructuredUrl(finalServiceSlug, resolved.stateSlug || '', resolved.citySlug || '');
+          const url = buildSearchUrl(
+            finalServiceSlug,
+            resolved.stateSlug || '',
+            resolved.citySlug || '',
+            searchParams
+          );
           navigate(url);
         } else {
           const sp = new URLSearchParams();
           sp.set('loc', freeLocText);
+          sp.set('q', finalServiceText);
           navigate(`/directory/search/${finalServiceSlug}?${sp.toString()}`);
         }
       } finally {
@@ -247,7 +276,7 @@ const DirectorySearchBar = ({
       return;
     }
 
-    const url = urlParser.createStructuredUrl(finalServiceSlug, '', '');
+    const url = buildSearchUrl(finalServiceSlug, '', '', searchParams);
     navigate(url);
   };
 
