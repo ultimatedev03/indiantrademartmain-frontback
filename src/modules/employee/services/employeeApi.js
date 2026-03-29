@@ -25,6 +25,8 @@ const canonicalizeRole = (value) => {
 
 const isInternalRole = (role) => INTERNAL_ROLES.has(String(role || '').trim().toUpperCase());
 const formatRoleLabel = (role) => String(canonicalizeRole(role) || role || 'Employee').replaceAll('_', ' ');
+const getAuthHintedRole = (authUser) =>
+  canonicalizeRole(authUser?.role || authUser?.user_metadata?.role || authUser?.app_metadata?.role);
 
 const buildEmployeeUser = (authUser, empRow) => {
   const name = empRow?.full_name || empRow?.name || authUser?.user_metadata?.full_name || authUser?.email || 'Employee';
@@ -58,6 +60,24 @@ const fetchEmployeeRow = async (authUserId) => {
   return data || null;
 };
 
+const fetchEmployeeRowByEmail = async (email) => {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  const { data, error } = await supabase
+    .from('employees')
+    .select('*')
+    .eq('email', normalizedEmail)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[employeeApi] employees email fetch error:', error);
+    return null;
+  }
+
+  return data || null;
+};
+
 const resolveEmployeeViaApi = async () => {
   try {
     const res = await fetchWithCsrf(apiUrl('/api/employee/me'));
@@ -69,12 +89,30 @@ const resolveEmployeeViaApi = async () => {
   }
 };
 
+const matchesAuthIdentity = (employee, authUser) => {
+  const employeeUserId = String(employee?.user_id || '').trim();
+  const authUserId = String(authUser?.id || '').trim();
+  const employeeEmail = String(employee?.email || '').trim().toLowerCase();
+  const authEmail = String(authUser?.email || '').trim().toLowerCase();
+
+  return (
+    (employeeUserId && authUserId && employeeUserId === authUserId) ||
+    (employeeEmail && authEmail && employeeEmail === authEmail)
+  );
+};
+
 export const employeeApi = {
   auth: {
     /**
      * Auth via backend JWT + cookies.
      */
     login: async (email, password, captcha = {}, expectedRole = '') => {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // ignore stale session cleanup errors before fresh login
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -85,19 +123,40 @@ export const employeeApi = {
       if (error) throw new Error(error.message);
       if (!data?.user) throw new Error('Login failed: user not returned');
 
-      const empRow = (await resolveEmployeeViaApi()) || (await fetchEmployeeRow(data.user.id));
+      const normalizedExpectedRole = canonicalizeRole(expectedRole);
+      const hintedRole = getAuthHintedRole(data.user);
+
+      if (normalizedExpectedRole && hintedRole && hintedRole !== normalizedExpectedRole) {
+        await supabase.auth.signOut();
+        throw new Error(
+          `${formatRoleLabel(hintedRole)} accounts must use the ${formatRoleLabel(normalizedExpectedRole)} Login.`
+        );
+      }
+
+      let empRow = await fetchEmployeeRow(data.user.id);
       if (!empRow) {
+        empRow = await fetchEmployeeRowByEmail(data.user.email);
+      }
+      if (!empRow) {
+        const resolvedEmployee = await resolveEmployeeViaApi();
+        if (matchesAuthIdentity(resolvedEmployee, data.user)) {
+          empRow = resolvedEmployee;
+        }
+      }
+
+      if (!empRow) {
+        await supabase.auth.signOut();
         // If you want to allow auth-only login, you can remove this throw.
         throw new Error('No employee profile found. Please ask admin to create your employee account.');
       }
 
-      const user = buildEmployeeUser(data.user, empRow);
-      const normalizedExpectedRole = canonicalizeRole(expectedRole);
+      const resolvedRole = canonicalizeRole(empRow?.role) || hintedRole || 'UNKNOWN';
+      const user = buildEmployeeUser(data.user, { ...empRow, role: resolvedRole });
 
-      if (normalizedExpectedRole && user.role !== normalizedExpectedRole) {
+      if (normalizedExpectedRole && resolvedRole !== normalizedExpectedRole) {
         await supabase.auth.signOut();
         throw new Error(
-          `${formatRoleLabel(user.role)} accounts must use the ${formatRoleLabel(normalizedExpectedRole)} Login.`
+          `${formatRoleLabel(resolvedRole)} accounts must use the ${formatRoleLabel(normalizedExpectedRole)} Login.`
         );
       }
 

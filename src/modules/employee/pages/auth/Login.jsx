@@ -12,6 +12,13 @@ import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import PublicSiteHomeLink from '@/shared/components/PublicSiteHomeLink';
+import { employeeApi } from '@/modules/employee/services/employeeApi';
+
+const normalizePortalRole = (value = '') => {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'DATAENTRY') return 'DATA_ENTRY';
+  return raw;
+};
 
 const PORTAL_CONFIGS = {
   dataentry: {
@@ -109,6 +116,16 @@ const Login = () => {
       }, portalConfig.expectedRole);
 
       if (user) {
+        if (
+          portalConfig.expectedRole &&
+          normalizePortalRole(user.role) !== normalizePortalRole(portalConfig.expectedRole)
+        ) {
+          await employeeApi.auth.logout().catch(() => {});
+          setError(`${user.role?.replaceAll('_', ' ') || 'This'} account is not allowed in this portal.`);
+          loginCaptcha.resetCaptcha();
+          return;
+        }
+
         // ✅ Role-based redirect (covers ADMIN/HR too)
         if (user.role === 'ADMIN') {
           navigate('/admin/dashboard');
