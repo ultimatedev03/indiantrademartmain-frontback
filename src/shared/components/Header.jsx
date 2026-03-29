@@ -1,6 +1,8 @@
 import React from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/hooks/useAuth';
+import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
+import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { Button } from '@/components/ui/button';
 import { Search, Menu, LayoutDashboard, LogIn, LogOut, ChevronDown } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
@@ -34,8 +36,15 @@ const resolveDashboardPath = (role = '') =>
   DASHBOARD_PATHS[String(role || '').trim().toUpperCase()] || '/';
 
 const Header = () => {
-  const { user, logout } = useAuth();
+  const publicAuth = useAuth();
+  const employeeAuth = useEmployeeAuth();
+  const internalAuth = useInternalAuth();
   const navigate = useNavigate();
+  const user = employeeAuth.user || internalAuth.user || publicAuth.user;
+  const logout =
+    (employeeAuth.user && employeeAuth.logout) ||
+    (internalAuth.user && internalAuth.logout) ||
+    publicAuth.logout;
   const dashboardPath = resolveDashboardPath(user?.role);
 
   const handleLogout = async () => {
@@ -175,7 +184,7 @@ const Header = () => {
               {user ? (
                 <div className="flex items-center space-x-3">
                    <NotificationBell
-                     userId={user?.id || user?.user_id || null}
+                     userId={user?.user_id || user?.id || null}
                      userEmail={user?.email || null}
                    />
                    <div className="h-6 w-px bg-slate-700 mx-2"></div>

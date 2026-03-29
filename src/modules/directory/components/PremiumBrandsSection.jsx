@@ -1,10 +1,30 @@
-import React, { useMemo } from 'react';
+import React, { startTransition, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { PREMIUM_BRANDS, getPremiumBrandTargetPath } from '@/modules/directory/lib/premiumBrands';
+
+const preloadVendorProfilePage = () => import('@/modules/directory/pages/VendorProfile');
 
 const PremiumBrandsSection = () => {
   const navigate = useNavigate();
   const items = useMemo(() => [...PREMIUM_BRANDS, ...PREMIUM_BRANDS], []);
+  const [pendingBrandSlug, setPendingBrandSlug] = useState('');
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void preloadVendorProfilePage();
+    }, 150);
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  const handleOpenBrand = (brandSlug) => {
+    setPendingBrandSlug(brandSlug);
+    void preloadVendorProfilePage();
+    startTransition(() => {
+      navigate(getPremiumBrandTargetPath(brandSlug));
+    });
+  };
 
   return (
     <section className="py-16 bg-gray-50 border-t border-gray-100 overflow-x-hidden min-h-[228px]">
@@ -45,10 +65,17 @@ const PremiumBrandsSection = () => {
               <button
                 type="button"
                 key={`${brand.id}-${idx}`}
-                className="flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300 border-0 bg-transparent p-0"
+                className={`relative flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300 border-0 bg-transparent p-0 ${pendingBrandSlug === brand.slug ? 'pointer-events-none' : ''}`}
                 title={brand.name}
                 aria-label={`Open ${brand.name} brand page`}
-                onClick={() => navigate(getPremiumBrandTargetPath(brand.slug))}
+                aria-busy={pendingBrandSlug === brand.slug}
+                onMouseEnter={() => {
+                  void preloadVendorProfilePage();
+                }}
+                onFocus={() => {
+                  void preloadVendorProfilePage();
+                }}
+                onClick={() => handleOpenBrand(brand.slug)}
               >
                 <img
                   src={brand.logo_url}
@@ -56,13 +83,19 @@ const PremiumBrandsSection = () => {
                   width="208"
                   height="112"
                   sizes="(min-width: 1024px) 208px, (min-width: 768px) 192px, 176px"
-                  className="max-h-20 md:max-h-24 lg:max-h-28 w-auto object-contain"
+                  className={`max-h-20 md:max-h-24 lg:max-h-28 w-auto object-contain ${pendingBrandSlug === brand.slug ? 'opacity-35' : ''}`}
                   loading="lazy"
                   decoding="async"
                   onError={(event) => {
                     event.currentTarget.style.display = 'none';
                   }}
                 />
+                {pendingBrandSlug === brand.slug && (
+                  <span className="absolute inset-0 flex items-center justify-center gap-2 text-sm font-medium text-slate-700">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Opening...
+                  </span>
+                )}
               </button>
             ))}
           </div>

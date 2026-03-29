@@ -9,7 +9,18 @@ const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
 
-const INTERNAL_ROLES = new Set(['ADMIN', 'HR', 'DATA_ENTRY', 'DATAENTRY', 'SUPPORT', 'SALES', 'FINANCE', 'SUPERADMIN']);
+const INTERNAL_ROLES = new Set([
+  'ADMIN',
+  'HR',
+  'FINANCE',
+  'DATA_ENTRY',
+  'DATAENTRY',
+  'SUPPORT',
+  'SALES',
+  'MANAGER',
+  'VP',
+  'SUPERADMIN',
+]);
 
 const canonicalizeRole = (value) => {
   const raw = String(value || '').trim().toUpperCase();
@@ -151,6 +162,12 @@ export const AuthProvider = ({ children }) => {
         }
         if (fetchedProfile?.role) role = canonicalizeRole(fetchedProfile.role);
       } else {
+        const employeeFromApi = await fetchEmployeeProfileFromApi();
+        if (employeeFromApi?.role && INTERNAL_ROLES.has(canonicalizeRole(employeeFromApi.role))) {
+          fetchedProfile = employeeFromApi;
+          role = canonicalizeRole(employeeFromApi.role);
+        }
+
         // Unknown role fallback without cross-portal route-based switching.
         if (!fetchedProfile) {
           const emp = await fetchProfileByIdentity('employees', userId, userEmail);

@@ -45,6 +45,27 @@ const SimpleRichText = ({ value, onChange, placeholder }) => (
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 const bytesToKb = (bytes = 0) => `${Math.ceil(Number(bytes || 0) / 1024)}KB`;
+const toNonNegativeNumber = (value) => {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+const clampDiscountPercent = (value) => {
+  const parsed = toNonNegativeNumber(value);
+  if (parsed === null) return 0;
+  return Math.max(0, Math.min(100, Number(parsed.toFixed(2))));
+};
+const calculateDiscountedPrice = (originalPrice, discountPercent) => {
+  const original = toNonNegativeNumber(originalPrice);
+  const discount = clampDiscountPercent(discountPercent);
+  if (original === null || discount <= 0) return null;
+  return Number((original * (100 - discount) / 100).toFixed(2));
+};
+const formatMoneyPreview = (value) =>
+  Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: Number.isInteger(Number(value || 0)) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 
 const ProductForm = () => {
   const location = useLocation();
@@ -90,6 +111,8 @@ const ProductForm = () => {
     description: '',
 
     price: '',
+    original_price: '',
+    discount_percent: '',
     status: 'ACTIVE',
 
     images: [],
@@ -105,6 +128,31 @@ const ProductForm = () => {
   });
 
   const isPanIndia = !!formData.target_locations?.pan_india;
+  const originalPriceValue = toNonNegativeNumber(formData.original_price);
+  const sellingPriceValue = toNonNegativeNumber(formData.price);
+  const enteredDiscountPercent = clampDiscountPercent(formData.discount_percent);
+  const impliedOriginalPrice =
+    originalPriceValue === null &&
+    sellingPriceValue !== null &&
+    enteredDiscountPercent > 0 &&
+    enteredDiscountPercent < 100
+      ? Number(((sellingPriceValue * 100) / (100 - enteredDiscountPercent)).toFixed(2))
+      : null;
+  const effectiveOriginalPrice = originalPriceValue ?? impliedOriginalPrice;
+  const derivedDiscountPercent =
+    effectiveOriginalPrice !== null &&
+    sellingPriceValue !== null &&
+    effectiveOriginalPrice > 0 &&
+    effectiveOriginalPrice > sellingPriceValue
+      ? Number((((effectiveOriginalPrice - sellingPriceValue) / effectiveOriginalPrice) * 100).toFixed(2))
+      : 0;
+  const effectiveDiscountPercent = enteredDiscountPercent || derivedDiscountPercent;
+  const discountPreviewPrice = calculateDiscountedPrice(originalPriceValue, enteredDiscountPercent);
+  const effectiveSellingPrice = sellingPriceValue ?? discountPreviewPrice;
+  const discountSavings =
+    effectiveOriginalPrice !== null && effectiveSellingPrice !== null && effectiveOriginalPrice > effectiveSellingPrice
+      ? Number((effectiveOriginalPrice - effectiveSellingPrice).toFixed(2))
+      : null;
 
   // ✅ Pan India auto-fill guard (avoid re-fetch loop)
   const panIndiaAutoFilledRef = useRef(false);
@@ -266,6 +314,7 @@ const ProductForm = () => {
         ? await dataEntryApi.getProductById(formProductId)
         : await vendorApi.products.get(formProductId);
       if (data) {
+        const productMetadata = normalizeMetadata(data.metadata);
         const relationImages = Array.isArray(data.product_images)
           ? data.product_images
               .map((image) => image?.image_url)
@@ -296,6 +345,8 @@ const ProductForm = () => {
           ...data,
           price_unit: data.price_unit || '',
           min_order_qty: data.min_order_qty || '',
+          original_price: String(productMetadata.original_price ?? ''),
+          discount_percent: String(productMetadata.discount_percent ?? ''),
           extra_micro_categories: data.extra_micro_categories || [],
           specifications: safeSpecs,
           images: safeImages,
@@ -615,6 +666,8 @@ const ProductForm = () => {
       delete payload.sub_category;
       delete payload.micro_category;
       delete payload.product_images;
+      delete payload.original_price;
+      delete payload.discount_percent;
 
       if (needsProductSlugNormalization(payload.slug, formData.name)) {
         payload.slug = await generateUniqueSlug(formData.name, {
@@ -631,9 +684,11 @@ const ProductForm = () => {
         })
         .filter(Boolean);
 
+      const productMetadata = normalizeMetadata(formData.metadata);
+
       // Derive category for compatibility
       const derivedCategory =
-        (payload.category_other || '').trim() ||
+        (formData.category_other || '').trim() ||
         String(payload.category_path || '')
           .split('>')
           .map((s) => s.trim())
@@ -648,13 +703,75 @@ const ProductForm = () => {
         // products table DOES NOT have category_slug column, so NEVER send it.
         // If you still want it, store inside metadata (safe JSON column).
         const catSlug = generateSlug(derivedCategory);
-        payload.metadata = {
-          ...normalizeMetadata(payload.metadata),
-          category_slug: catSlug,
-        };
+        productMetadata.category_slug = catSlug;
 
         if (!payload.category_path) payload.category_path = derivedCategory;
       }
+
+      const normalizedOriginalPrice = toNonNegativeNumber(formData.original_price);
+      const normalizedSellingPrice = toNonNegativeNumber(formData.price);
+      let normalizedDiscountPercent = clampDiscountPercent(formData.discount_percent);
+      let resolvedOriginalPrice = normalizedOriginalPrice;
+      let resolvedSellingPrice = normalizedSellingPrice;
+
+      if (normalizedOriginalPrice !== null && normalizedDiscountPercent > 0 && resolvedSellingPrice === null) {
+        resolvedSellingPrice = calculateDiscountedPrice(normalizedOriginalPrice, normalizedDiscountPercent);
+      }
+
+      if (
+        resolvedOriginalPrice === null &&
+        resolvedSellingPrice !== null &&
+        normalizedDiscountPercent > 0 &&
+        normalizedDiscountPercent < 100
+      ) {
+        resolvedOriginalPrice = Number(
+          ((resolvedSellingPrice * 100) / (100 - normalizedDiscountPercent)).toFixed(2)
+        );
+      }
+
+      if (
+        resolvedOriginalPrice !== null &&
+        resolvedSellingPrice !== null &&
+        resolvedOriginalPrice > 0 &&
+        resolvedSellingPrice > resolvedOriginalPrice
+      ) {
+        throw new Error('Selling price cannot be greater than original price when discount is set.');
+      }
+
+      if (
+        resolvedOriginalPrice !== null &&
+        resolvedSellingPrice !== null &&
+        resolvedOriginalPrice > resolvedSellingPrice &&
+        normalizedDiscountPercent <= 0
+      ) {
+        normalizedDiscountPercent = Number(
+          (((resolvedOriginalPrice - resolvedSellingPrice) / resolvedOriginalPrice) * 100).toFixed(2)
+        );
+      }
+
+      if (resolvedSellingPrice !== null) {
+        payload.price = String(resolvedSellingPrice);
+      }
+
+      if (resolvedOriginalPrice !== null) {
+        productMetadata.original_price = resolvedOriginalPrice;
+      } else {
+        delete productMetadata.original_price;
+      }
+
+      if (normalizedDiscountPercent > 0) {
+        productMetadata.discount_percent = normalizedDiscountPercent;
+      } else {
+        delete productMetadata.discount_percent;
+      }
+
+      if (resolvedOriginalPrice !== null && resolvedSellingPrice !== null && resolvedOriginalPrice > resolvedSellingPrice) {
+        productMetadata.discount_amount = Number((resolvedOriginalPrice - resolvedSellingPrice).toFixed(2));
+      } else {
+        delete productMetadata.discount_amount;
+      }
+
+      payload.metadata = productMetadata;
 
       if (!payload.status) payload.status = 'ACTIVE';
 
@@ -1088,7 +1205,7 @@ const ProductForm = () => {
                 <CardContent className="space-y-3">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label>Price (₹)</Label>
+                      <Label>Selling Price (₹)</Label>
                       <Input
                         type="number"
                         value={formData.price}
@@ -1108,8 +1225,43 @@ const ProductForm = () => {
                       />
                     </div>
                   </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>Original Price / MRP (₹)</Label>
+                      <Input
+                        type="number"
+                        value={formData.original_price}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, original_price: e.target.value }))
+                        }
+                        placeholder="e.g. 650"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Discount (%)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={formData.discount_percent}
+                        onChange={(e) =>
+                          setFormData((p) => ({ ...p, discount_percent: e.target.value }))
+                        }
+                        placeholder="e.g. 10"
+                      />
+                    </div>
+                  </div>
+                  {(discountPreviewPrice !== null || effectiveDiscountPercent > 0 || discountSavings !== null) && (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      {discountPreviewPrice !== null && !formData.price
+                        ? `Discounted selling price will be auto-filled as ₹${formatMoneyPreview(discountPreviewPrice)}.`
+                        : `Effective discount: ${formatMoneyPreview(effectiveDiscountPercent)}%`}
+                      {discountSavings !== null ? ` You save ₹${formatMoneyPreview(discountSavings)}.` : ''}
+                    </div>
+                  )}
                   <p className="text-xs text-slate-500">
-                    Agar exact price nahi hai, blank chhod sakte ho.
+                    Selling price blank chhodoge aur MRP + discount bharoge to discounted selling price auto-calculate ho jayega.
                   </p>
                 </CardContent>
               </Card>
