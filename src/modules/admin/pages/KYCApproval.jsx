@@ -12,12 +12,21 @@ import { Search, CheckCircle, XCircle, Eye, FileText, Loader2, ShieldAlert, Buil
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const KYC_VENDOR_BATCH_SIZE = 1000;
+const MIN_VALID_JOIN_DATE_MS = Date.UTC(2000, 0, 1);
 
 const looksLikePdf = (v = '') => String(v || '').toLowerCase().includes('.pdf');
 
 const prettyLabel = (t = '') => {
   const x = String(t || '').replaceAll('_', ' ').trim();
   return x ? x.toUpperCase() : 'DOCUMENT';
+};
+
+const formatJoinedDate = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  const time = date.getTime();
+  if (Number.isNaN(time) || time < MIN_VALID_JOIN_DATE_MS) return '-';
+  return date.toLocaleDateString('en-IN');
 };
 
 async function downloadViaFetch(url, filename = 'document') {
@@ -389,7 +398,7 @@ const KYCApproval = () => {
                       <span className="text-sm font-medium text-gray-600">{vendor.products?.[0]?.count || 0}</span>
                     </TableCell>
 
-                    <TableCell className="text-sm text-gray-500">{new Date(vendor.created_at).toLocaleDateString()}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{formatJoinedDate(vendor.created_at)}</TableCell>
 
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">

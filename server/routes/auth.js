@@ -52,6 +52,7 @@ const BUYER_AVATAR_EXT_BY_MIME = {
 };
 
 const isValidEmail = (email) => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const INDIAN_PHONE_RE = /^[6-9]\d{9}$/;
 const pickFirstDefined = (...values) => values.find((value) => value !== undefined && value !== null);
 const optionalText = (value) => {
   const text = String(value || '').trim();
@@ -81,6 +82,23 @@ const sanitizeFilename = (name) =>
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/^_+/, '')
     .slice(0, 120) || 'avatar';
+
+const createValidationError = (message) => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+};
+
+const normalizeIndianPhone = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
 
 const formatRuntimeError = (error) => {
   const raw = String(error?.message || error || '').trim();
@@ -497,7 +515,13 @@ function parseBuyerProfileUpdates(body = {}) {
   }
 
   const phoneRaw = pickFirstDefined(body.phone, body.mobile_number, body.mobileNumber);
-  if (phoneRaw !== undefined) updates.phone = optionalText(phoneRaw);
+  if (phoneRaw !== undefined) {
+    const normalizedPhone = normalizeIndianPhone(phoneRaw);
+    if (String(phoneRaw ?? '').trim() && !INDIAN_PHONE_RE.test(normalizedPhone)) {
+      throw createValidationError('Mobile number must be a valid 10-digit Indian number.');
+    }
+    updates.phone = normalizedPhone || null;
+  }
 
   const companyRaw = pickFirstDefined(body.company_name, body.companyName);
   if (companyRaw !== undefined) updates.company_name = optionalText(companyRaw);
@@ -1006,7 +1030,11 @@ router.patch('/buyer/profile', requireAuth({ roles: ['BUYER'] }), async (req, re
     });
   } catch (error) {
     console.error('[Auth] Buyer profile update failed:', error?.message || error);
-    return res.status(500).json({ success: false, error: 'Failed to update buyer profile' });
+    const statusCode = error?.statusCode || 500;
+    return res.status(statusCode).json({
+      success: false,
+      error: statusCode === 500 ? 'Failed to update buyer profile' : error?.message || 'Failed to update buyer profile',
+    });
   }
 });
 

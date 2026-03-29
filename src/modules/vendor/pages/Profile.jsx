@@ -31,16 +31,25 @@ const normalizeVendorProfile = (profile = {}) => ({
   primaryBusinessType: profile.primaryBusinessType || profile.primary_business_type,
   annualTurnover: profile.annualTurnover || profile.annual_turnover,
   businessDescription: profile.businessDescription || profile.business_description || profile.description,
-  cinNumber: profile.cinNumber || profile.cin_number,
+  cinNumber: profile.cinNumber || profile.cin_number || profile.llpinNumber || profile.llpin_number,
   llpinNumber: profile.llpinNumber || profile.llpin_number,
   iecCode: profile.iecCode || profile.iec_code,
   yearOfEstablishment: profile.yearOfEstablishment ?? profile.year_of_establishment,
   ownerDesignation: profile.ownerDesignation || profile.owner_designation,
 });
 
+const INDIA_COUNTRY_CODE = '+91';
+const INDIAN_PHONE_RE = /^[6-9]\d{9}$/;
+const LANDLINE_NUMBER_RE = /^\d{6,15}$/;
+const GST_NUMBER_RE = /^\d{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
 const PAN_NUMBER_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const AADHAR_NUMBER_RE = /^\d{12}$/;
 const IFSC_CODE_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const TAN_NUMBER_RE = /^[A-Z]{4}[0-9]{5}[A-Z]$/;
+const IEC_CODE_RE = /^[A-Z0-9]{10}$/;
+const CIN_NUMBER_RE = /^[A-Z0-9]{21}$/;
+const LLPIN_NUMBER_RE = /^[A-Z0-9]{8}$/;
+const ACCOUNT_HOLDER_NAME_RE = /^[A-Za-z][A-Za-z\s.'-]*$/;
 
 const normalizePanNumber = (value = '') =>
   String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
@@ -53,6 +62,96 @@ const normalizeIfscCode = (value = '') =>
 
 const normalizeShortText = (value = '', maxLength = 120) =>
   String(value || '').replace(/\s+/g, ' ').trim().slice(0, maxLength);
+
+const normalizeIndianPhoneInput = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
+
+const normalizeLandlineNumber = (value = '') =>
+  String(value || '').replace(/\D/g, '').slice(0, 15);
+
+const normalizeCodeValue = (value = '', maxLength = 32) =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, maxLength);
+
+const normalizeAccountHolderName = (value = '') =>
+  String(value || '')
+    .replace(/[^A-Za-z\s.'-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+
+const normalizeWebsiteUrl = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`;
+  let parsed;
+
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw new Error('Website URL must be a valid http/https URL.');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error('Website URL must be a valid http/https URL.');
+  }
+
+  return parsed.toString();
+};
+
+const normalizeYearOfEstablishment = (value) => {
+  if (value === '' || value === null || value === undefined) {
+    return null;
+  }
+
+  const digits = String(value).replace(/\D/g, '').slice(0, 4);
+  const year = Number(digits);
+  const currentYear = new Date().getFullYear();
+
+  if (!digits || !Number.isInteger(year) || year < 1900 || year > currentYear) {
+    throw new Error(`Year of establishment must be between 1900 and ${currentYear}.`);
+  }
+
+  return year;
+};
+
+const resolveRegistrationNumbers = (value = '') => {
+  const normalizedValue = normalizeCodeValue(value, 21);
+
+  if (!normalizedValue) {
+    return {
+      displayValue: null,
+      cinNumber: null,
+      llpinNumber: null,
+    };
+  }
+
+  if (CIN_NUMBER_RE.test(normalizedValue)) {
+    return {
+      displayValue: normalizedValue,
+      cinNumber: normalizedValue,
+      llpinNumber: null,
+    };
+  }
+
+  if (LLPIN_NUMBER_RE.test(normalizedValue)) {
+    return {
+      displayValue: normalizedValue,
+      cinNumber: null,
+      llpinNumber: normalizedValue,
+    };
+  }
+
+  throw new Error('CIN/LLPIN number must be a valid 21-character CIN or 8-character LLPIN.');
+};
 
 const validateVendorIdentityDraft = (draft = {}) => {
   const rawPanNumber = String(draft.panNumber || draft.pan_number || '').trim();
@@ -74,15 +173,101 @@ const validateVendorIdentityDraft = (draft = {}) => {
   };
 };
 
+const validateVendorPrimaryDraft = (draft = {}) => {
+  const rawPhone = String(draft.phone || '').trim();
+  const phone = normalizeIndianPhoneInput(rawPhone);
+
+  if (rawPhone && !INDIAN_PHONE_RE.test(phone)) {
+    throw new Error('Mobile number must be a valid 10-digit Indian number.');
+  }
+
+  const rawSecondaryPhone = String(draft.secondaryPhone || draft.secondary_phone || '').trim();
+  const secondaryPhone = normalizeIndianPhoneInput(rawSecondaryPhone);
+
+  if (rawSecondaryPhone && !INDIAN_PHONE_RE.test(secondaryPhone)) {
+    throw new Error('Second phone number must be a valid 10-digit Indian number.');
+  }
+
+  const rawLandline = String(draft.landlineNumber || draft.landline_number || '').trim();
+  const landlineNumber = normalizeLandlineNumber(rawLandline);
+
+  if (rawLandline && !LANDLINE_NUMBER_RE.test(landlineNumber)) {
+    throw new Error('Landline number must contain 6 to 15 digits.');
+  }
+
+  return {
+    phone: phone || null,
+    secondaryPhone: secondaryPhone || null,
+    secondary_phone: secondaryPhone || null,
+    landlineNumber: landlineNumber || null,
+    landline_number: landlineNumber || null,
+  };
+};
+
+const validateVendorBusinessDraft = (draft = {}) => {
+  const normalizedIdentity = validateVendorIdentityDraft(draft);
+
+  const rawGstNumber = String(draft.gstNumber || draft.gst_number || '').trim();
+  const gstNumber = normalizeCodeValue(rawGstNumber, 15);
+  if (rawGstNumber && !GST_NUMBER_RE.test(gstNumber)) {
+    throw new Error('GST number must be a valid 15-character GSTIN.');
+  }
+
+  const websiteUrl = normalizeWebsiteUrl(draft.websiteUrl || draft.website_url || '');
+
+  const rawTanNumber = String(draft.tanNumber || draft.tan_number || '').trim();
+  const tanNumber = normalizeCodeValue(rawTanNumber, 10);
+  if (rawTanNumber && !TAN_NUMBER_RE.test(tanNumber)) {
+    throw new Error('TAN number must be in the format ABCD12345F.');
+  }
+
+  const rawIecCode = String(draft.iecCode || draft.iec_code || '').trim();
+  const iecCode = normalizeCodeValue(rawIecCode, 10);
+  if (rawIecCode && !IEC_CODE_RE.test(iecCode)) {
+    throw new Error('IEC code must contain exactly 10 alphanumeric characters.');
+  }
+
+  const registrationNumbers = resolveRegistrationNumbers(
+    draft.cinNumber || draft.cin_number || draft.llpinNumber || draft.llpin_number || ''
+  );
+
+  const yearOfEstablishment = normalizeYearOfEstablishment(
+    draft.yearOfEstablishment ?? draft.year_of_establishment ?? ''
+  );
+
+  return {
+    gstNumber: gstNumber || null,
+    gst_number: gstNumber || null,
+    panNumber: normalizedIdentity.panNumber || null,
+    pan_number: normalizedIdentity.panNumber || null,
+    aadharNumber: normalizedIdentity.aadharNumber || null,
+    aadhar_number: normalizedIdentity.aadharNumber || null,
+    websiteUrl: websiteUrl || null,
+    website_url: websiteUrl || null,
+    cinNumber: registrationNumbers.displayValue,
+    cin_number: registrationNumbers.cinNumber,
+    llpinNumber: registrationNumbers.llpinNumber,
+    llpin_number: registrationNumbers.llpinNumber,
+    tanNumber: tanNumber || null,
+    tan_number: tanNumber || null,
+    iecCode: iecCode || null,
+    iec_code: iecCode || null,
+    yearOfEstablishment,
+    year_of_establishment: yearOfEstablishment,
+  };
+};
+
 const normalizeBankDraft = (bank = {}, index = 0) => {
   const accountNumber = String(bank.account_number || '').replace(/\D/g, '').slice(0, 30);
   const ifscCode = normalizeIfscCode(bank.ifsc_code || '');
+  const rawAccountHolder = String(bank.account_holder || '').trim();
+  const accountHolder = normalizeAccountHolderName(rawAccountHolder);
   const hasAnyValue = [
     accountNumber,
     ifscCode,
     bank.bank_name,
     bank.branch_name,
-    bank.account_holder,
+    rawAccountHolder,
   ].some((value) => String(value || '').trim());
 
   if (!hasAnyValue) {
@@ -105,12 +290,16 @@ const normalizeBankDraft = (bank = {}, index = 0) => {
     throw new Error(`Bank Account ${index + 1}: IFSC code must be in format ABCD0123456.`);
   }
 
+  if (rawAccountHolder && (!accountHolder || !ACCOUNT_HOLDER_NAME_RE.test(accountHolder))) {
+    throw new Error(`Bank Account ${index + 1}: account holder name must contain only letters and spaces.`);
+  }
+
   return {
     account_number: accountNumber,
     ifsc_code: ifscCode,
     bank_name: normalizeShortText(bank.bank_name || ''),
     branch_name: normalizeShortText(bank.branch_name || ''),
-    account_holder: normalizeShortText(bank.account_holder || ''),
+    account_holder: accountHolder || null,
     is_primary: bank.is_primary === true,
   };
 };
@@ -226,9 +415,13 @@ const Profile = () => {
 
   // ✅ FIXED: auth-only fields removed, confirmed_at removed
   const handleSave = async () => {
-    let normalizedIdentity = null;
+    let normalizedSectionDraft = {};
     try {
-      normalizedIdentity = validateVendorIdentityDraft(draft);
+      if (editingSection === 'primary') {
+        normalizedSectionDraft = validateVendorPrimaryDraft(draft);
+      } else if (editingSection === 'additional') {
+        normalizedSectionDraft = validateVendorBusinessDraft(draft);
+      }
     } catch (validationError) {
       toast({
         title: "Invalid Details",
@@ -242,10 +435,7 @@ const Profile = () => {
     try {
       const normalizedDraft = {
         ...draft,
-        panNumber: normalizedIdentity.panNumber,
-        pan_number: normalizedIdentity.panNumber,
-        aadharNumber: normalizedIdentity.aadharNumber,
-        aadhar_number: normalizedIdentity.aadharNumber,
+        ...normalizedSectionDraft,
       };
 
       // ✅ remove auth-only fields if present (VERY IMPORTANT)
@@ -579,15 +769,28 @@ const Profile = () => {
 
                   <div className="space-y-1">
                     <Label className="text-xs text-slate-500">Mobile</Label>
-                    <Input
-                      name="phone"
-                      type="tel"
-                      inputMode="numeric"
-                      disabled={editingSection !== 'primary'}
-                      value={draft.phone || ''}
-                      onChange={e => setDraft({ ...draft, phone: e.target.value })}
-                      className="h-9"
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={INDIA_COUNTRY_CODE}
+                        disabled={editingSection !== 'primary'}
+                        className="h-9 w-28 rounded-md border border-input bg-background px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="Vendor mobile country code"
+                      >
+                        <option value={INDIA_COUNTRY_CODE}>India (+91)</option>
+                      </select>
+                      <Input
+                        name="phone"
+                        type="tel"
+                        inputMode="numeric"
+                        disableAutoSanitize
+                        maxLength={10}
+                        disabled={editingSection !== 'primary'}
+                        value={draft.phone || ''}
+                        onChange={e => setDraft({ ...draft, phone: normalizeIndianPhoneInput(e.target.value) })}
+                        className="h-9"
+                        placeholder="10-digit mobile number"
+                      />
+                    </div>
                   </div>
 
                   {/* ✅ Secondary Email */}
@@ -611,10 +814,15 @@ const Profile = () => {
                       name="secondary_phone"
                       type="tel"
                       inputMode="numeric"
+                      disableAutoSanitize
+                      maxLength={10}
                       disabled={editingSection !== 'primary'}
                       placeholder="Alternate mobile"
                       value={draft.secondaryPhone || draft.secondary_phone || ''}
-                      onChange={e => setDraft({ ...draft, secondaryPhone: e.target.value, secondary_phone: e.target.value })}
+                      onChange={e => {
+                        const secondaryPhone = normalizeIndianPhoneInput(e.target.value);
+                        setDraft({ ...draft, secondaryPhone, secondary_phone: secondaryPhone });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -626,10 +834,15 @@ const Profile = () => {
                       name="landline_number"
                       type="tel"
                       inputMode="numeric"
+                      disableAutoSanitize
+                      maxLength={15}
                       disabled={editingSection !== 'primary'}
                       placeholder="Landline (optional)"
                       value={draft.landlineNumber || draft.landline_number || ''}
-                      onChange={e => setDraft({ ...draft, landlineNumber: e.target.value, landline_number: e.target.value })}
+                      onChange={e => {
+                        const landlineNumber = normalizeLandlineNumber(e.target.value);
+                        setDraft({ ...draft, landlineNumber, landline_number: landlineNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -692,8 +905,12 @@ const Profile = () => {
                     <Input
                       name="gst_number"
                       disabled={editingSection !== 'additional'}
+                      maxLength={15}
                       value={draft.gstNumber || draft.gst_number || ''}
-                      onChange={e => setDraft({ ...draft, gstNumber: e.target.value, gst_number: e.target.value })}
+                      onChange={e => {
+                        const gstNumber = normalizeCodeValue(e.target.value, 15);
+                        setDraft({ ...draft, gstNumber, gst_number: gstNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -736,6 +953,7 @@ const Profile = () => {
                     <Input
                       name="website_url"
                       type="url"
+                      disableAutoSanitize
                       disabled={editingSection !== 'additional'}
                       placeholder="https://example.com"
                       value={draft.websiteUrl || draft.website_url || ''}
@@ -773,8 +991,12 @@ const Profile = () => {
                       name="cin_number"
                       disabled={editingSection !== 'additional'}
                       placeholder="CIN (if company)"
+                      maxLength={21}
                       value={draft.cinNumber || draft.cin_number || ''}
-                      onChange={e => setDraft({ ...draft, cinNumber: e.target.value, cin_number: e.target.value })}
+                      onChange={e => {
+                        const cinNumber = normalizeCodeValue(e.target.value, 21);
+                        setDraft({ ...draft, cinNumber, cin_number: cinNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -785,8 +1007,12 @@ const Profile = () => {
                       name="tan_number"
                       disabled={editingSection !== 'additional'}
                       placeholder="TAN Number"
+                      maxLength={10}
                       value={draft.tanNumber || draft.tan_number || ''}
-                      onChange={e => setDraft({ ...draft, tanNumber: e.target.value, tan_number: e.target.value })}
+                      onChange={e => {
+                        const tanNumber = normalizeCodeValue(e.target.value, 10);
+                        setDraft({ ...draft, tanNumber, tan_number: tanNumber });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -797,8 +1023,12 @@ const Profile = () => {
                       name="iec_code"
                       disabled={editingSection !== 'additional'}
                       placeholder="IEC Code"
+                      maxLength={10}
                       value={draft.iecCode || draft.iec_code || ''}
-                      onChange={e => setDraft({ ...draft, iecCode: e.target.value, iec_code: e.target.value })}
+                      onChange={e => {
+                        const iecCode = normalizeCodeValue(e.target.value, 10);
+                        setDraft({ ...draft, iecCode, iec_code: iecCode });
+                      }}
                       className="h-9"
                     />
                   </div>
@@ -808,13 +1038,15 @@ const Profile = () => {
                     <Input
                       name="year_of_establishment"
                       disabled={editingSection !== 'additional'}
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={4}
                       placeholder="e.g. 2015"
                       value={draft.yearOfEstablishment ?? draft.year_of_establishment ?? ''}
                       onChange={e => setDraft({
                         ...draft,
-                        yearOfEstablishment: e.target.value === '' ? null : Number(e.target.value),
-                        year_of_establishment: e.target.value === '' ? null : Number(e.target.value),
+                        yearOfEstablishment: e.target.value === '' ? null : e.target.value.replace(/\D/g, '').slice(0, 4),
+                        year_of_establishment: e.target.value === '' ? null : e.target.value.replace(/\D/g, '').slice(0, 4),
                       })}
                       className="h-9"
                     />
@@ -971,6 +1203,8 @@ const BankingSection = ({ banks, onRefresh }) => {
       nextVal = (value || '').replace(/\D/g, '').slice(0, 30);
     } else if (field === 'ifsc_code') {
       nextVal = normalizeIfscCode(value);
+    } else if (field === 'account_holder') {
+      nextVal = normalizeAccountHolderName(value);
     } else if (field === 'bank_name' || field === 'branch_name' || field === 'account_holder') {
       nextVal = String(value || '').slice(0, 120);
     }
@@ -1082,6 +1316,8 @@ const BankingSection = ({ banks, onRefresh }) => {
               />
               <Input
                 placeholder="Account Holder Name"
+                inputMode="text"
+                disableAutoSanitize
                 className="h-9 bg-white md:col-span-2"
                 value={bank.account_holder || ''}
                 onChange={e => handleUpdateBank(index, 'account_holder', e.target.value)}

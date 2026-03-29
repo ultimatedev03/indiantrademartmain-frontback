@@ -200,6 +200,13 @@ const sanitizeVendorUpdates = (updates = {}) => {
 const PAN_NUMBER_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const AADHAR_NUMBER_RE = /^\d{12}$/;
 const IFSC_CODE_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+const INDIAN_PHONE_RE = /^[6-9]\d{9}$/;
+const GST_NUMBER_RE = /^\d{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/;
+const TAN_NUMBER_RE = /^[A-Z]{4}[0-9]{5}[A-Z]$/;
+const IEC_CODE_RE = /^[A-Z0-9]{10}$/;
+const CIN_NUMBER_RE = /^[A-Z0-9]{21}$/;
+const LLPIN_NUMBER_RE = /^[A-Z0-9]{8}$/;
+const ACCOUNT_HOLDER_NAME_RE = /^[A-Za-z][A-Za-z\s.'-]*$/;
 
 const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj || {}, key);
 
@@ -217,10 +224,104 @@ const normalizeAadharNumber = (value = '') =>
 const normalizeIfscCode = (value = '') =>
   String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
 
+const normalizeIndianPhone = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
+
+const normalizeCodeValue = (value = '', maxLength = 32) =>
+  String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, maxLength);
+
+const normalizeAccountHolderName = (value = '') =>
+  String(value || '')
+    .replace(/[^A-Za-z\s.'-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+
+const normalizeWebsiteUrl = (value = '') => {
+  const text = String(value || '').trim();
+  if (!text) return null;
+
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`;
+  let parsed;
+
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw new Error('Website URL must be a valid http/https URL.');
+  }
+
+  if (!['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname) {
+    throw new Error('Website URL must be a valid http/https URL.');
+  }
+
+  return parsed.toString();
+};
+
+const normalizeYearOfEstablishment = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const digits = String(value).replace(/\D/g, '').slice(0, 4);
+  const year = Number(digits);
+  const currentYear = new Date().getFullYear();
+
+  if (!digits || !Number.isInteger(year) || year < 1900 || year > currentYear) {
+    throw new Error(`Year of establishment must be between 1900 and ${currentYear}.`);
+  }
+
+  return year;
+};
+
+const resolveRegistrationNumbers = (value = '') => {
+  const normalizedValue = normalizeCodeValue(value, 21);
+
+  if (!normalizedValue) {
+    return {
+      cinNumber: null,
+      llpinNumber: null,
+    };
+  }
+
+  if (CIN_NUMBER_RE.test(normalizedValue)) {
+    return {
+      cinNumber: normalizedValue,
+      llpinNumber: null,
+    };
+  }
+
+  if (LLPIN_NUMBER_RE.test(normalizedValue)) {
+    return {
+      cinNumber: null,
+      llpinNumber: normalizedValue,
+    };
+  }
+
+  throw new Error('CIN/LLPIN number must be a valid 21-character CIN or 8-character LLPIN.');
+};
+
 const validateVendorIdentityFields = (updates = {}) => {
   const normalized = { ...updates };
   const rawPanNumber = hasOwn(updates, 'pan_number') ? updates.pan_number : updates.panNumber;
   const rawAadharNumber = hasOwn(updates, 'aadhar_number') ? updates.aadhar_number : updates.aadharNumber;
+  const rawPhone = hasOwn(updates, 'phone') ? updates.phone : undefined;
+  const rawGstNumber = hasOwn(updates, 'gst_number') ? updates.gst_number : updates.gstNumber;
+  const rawWebsiteUrl = hasOwn(updates, 'website_url') ? updates.website_url : updates.websiteUrl;
+  const rawCinNumber = hasOwn(updates, 'cin_number') ? updates.cin_number : updates.cinNumber;
+  const rawLlpinNumber = hasOwn(updates, 'llpin_number') ? updates.llpin_number : updates.llpinNumber;
+  const rawTanNumber = hasOwn(updates, 'tan_number') ? updates.tan_number : updates.tanNumber;
+  const rawIecCode = hasOwn(updates, 'iec_code') ? updates.iec_code : updates.iecCode;
+  const rawYearOfEstablishment = hasOwn(updates, 'year_of_establishment')
+    ? updates.year_of_establishment
+    : updates.yearOfEstablishment;
 
   if (rawPanNumber !== undefined) {
     const panNumber = normalizePanNumber(rawPanNumber);
@@ -240,6 +341,59 @@ const validateVendorIdentityFields = (updates = {}) => {
     delete normalized.aadharNumber;
   }
 
+  if (rawPhone !== undefined) {
+    const phone = normalizeIndianPhone(rawPhone);
+    if (String(rawPhone ?? '').trim() && !INDIAN_PHONE_RE.test(phone)) {
+      throw new Error('Mobile number must be a valid 10-digit Indian number.');
+    }
+    normalized.phone = phone || null;
+  }
+
+  if (rawGstNumber !== undefined) {
+    const gstNumber = normalizeCodeValue(rawGstNumber, 15);
+    if (String(rawGstNumber ?? '').trim() && !GST_NUMBER_RE.test(gstNumber)) {
+      throw new Error('GST number must be a valid 15-character GSTIN.');
+    }
+    normalized.gst_number = gstNumber || null;
+    delete normalized.gstNumber;
+  }
+
+  if (rawWebsiteUrl !== undefined) {
+    normalized.website_url = normalizeWebsiteUrl(rawWebsiteUrl);
+    delete normalized.websiteUrl;
+  }
+
+  if (rawCinNumber !== undefined || rawLlpinNumber !== undefined) {
+    const registrationNumbers = resolveRegistrationNumbers(rawCinNumber ?? rawLlpinNumber ?? '');
+    normalized.cin_number = registrationNumbers.cinNumber;
+    normalized.llpin_number = registrationNumbers.llpinNumber;
+    delete normalized.cinNumber;
+    delete normalized.llpinNumber;
+  }
+
+  if (rawTanNumber !== undefined) {
+    const tanNumber = normalizeCodeValue(rawTanNumber, 10);
+    if (String(rawTanNumber ?? '').trim() && !TAN_NUMBER_RE.test(tanNumber)) {
+      throw new Error('TAN number must be in format ABCD12345F.');
+    }
+    normalized.tan_number = tanNumber || null;
+    delete normalized.tanNumber;
+  }
+
+  if (rawIecCode !== undefined) {
+    const iecCode = normalizeCodeValue(rawIecCode, 10);
+    if (String(rawIecCode ?? '').trim() && !IEC_CODE_RE.test(iecCode)) {
+      throw new Error('IEC code must contain exactly 10 alphanumeric characters.');
+    }
+    normalized.iec_code = iecCode || null;
+    delete normalized.iecCode;
+  }
+
+  if (rawYearOfEstablishment !== undefined) {
+    normalized.year_of_establishment = normalizeYearOfEstablishment(rawYearOfEstablishment);
+    delete normalized.yearOfEstablishment;
+  }
+
   return normalized;
 };
 
@@ -247,7 +401,12 @@ const normalizeVendorBankDetailsPayload = (payload = {}, { requireCoreFields = f
   const normalized = {};
 
   if (!partial || hasOwn(payload, 'account_holder') || hasOwn(payload, 'accountHolder')) {
-    normalized.account_holder = normalizeOptionalText(payload.account_holder ?? payload.accountHolder, 120);
+    const rawAccountHolder = payload.account_holder ?? payload.accountHolder;
+    const accountHolder = normalizeAccountHolderName(rawAccountHolder);
+    if (String(rawAccountHolder ?? '').trim() && (!accountHolder || !ACCOUNT_HOLDER_NAME_RE.test(accountHolder))) {
+      throw new Error('Account holder name must contain only letters and spaces.');
+    }
+    normalized.account_holder = accountHolder || null;
   }
 
   if (!partial || hasOwn(payload, 'bank_name') || hasOwn(payload, 'bankName')) {

@@ -15,11 +15,13 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, FileText, AlertCircle, Check, X, Eye, BellRing, Mail, Search } from 'lucide-react';
 
 const normalizeStatus = (status) => String(status || 'PENDING').trim().toUpperCase();
+const MIN_VALID_JOIN_DATE_MS = Date.UTC(2000, 0, 1);
 const formatDate = (value) => {
   if (!value) return '-';
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '-';
-  return d.toLocaleDateString();
+  const time = d.getTime();
+  if (Number.isNaN(time) || time < MIN_VALID_JOIN_DATE_MS) return '-';
+  return d.toLocaleDateString('en-IN');
 };
 const prettyLabel = (value = '') => {
   const text = String(value || '').replaceAll('_', ' ').trim();
@@ -553,7 +555,7 @@ const KycApprovals = () => {
                 <TableHead>Company</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Docs</TableHead>
-                <TableHead>Updated On</TableHead>
+                <TableHead>Joined On</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -589,7 +591,7 @@ const KycApprovals = () => {
                         </Badge>
                       </TableCell>
                       <TableCell>{rowDocCount}</TableCell>
-                      <TableCell>{formatDate(vendor.updated_at || vendor.created_at)}</TableCell>
+                      <TableCell>{formatDate(vendor.created_at)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-2">
                           <Button size="sm" variant="outline" onClick={() => handleViewDocs(vendor)}>

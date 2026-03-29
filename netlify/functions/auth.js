@@ -38,6 +38,7 @@ const supabaseAnon = SUPABASE_ANON_KEY
   : null;
 
 const isValidEmail = (email) => !!email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const INDIAN_PHONE_RE = /^[6-9]\d{9}$/;
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
@@ -96,6 +97,23 @@ const sanitizeFilename = (name) =>
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/^_+/, '')
     .slice(0, 120) || 'avatar';
+
+const createValidationError = (message) => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+};
+
+const normalizeIndianPhone = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
 const parseBuyerProfileInput = (body = {}) => ({
   company_name: optionalText(pickFirstDefined(body.company_name, body.companyName)),
   state_id: optionalId(pickFirstDefined(body.state_id, body.stateId)),
@@ -810,7 +828,13 @@ const parseBuyerProfileUpdates = (body = {}) => {
   }
 
   const phoneRaw = pickFirstDefined(body.phone, body.mobile_number, body.mobileNumber);
-  if (phoneRaw !== undefined) updates.phone = optionalText(phoneRaw);
+  if (phoneRaw !== undefined) {
+    const normalizedPhone = normalizeIndianPhone(phoneRaw);
+    if (String(phoneRaw ?? '').trim() && !INDIAN_PHONE_RE.test(normalizedPhone)) {
+      throw createValidationError('Mobile number must be a valid 10-digit Indian number.');
+    }
+    updates.phone = normalizedPhone || null;
+  }
 
   const companyRaw = pickFirstDefined(body.company_name, body.companyName);
   if (companyRaw !== undefined) updates.company_name = optionalText(companyRaw);
@@ -1315,7 +1339,16 @@ export const handler = async (event) => {
       if (!buyer) return forbidden(event, 'Forbidden');
       if (!buyer.id) return bad(event, 'Buyer profile not found', null, 404);
 
-      const requestedUpdates = parseBuyerProfileUpdates(readBody(event));
+      let requestedUpdates;
+      try {
+        requestedUpdates = parseBuyerProfileUpdates(readBody(event));
+      } catch (error) {
+        const statusCode = error?.statusCode || 400;
+        return json(event, statusCode, {
+          success: false,
+          error: error?.message || 'Failed to update buyer profile',
+        });
+      }
       const updates = {};
 
       for (const [key, value] of Object.entries(requestedUpdates)) {

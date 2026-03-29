@@ -10,6 +10,22 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Upload, Save, User, Building, MapPin, Trash2, X, Pencil } from 'lucide-react';
 
+const INDIA_COUNTRY_CODE = '+91';
+const INDIAN_PHONE_RE = /^[6-9]\d{9}$/;
+
+const normalizeIndianPhoneInput = (value = '') => {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.startsWith('91') && digits.length > 10) {
+    digits = digits.slice(2);
+  }
+  if (digits.length > 10) {
+    digits = digits.slice(-10);
+  }
+  return digits;
+};
+
+const isValidIndianPhone = (value = '') => INDIAN_PHONE_RE.test(normalizeIndianPhoneInput(value));
+
 const BuyerProfile = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -62,7 +78,7 @@ const BuyerProfile = () => {
         const nextData = {
           full_name: data.full_name || '',
           email: data.email || user.email || '',
-          phone: data.phone || '',
+          phone: normalizeIndianPhoneInput(data.phone || ''),
           company_name: data.company_name || '',
           company_type: data.company_type || '',
           industry: data.industry || '',
@@ -96,7 +112,8 @@ const BuyerProfile = () => {
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    const nextValue = name === 'phone' ? normalizeIndianPhoneInput(value) : value;
+    setFormData(prev => ({ ...prev, [name]: nextValue }));
   };
 
   const handleImageUpload = async (e) => {
@@ -143,10 +160,25 @@ const BuyerProfile = () => {
   };
 
   const handleSubmit = async () => {
+    const normalizedPhone = normalizeIndianPhoneInput(formData.phone);
+    if (normalizedPhone && !isValidIndianPhone(normalizedPhone)) {
+      toast({
+        title: "Invalid Mobile Number",
+        description: "Mobile number must be a valid 10-digit Indian number.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       setSaving(true);
-      await saveData(formData);
-      setSavedData(formData);
+      const nextFormData = {
+        ...formData,
+        phone: normalizedPhone || '',
+      };
+      await saveData(nextFormData);
+      setFormData(nextFormData);
+      setSavedData(nextFormData);
       setIsEditing(false);
       toast({ title: "Profile Saved", description: "Your details have been updated." });
     } catch (error) {
@@ -250,7 +282,28 @@ const BuyerProfile = () => {
                 </div>
                 <div>
                   <Label className="text-sm text-slate-700">Phone</Label>
-                  <Input name="phone" type="tel" inputMode="numeric" value={formData.phone} onChange={handleInputChange} className="mt-1" disabled={!isEditing} />
+                  <div className="mt-1 flex gap-2">
+                    <select
+                      value={INDIA_COUNTRY_CODE}
+                      disabled={!isEditing}
+                      className="h-10 w-28 rounded-md border border-slate-200 bg-background px-3 py-2 text-sm disabled:bg-slate-50 disabled:text-slate-500"
+                      aria-label="Buyer mobile country code"
+                    >
+                      <option value={INDIA_COUNTRY_CODE}>India (+91)</option>
+                    </select>
+                    <Input
+                      name="phone"
+                      type="tel"
+                      inputMode="numeric"
+                      disableAutoSanitize
+                      maxLength={10}
+                      value={formData.phone}
+                      onChange={handleInputChange}
+                      className="flex-1"
+                      disabled={!isEditing}
+                      placeholder="10-digit mobile number"
+                    />
+                  </div>
                 </div>
                 <div className="md:col-span-2">
                   <Label className="text-sm text-slate-700">Email</Label>
