@@ -1981,6 +1981,9 @@ router.post('/me/kyc/submit', requireAuth({ roles: ['VENDOR'] }), async (req, re
   try {
     const vendor = await resolveVendorForUser(req.user);
     if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    if (kycDocumentsAreLocked(vendor)) {
+      return sendLockedKycResponse(res);
+    }
 
     const { data, error } = await supabase
       .from('vendors')

@@ -1346,10 +1346,19 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
   const [submitting, setSubmitting] = useState(false);
   const normalizedKycStatus = String(kycStatus || '').trim().toUpperCase();
   const kycLocked = normalizedKycStatus === 'VERIFIED' || normalizedKycStatus === 'APPROVED';
+  const kycApproved = kycLocked;
 
   const handleUpload = async (e, type) => {
     e?.preventDefault?.();
     e?.stopPropagation?.();
+    if (kycLocked) {
+      toast({
+        title: "KYC Locked",
+        description: "Approved KYC documents cannot be changed.",
+        variant: "destructive"
+      });
+      return;
+    }
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -1382,6 +1391,14 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
   };
 
   const handleDelete = async (id) => {
+    if (kycLocked) {
+      toast({
+        title: "KYC Locked",
+        description: "Approved KYC documents cannot be changed.",
+        variant: "destructive"
+      });
+      return;
+    }
     if (!window.confirm('Delete this document?')) return;
     try {
       await vendorApi.documents.delete(id);
@@ -1466,18 +1483,24 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
                   )}
                 </div>
               ) : (
-                <label className="cursor-pointer">
-                  <div className={`px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded ${uploadingType === type.id ? 'opacity-50' : ''}`}>
-                    {uploadingType === type.id ? 'Uploading...' : normalizedKycStatus === 'REJECTED' ? 'Re-upload' : 'Upload'}
-                  </div>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
-                    onChange={e => handleUpload(e, type.id)}
-                    disabled={!!uploadingType || kycLocked}
-                  />
-                </label>
+                kycLocked ? (
+                  <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-500">
+                    Locked after approval
+                  </span>
+                ) : (
+                  <label className="cursor-pointer">
+                    <div className={`px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-semibold rounded ${uploadingType === type.id ? 'opacity-50' : ''}`}>
+                      {uploadingType === type.id ? 'Uploading...' : normalizedKycStatus === 'REJECTED' ? 'Re-upload' : 'Upload'}
+                    </div>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                      onChange={e => handleUpload(e, type.id)}
+                      disabled={!!uploadingType}
+                    />
+                  </label>
+                )
               )}
             </div>
           );
@@ -1495,36 +1518,43 @@ const DocumentsSection = ({ documents, onRefresh, kycStatus }) => {
       )}
 
       <div className="mt-8 flex justify-end border-t pt-4">
-        <Button
-          type="button"
-          className="bg-[#003D82] px-8"
-          disabled={submitting || normalizedKycStatus === 'SUBMITTED' || kycLocked || !canSubmitKyc}
-          onClick={async () => {
-            setSubmitting(true);
-            try {
-              await vendorApi.kyc.submit();
-              await onRefresh();
-              toast({ title: "KYC Submitted" });
-            } catch (e) {
-              toast({ title: "Submit failed", description: e?.message || "", variant: "destructive" });
-            } finally {
-              setSubmitting(false);
-            }
-          }}
-        >
-          {submitting ? (
-            <>
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              Submitting...
-            </>
-          ) : (
-            (normalizedKycStatus === 'SUBMITTED'
-              ? 'Verification In Progress'
-              : normalizedKycStatus === 'REJECTED'
-                ? 'Resubmit for Verification'
-                : 'Submit for Verification')
-          )}
-        </Button>
+        {kycApproved ? (
+          <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-right">
+            <p className="text-sm font-semibold text-green-800">KYC already approved</p>
+            <p className="text-xs text-green-700">Your documents are now locked and cannot be edited.</p>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            className="bg-[#003D82] px-8"
+            disabled={submitting || normalizedKycStatus === 'SUBMITTED' || !canSubmitKyc}
+            onClick={async () => {
+              setSubmitting(true);
+              try {
+                await vendorApi.kyc.submit();
+                await onRefresh();
+                toast({ title: "KYC Submitted" });
+              } catch (e) {
+                toast({ title: "Submit failed", description: e?.message || "", variant: "destructive" });
+              } finally {
+                setSubmitting(false);
+              }
+            }}
+          >
+            {submitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                Submitting...
+              </>
+            ) : (
+              (normalizedKycStatus === 'SUBMITTED'
+                ? 'Verification In Progress'
+                : normalizedKycStatus === 'REJECTED'
+                  ? 'Resubmit for Verification'
+                  : 'Submit for Verification')
+            )}
+          </Button>
+        )}
       </div>
     </div>
   );

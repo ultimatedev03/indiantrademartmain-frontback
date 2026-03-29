@@ -1603,6 +1603,9 @@ export const handler = async (event) => {
       if (event.httpMethod === 'POST' && tail[1] === 'kyc' && tail[2] === 'submit') {
         const vendor = await resolveVendorForUser(user);
         if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+        if (kycDocumentsAreLocked(vendor)) {
+          return badLockedKyc(event);
+        }
 
         const { data, error: updErr } = await supabase
           .from('vendors')
