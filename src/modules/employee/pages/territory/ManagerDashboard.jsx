@@ -5,10 +5,16 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { territoryApi } from '@/modules/employee/services/territoryApi';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
+import { locationService } from '@/shared/services/locationService';
+
+const ALL_STATES_VALUE = 'all';
+const ALL_CITIES_VALUE = 'all';
+const normalizeId = (value) => String(value || '').trim();
 
 const ManagerDashboard = () => {
   const { user } = useEmployeeAuth();
@@ -19,17 +25,21 @@ const ManagerDashboard = () => {
   const [salesUsers, setSalesUsers] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [allocations, setAllocations] = useState([]);
+  const [states, setStates] = useState([]);
+  const [cities, setCities] = useState([]);
+  const [statesLoading, setStatesLoading] = useState(false);
+  const [citiesLoading, setCitiesLoading] = useState(false);
 
   const [selectedSalesUser, setSelectedSalesUser] = useState('');
   const [selectedDivisionIds, setSelectedDivisionIds] = useState([]);
-  const [selectedStateId, setSelectedStateId] = useState('all');
-  const [selectedCityId, setSelectedCityId] = useState('all');
+  const [selectedStateId, setSelectedStateId] = useState(ALL_STATES_VALUE);
+  const [selectedCityId, setSelectedCityId] = useState(ALL_CITIES_VALUE);
 
   const filteredDivisions = useMemo(() => {
     const term = String(search || '').trim().toLowerCase();
     return (divisions || []).filter((d) => {
-      if (selectedStateId !== 'all' && d?.state_id !== selectedStateId) return false;
-      if (selectedCityId !== 'all' && d?.city_id !== selectedCityId) return false;
+      if (selectedStateId !== ALL_STATES_VALUE && normalizeId(d?.state_id) !== selectedStateId) return false;
+      if (selectedCityId !== ALL_CITIES_VALUE && normalizeId(d?.city_id) !== selectedCityId) return false;
       if (!term) return true;
       return [d?.name, d?.city?.name, d?.state?.name, d?.district_name, d?.subdistrict_name, d?.pincode_count]
         .filter(Boolean)
@@ -38,33 +48,41 @@ const ManagerDashboard = () => {
   }, [divisions, search, selectedStateId, selectedCityId]);
 
   const stateOptions = useMemo(() => {
-    const map = new Map();
+    const divisionStateIds = new Set((divisions || []).map((d) => normalizeId(d?.state_id)).filter(Boolean));
+    const options = (states || [])
+      .filter((state) => divisionStateIds.has(normalizeId(state?.id)))
+      .map((state) => ({
+        id: normalizeId(state?.id),
+        name: state?.name || 'State N/A',
+      }));
+
+    if (options.length === divisionStateIds.size) {
+      return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    }
+
+    const seen = new Set(options.map((state) => state.id));
     (divisions || []).forEach((d) => {
-      if (!d?.state_id) return;
-      if (!map.has(d.state_id)) {
-        map.set(d.state_id, {
-          id: d.state_id,
-          name: d?.state?.name || 'State N/A',
-        });
-      }
+      const stateId = normalizeId(d?.state_id);
+      if (!stateId || seen.has(stateId)) return;
+      seen.add(stateId);
+      options.push({
+        id: stateId,
+        name: d?.state?.name || 'State N/A',
+      });
     });
-    return [...map.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [divisions]);
+
+    return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [divisions, states]);
 
   const cityOptions = useMemo(() => {
-    const map = new Map();
-    (divisions || []).forEach((d) => {
-      if (!d?.city_id) return;
-      if (selectedStateId !== 'all' && d?.state_id !== selectedStateId) return;
-      if (!map.has(d.city_id)) {
-        map.set(d.city_id, {
-          id: d.city_id,
-          name: d?.city?.name || 'City N/A',
-        });
-      }
-    });
-    return [...map.values()].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [divisions, selectedStateId]);
+    return (cities || [])
+      .map((city) => ({
+        id: normalizeId(city?.id),
+        name: city?.name || 'City N/A',
+      }))
+      .filter((city) => city.id)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [cities]);
 
   const loadBase = async () => {
     try {
@@ -94,6 +112,37 @@ const ManagerDashboard = () => {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
+
+    const loadStates = async () => {
+      try {
+        setStatesLoading(true);
+        const rows = await locationService.getStates();
+        if (mounted) {
+          setStates(rows || []);
+        }
+      } catch (error) {
+        if (mounted) {
+          toast({
+            title: 'Failed to load states',
+            description: error?.message || 'Unable to load available states',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (mounted) {
+          setStatesLoading(false);
+        }
+      }
+    };
+
+    loadStates();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedSalesUser) {
       setSelectedDivisionIds([]);
       return;
@@ -106,7 +155,45 @@ const ManagerDashboard = () => {
   }, [allocations, selectedSalesUser]);
 
   useEffect(() => {
-    setSelectedCityId('all');
+    setSelectedCityId(ALL_CITIES_VALUE);
+  }, [selectedStateId]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCities = async () => {
+      if (selectedStateId === ALL_STATES_VALUE) {
+        setCitiesLoading(false);
+        setCities([]);
+        return;
+      }
+
+      try {
+        setCitiesLoading(true);
+        const rows = await locationService.getCities(selectedStateId);
+        if (mounted) {
+          setCities(rows || []);
+        }
+      } catch (error) {
+        if (mounted) {
+          setCities([]);
+          toast({
+            title: 'Failed to load cities',
+            description: error?.message || 'Unable to load cities for the selected state',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (mounted) {
+          setCitiesLoading(false);
+        }
+      }
+    };
+
+    loadCities();
+    return () => {
+      mounted = false;
+    };
   }, [selectedStateId]);
 
   const toggleDivision = (divisionId, checked) => {
@@ -155,6 +242,9 @@ const ManagerDashboard = () => {
     });
     return grouped;
   }, [allocations]);
+
+  const isStateScoped = selectedStateId !== ALL_STATES_VALUE;
+  const citySelectDisabled = !isStateScoped || citiesLoading;
 
   if (loading) {
     return (
@@ -221,12 +311,12 @@ const ManagerDashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={selectedStateId} onValueChange={setSelectedStateId}>
+            <Select value={selectedStateId} onValueChange={setSelectedStateId} disabled={statesLoading}>
               <SelectTrigger>
                 <SelectValue placeholder="Filter by state" />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All states</SelectItem>
+              <SelectContent className="max-h-72">
+                <SelectItem value={ALL_STATES_VALUE}>All states</SelectItem>
                 {stateOptions.map((state) => (
                   <SelectItem key={state.id} value={state.id}>
                     {state.name}
@@ -237,12 +327,12 @@ const ManagerDashboard = () => {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <Select value={selectedCityId} onValueChange={setSelectedCityId}>
+            <Select value={selectedCityId} onValueChange={setSelectedCityId} disabled={citySelectDisabled}>
               <SelectTrigger>
-                <SelectValue placeholder="Filter by city" />
+                <SelectValue placeholder={isStateScoped ? 'Filter by city' : 'Select a state first'} />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All cities</SelectItem>
+              <SelectContent className="max-h-72">
+                <SelectItem value={ALL_CITIES_VALUE}>All cities</SelectItem>
                 {cityOptions.map((city) => (
                   <SelectItem key={city.id} value={city.id}>
                     {city.name}
@@ -250,50 +340,63 @@ const ManagerDashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search division / city / state / pincode"
-            />
+            <div className="space-y-2">
+              <Label htmlFor="manager-division-search">Search divisions</Label>
+              <Input
+                id="manager-division-search"
+                type="search"
+                name="manager-division-search"
+                autoComplete="off"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search division, city, state or pincode"
+              />
+            </div>
           </div>
 
           {!selectedSalesUser ? (
             <div className="text-sm text-slate-500">Choose a salesperson to allocate divisions.</div>
           ) : (
             <div className="max-h-72 overflow-y-auto border rounded-lg p-3 space-y-2">
-              {filteredDivisions.map((division) => {
-                const checked = selectedDivisionIds.includes(division.id);
-                const pincodeRows = Array.isArray(division.division_pincodes) ? division.division_pincodes : [];
-                const pincodePreview = pincodeRows
-                  .map((x) => String(x?.pincode || '').trim())
-                  .filter(Boolean)
-                  .slice(0, 3);
-                const remainingPincodes = Math.max(0, pincodeRows.length - pincodePreview.length);
-                return (
-                  <label key={division.id} className="flex items-start gap-3 p-2 rounded hover:bg-slate-50">
-                    <Checkbox checked={checked} onCheckedChange={(v) => toggleDivision(division.id, Boolean(v))} />
-                    <div className="min-w-0">
-                      <div className="font-medium text-sm">{division.name}</div>
-                      <div className="text-xs text-slate-500">
-                        {division.city?.name || 'City N/A'} • {division.state?.name || 'State N/A'}
-                      </div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
-                        <Badge variant="outline">{division.pincode_count || 0} pincodes</Badge>
-                        {(division.district_name || division.subdistrict_name) ? (
-                          <span>
-                            {[division.district_name, division.subdistrict_name].filter(Boolean).join(' / ')}
-                          </span>
+              {filteredDivisions.length ? (
+                filteredDivisions.map((division) => {
+                  const checked = selectedDivisionIds.includes(division.id);
+                  const pincodeRows = Array.isArray(division.division_pincodes) ? division.division_pincodes : [];
+                  const pincodePreview = pincodeRows
+                    .map((x) => String(x?.pincode || '').trim())
+                    .filter(Boolean)
+                    .slice(0, 3);
+                  const remainingPincodes = Math.max(0, pincodeRows.length - pincodePreview.length);
+                  return (
+                    <label key={division.id} className="flex items-start gap-3 p-2 rounded hover:bg-slate-50">
+                      <Checkbox checked={checked} onCheckedChange={(v) => toggleDivision(division.id, Boolean(v))} />
+                      <div className="min-w-0">
+                        <div className="font-medium text-sm">{division.name}</div>
+                        <div className="text-xs text-slate-500">
+                          {division.city?.name || 'City N/A'} • {division.state?.name || 'State N/A'}
+                        </div>
+                        <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+                          <Badge variant="outline">{division.pincode_count || 0} pincodes</Badge>
+                          {(division.district_name || division.subdistrict_name) ? (
+                            <span>
+                              {[division.district_name, division.subdistrict_name].filter(Boolean).join(' / ')}
+                            </span>
+                          ) : null}
+                        </div>
+                        {pincodePreview.length ? (
+                          <div className="mt-1 text-[11px] text-slate-500">
+                            Pincodes: {pincodePreview.join(', ')}{remainingPincodes ? ` +${remainingPincodes}` : ''}
+                          </div>
                         ) : null}
                       </div>
-                      {pincodePreview.length ? (
-                        <div className="mt-1 text-[11px] text-slate-500">
-                          Pincodes: {pincodePreview.join(', ')}{remainingPincodes ? ` +${remainingPincodes}` : ''}
-                        </div>
-                      ) : null}
-                    </div>
-                  </label>
-                );
-              })}
+                    </label>
+                  );
+                })
+              ) : (
+                <div className="rounded border border-dashed px-3 py-6 text-center text-sm text-slate-500">
+                  No divisions match the current filters.
+                </div>
+              )}
             </div>
           )}
 

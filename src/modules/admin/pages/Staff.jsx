@@ -343,6 +343,11 @@ const Staff = () => {
                 <div className="relative">
                   <Input
                     type={showCreatePassword ? "text" : "password"}
+                    id="staff-create-password"
+                    name="staff-create-password"
+                    autoComplete="new-password"
+                    data-1p-ignore="true"
+                    data-lpignore="true"
                     value={formData.password}
                     onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                     placeholder="********"
@@ -427,6 +432,17 @@ const Staff = () => {
       <div className="flex items-center space-x-2 bg-white p-4 rounded-lg border">
         <Search className="h-5 w-5 text-gray-400" />
         <Input
+          id="staff-directory-search"
+          type="search"
+          name="staff-directory-search"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="none"
+          inputMode="search"
+          spellCheck={false}
+          data-form-type="other"
+          data-1p-ignore="true"
+          data-lpignore="true"
           placeholder="Search by name, email or role..."
           className="border-0 focus-visible:ring-0"
           value={searchTerm}
@@ -531,6 +547,16 @@ const Staff = () => {
           </DialogHeader>
 
           <div className="space-y-4 py-4">
+            <input
+              type="text"
+              name="staff-password-username"
+              autoComplete="username"
+              value={pwEmployee?.email || ""}
+              readOnly
+              tabIndex={-1}
+              aria-hidden="true"
+              className="sr-only"
+            />
             <div className="text-sm text-muted-foreground">
               Employee: <span className="font-semibold text-slate-900">{pwEmployee?.full_name || pwEmployee?.name || "-"}</span>
               {pwEmployee?.email ? <span className="ml-2">({pwEmployee.email})</span> : null}
@@ -541,6 +567,11 @@ const Staff = () => {
               <div className="relative">
                 <Input
                   type={showPwPassword ? "text" : "password"}
+                  id="staff-new-password"
+                  name="staff-new-password"
+                  autoComplete="new-password"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
                   value={pwForm.password}
                   onChange={(e) => setPwForm((p) => ({ ...p, password: e.target.value }))}
                   placeholder="********"
@@ -563,6 +594,11 @@ const Staff = () => {
               <div className="relative">
                 <Input
                   type={showPwConfirm ? "text" : "password"}
+                  id="staff-confirm-password"
+                  name="staff-confirm-password"
+                  autoComplete="new-password"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
                   value={pwForm.confirm}
                   onChange={(e) => setPwForm((p) => ({ ...p, confirm: e.target.value }))}
                   placeholder="********"
