@@ -208,6 +208,89 @@ const runKeywordQuery = async ({ selectString, stateId, cityId, applyFilter }) =
   }
 };
 
+const tokenizeSearchTerms = (...values) =>
+  Array.from(
+    new Set(
+      values
+        .flatMap((value) =>
+          normalizeText(String(value || '').replace(/-/g, ' '))
+            .split(' ')
+            .map((token) => token.trim())
+            .filter((token) => token.length >= 2)
+            .flatMap((token) => {
+              const stemmed = stemWord(token);
+              return stemmed && stemmed !== token ? [token, stemmed] : [token];
+            })
+        )
+        .filter(Boolean)
+    )
+  ).slice(0, 8);
+
+const runCategoryContextQuery = async ({ ctx, selectString, stateId, cityId }) => {
+  let filterColumn = '';
+  let filterValue = null;
+
+  if (ctx?.type === 'micro' && ctx.microId) {
+    filterColumn = 'micro_category_id';
+    filterValue = ctx.microId;
+  } else if (ctx?.type === 'sub' && ctx.subId) {
+    filterColumn = 'sub_category_id';
+    filterValue = ctx.subId;
+  } else if (ctx?.type === 'head' && ctx.headId) {
+    filterColumn = 'head_category_id';
+    filterValue = ctx.headId;
+  }
+
+  if (!filterColumn || !filterValue) {
+    return [];
+  }
+
+  let query = supabase
+    .from('products')
+    .select(selectString)
+    .eq('status', 'ACTIVE')
+    .eq('vendors.is_active', true)
+    .eq(filterColumn, filterValue);
+
+  query = applyLocationFilters(query, stateId, cityId);
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .limit(300);
+
+  if (error) throw error;
+  return data || [];
+};
+
+const getKeywordRelevanceScore = (product, { servicePhrase, serviceQuerySlug, searchTokens }) => {
+  const name = normalizeText(product?.name);
+  const category = normalizeText(product?.category || product?.category_slug);
+  const description = normalizeText(product?.description);
+  const productSlug = slugify(product?.slug || product?.name);
+  const categorySlug = slugify(product?.category_slug || product?.category);
+
+  let score = 0;
+
+  if (serviceQuerySlug && productSlug === serviceQuerySlug) score += 1400;
+  if (servicePhrase && name === servicePhrase) score += 1300;
+  if (serviceQuerySlug && categorySlug === serviceQuerySlug) score += 1000;
+  if (servicePhrase && category === servicePhrase) score += 900;
+
+  if (servicePhrase && name.includes(servicePhrase)) score += 350;
+  if (servicePhrase && category.includes(servicePhrase)) score += 240;
+  if (servicePhrase && description.includes(servicePhrase)) score += 80;
+
+  searchTokens.forEach((token) => {
+    if (name.includes(token)) score += 100;
+    if (category.includes(token)) score += 70;
+    if (description.includes(token)) score += 25;
+    if (productSlug.includes(token)) score += 120;
+    if (categorySlug.includes(token)) score += 80;
+  });
+
+  return score;
+};
+
 const SearchResults = () => {
   const [searchParams] = useSearchParams();
   const params = useParams();
@@ -404,6 +487,10 @@ const SearchResults = () => {
     const textVariants = Array.from(
       new Set([rawServiceText, servicePhrase].map((value) => String(value || '').trim()).filter(Boolean))
     );
+    const searchTokens = tokenizeSearchTerms(rawServiceText, servicePhrase);
+    const slugTokens = Array.from(
+      new Set(searchTokens.map((value) => slugify(value)).filter((value) => value.length >= 2))
+    );
 
     const exactMatches = dedupeProducts(
       (
@@ -432,6 +519,14 @@ const SearchResults = () => {
               applyFilter: (query) => query.ilike('name', text),
             })
           ),
+          ...textVariants.map((text) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('category', text),
+            })
+          ),
         ])
       ).flat()
     );
@@ -440,7 +535,7 @@ const SearchResults = () => {
       return exactMatches;
     }
 
-    const containsMatches = dedupeProducts(
+    const broadMatches = dedupeProducts(
       (
         await Promise.all([
           ...textVariants.map((text) =>
@@ -459,12 +554,52 @@ const SearchResults = () => {
               applyFilter: (query) => query.ilike('category', `%${text}%`),
             })
           ),
+          ...slugTokens.map((token) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('slug', `%${token}%`),
+            })
+          ),
+          ...slugTokens.map((token) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('category_slug', `%${token}%`),
+            })
+          ),
+          ...searchTokens.map((token) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('name', `%${token}%`),
+            })
+          ),
+          ...searchTokens.map((token) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('category', `%${token}%`),
+            })
+          ),
+          ...searchTokens.map((token) =>
+            runKeywordQuery({
+              selectString,
+              stateId,
+              cityId,
+              applyFilter: (query) => query.ilike('description', `%${token}%`),
+            })
+          ),
         ])
       ).flat()
     );
 
-    if (containsMatches.length > 0) {
-      return containsMatches;
+    if (broadMatches.length > 0) {
+      return broadMatches;
     }
 
     return dedupeProducts(
@@ -533,6 +668,7 @@ const SearchResults = () => {
         const rawServiceText = rawSearchQuery || serviceSlug.replace(/-/g, ' ');
         const servicePhrase = normalizeText(rawServiceText);
         const serviceQuerySlug = slugify(rawServiceText) || serviceSlug;
+        const searchTokens = tokenizeSearchTerms(rawServiceText, servicePhrase);
 
         const [{ state, city }, ctx] = await Promise.all([
           locationService.getLocationBySlug(parsedParams.stateSlug, parsedParams.citySlug),
@@ -552,67 +688,35 @@ const SearchResults = () => {
           )
         `;
 
-        let data = [];
+        const shouldIncludeCategoryMatches = ctx.type !== 'text';
+        const shouldIncludeKeywordMatches = Boolean(rawSearchQuery) || ctx.type === 'text';
 
-        if (ctx.type === 'micro' && ctx.microId) {
-          let query = supabase
-            .from('products')
-            .select(selectString)
-            .eq('status', 'ACTIVE')
-            .eq('vendors.is_active', true)
-            .eq('micro_category_id', ctx.microId);
+        const [categoryMatches, keywordMatches] = await Promise.all([
+          shouldIncludeCategoryMatches
+            ? runCategoryContextQuery({
+                ctx,
+                selectString,
+                stateId,
+                cityId,
+              })
+            : Promise.resolve([]),
+          shouldIncludeKeywordMatches
+            ? runKeywordProductsQueryWithFallback({
+                rawServiceText,
+                servicePhrase,
+                serviceSlug,
+                serviceQuerySlug,
+                selectString,
+                stateId,
+                cityId,
+              })
+            : Promise.resolve([]),
+        ]);
 
-          query = applyLocationFilters(query, stateId, cityId);
-
-          const { data: d, error } = await query
-            .order('created_at', { ascending: false })
-            .limit(300);
-
-          if (error) throw error;
-          data = d || [];
-        } else if (ctx.type === 'sub' && ctx.subId) {
-          let query = supabase
-            .from('products')
-            .select(selectString)
-            .eq('status', 'ACTIVE')
-            .eq('vendors.is_active', true)
-            .eq('sub_category_id', ctx.subId);
-
-          query = applyLocationFilters(query, stateId, cityId);
-
-          const { data: d, error } = await query
-            .order('created_at', { ascending: false })
-            .limit(300);
-
-          if (error) throw error;
-          data = d || [];
-        } else if (ctx.type === 'head' && ctx.headId) {
-          let query = supabase
-            .from('products')
-            .select(selectString)
-            .eq('status', 'ACTIVE')
-            .eq('vendors.is_active', true)
-            .eq('head_category_id', ctx.headId);
-
-          query = applyLocationFilters(query, stateId, cityId);
-
-          const { data: d, error } = await query
-            .order('created_at', { ascending: false })
-            .limit(300);
-
-          if (error) throw error;
-          data = d || [];
-        } else {
-          data = await runKeywordProductsQueryWithFallback({
-            rawServiceText,
-            servicePhrase,
-            serviceSlug,
-            serviceQuerySlug,
-            selectString,
-            stateId,
-            cityId,
-          });
-        }
+        const data = dedupeProducts([
+          ...categoryMatches,
+          ...keywordMatches,
+        ]);
 
         const vendorIds = Array.from(
           new Set(
@@ -677,10 +781,12 @@ const SearchResults = () => {
         // 4) Latest
         const sorted = locationFiltered
           .map((p) => {
-            const nm = normalizeText(p?.name);
-            const exact = nm === servicePhrase ? 1000 : 0;
-            const contains = nm.includes(servicePhrase) ? 200 : 0;
-            return { ...p, __sortScore: exact + contains };
+            const relevanceScore = getKeywordRelevanceScore(p, {
+              servicePhrase,
+              serviceQuerySlug,
+              searchTokens,
+            });
+            return { ...p, __sortScore: relevanceScore };
           })
           .sort((a, b) => {
             const ap = a.__planPriority || 0;

@@ -15,9 +15,28 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const DASHBOARD_PATHS = {
+  VENDOR: '/vendor/dashboard',
+  BUYER: '/buyer/dashboard',
+  ADMIN: '/admin/dashboard',
+  SUPERADMIN: '/admin/register/superadmin/dashboard',
+  HR: '/hr/dashboard',
+  FINANCE: '/finance-portal/dashboard',
+  DATA_ENTRY: '/employee/dataentry/dashboard',
+  DATAENTRY: '/employee/dataentry/dashboard',
+  SUPPORT: '/employee/support/dashboard',
+  SALES: '/employee/sales/dashboard',
+  MANAGER: '/employee/manager/dashboard',
+  VP: '/employee/vp/dashboard',
+};
+
+const resolveDashboardPath = (role = '') =>
+  DASHBOARD_PATHS[String(role || '').trim().toUpperCase()] || '/';
+
 const Header = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const dashboardPath = resolveDashboardPath(user?.role);
 
   const handleLogout = async () => {
     await logout();
@@ -99,11 +118,7 @@ const Header = () => {
                                 <p className="text-xs text-gray-500 truncate">{user.role}</p>
                               </div>
                            </div>
-                           <Link to={
-                             user.role === 'VENDOR' ? '/vendor/dashboard' : 
-                             user.role === 'BUYER' ? '/buyer/dashboard' : 
-                             '/admin/dashboard'
-                           }>
+                           <Link to={dashboardPath}>
                               <Button className="w-full justify-start" variant="outline">
                                 <LayoutDashboard className="mr-2 h-4 w-4" /> Dashboard
                               </Button>
@@ -164,11 +179,7 @@ const Header = () => {
                      userEmail={user?.email || null}
                    />
                    <div className="h-6 w-px bg-slate-700 mx-2"></div>
-                   <Link to={
-                     user.role === 'VENDOR' ? '/vendor/dashboard' : 
-                     user.role === 'BUYER' ? '/buyer/dashboard' : 
-                     '/admin/dashboard'
-                   }>
+                   <Link to={dashboardPath}>
                       <Button variant="default" size="sm" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold shadow-none border border-transparent">
                          Dashboard
                       </Button>
