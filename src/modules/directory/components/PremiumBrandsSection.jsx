@@ -1,16 +1,6 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-const PREMIUM_BRANDS = [
-  { id: 'pdce', name: 'PDCE', slug: 'pdce', logo_url: 'https://eimager.com/images/pdce-new.png' },
-  { id: 'bsh', name: 'BSH', slug: 'bsh', logo_url: 'https://eimager.com/images/bsh.png' },
-  { id: 'bsh-realty', name: 'BSH Realty', slug: 'bsh-realty', logo_url: 'https://eimager.com/images/bshrealty.png' },
-  { id: 'ultimate itech', name: 'Ultimate Itech', slug: 'ultimate-itech', logo_url: 'https://eimager.com/images/ultimate-new.png' },
-  { id: 'startup', name: 'Startup', slug: 'startup', logo_url: 'https://eimager.com/images/startup.png' },
-  { id: 'movie', name: 'Movie', slug: 'movie', logo_url: 'https://eimager.com/images/movie-image.png' },
-  { id: 'sres-tech', name: 'SRES Tech', slug: 'sres-tech', logo_url: 'https://eimager.com/images/sres-tech.png' },
-  { id: 'pss-lab', name: 'PSS Lab', slug: 'pss-lab', logo_url: 'https://eimager.com/images/pss-lab-now.png' },
-];
+import { PREMIUM_BRANDS, getPremiumBrandTargetPath } from '@/modules/directory/lib/premiumBrands';
 
 const PremiumBrandsSection = () => {
   const navigate = useNavigate();
@@ -58,7 +48,7 @@ const PremiumBrandsSection = () => {
                 className="flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300 border-0 bg-transparent p-0"
                 title={brand.name}
                 aria-label={`Open ${brand.name} brand page`}
-                onClick={() => navigate(`/directory/brand/${brand.slug}`)}
+                onClick={() => navigate(getPremiumBrandTargetPath(brand.slug))}
               >
                 <img
                   src={brand.logo_url}

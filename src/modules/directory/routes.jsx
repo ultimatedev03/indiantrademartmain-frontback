@@ -2,6 +2,7 @@ import React, { lazy } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
+import { getPremiumBrandTargetPath } from '@/modules/directory/lib/premiumBrands';
 
 import Home from '@/modules/directory/pages/Home';
 const Directory = lazy(() => import('@/modules/directory/pages/Directory'));
@@ -48,6 +49,11 @@ const LegacyProductRedirect = () => {
   return <Navigate to={getProductDetailPath(productSlug) || '/directory'} replace />;
 };
 
+const PremiumBrandRedirect = () => {
+  const { brandSlug } = useParams();
+  return <Navigate to={getPremiumBrandTargetPath(brandSlug)} replace />;
+};
+
 export const DirectoryRoutes = () => {
   return (
     <Routes>
@@ -68,6 +74,7 @@ export const DirectoryRoutes = () => {
         {/* Vendor */}
         <Route path="directory/vendor" element={<VendorListing />} />
         <Route path="directory/vendor/:vendorSlugOrId" element={<VendorProfilePublic />} />
+        <Route path="directory/brand/:brandSlug" element={<PremiumBrandRedirect />} />
 
         {/* Search (MOST specific first) */}
         <Route path="directory/search/:service/:state/:city" element={<SearchResults />} />

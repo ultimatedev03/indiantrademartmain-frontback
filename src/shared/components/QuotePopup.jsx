@@ -14,6 +14,42 @@ import { isValidIndianPhone, normalizeIndianPhone, submitPublicLead } from '@/sh
 const isValidEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 const hasStartedForm = (data = {}) =>
   Object.values(data || {}).some((value) => String(value || '').trim().length > 0);
+const QUOTE_POPUP_SHOW_DELAY_MS = 35000;
+const QUOTE_POPUP_AUTO_CLOSE_MS = 35000;
+const QUOTE_POPUP_SESSION_KEY = 'itm_quote_popup_state_v2';
+
+const readPopupSessionState = () => {
+  if (typeof window === 'undefined') {
+    return { firstEligibleAt: 0, shown: false, dismissed: false };
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(QUOTE_POPUP_SESSION_KEY);
+    if (!raw) return { firstEligibleAt: 0, shown: false, dismissed: false };
+    const parsed = JSON.parse(raw);
+    return {
+      firstEligibleAt: Number(parsed?.firstEligibleAt || 0),
+      shown: Boolean(parsed?.shown),
+      dismissed: Boolean(parsed?.dismissed),
+    };
+  } catch {
+    return { firstEligibleAt: 0, shown: false, dismissed: false };
+  }
+};
+
+const writePopupSessionState = (patch = {}) => {
+  if (typeof window === 'undefined') return;
+
+  try {
+    const next = {
+      ...readPopupSessionState(),
+      ...patch,
+    };
+    window.sessionStorage.setItem(QUOTE_POPUP_SESSION_KEY, JSON.stringify(next));
+  } catch {
+    // ignore storage errors
+  }
+};
 
 const QuotePopup = () => {
   const { user } = useAuth();
@@ -91,13 +127,21 @@ const QuotePopup = () => {
     // 2. Conditions to NOT show
     if (user) return; // User is logged in
     if (!isAllowedPage()) return; // Not on allowed page
-    if (sessionStorage.getItem('itm_quote_popup_shown')) return; // Shown once this session
-    if (localStorage.getItem('itm_quote_popup_closed')) return; // User explicitly closed it before
+    const popupState = readPopupSessionState();
+    if (popupState.shown || popupState.dismissed) return;
 
-    // 3. Start Delay Timer (35 seconds)
+    const firstEligibleAt = popupState.firstEligibleAt || Date.now();
+    if (!popupState.firstEligibleAt) {
+      writePopupSessionState({ firstEligibleAt });
+    }
+
+    const elapsed = Math.max(0, Date.now() - firstEligibleAt);
+    const remainingDelay = Math.max(0, QUOTE_POPUP_SHOW_DELAY_MS - elapsed);
+
+    // 3. Start a session-stable timer so refresh does not reset popup timing.
     showTimerRef.current = setTimeout(() => {
       showPopup();
-    }, 35000); 
+    }, remainingDelay);
 
     return () => clearTimers();
   }, [user, location.pathname]);
@@ -109,25 +153,24 @@ const QuotePopup = () => {
 
   const showPopup = () => {
     setIsVisible(true);
-    sessionStorage.setItem('itm_quote_popup_shown', 'true');
+    writePopupSessionState({ shown: true });
 
-    // 4. Auto-close Logic (35 seconds duration)
+    // 4. Auto-close logic for untouched sessions only.
     closeTimerRef.current = setTimeout(() => {
-      // Only auto-close if user hasn't started typing (checking if form data is empty)
       setFormData(currentData => {
         if (!hasStartedForm(currentData)) {
           setIsVisible(false);
+          writePopupSessionState({ dismissed: true });
         }
         return currentData;
       });
-    }, 35000);
+    }, QUOTE_POPUP_AUTO_CLOSE_MS);
   };
 
   const handleClose = () => {
     setIsVisible(false);
     clearTimers();
-    // Mark as closed so it doesn't annoy user again
-    localStorage.setItem('itm_quote_popup_closed', 'true');
+    writePopupSessionState({ dismissed: true });
   };
 
   const handleInputChange = (e) => {
@@ -224,7 +267,7 @@ const QuotePopup = () => {
   return (
     <AnimatePresence>
       {isVisible && (
-        <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9998] flex items-center justify-center p-3 sm:p-4">
             {/* Backdrop */}
             <motion.div 
                 initial={{ opacity: 0 }}
@@ -240,16 +283,16 @@ const QuotePopup = () => {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 20 }}
                 transition={{ duration: 0.2 }}
-                className="relative bg-white rounded-lg shadow-2xl overflow-hidden border border-gray-200 w-[90%] md:w-[500px] z-[9999]"
+                className="relative z-[9999] flex max-h-[calc(100vh-1.5rem)] w-full max-w-[500px] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
             >
                 <button 
                     onClick={handleClose}
-                    className="absolute right-4 top-4 text-gray-400 hover:text-gray-600 transition-colors z-10 p-1 hover:bg-gray-100 rounded-full"
+                    className="absolute right-3 top-3 z-10 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 sm:right-4 sm:top-4"
                 >
                     <X className="h-5 w-5" />
                 </button>
 
-                <div className="p-6 md:p-8">
+                <div className="flex-1 overflow-y-auto p-4 sm:p-6">
                     <div className="mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Get a Quote</h2>
                         <p className="text-gray-500 mt-2 text-sm">Tell us what you need, and we'll help you get quotes</p>
@@ -270,7 +313,7 @@ const QuotePopup = () => {
                             />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
                                 <Label htmlFor="quantity" className="text-xs font-bold uppercase text-gray-500">
                                     Quantity <span className="text-red-500">*</span>
@@ -338,7 +381,7 @@ const QuotePopup = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
                                 <Label htmlFor="state" className="text-xs font-bold uppercase text-gray-500">
                                     State <span className="text-red-500">*</span>

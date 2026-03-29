@@ -3,7 +3,7 @@ import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
-  Menu, X, Search, ShieldCheck, HelpCircle, ChevronRight, Boxes,
+  Menu, X, ShieldCheck, HelpCircle, ChevronRight, Boxes,
   BarChart3, UserCheck, Ticket, Database, Home
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -301,14 +301,6 @@ const PortalLayout = ({ role }) => {
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileMenuOpen(true)}>
               <Menu className="h-6 w-6" />
             </Button>
-            <div className="hidden sm:flex relative">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-neutral-400" />
-              <input
-                type="text"
-                placeholder="Search..."
-                className="pl-9 pr-4 py-2 bg-neutral-100 border-none rounded-md text-sm focus:ring-2 focus:ring-[#003D82] w-64"
-              />
-            </div>
           </div>
 
           <div className="flex items-center gap-4">
