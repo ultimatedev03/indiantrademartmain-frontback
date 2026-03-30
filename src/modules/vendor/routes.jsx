@@ -1,6 +1,7 @@
 import React, { lazy } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import VendorPortalLayout from '@/modules/vendor/layouts/PortalLayout';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const VendorDashboard = lazy(() => import('@/modules/vendor/pages/Dashboard'));
 const VendorProducts = lazy(() => import('@/modules/vendor/pages/Products'));
@@ -28,7 +29,21 @@ const VendorReferrals = lazy(() => import('@/modules/vendor/pages/Referrals'));
 import ProtectedRoute from '@/shared/components/ProtectedRoute';
 import PageStatusWrapper from '@/components/PageStatusWrapper';
 
+const StripPrefixRedirect = ({ prefix, fallback }) => {
+  const location = useLocation();
+  const trimmedPath = String(location.pathname || '').startsWith(prefix)
+    ? String(location.pathname || '').slice(prefix.length)
+    : '';
+  const nextPath = trimmedPath || fallback;
+  const normalizedPath = nextPath.startsWith('/') ? nextPath : `/${nextPath}`;
+  return <Navigate to={`${normalizedPath}${location.search || ''}${location.hash || ''}`} replace />;
+};
+
 export const VendorRoutes = () => {
+  const { appType, resolvePath } = useSubdomain();
+  const vendorLoginPath = resolvePath('login', 'vendor');
+  const vendorProfilePath = `${resolvePath('profile', 'vendor')}?tab=primary`;
+
   return (
     <Routes>
       {/* Public Auth Routes */}
@@ -45,7 +60,7 @@ export const VendorRoutes = () => {
       <Route path="forgot-password" element={<ForgotPassword />} />
 
       {/* Protected Portal Routes */}
-      <Route element={<ProtectedRoute allowedRoles={['VENDOR']} redirectTo="/vendor/login" />}>
+      <Route element={<ProtectedRoute allowedRoles={['VENDOR']} redirectTo={vendorLoginPath} />}>
         <Route
           element={
             <PageStatusWrapper pageRoute="/vendor">
@@ -68,7 +83,7 @@ export const VendorRoutes = () => {
           <Route path="messages" element={<VendorMessages />} />
           <Route path="proposals/send" element={<SendQuotation />} />
 
-          <Route path="kyc" element={<Navigate to="/vendor/profile?tab=primary" replace />} />
+          <Route path="kyc" element={<Navigate to={vendorProfilePath} replace />} />
 
           <Route path="support" element={<VendorSupport />} />
           <Route path="support/:id" element={<VendorSupportTicket />} />
@@ -83,7 +98,11 @@ export const VendorRoutes = () => {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/vendor/login" replace />} />
+      {appType === 'vendor' ? (
+        <Route path="vendor/*" element={<StripPrefixRedirect prefix="/vendor" fallback={resolvePath('dashboard', 'vendor')} />} />
+      ) : null}
+
+      <Route path="*" element={<Navigate to={vendorLoginPath} replace />} />
     </Routes>
   );
 };

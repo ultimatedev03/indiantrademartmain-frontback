@@ -57,6 +57,7 @@ const parsePreferenceLimits = (planObj) => {
 const PreferencesSection = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedSnapshot, setSavedSnapshot] = useState('');
   const [preferences, setPreferences] = useState({
     preferred_micro_categories: [],
     preferred_states: [],
@@ -81,6 +82,8 @@ const PreferencesSection = () => {
   const stateMap = useMemo(() => buildLookupMap(allStates), [allStates]);
   const cityMap = useMemo(() => buildLookupMap(allCities), [allCities]);
   const categoryMap = useMemo(() => buildLookupMap(allHeadCategories), [allHeadCategories]);
+  const preferencesSnapshot = useMemo(() => JSON.stringify(preferences), [preferences]);
+  const hasUnsavedChanges = preferencesSnapshot !== savedSnapshot;
 
   useEffect(() => {
     loadData();
@@ -207,15 +210,18 @@ const PreferencesSection = () => {
       };
       const limits = parsePreferenceLimits(activeSub?.plan);
 
-      setAllStates(nextStates);
-      setAllHeadCategories(nextCategories);
-      setSelectionLimits(limits);
-      setPreferences({
+      const normalizedPreferences = {
         ...prefs,
         preferred_states: (prefs?.preferred_states || []).map((id) => normalizeId(id)).filter(Boolean).slice(0, limits.states),
         preferred_cities: (prefs?.preferred_cities || []).map((id) => normalizeId(id)).filter(Boolean).slice(0, limits.cities),
         preferred_micro_categories: (prefs?.preferred_micro_categories || []).map((id) => normalizeId(id)).filter(Boolean).slice(0, limits.categories),
-      });
+      };
+
+      setAllStates(nextStates);
+      setAllHeadCategories(nextCategories);
+      setSelectionLimits(limits);
+      setPreferences(normalizedPreferences);
+      setSavedSnapshot(JSON.stringify(normalizedPreferences));
 
       if ((!prefs?.preferred_states || prefs.preferred_states.length === 0) && nextStates.length > 0) {
         setSelectedStateId(normalizeId(nextStates[0].id));
@@ -321,6 +327,7 @@ const PreferencesSection = () => {
     setSaving(true);
     try {
       await vendorApi.preferences.update(preferences);
+      setSavedSnapshot(preferencesSnapshot);
       toast({
         title: 'Preferences Updated',
         className: 'bg-green-50 text-green-900 border-green-200'
@@ -519,10 +526,13 @@ const PreferencesSection = () => {
       </Card>
 
       {/* Save Button */}
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-sm text-gray-500">
+          {hasUnsavedChanges ? 'You have unsaved preference changes.' : 'Preferences are saved.'}
+        </p>
         <Button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || !hasUnsavedChanges}
           className="bg-[#003D82] hover:bg-[#003D82]/90 flex items-center gap-2"
         >
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}

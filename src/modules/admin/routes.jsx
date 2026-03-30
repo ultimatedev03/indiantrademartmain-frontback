@@ -52,6 +52,16 @@ import { ShieldCheck, Users } from 'lucide-react';
 const Buyers = lazy(() => import('@/modules/admin/pages/Buyers'));
 const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
 
+const StripPrefixRedirect = ({ prefix, fallback }) => {
+  const location = useLocation();
+  const trimmedPath = String(location.pathname || '').startsWith(prefix)
+    ? String(location.pathname || '').slice(prefix.length)
+    : '';
+  const nextPath = trimmedPath || fallback;
+  const normalizedPath = nextPath.startsWith('/') ? nextPath : `/${nextPath}`;
+  return <Navigate to={`${normalizedPath}${location.search || ''}${location.hash || ''}`} replace />;
+};
+
 const LoginRouter = () => {
   const location = useLocation();
   const { appType } = useSubdomain();
@@ -205,7 +215,7 @@ export const AdminRoutes = () => {
 
       {/* Admin */}
       {isAdminScope ? (
-        <Route element={<ProtectedRoute allowedRoles={['ADMIN']} />}>
+        <Route element={<ProtectedRoute allowedRoles={['ADMIN']} redirectTo={isDirectInternalPortalMode ? '/login' : '/admin/login'} />}>
           <Route element={<PortalLayout role="ADMIN" />}>
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<AdminDashboard />} />
@@ -229,6 +239,10 @@ export const AdminRoutes = () => {
             <Route path="settings" element={<AdminSettings />} />
           </Route>
         </Route>
+      ) : null}
+
+      {isDirectInternalPortalMode ? (
+        <Route path="admin/*" element={<StripPrefixRedirect prefix="/admin" fallback="/dashboard" />} />
       ) : null}
 
       {/* HR */}

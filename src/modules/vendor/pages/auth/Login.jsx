@@ -12,54 +12,28 @@ import { Loader2, ArrowRight } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const VendorLogin = () => {
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
   const supaAuth = useAuth();
   const loginCaptcha = useCaptchaGate();
-  const captchaWidgetRef = React.useRef(null);
-  const captchaExecuteQueuedRef = React.useRef(false);
   const [loading, setLoading] = useState(false);
-  const [captchaStarted, setCaptchaStarted] = useState(false);
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
+  const dashboardPath = resolvePath('dashboard', 'vendor');
+  const forgotPasswordPath = resolvePath('forgot-password', 'vendor');
+  const registerPath = resolvePath('register', 'vendor');
 
   // If already authenticated as vendor, send to dashboard
   React.useEffect(() => {
     if (supaAuth?.userRole === 'VENDOR') {
-      navigate('/vendor/dashboard', { replace: true });
+      navigate(dashboardPath, { replace: true });
     }
-  }, [supaAuth?.userRole, navigate]);
-
-  React.useEffect(() => {
-    if (!loginCaptcha.captchaToken) {
-      return;
-    }
-
-    captchaExecuteQueuedRef.current = false;
-    captchaWidgetRef.current = null;
-    setCaptchaStarted(false);
-  }, [loginCaptcha.captchaToken]);
-
-  const resetLoginCaptcha = React.useCallback(() => {
-    captchaExecuteQueuedRef.current = false;
-    captchaWidgetRef.current = null;
-    loginCaptcha.resetCaptcha();
-    setCaptchaStarted(false);
-  }, [loginCaptcha]);
-
-  const handleCaptchaWidgetReady = React.useCallback(async (widgetApi) => {
-    captchaWidgetRef.current = widgetApi;
-
-    if (!widgetApi || !captchaExecuteQueuedRef.current) {
-      return;
-    }
-
-    captchaExecuteQueuedRef.current = false;
-    await widgetApi.execute();
-  }, []);
+  }, [dashboardPath, supaAuth?.userRole, navigate]);
 
   const performLogin = async () => {
     setLoading(true);
@@ -133,12 +107,10 @@ const VendorLogin = () => {
 
       // 4. Success
       toast({ title: "Welcome back!", description: "Logged in successfully." });
-      navigate('/vendor/dashboard', { replace: true });
-      // hard redirect as fallback in case router state is stale
-      window.location.href = '/vendor/dashboard';
+      navigate(dashboardPath, { replace: true });
 
     } catch (error) {
-      resetLoginCaptcha();
+      loginCaptcha.resetCaptcha();
       toast({ 
         title: "Login Failed", 
         description: error.message || "Invalid credentials", 
@@ -147,13 +119,6 @@ const VendorLogin = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleStartCaptcha = () => {
-    if (loading) return;
-    captchaExecuteQueuedRef.current = true;
-    loginCaptcha.resetCaptcha();
-    setCaptchaStarted(true);
   };
 
   const handleLogin = async (e) => {
@@ -202,7 +167,7 @@ const VendorLogin = () => {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
-                <Link to="/auth/forgot-password?role=VENDOR" className="text-sm text-[#003D82] hover:underline">
+                <Link to={forgotPasswordPath} className="text-sm text-[#003D82] hover:underline">
                   Forgot password?
                 </Link>
               </div>
@@ -221,38 +186,13 @@ const VendorLogin = () => {
             <div className="flex flex-col items-center space-y-3">
               <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="flex flex-col items-center space-y-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleStartCaptcha}
-                    disabled={loading}
-                  >
-                    {loginCaptcha.captchaToken
-                      ? 'Run Security Check Again'
-                      : captchaStarted
-                        ? 'Retry Security Check'
-                        : 'Start Security Check'}
-                  </Button>
-
-                  {captchaStarted ? (
-                    <TurnstileField
-                      action="auth_login"
-                      appearance="execute"
-                      className="mx-auto w-full max-w-[320px]"
-                      execution="execute"
-                      onStatusChange={loginCaptcha.setCaptchaStatus}
-                      onWidgetReady={handleCaptchaWidgetReady}
-                      refreshExpired="never"
-                      refreshTimeout="never"
-                      resetKey={loginCaptcha.captchaResetKey}
-                      retry="never"
-                      onTokenChange={loginCaptcha.setCaptchaToken}
-                    />
-                  ) : (
-                    <p className="text-center text-xs text-gray-500">
-                      Cloudflare verification will stay idle until you start it manually.
-                    </p>
-                  )}
+                  <TurnstileField
+                    action="auth_login"
+                    className="mx-auto w-full max-w-[320px]"
+                    onStatusChange={loginCaptcha.setCaptchaStatus}
+                    resetKey={loginCaptcha.captchaResetKey}
+                    onTokenChange={loginCaptcha.setCaptchaToken}
+                  />
 
                   <p className="text-center text-xs text-gray-500">
                     {loginCaptcha.captchaToken
@@ -267,7 +207,7 @@ const VendorLogin = () => {
         <CardFooter className="flex justify-center border-t p-4 bg-gray-50 rounded-b-lg">
           <div className="text-sm text-gray-600">
             Don't have an account?{' '}
-            <Link to="/vendor/register" className="font-semibold text-[#003D82] hover:underline inline-flex items-center">
+            <Link to={registerPath} className="font-semibold text-[#003D82] hover:underline inline-flex items-center">
               Register Now <ArrowRight className="ml-1 w-3 h-3" />
             </Link>
           </div>

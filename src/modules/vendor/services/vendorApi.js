@@ -1206,7 +1206,9 @@ export const vendorApi = {
         'id', 'user_id', 'aud', 'role', 'created_at', 'updated_at',
         'confirmed_at', 'email_confirmed_at', 'last_sign_in_at', 'phone_confirmed_at',
         'app_metadata', 'user_metadata', 'identities', 'factors',
-        'is_anonymous' // ✅ IMPORTANT (your current error)
+        'is_anonymous',
+        'llpinNumber',
+        'llpin_number',
       ]);
 
       const safeUpdates = Object.fromEntries(

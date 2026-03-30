@@ -9,10 +9,17 @@ import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/ui/use-toast';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const BUYER_NOTIF_PREFIX = 'buyer_notif:';
 const FALLBACK_POLL_INTERVAL_MS = 30000;
+const APP_ROUTE_PREFIX = {
+  vendor: '/vendor',
+  buyer: '/buyer',
+  admin: '/admin',
+  management: '/admin',
+};
 const TYPE_SCOPE_HINTS = {
   KYC_APPROVAL_REQUESTED: '/admin',
   KYC_VENDOR_FOLLOWUP: '/employee/support',
@@ -31,8 +38,17 @@ const toBuyerNotifId = (id) => `${BUYER_NOTIF_PREFIX}${id}`;
 const isBuyerNotifId = (id) => String(id || '').startsWith(BUYER_NOTIF_PREFIX);
 const fromBuyerNotifId = (id) => String(id || '').replace(BUYER_NOTIF_PREFIX, '');
 
-const resolveDashboardScope = (pathname = '') => {
+const stripCurrentAppPrefix = (pathname = '', appType = 'main') => {
   const p = String(pathname || '');
+  const prefix = APP_ROUTE_PREFIX[appType];
+  if (!prefix) return p;
+  if (p === prefix) return '/';
+  if (p.startsWith(`${prefix}/`)) return p.slice(prefix.length) || '/';
+  return p;
+};
+
+const resolveDashboardScope = (pathname = '', appType = 'main') => {
+  const p = stripCurrentAppPrefix(pathname, appType);
   if (p.startsWith('/employee/dataentry')) return '/employee/dataentry';
   if (p.startsWith('/employee/support')) return '/employee/support';
   if (p.startsWith('/employee/sales')) return '/employee/sales';
@@ -42,6 +58,9 @@ const resolveDashboardScope = (pathname = '') => {
   if (p.startsWith('/buyer')) return '/buyer';
   if (p.startsWith('/hr')) return '/hr';
   if (p.startsWith('/finance-portal')) return '/finance-portal';
+  if (appType === 'admin' || appType === 'management') return '/admin';
+  if (appType === 'vendor') return '/vendor';
+  if (appType === 'buyer') return '/buyer';
   return '';
 };
 
@@ -93,6 +112,32 @@ const mapBuyerNotificationRow = (row = {}) => ({
   link: resolveBuyerNotificationLink(row),
 });
 
+const resolveNotificationPathForCurrentApp = (notif = {}, appType = 'main') => {
+  const linkPath = notificationLinkPath(notif);
+  if (!linkPath) return '';
+
+  if (appType === 'vendor' && (linkPath === '/vendor' || linkPath.startsWith('/vendor/'))) {
+    return stripCurrentAppPrefix(linkPath, appType) || '/';
+  }
+
+  if (appType === 'buyer' && (linkPath === '/buyer' || linkPath.startsWith('/buyer/'))) {
+    return stripCurrentAppPrefix(linkPath, appType) || '/';
+  }
+
+  if ((appType === 'admin' || appType === 'management') && (linkPath === '/admin' || linkPath.startsWith('/admin/'))) {
+    return stripCurrentAppPrefix(linkPath, appType) || '/';
+  }
+
+  return linkPath;
+};
+
+const resolveNotificationTarget = (notif = {}, appType = 'main') => {
+  const targetPath = resolveNotificationPathForCurrentApp(notif, appType);
+  if (!targetPath) return '';
+  const query = notificationLinkQuery(notif)?.toString();
+  return query ? `${targetPath}?${query}` : targetPath;
+};
+
 const isChatNotification = (notif = {}) => {
   const type = String(notif?.type || '').trim().toUpperCase();
   if (type === 'PROPOSAL_MESSAGE') return true;
@@ -131,9 +176,11 @@ const collectUserIds = (...values) => {
 
 const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp = null }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { appType } = useSubdomain();
   const dashboardScope = useMemo(
-    () => resolveDashboardScope(location?.pathname || ''),
-    [location?.pathname]
+    () => resolveDashboardScope(location?.pathname || '', appType),
+    [appType, location?.pathname]
   );
 
   const [userId, setUserId] = useState(userIdProp || null);
@@ -629,20 +676,27 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
   }, [unreadCount]);
 
   useEffect(() => {
-    const path = String(location?.pathname || '');
-    const inBuyerMessages = path.startsWith('/buyer/messages');
-    const inVendorMessages = path.startsWith('/vendor/messages');
+    const rawPath = String(location?.pathname || '');
+    const normalizedPath = stripCurrentAppPrefix(rawPath, appType);
+    const inBuyerMessages =
+      rawPath.startsWith('/buyer/messages') ||
+      (appType === 'buyer' && normalizedPath.startsWith('/messages'));
+    const inVendorMessages =
+      rawPath.startsWith('/vendor/messages') ||
+      (appType === 'vendor' && normalizedPath.startsWith('/messages'));
     if (!inBuyerMessages && !inVendorMessages) return;
 
     const proposalFromUrl = String(new URLSearchParams(location?.search || '').get('proposal') || '').trim();
     if (!proposalFromUrl) return;
-    const targetPrefix = inBuyerMessages ? '/buyer/messages' : '/vendor/messages';
+    const targetPrefix = inBuyerMessages
+      ? (appType === 'buyer' ? '/messages' : '/buyer/messages')
+      : (appType === 'vendor' ? '/messages' : '/vendor/messages');
 
     const unreadMessageNotifs = notifications.filter((notif) => {
       if (notif?.is_read) return false;
       if (!isChatNotification(notif)) return false;
 
-      const linkPath = notificationLinkPath(notif);
+      const linkPath = resolveNotificationPathForCurrentApp(notif, appType);
       if (linkPath && !linkPath.startsWith(targetPrefix)) return false;
 
       const notifReference = String(notif?.reference_id || '').trim();
@@ -681,7 +735,7 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     return () => {
       cancelled = true;
     };
-  }, [location?.pathname, location?.search, notifications]);
+  }, [appType, location?.pathname, location?.search, notifications]);
 
   const markAsRead = async (id) => {
     try {
@@ -749,6 +803,14 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
     } catch (error) {
       console.error("Error marking all read:", error);
     }
+  };
+
+  const handleNotificationClick = async (notif) => {
+    await markAsRead(notif.id);
+    const target = resolveNotificationTarget(notif, appType);
+    if (!target) return;
+    setIsOpen(false);
+    navigate(target);
   };
 
   const getCategoryRequestId = (notif) => {
@@ -913,7 +975,7 @@ const NotificationBell = ({ userId: userIdProp = null, userEmail: userEmailProp 
                       "relative p-4 hover:bg-gray-50 transition-colors cursor-pointer group",
                       !notif.is_read && "bg-blue-50/30"
                     )}
-                    onClick={() => markAsRead(notif.id)}
+                    onClick={() => handleNotificationClick(notif)}
                   >
                     <div className="flex gap-3">
                       <div className={cn(

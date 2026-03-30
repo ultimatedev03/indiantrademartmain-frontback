@@ -204,9 +204,7 @@ const validateVendorPrimaryDraft = (draft = {}) => {
   };
 };
 
-const validateVendorBusinessDraft = (draft = {}) => {
-  const normalizedIdentity = validateVendorIdentityDraft(draft);
-
+const validateVendorBusinessDraft = (draft = {}, previous = {}) => {
   const rawGstNumber = String(draft.gstNumber || draft.gst_number || '').trim();
   const gstNumber = normalizeCodeValue(rawGstNumber, 15);
   if (rawGstNumber && !GST_NUMBER_RE.test(gstNumber)) {
@@ -214,6 +212,20 @@ const validateVendorBusinessDraft = (draft = {}) => {
   }
 
   const websiteUrl = normalizeWebsiteUrl(draft.websiteUrl || draft.website_url || '');
+
+  const rawPanNumber = String(draft.panNumber || draft.pan_number || '').trim();
+  const panNumber = normalizePanNumber(rawPanNumber);
+  const previousPanNumber = normalizePanNumber(previous.panNumber || previous.pan_number || '');
+  if (rawPanNumber && panNumber !== previousPanNumber && !PAN_NUMBER_RE.test(panNumber)) {
+    throw new Error('PAN number must be in the format ABCDE1234F.');
+  }
+
+  const rawAadharNumber = String(draft.aadharNumber || draft.aadhar_number || '').trim();
+  const aadharNumber = normalizeAadharNumber(rawAadharNumber);
+  const previousAadharNumber = normalizeAadharNumber(previous.aadharNumber || previous.aadhar_number || '');
+  if (rawAadharNumber && aadharNumber !== previousAadharNumber && !AADHAR_NUMBER_RE.test(aadharNumber)) {
+    throw new Error('Aadhar number must contain exactly 12 digits.');
+  }
 
   const rawTanNumber = String(draft.tanNumber || draft.tan_number || '').trim();
   const tanNumber = normalizeCodeValue(rawTanNumber, 10);
@@ -238,16 +250,14 @@ const validateVendorBusinessDraft = (draft = {}) => {
   return {
     gstNumber: gstNumber || null,
     gst_number: gstNumber || null,
-    panNumber: normalizedIdentity.panNumber || null,
-    pan_number: normalizedIdentity.panNumber || null,
-    aadharNumber: normalizedIdentity.aadharNumber || null,
-    aadhar_number: normalizedIdentity.aadharNumber || null,
+    panNumber: panNumber || null,
+    pan_number: panNumber || null,
+    aadharNumber: aadharNumber || null,
+    aadhar_number: aadharNumber || null,
     websiteUrl: websiteUrl || null,
     website_url: websiteUrl || null,
     cinNumber: registrationNumbers.displayValue,
     cin_number: registrationNumbers.cinNumber,
-    llpinNumber: registrationNumbers.llpinNumber,
-    llpin_number: registrationNumbers.llpinNumber,
     tanNumber: tanNumber || null,
     tan_number: tanNumber || null,
     iecCode: iecCode || null,
@@ -437,7 +447,7 @@ const Profile = () => {
       if (editingSection === 'primary') {
         normalizedSectionDraft = validateVendorPrimaryDraft(draft);
       } else if (editingSection === 'additional') {
-        normalizedSectionDraft = validateVendorBusinessDraft(draft);
+        normalizedSectionDraft = validateVendorBusinessDraft(draft, profile);
       }
     } catch (validationError) {
       toast({

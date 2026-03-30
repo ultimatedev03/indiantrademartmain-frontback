@@ -14,6 +14,7 @@ import MaintenancePage from '@/shared/components/MaintenancePage';
 import { Loader2 } from 'lucide-react';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { getPublicSiteUrl } from '@/shared/lib/publicSite';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const SidebarItem = ({ icon: Icon, label, path, active, collapsed }) => (
   <Link to={path}>
@@ -39,6 +40,7 @@ const PortalLayout = ({ role }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
 
   const vendorAuth = useVendorAuth();
   const internalAuth = useInternalAuth();
@@ -162,7 +164,7 @@ const PortalLayout = ({ role }) => {
         navigate('/employee/login');
         break;
       default:
-        navigate('/admin/login');
+        navigate(resolvePath('login', 'admin'));
         break;
     }
   };
@@ -185,14 +187,14 @@ const PortalLayout = ({ role }) => {
         ];
       case 'ADMIN':
         return [
-          { icon: LayoutDashboard, label: 'Dashboard', path: '/admin/dashboard' },
-          { icon: Package, label: 'Vendors', path: '/admin/vendors' },
-          { icon: Ticket, label: 'Support Tickets', path: '/admin/tickets' },
-          { icon: UserCheck, label: 'KYC Approvals', path: '/admin/kyc' },
-          { icon: BarChart3, label: 'Finance', path: '/admin/finance' },
-          { icon: Users, label: 'Staff', path: '/admin/staff' },
-          { icon: FileText, label: 'Audit Logs', path: '/admin/audit-logs' },
-          { icon: Settings, label: 'Settings', path: '/admin/settings' },
+          { icon: LayoutDashboard, label: 'Dashboard', path: resolvePath('dashboard', 'admin') },
+          { icon: Package, label: 'Vendors', path: resolvePath('vendors', 'admin') },
+          { icon: Ticket, label: 'Support Tickets', path: resolvePath('tickets', 'admin') },
+          { icon: UserCheck, label: 'KYC Approvals', path: resolvePath('kyc', 'admin') },
+          { icon: BarChart3, label: 'Finance', path: resolvePath('finance', 'admin') },
+          { icon: Users, label: 'Staff', path: resolvePath('staff', 'admin') },
+          { icon: FileText, label: 'Audit Logs', path: resolvePath('audit-logs', 'admin') },
+          { icon: Settings, label: 'Settings', path: resolvePath('settings', 'admin') },
         ];
       case 'FINANCE':
         return [
