@@ -1,9 +1,9 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { useAuth as useVendorAuth } from '@/modules/vendor/context/AuthContext';
+import AppBootScreen from '@/shared/components/AppBootScreen';
 
 // ✅ Generic route-guard for Buyer/Vendor/Admin/Employee
 // Fix: Buyer dashboard refresh redirecting to Vendor login.
@@ -107,11 +107,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-[#003D82]" />
-      </div>
-    );
+    return <AppBootScreen />;
   }
 
   if (!isAuthenticated || !user) {

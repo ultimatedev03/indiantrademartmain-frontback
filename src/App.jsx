@@ -12,10 +12,10 @@ import { SubdomainProvider, useSubdomain } from '@/contexts/SubdomainContext';
 import { PageStatusProvider } from '@/contexts/PageStatusContext';
 import { locationService } from '@/shared/services/locationService';
 import { supabase } from '@/lib/customSupabaseClient';
-import { Loader2 } from 'lucide-react';
 import AnalyticsLoader from '@/components/AnalyticsLoader';
 import DeferredAIChatWidget from '@/shared/components/DeferredAIChatWidget';
 import ScrollToTopButton from '@/shared/components/ScrollToTopButton';
+import AppBootScreen from '@/shared/components/AppBootScreen';
 
 const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage'));
 
@@ -32,11 +32,7 @@ const SuperAdminDashboard = lazy(() => import('@/modules/admin/pages/superadmin/
 const SuperAdminProtectedRoute = lazy(() => import('@/modules/admin/routes/SuperAdminProtectedRoute'));
 const MigrationTools = lazy(() => import('@/shared/pages/MigrationTools'));
 const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
-const RouteFallback = () => (
-  <div className="min-h-[60vh] flex items-center justify-center">
-    <Loader2 className="h-8 w-8 animate-spin text-[#003D82]" />
-  </div>
-);
+const RouteFallback = () => <AppBootScreen minHeightClass="min-h-[60vh]" />;
 
 const MAINTENANCE_KEY = 'maintenance_mode';
 

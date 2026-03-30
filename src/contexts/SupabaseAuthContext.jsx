@@ -3,7 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-import { Loader2 } from 'lucide-react';
+import AppBootScreen from '@/shared/components/AppBootScreen';
 
 const AuthContext = createContext({});
 
@@ -286,14 +286,7 @@ export const AuthProvider = ({ children }) => {
       logout,
       isAdmin: user?.role === 'ADMIN'
     }}>
-      {!loading ? children : (
-        <div className="h-screen w-full flex items-center justify-center bg-gray-50">
-          <div className="flex flex-col items-center gap-2">
-            <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-            <p className="text-sm text-gray-500 font-medium">Loading Application...</p>
-          </div>
-        </div>
-      )}
+      {!loading ? children : <AppBootScreen />}
     </AuthContext.Provider>
   );
 };
