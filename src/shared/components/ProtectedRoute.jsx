@@ -36,19 +36,19 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   const loading = wantsInternal
     ? (internal?.isLoading ?? false)
     : wantsVendor
-      ? ((supa?.loading ?? false) || (vendor?.loading ?? false))
+      ? (vendor?.loading ?? false)
       : (supa?.loading ?? false);
   const internalUser = internal?.user;
   const supaUser = supa?.user;
   const vendorUser = vendor?.user;
   const fallbackRole = supa?.userRole || supaUser?.role;
-  const user = wantsInternal ? internalUser : (wantsVendor ? (vendorUser || supaUser) : supaUser);
+  const user = wantsInternal ? internalUser : (wantsVendor ? vendorUser : supaUser);
   const role = wantsInternal
     ? internalUser?.role
-    : (wantsVendor ? (vendorUser?.role || fallbackRole || (vendorUser ? 'VENDOR' : '')) : fallbackRole);
+    : (wantsVendor ? (vendorUser?.role || (vendorUser ? 'VENDOR' : '')) : fallbackRole);
   const isAuthenticated = wantsInternal
     ? !!internal?.isAuthenticated
-    : (wantsVendor ? (!!vendorUser || !!supaUser) : !!supaUser);
+    : (wantsVendor ? !!vendor?.isAuthenticated : !!supaUser);
   const normalizedRole = normalizeRole(role);
   const allowedSet = new Set((allowedRoles || []).map((r) => normalizeRole(r)));
 
