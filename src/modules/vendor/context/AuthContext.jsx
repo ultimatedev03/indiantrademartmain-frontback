@@ -116,6 +116,45 @@ const mapPresenceStateWithAliases = (state = {}) => {
   return mapped;
 };
 
+const withTimeout = (promise, ms, label = 'Request') =>
+  new Promise((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      reject(new Error(`${label} timed out`));
+    }, ms);
+
+    Promise.resolve(promise).then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+
+const buildVendorSessionFallback = (sessionUser = null) => {
+  if (!sessionUser?.id) return null;
+  const fullName =
+    sessionUser?.user_metadata?.full_name ||
+    sessionUser?.user_metadata?.name ||
+    sessionUser?.email?.split('@')?.[0] ||
+    'Vendor';
+
+  return {
+    id: sessionUser.id,
+    user_id: sessionUser.id,
+    email: sessionUser.email || null,
+    phone: sessionUser.phone || null,
+    role: 'VENDOR',
+    name: fullName,
+    ownerName: fullName,
+    isVerified: true,
+    isActive: true,
+  };
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null); // ✅ combined auth user + vendor profile
   const [loading, setLoading] = useState(true);
@@ -148,8 +187,9 @@ export const AuthProvider = ({ children }) => {
       );
 
       // Strict single-session portal behavior:
-      // only VENDOR role can remain authenticated in vendor context.
-      if (role !== 'VENDOR') {
+      // reject only when another explicit portal role is present.
+      // Blank/missing metadata should not block a real vendor session.
+      if (role && role !== 'VENDOR') {
         setUser(null);
         setIsAuthenticated(false);
         return null;
@@ -158,15 +198,22 @@ export const AuthProvider = ({ children }) => {
       // vendorApi.auth.me() already merges vendors table info
       let me = null;
       try {
-        me = await vendorApi.auth.me();
+        me = await withTimeout(vendorApi.auth.me(), 8000, 'Vendor profile bootstrap');
       } catch {
         me = null;
       }
 
       if (!me) {
-        setUser(null);
-        setIsAuthenticated(false);
-        return null;
+        const fallbackUser = role === 'VENDOR' ? buildVendorSessionFallback(session.user) : null;
+        if (!fallbackUser) {
+          setUser(null);
+          setIsAuthenticated(false);
+          return null;
+        }
+
+        setUser(fallbackUser);
+        setIsAuthenticated(true);
+        return fallbackUser;
       }
 
       const finalUser = { ...me, role: 'VENDOR' };

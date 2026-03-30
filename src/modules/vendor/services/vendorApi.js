@@ -1093,9 +1093,6 @@ export const vendorApi = {
         const response = await fetchVendorJson('/api/vendors/me');
         vendor = response?.vendor || null;
       } catch (error) {
-        if (error?.status === 401 || error?.status === 403) {
-          return null;
-        }
         vendor = null;
       }
 
