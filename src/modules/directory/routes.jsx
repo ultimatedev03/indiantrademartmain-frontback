@@ -1,4 +1,4 @@
-import React, { lazy } from 'react';
+import React, { lazy, useEffect } from 'react';
 import { Routes, Route, Navigate, useParams } from 'react-router-dom';
 import PublicLayout from '@/shared/layouts/PublicLayout';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
@@ -17,7 +17,6 @@ const SearchResults = lazy(() => import('@/modules/directory/pages/SearchResults
 
 const AboutUs = lazy(() => import('@/modules/directory/pages/AboutUs'));
 const BecomeVendor = lazy(() => import('@/modules/directory/pages/BecomeVendor'));
-const Blog = lazy(() => import('@/modules/directory/pages/Blog'));
 const Pricing = lazy(() => import('@/modules/directory/pages/Pricing'));
 const Login = lazy(() => import('@/modules/directory/pages/Login'));
 const Logistics = lazy(() => import('@/modules/directory/pages/Logistics'));
@@ -52,6 +51,18 @@ const LegacyProductRedirect = () => {
 const PremiumBrandRedirect = () => {
   const { brandSlug } = useParams();
   return <Navigate to={getPremiumBrandTargetPath(brandSlug)} replace />;
+};
+
+const BLOG_URL = 'https://blog.indiantrademart.com';
+
+const ExternalBlogRedirect = () => {
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.location.replace(BLOG_URL);
+    }
+  }, []);
+
+  return null;
 };
 
 export const DirectoryRoutes = () => {
@@ -107,8 +118,8 @@ export const DirectoryRoutes = () => {
 
         {/* Static Pages */}
         <Route path="about-us" element={<AboutUs />} />
-        <Route path="blog" element={<Blog />} />
-        <Route path="insights" element={<Blog />} />
+        <Route path="blog" element={<ExternalBlogRedirect />} />
+        <Route path="insights" element={<ExternalBlogRedirect />} />
         <Route path="become-a-vendor" element={<BecomeVendor />} />
         <Route path="pricing" element={<Pricing />} />
         <Route path="logistics" element={<Logistics />} />

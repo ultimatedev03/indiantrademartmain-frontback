@@ -150,9 +150,9 @@ const Footer = () => {
                   </Link>
                 </li>
                 <li>
-                  <Link to="/blog" className="text-gray-300 hover:text-blue-400 transition-colors">
+                  <a href="https://blog.indiantrademart.com" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Blog & Insights
-                  </Link>
+                  </a>
                 </li>
               </ul>
             </div>

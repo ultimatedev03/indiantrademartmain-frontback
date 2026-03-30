@@ -15,7 +15,6 @@ import { supabase } from '@/lib/customSupabaseClient';
 import AnalyticsLoader from '@/components/AnalyticsLoader';
 import DeferredAIChatWidget from '@/shared/components/DeferredAIChatWidget';
 import ScrollToTopButton from '@/shared/components/ScrollToTopButton';
-import AppBootScreen from '@/shared/components/AppBootScreen';
 
 const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage'));
 
@@ -32,8 +31,6 @@ const SuperAdminDashboard = lazy(() => import('@/modules/admin/pages/superadmin/
 const SuperAdminProtectedRoute = lazy(() => import('@/modules/admin/routes/SuperAdminProtectedRoute'));
 const MigrationTools = lazy(() => import('@/shared/pages/MigrationTools'));
 const Unauthorized = lazy(() => import('@/shared/pages/Unauthorized'));
-const RouteFallback = () => <AppBootScreen minHeightClass="min-h-[60vh]" />;
-
 const MAINTENANCE_KEY = 'maintenance_mode';
 
 /** ✅ Full-screen overlay (blur + message) */
@@ -372,7 +369,7 @@ function App() {
                         <PublicNoticeGate>
                           {/* ✅ Vendor suspended gate added here */}
                           <VendorSuspensionGate>
-                            <Suspense fallback={<RouteFallback />}>
+                            <Suspense fallback={null}>
                               <AppRoutes />
                             </Suspense>
                             <ScrollToTopButton />

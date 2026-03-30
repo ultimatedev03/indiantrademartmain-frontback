@@ -3,7 +3,6 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
 import { useAuth as useVendorAuth } from '@/modules/vendor/context/AuthContext';
-import AppBootScreen from '@/shared/components/AppBootScreen';
 
 // ✅ Generic route-guard for Buyer/Vendor/Admin/Employee
 // Fix: Buyer dashboard refresh redirecting to Vendor login.
@@ -107,7 +106,7 @@ const ProtectedRoute = ({ allowedRoles = [], redirectTo, children }) => {
   };
 
   if (loading) {
-    return <AppBootScreen />;
+    return null;
   }
 
   if (!isAuthenticated || !user) {
