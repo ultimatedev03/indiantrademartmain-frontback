@@ -1,81 +1,77 @@
 // src/contexts/SubdomainContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const SubdomainContext = createContext();
 
 // ✅ Only these should trigger subdomain-mode
 const KNOWN_SUBDOMAINS = new Set(['vendor', 'buyer', 'man', 'dir', 'admin', 'career']);
 
+const resolveSubdomainState = () => {
+  if (typeof window === 'undefined') {
+    return { subdomain: null, appType: 'main', basePath: '' };
+  }
+
+  const hostname = window.location.hostname;
+
+  // ✅ Localhost (Development)
+  if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
+    return { subdomain: null, appType: 'main', basePath: '' };
+  }
+
+  // ✅ Netlify default domain (e.g. xyz.netlify.app) => treat as MAIN
+  // So /vendor/register etc works on Netlify
+  if (hostname.endsWith('.netlify.app')) {
+    return { subdomain: null, appType: 'main', basePath: '' };
+  }
+
+  const parts = hostname.split('.');
+  let currentSub = '';
+
+  // Assuming: subdomain.domain.com (ignore www)
+  if (parts.length >= 3 && parts[0] !== 'www') {
+    currentSub = parts[0];
+  }
+
+  // ✅ If subdomain is not one of our known subdomains, treat as MAIN
+  // This prevents random domains from forcing "directory" and causing blank pages
+  if (!KNOWN_SUBDOMAINS.has(currentSub)) {
+    return { subdomain: null, appType: 'main', basePath: '' };
+  }
+
+  switch (currentSub) {
+    case 'vendor':
+      return { subdomain: currentSub, appType: 'vendor', basePath: '' };
+    case 'buyer':
+      return { subdomain: currentSub, appType: 'buyer', basePath: '' };
+    case 'man':
+      return { subdomain: currentSub, appType: 'management', basePath: '' };
+    case 'dir':
+      return { subdomain: currentSub, appType: 'directory', basePath: '' };
+    case 'admin':
+      return { subdomain: currentSub, appType: 'admin', basePath: '' };
+    case 'career':
+      return { subdomain: currentSub, appType: 'career', basePath: '' };
+    default:
+      return { subdomain: null, appType: 'main', basePath: '' };
+  }
+};
+
 export const SubdomainProvider = ({ children }) => {
-  const [subdomain, setSubdomain] = useState(null);
-  const [appType, setAppType] = useState('main'); // main, vendor, buyer, admin, directory, career
-  const [basePath, setBasePath] = useState('');
+  const [routingState, setRoutingState] = useState(resolveSubdomainState);
+  const { subdomain, appType, basePath } = routingState;
 
   useEffect(() => {
-    const hostname = window.location.hostname;
-
-    // ✅ Localhost (Development)
-    if (hostname.includes('localhost') || hostname.includes('127.0.0.1')) {
-      setSubdomain(null);
-      setAppType('main');
-      setBasePath('');
-      return;
-    }
-
-    // ✅ Netlify default domain (e.g. xyz.netlify.app) => treat as MAIN
-    // So /vendor/register etc works on Netlify
-    if (hostname.endsWith('.netlify.app')) {
-      setSubdomain(null);
-      setAppType('main');
-      setBasePath('');
-      return;
-    }
-
-    const parts = hostname.split('.');
-    let currentSub = '';
-
-    // Assuming: subdomain.domain.com (ignore www)
-    if (parts.length >= 3 && parts[0] !== 'www') {
-      currentSub = parts[0];
-    }
-
-    // ✅ If subdomain is not one of our known subdomains, treat as MAIN
-    // This prevents random domains from forcing "directory" and causing blank pages
-    if (!KNOWN_SUBDOMAINS.has(currentSub)) {
-      setSubdomain(null);
-      setAppType('main');
-      setBasePath('');
-      return;
-    }
-
-    setSubdomain(currentSub);
-
-    // Map subdomain to App Type
-    switch (currentSub) {
-      case 'vendor':
-        setAppType('vendor');
-        break;
-      case 'buyer':
-        setAppType('buyer');
-        break;
-      case 'man':
-        setAppType('management');
-        break;
-      case 'dir':
-        setAppType('directory');
-        break;
-      case 'admin':
-        setAppType('admin');
-        break;
-      case 'career':
-        setAppType('career');
-        break;
-      default:
-        setAppType('main');
-        break;
-    }
-
-    setBasePath('');
+    setRoutingState((current) => {
+      const next = resolveSubdomainState();
+      if (
+        current.subdomain === next.subdomain &&
+        current.appType === next.appType &&
+        current.basePath === next.basePath
+      ) {
+        return current;
+      }
+      return next;
+    });
   }, []);
 
   // ✅ Helper to generate correct links based on environment
