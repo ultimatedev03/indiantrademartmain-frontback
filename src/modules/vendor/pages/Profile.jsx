@@ -1231,6 +1231,19 @@ const BankingSection = ({ banks, onRefresh }) => {
     setEditing(banks.length === 0);
   }, [banks]);
 
+  const startEditingBanks = useCallback(() => {
+    setNewBanks(createBankDrafts(banks));
+    setEditing(true);
+  }, [banks]);
+
+  const startAddingBank = useCallback(() => {
+    setNewBanks((currentBanks) => {
+      const baseBanks = editing ? currentBanks : createBankDrafts(banks);
+      return [...baseBanks, createEmptyBankDraft()];
+    });
+    setEditing(true);
+  }, [banks, editing]);
+
   const handleUpdateBank = (index, field, value) => {
     let nextVal = value;
     if (field === 'account_number') {
@@ -1247,11 +1260,6 @@ const BankingSection = ({ banks, onRefresh }) => {
         bankIndex === index ? { ...bank, [field]: nextVal } : bank
       )
     );
-  };
-
-  const handleAddBank = () => {
-    setEditing(true);
-    setNewBanks((currentBanks) => [...currentBanks, createEmptyBankDraft()]);
   };
 
   const handleRemoveBank = async (index) => {
@@ -1332,23 +1340,30 @@ const BankingSection = ({ banks, onRefresh }) => {
               size="sm"
               variant="ghost"
               className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
-              onClick={handleAddBank}
+              onClick={startAddingBank}
               disabled={adding}
             >
               <Plus className="w-3.5 h-3.5 mr-1" /> Add Another
             </Button>
           ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
-              onClick={() => {
-                setNewBanks(createBankDrafts(banks));
-                setEditing(true);
-              }}
-            >
-              <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
-            </Button>
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
+                onClick={startAddingBank}
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add New Account
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
+                onClick={startEditingBanks}
+              >
+                <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -1358,7 +1373,7 @@ const BankingSection = ({ banks, onRefresh }) => {
           <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-semibold">Bank details saved</p>
-            <p className="text-green-700">The saved details are shown below in read-only mode. Use Edit to make changes.</p>
+            <p className="text-green-700">The saved details are shown below in read-only mode. Use Edit to update them or Add New Account to add another bank.</p>
           </div>
         </div>
       ) : null}
