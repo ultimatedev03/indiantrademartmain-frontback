@@ -16,6 +16,7 @@ import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
 import { generateSlug, generateUniqueSlug, needsProductSlugNormalization } from '@/shared/utils/slugUtils';
 import { Switch } from '@/components/ui/switch';
 import { ArrowLeft, Loader2, Upload, X, Plus } from 'lucide-react';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const MAX_IMAGES = 7;
 const MIN_PRODUCT_IMAGE_BYTES = 100 * 1024;
@@ -73,12 +74,13 @@ const ProductForm = () => {
   const formProductId = id || productId || '';
   const isDataEntryMode = location.pathname.startsWith('/employee/dataentry');
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
   const [params, setParams] = useSearchParams();
   const step = params.get('step') || 'basic';
   const [resolvedVendorId, setResolvedVendorId] = useState(routeVendorId || '');
   const productsListPath = isDataEntryMode
     ? (resolvedVendorId ? `/employee/dataentry/vendors/${resolvedVendorId}/products` : '/employee/dataentry/vendors')
-    : '/vendor/products';
+    : resolvePath('products', 'vendor');
 
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);

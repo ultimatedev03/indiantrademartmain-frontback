@@ -18,6 +18,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
 import SubscriptionBadge from '@/modules/vendor/components/SubscriptionBadge';
 import { toast } from '@/components/ui/use-toast';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 // ✅ Clickable + Hover premium stats card (FIXED overflow)
 const StatsCardWithDetail = ({ label, value, icon: Icon, detail, hint, to }) => {
@@ -85,6 +86,7 @@ const Dashboard = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { vendorId: paramVendorId } = useParams();
+  const { resolvePath } = useSubdomain();
 
   const [stats, setStats] = useState({
     totalProducts: 0,
@@ -132,7 +134,7 @@ const Dashboard = () => {
         setSubscription(sub || null);
 
         if (vendId && !paramVendorId) {
-          navigate(`/vendor/${vendId}/dashboard`, { replace: true });
+          navigate(resolvePath(`${vendId}/dashboard`, 'vendor'), { replace: true });
         }
       } catch (error) {
         console.error("Failed to load dashboard", error);
@@ -170,7 +172,7 @@ const Dashboard = () => {
     return () => {
       subscription?.unsubscribe();
     };
-  }, [paramVendorId, navigate, user?.id]);
+  }, [paramVendorId, navigate, resolvePath, user?.id]);
 
   const ownerName = useMemo(() => {
     return (
@@ -190,6 +192,16 @@ const Dashboard = () => {
     return 'Fill profile + upload KYC documents to unlock full features.';
   }, [stats.profileCompletion]);
 
+  const subscriptionsPath = resolvePath('subscriptions', 'vendor');
+  const productAddPath = resolvePath('products/add', 'vendor');
+  const productsPath = resolvePath('products', 'vendor');
+  const leadsPath = resolvePath('leads', 'vendor');
+  const supportPath = resolvePath('support', 'vendor');
+  const messagesPath = resolvePath('messages', 'vendor');
+  const profilePath = resolvePath('profile', 'vendor');
+  const profileKycPath = `${profilePath}?tab=kyc`;
+  const profilePrimaryPath = `${profilePath}?tab=primary`;
+
   return (
     <div className="space-y-6">
       {/* Welcome & KYC Status */}
@@ -201,7 +213,7 @@ const Dashboard = () => {
 
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
           {/* Subscription Status */}
-          <Link to="/vendor/subscriptions" className="block">
+          <Link to={subscriptionsPath} className="block">
             <SubscriptionBadge subscription={subscription} loading={subscriptionLoading} />
           </Link>
 
@@ -219,7 +231,7 @@ const Dashboard = () => {
 
             if (isExpired) {
               return (
-                <Link to="/vendor/subscriptions" className="block">
+                <Link to={subscriptionsPath} className="block">
                   <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow cursor-pointer">
                     <AlertTriangle className="h-5 w-5" />
                     <div>
@@ -240,7 +252,7 @@ const Dashboard = () => {
 
             if (isExpiringSoon) {
               return (
-                <Link to="/vendor/subscriptions" className="block">
+                <Link to={subscriptionsPath} className="block">
                   <div className="bg-orange-50 border border-orange-200 text-orange-800 px-4 py-3 rounded-lg flex items-center gap-3 hover:shadow-sm transition-shadow cursor-pointer">
                     <AlertTriangle className="h-5 w-5" />
                     <div>
@@ -274,7 +286,7 @@ const Dashboard = () => {
                 <p className="font-semibold text-sm">KYC {stats.kycStatus}</p>
                 <p className="text-xs">Complete verification to unlock all features.</p>
               </div>
-              <Link to="/vendor/profile?tab=kyc">
+              <Link to={profileKycPath}>
                 <Button
                   size="sm"
                   variant="outline"
@@ -296,7 +308,7 @@ const Dashboard = () => {
           icon={Package}
           detail="Listed products in your catalog."
           hint="Add more products to increase visibility."
-          to="/vendor/products"
+          to={productsPath}
         />
 
         <StatsCardWithDetail
@@ -305,7 +317,7 @@ const Dashboard = () => {
           icon={Users}
           detail="New buyer inquiries received."
           hint="Reply fast to win more orders."
-          to="/vendor/leads"
+          to={leadsPath}
         />
 
         <StatsCardWithDetail
@@ -314,7 +326,7 @@ const Dashboard = () => {
           icon={MessageSquare}
           detail="Support / buyer messages pending."
           hint="Open messages and respond."
-          to="/vendor/messages"
+          to={messagesPath}
         />
 
         <StatsCardWithDetail
@@ -323,7 +335,7 @@ const Dashboard = () => {
           icon={ShoppingCart}
           detail="How much of your business profile is filled."
           hint={profileHint}
-          to="/vendor/profile?tab=primary"
+          to={profilePrimaryPath}
         />
       </div>
 
@@ -370,7 +382,7 @@ const Dashboard = () => {
               <Card.Title>Quick Actions</Card.Title>
             </Card.Header>
             <Card.Content className="space-y-3">
-              <Link to="/vendor/products/add">
+              <Link to={productAddPath}>
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
@@ -380,7 +392,7 @@ const Dashboard = () => {
                 </Button>
               </Link>
 
-              <Link to="/vendor/leads">
+              <Link to={leadsPath}>
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
@@ -390,7 +402,7 @@ const Dashboard = () => {
                 </Button>
               </Link>
 
-              <Link to="/vendor/support">
+              <Link to={supportPath}>
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
@@ -428,7 +440,7 @@ const Dashboard = () => {
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   No products yet.{' '}
-                  <Link to="/vendor/products/add" className="text-[#003D82] font-semibold hover:underline">
+                  <Link to={productAddPath} className="text-[#003D82] font-semibold hover:underline">
                     Add one now
                   </Link>
                 </div>

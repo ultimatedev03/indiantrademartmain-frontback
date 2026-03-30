@@ -12,9 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
 import { useInternalAuth } from '@/modules/admin/context/InternalAuthContext';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const AdminDashboard = () => {
   const { user: internalUser, isLoading: internalLoading } = useInternalAuth();
+  const { resolvePath } = useSubdomain();
   const [stats, setStats] = useState({ 
     totalUsers: 0, 
     activeVendors: 0, 
@@ -108,6 +110,11 @@ const AdminDashboard = () => {
     return styles[status] || 'bg-gray-100 text-gray-800';
   };
 
+  const kycPath = resolvePath('kyc', 'admin');
+  const ticketsPath = resolvePath('tickets', 'admin');
+  const vendorsPath = resolvePath('vendors', 'admin');
+  const buyersPath = resolvePath('buyers', 'admin');
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
@@ -159,7 +166,7 @@ const AdminDashboard = () => {
 
       {/* Quick Action Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Link to="/admin/kyc">
+        <Link to={kycPath}>
           <Card className="hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-yellow-500">
             <CardContent className="p-4 flex items-center justify-between">
               <div>
@@ -171,7 +178,7 @@ const AdminDashboard = () => {
           </Card>
         </Link>
         
-        <Link to="/admin/tickets">
+        <Link to={ticketsPath}>
           <Card className="hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-red-500">
             <CardContent className="p-4 flex items-center justify-between">
               <div>
@@ -183,7 +190,7 @@ const AdminDashboard = () => {
           </Card>
         </Link>
         
-        <Link to="/admin/vendors">
+        <Link to={vendorsPath}>
           <Card className="hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-blue-500">
             <CardContent className="p-4 flex items-center justify-between">
               <div>
@@ -195,7 +202,7 @@ const AdminDashboard = () => {
           </Card>
         </Link>
         
-        <Link to="/admin/buyers">
+        <Link to={buyersPath}>
           <Card className="hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-green-500">
             <CardContent className="p-4 flex items-center justify-between">
               <div>
@@ -214,7 +221,7 @@ const AdminDashboard = () => {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg">Recent Support Tickets</CardTitle>
-            <Link to="/admin/tickets">
+            <Link to={ticketsPath}>
               <Button variant="ghost" size="sm" className="text-[#003D82]">
                 View All <ArrowUpRight className="ml-1 h-4 w-4" />
               </Button>
@@ -255,7 +262,7 @@ const AdminDashboard = () => {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-lg">Recent Vendors</CardTitle>
-            <Link to="/admin/vendors">
+            <Link to={vendorsPath}>
               <Button variant="ghost" size="sm" className="text-[#003D82]">
                 View All <ArrowUpRight className="ml-1 h-4 w-4" />
               </Button>

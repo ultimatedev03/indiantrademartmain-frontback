@@ -15,6 +15,7 @@ import { useToast } from "@/components/ui/use-toast";
 
 import CategoryTypeahead from "@/shared/components/CategoryTypeahead";
 import { vendorApi } from "@/modules/vendor/services/vendorApi";
+import { useSubdomain } from "@/contexts/SubdomainContext";
 
 import { Loader2, ArrowLeft, Image as ImageIcon, Eye, Pencil, Trash2, X } from "lucide-react";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
@@ -134,6 +135,7 @@ const formatCategory = (p) => {
 
 export default function VendorProducts() {
   const { toast } = useToast();
+  const { resolvePath } = useSubdomain();
   const ADMIN_API_BASE = getAdminBase();
   const { vendorId } = useParams();
 
@@ -375,7 +377,7 @@ export default function VendorProducts() {
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/admin/vendors">
+        <Link to={resolvePath('vendors', 'admin')}>
           <Button variant="ghost" size="icon">
             <ArrowLeft className="w-4 h-4" />
           </Button>

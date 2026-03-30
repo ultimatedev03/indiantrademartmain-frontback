@@ -10,8 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { shareUtils } from '@/shared/utils/shareUtils';
 import { getProductDetailPath, getProductDetailUrl } from '@/shared/utils/productRoutes';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const Products = () => {
+  const { resolvePath } = useSubdomain();
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -53,6 +55,7 @@ const Products = () => {
       (p.sku || '').toLowerCase().includes(t)
     );
   }, [products, searchTerm]);
+  const addProductPath = resolvePath('products/add', 'vendor');
 
   const handleDelete = async (productId) => {
     if (!window.confirm('Are you sure you want to delete this product?')) return;
@@ -73,7 +76,7 @@ const Products = () => {
            <p className="text-gray-500">Manage your product catalog</p>
         </div>
         <Button className="bg-[#003D82]" asChild>
-          <Link to="/vendor/products/add"><Plus className="mr-2 h-4 w-4" /> Add Product</Link>
+          <Link to={addProductPath}><Plus className="mr-2 h-4 w-4" /> Add Product</Link>
         </Button>
       </div>
 
@@ -220,7 +223,7 @@ const Products = () => {
                         )}
                       </Button>
                       <Button size="sm" variant="ghost" asChild className="justify-start">
-                        <Link to={`/vendor/products/${p.id}/edit`}>
+                        <Link to={resolvePath(`products/${p.id}/edit`, 'vendor')}>
                           <Edit className="w-4 h-4 mr-2" /> Edit
                         </Link>
                       </Button>

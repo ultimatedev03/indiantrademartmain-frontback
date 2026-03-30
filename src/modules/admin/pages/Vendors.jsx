@@ -46,6 +46,7 @@ import {
   Check,
 } from "lucide-react";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
+import { useSubdomain } from "@/contexts/SubdomainContext";
 
 const isLocalHost = () => {
   const h = window.location.hostname;
@@ -117,6 +118,7 @@ const getJoinedDateRange = (filterValue, now = new Date()) => {
 
 export default function Vendors() {
   const { toast } = useToast();
+  const { resolvePath } = useSubdomain();
   const ADMIN_API_BASE = getAdminBase();
 
   const [vendors, setVendors] = useState([]);
@@ -669,7 +671,7 @@ export default function Vendors() {
                                 <Eye className="h-4 w-4" />
                               </Button>
 
-                              <Link to={`/admin/vendors/${v.id}/products`} className="inline-flex">
+                              <Link to={resolvePath(`vendors/${v.id}/products`, 'admin')} className="inline-flex">
                                 <Button
                                   variant="outline"
                                   size="icon"
