@@ -9,13 +9,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/components/ui/use-toast';
 import CategoryTypeahead from '@/shared/components/CategoryTypeahead';
 import { generateSlug, generateUniqueSlug, needsProductSlugNormalization } from '@/shared/utils/slugUtils';
 import { Switch } from '@/components/ui/switch';
-import { ArrowLeft, Loader2, Upload, X, Plus } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Loader2, Upload, X, Plus } from 'lucide-react';
 import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const MAX_IMAGES = 7;
@@ -42,6 +41,31 @@ const SimpleRichText = ({ value, onChange, placeholder }) => (
     onChange={(e) => onChange(e.target.value)}
     placeholder={placeholder}
   />
+);
+
+const SimpleSelect = ({
+  value = '',
+  onValueChange,
+  placeholder = 'Select an option',
+  disabled = false,
+  className = '',
+  children,
+}) => (
+  <div className="relative">
+    <select
+      className={cx(
+        'flex h-10 w-full appearance-none items-center rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+        className
+      )}
+      value={value}
+      onChange={(e) => onValueChange?.(e.target.value)}
+      disabled={disabled}
+    >
+      <option value="">{placeholder}</option>
+      {children}
+    </select>
+    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+  </div>
 );
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
@@ -90,6 +114,8 @@ const ProductForm = () => {
   const [states, setStates] = useState([]);
   const [cities, setCities] = useState([]);
   const [selectedStateId, setSelectedStateId] = useState('');
+  const [statePickerValue, setStatePickerValue] = useState('');
+  const [cityPickerValue, setCityPickerValue] = useState('');
   const [bulkCityLoading, setBulkCityLoading] = useState(false);
 
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -221,6 +247,8 @@ const ProductForm = () => {
 
       // ✅ UI reset for state/city dropdown (now everything selected)
       setSelectedStateId('');
+      setStatePickerValue('');
+      setCityPickerValue('');
       setCities([]);
       setShowAddCityDialog(false);
       setCustomCityInput('');
@@ -410,6 +438,35 @@ const ProductForm = () => {
 
   const addLocation = (type, item) => addLocations(type, item ? [item] : []);
 
+  const handleStateSelect = (value) => {
+    setStatePickerValue(value);
+    if (!value) return;
+
+    const state = states.find((item) => String(item.id) === String(value));
+    addLocation('states', state);
+    setSelectedStateId(value);
+    setCityPickerValue('');
+    setShowAddCityDialog(false);
+    loadCities(value);
+    setStatePickerValue('');
+  };
+
+  const handleCitySelect = (value) => {
+    setCityPickerValue(value);
+    if (!value) return;
+
+    if (value === 'OTHER') {
+      setShowAddCityDialog(true);
+      setCityPickerValue('');
+      return;
+    }
+
+    const city = cities.find((item) => String(item.id) === String(value));
+    addLocation('cities', city);
+    setShowAddCityDialog(false);
+    setCityPickerValue('');
+  };
+
   const removeLocation = (type, rid) => {
     setFormData((p) => ({
       ...p,
@@ -440,6 +497,8 @@ const ProductForm = () => {
       }));
 
       setSelectedStateId('');
+      setStatePickerValue('');
+      setCityPickerValue('');
       setCities([]);
       setShowAddCityDialog(false);
       setCustomCityInput('');
@@ -1157,23 +1216,19 @@ const ProductForm = () => {
 
                     <div className="space-y-2">
                       <Label>Unit</Label>
-                      <Select
+                      <SimpleSelect
                         value={formData.price_unit || ''}
                         onValueChange={(v) =>
                           setFormData((p) => ({ ...p, price_unit: v }))
                         }
+                        placeholder="Select unit"
                       >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-60">
-                          {UNIT_OPTIONS.map((u) => (
-                            <SelectItem key={u} value={u}>
-                              {u}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        {UNIT_OPTIONS.map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                      </SimpleSelect>
                       <p className="text-[11px] text-slate-500">
                         IndiaMART style: Piece / Nos / Kg / Litre / Meter etc.
                       </p>
@@ -1426,25 +1481,17 @@ const ProductForm = () => {
                       {/* States */}
                       <div>
                         <Label>Select multiple states</Label>
-                        <Select
-                          onValueChange={(v) => {
-                            const s = states.find((x) => String(x.id) === String(v));
-                            addLocation('states', s);
-                            setSelectedStateId(v);
-                            loadCities(v);
-                          }}
+                        <SimpleSelect
+                          value={statePickerValue}
+                          onValueChange={handleStateSelect}
+                          placeholder="Add State"
                         >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Add State" />
-                          </SelectTrigger>
-                          <SelectContent className="max-h-60">
-                            {states.map((s) => (
-                              <SelectItem key={s.id} value={String(s.id)}>
-                                {s.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          {states.map((s) => (
+                            <option key={s.id} value={String(s.id)}>
+                              {s.name}
+                            </option>
+                          ))}
+                        </SimpleSelect>
 
                         {/* ✅ scrollable chips (clean) */}
                         <div className="mt-2 rounded-md border bg-slate-50 p-2 max-h-32 overflow-auto">
@@ -1472,31 +1519,19 @@ const ProductForm = () => {
                       <div>
                         <Label>Select multiple cities of that state</Label>
                         <div className="space-y-2">
-                          <Select
+                          <SimpleSelect
+                            value={cityPickerValue}
                             disabled={!selectedStateId}
-                            onValueChange={(v) => {
-                              if (v === 'OTHER') {
-                                setShowAddCityDialog(true);
-                                return;
-                              }
-                              const c = cities.find((x) => String(x.id) === String(v));
-                              addLocation('cities', c);
-                            }}
+                            onValueChange={handleCitySelect}
+                            placeholder={selectedStateId ? 'Add City' : 'Select state first'}
                           >
-                            <SelectTrigger>
-                              <SelectValue
-                                placeholder={selectedStateId ? 'Add City' : 'Select state first'}
-                              />
-                            </SelectTrigger>
-                            <SelectContent className="max-h-60">
-                              {cities.map((c) => (
-                                <SelectItem key={c.id} value={String(c.id)}>
-                                  {c.name}
-                                </SelectItem>
-                              ))}
-                              <SelectItem value="OTHER">+ Add Other City</SelectItem>
-                            </SelectContent>
-                          </Select>
+                            {cities.map((c) => (
+                              <option key={c.id} value={String(c.id)}>
+                                {c.name}
+                              </option>
+                            ))}
+                            <option value="OTHER">+ Add Other City</option>
+                          </SimpleSelect>
 
                           {showAddCityDialog && (
                             <div className="border rounded-md p-3 bg-blue-50">
