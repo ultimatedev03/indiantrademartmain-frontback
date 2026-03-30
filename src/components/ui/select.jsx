@@ -1,113 +1,209 @@
+import * as React from 'react';
+import { ChevronDown } from 'lucide-react';
 
-import * as React from "react"
-import * as SelectPrimitive from "@radix-ui/react-select"
-import { Check, ChevronDown, ChevronUp } from "lucide-react"
+import { cn } from '@/lib/utils';
 
-import { cn } from "@/lib/utils"
+const SELECT_ROLES = {
+  content: 'content',
+  group: 'group',
+  item: 'item',
+  label: 'label',
+  separator: 'separator',
+  trigger: 'trigger',
+  value: 'value',
+};
 
-const Select = SelectPrimitive.Root
+const marker = (role, displayName) => {
+  const Component = ({ children }) => children ?? null;
+  Component.selectRole = role;
+  Component.displayName = displayName;
+  return Component;
+};
 
-const SelectGroup = SelectPrimitive.Group
+const normalizeValue = (value) => {
+  if (value === null || value === undefined) return '';
+  return String(value);
+};
 
-const SelectValue = SelectPrimitive.Value
+const getRole = (node) => node?.type?.selectRole;
 
-const SelectTrigger = React.forwardRef(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    className={cn(
-      "flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
-      className
-    )}
-    {...props}>
-    {children}
-    <SelectPrimitive.Icon asChild>
-      <ChevronDown className="h-4 w-4 opacity-50" />
-    </SelectPrimitive.Icon>
-  </SelectPrimitive.Trigger>
-))
-SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
+const flattenText = (children) =>
+  React.Children.toArray(children)
+    .map((child) => {
+      if (typeof child === 'string' || typeof child === 'number') {
+        return String(child);
+      }
 
-const SelectScrollUpButton = React.forwardRef(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollUpButton
-    ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1", className)}
-    {...props}>
-    <ChevronUp className="h-4 w-4" />
-  </SelectPrimitive.ScrollUpButton>
-))
-SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName
+      if (React.isValidElement(child)) {
+        return flattenText(child.props.children);
+      }
 
-const SelectScrollDownButton = React.forwardRef(({ className, ...props }, ref) => (
-  <SelectPrimitive.ScrollDownButton
-    ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1", className)}
-    {...props}>
-    <ChevronDown className="h-4 w-4" />
-  </SelectPrimitive.ScrollDownButton>
-))
-SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName
+      return '';
+    })
+    .join('')
+    .trim();
 
-const SelectContent = React.forwardRef(({ className, children, position = "popper", ...props }, ref) => (
-  <SelectPrimitive.Portal>
-    <SelectPrimitive.Content
-      ref={ref}
-      className={cn(
-        "relative z-50 max-h-96 min-w-[8rem] overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        position === "popper" &&
-          "data-[side=bottom]:translate-y-1 data-[side=left]:-translate-x-1 data-[side=right]:translate-x-1 data-[side=top]:-translate-y-1",
-        className
-      )}
-      position={position}
-      {...props}>
-      <SelectScrollUpButton />
-      <SelectPrimitive.Viewport
-        className={cn(
-          "p-1",
-          position === "popper" &&
-            "w-full min-w-[var(--radix-select-trigger-width)]"
-        )}>
-        {children}
-      </SelectPrimitive.Viewport>
-      <SelectScrollDownButton />
-    </SelectPrimitive.Content>
-  </SelectPrimitive.Portal>
-))
-SelectContent.displayName = SelectPrimitive.Content.displayName
+const SelectValue = marker(SELECT_ROLES.value, 'SelectValue');
+const SelectTrigger = marker(SELECT_ROLES.trigger, 'SelectTrigger');
+const SelectContent = marker(SELECT_ROLES.content, 'SelectContent');
+const SelectItem = marker(SELECT_ROLES.item, 'SelectItem');
+const SelectGroup = marker(SELECT_ROLES.group, 'SelectGroup');
+const SelectLabel = marker(SELECT_ROLES.label, 'SelectLabel');
+const SelectSeparator = marker(SELECT_ROLES.separator, 'SelectSeparator');
+const SelectScrollUpButton = marker('scroll-up', 'SelectScrollUpButton');
+const SelectScrollDownButton = marker('scroll-down', 'SelectScrollDownButton');
 
-const SelectLabel = React.forwardRef(({ className, ...props }, ref) => (
-  <SelectPrimitive.Label
-    ref={ref}
-    className={cn("py-1.5 pl-8 pr-2 text-sm font-semibold", className)}
-    {...props} />
-))
-SelectLabel.displayName = SelectPrimitive.Label.displayName
+const buildOptions = (children, keyPrefix = 'opt') => {
+  const options = [];
 
-const SelectItem = React.forwardRef(({ className, children, ...props }, ref) => (
-  <SelectPrimitive.Item
-    ref={ref}
-    className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      className
-    )}
-    {...props}>
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-      <SelectPrimitive.ItemIndicator>
-        <Check className="h-4 w-4" />
-      </SelectPrimitive.ItemIndicator>
-    </span>
+  React.Children.forEach(children, (child, index) => {
+    if (!React.isValidElement(child)) return;
 
-    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
-  </SelectPrimitive.Item>
-))
-SelectItem.displayName = SelectPrimitive.Item.displayName
+    const role = getRole(child);
+    const itemKey = child.key ?? `${keyPrefix}-${index}`;
 
-const SelectSeparator = React.forwardRef(({ className, ...props }, ref) => (
-  <SelectPrimitive.Separator
-    ref={ref}
-    className={cn("-mx-1 my-1 h-px bg-muted", className)}
-    {...props} />
-))
-SelectSeparator.displayName = SelectPrimitive.Separator.displayName
+    if (role === SELECT_ROLES.content) {
+      options.push(...buildOptions(child.props.children, `${itemKey}-content`));
+      return;
+    }
+
+    if (role === SELECT_ROLES.group) {
+      let label = '';
+      const groupedChildren = [];
+
+      React.Children.forEach(child.props.children, (groupChild) => {
+        if (!React.isValidElement(groupChild)) return;
+        if (getRole(groupChild) === SELECT_ROLES.label) {
+          label = flattenText(groupChild.props.children);
+          return;
+        }
+
+        if (getRole(groupChild) === SELECT_ROLES.separator) return;
+        groupedChildren.push(groupChild);
+      });
+
+      const groupOptions = buildOptions(groupedChildren, `${itemKey}-group`);
+      if (!groupOptions.length) return;
+
+      if (label) {
+        options.push(
+          <optgroup key={`${itemKey}-optgroup`} label={label}>
+            {groupOptions}
+          </optgroup>
+        );
+        return;
+      }
+
+      options.push(...groupOptions);
+      return;
+    }
+
+    if (role === SELECT_ROLES.item) {
+      options.push(
+        <option
+          key={itemKey}
+          value={normalizeValue(child.props.value)}
+          disabled={Boolean(child.props.disabled)}
+        >
+          {flattenText(child.props.children)}
+        </option>
+      );
+    }
+  });
+
+  return options;
+};
+
+const extractTriggerConfig = (children) => {
+  let triggerProps = {};
+  let placeholder = '';
+
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child) || getRole(child) !== SELECT_ROLES.trigger) return;
+
+    const { children: triggerChildren, ...restTriggerProps } = child.props;
+    triggerProps = restTriggerProps;
+
+    React.Children.forEach(triggerChildren, (triggerChild) => {
+      if (!React.isValidElement(triggerChild) || getRole(triggerChild) !== SELECT_ROLES.value) return;
+      placeholder = triggerChild.props.placeholder ?? '';
+    });
+  });
+
+  return { triggerProps, placeholder };
+};
+
+const Select = React.forwardRef(
+  (
+    {
+      children,
+      defaultValue,
+      disabled = false,
+      form,
+      name,
+      onValueChange,
+      required = false,
+      value,
+      ...restProps
+    },
+    ref
+  ) => {
+    const [uncontrolledValue, setUncontrolledValue] = React.useState(() =>
+      normalizeValue(defaultValue)
+    );
+    const isControlled = value !== undefined;
+    const selectedValue = isControlled ? normalizeValue(value) : uncontrolledValue;
+    const { triggerProps, placeholder } = React.useMemo(
+      () => extractTriggerConfig(children),
+      [children]
+    );
+    const options = React.useMemo(() => buildOptions(children), [children]);
+    const {
+      children: _ignoredTriggerChildren,
+      className: triggerClassName,
+      disabled: triggerDisabled,
+      ...triggerRestProps
+    } = triggerProps;
+
+    const isDisabled = disabled || Boolean(triggerDisabled);
+
+    const handleChange = (event) => {
+      const nextValue = event.target.value;
+      if (!isControlled) {
+        setUncontrolledValue(nextValue);
+      }
+      onValueChange?.(nextValue);
+    };
+
+    return (
+      <div className="relative">
+        <select
+          ref={ref}
+          className={cn(
+            'flex h-10 w-full appearance-none items-center justify-between rounded-md border border-input bg-background px-3 py-2 pr-10 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50',
+            triggerClassName
+          )}
+          disabled={isDisabled}
+          form={form}
+          name={name}
+          onChange={handleChange}
+          required={required}
+          value={selectedValue}
+          {...triggerRestProps}
+          {...restProps}
+        >
+          <option value="" disabled={required}>
+            {placeholder}
+          </option>
+          {options}
+        </select>
+        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 opacity-50" />
+      </div>
+    );
+  }
+);
+
+Select.displayName = 'Select';
 
 export {
   Select,
@@ -120,4 +216,4 @@ export {
   SelectSeparator,
   SelectScrollUpButton,
   SelectScrollDownButton,
-}
+};
