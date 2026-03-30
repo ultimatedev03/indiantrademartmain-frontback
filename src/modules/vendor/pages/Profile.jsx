@@ -1205,7 +1205,7 @@ const BankingSection = ({ banks, onRefresh }) => {
       nextVal = normalizeIfscCode(value);
     } else if (field === 'account_holder') {
       nextVal = normalizeAccountHolderName(value);
-    } else if (field === 'bank_name' || field === 'branch_name' || field === 'account_holder') {
+    } else if (field === 'bank_name' || field === 'branch_name') {
       nextVal = String(value || '').slice(0, 120);
     }
     const updated = [...newBanks];
@@ -1315,11 +1315,12 @@ const BankingSection = ({ banks, onRefresh }) => {
                 onChange={e => handleUpdateBank(index, 'branch_name', e.target.value)}
               />
               <Input
+                name="account_holder"
                 placeholder="Account Holder Name"
                 inputMode="text"
                 disableAutoSanitize
                 className="h-9 bg-white md:col-span-2"
-                value={bank.account_holder || ''}
+                value={bank.account_holder || bank.accountHolder || ''}
                 onChange={e => handleUpdateBank(index, 'account_holder', e.target.value)}
               />
             </div>

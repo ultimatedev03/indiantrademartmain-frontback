@@ -35,8 +35,21 @@ const isTextLikeField = (target) => {
   return !NON_TEXT_INPUT_TYPES.has(inputType)
 }
 
+const isAutoSanitizeDisabled = (target) => {
+  if (!target?.getAttribute) return false
+
+  const explicitFlag = String(
+    target.getAttribute("data-disable-auto-sanitize") ||
+    target.dataset?.disableAutoSanitize ||
+    ""
+  ).toLowerCase()
+
+  return explicitFlag === "true" || explicitFlag === "1" || explicitFlag === "yes"
+}
+
 export const sanitizeInputElementValue = (target) => {
   if (!isTextLikeField(target)) return
+  if (isAutoSanitizeDisabled(target)) return
 
   const currentValue = target.value
   if (typeof currentValue !== "string") return
@@ -81,4 +94,3 @@ export const useGlobalInputSanitizer = ({ enabled = true } = {}) => {
     }
   }, [enabled])
 }
-

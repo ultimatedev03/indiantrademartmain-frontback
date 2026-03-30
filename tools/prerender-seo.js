@@ -176,7 +176,235 @@ const applyMeta = (html, meta = {}) => {
   return out;
 };
 
-const writeRoute = (route, meta) => {
+const PUBLIC_FALLBACK_STYLE_BLOCK = `
+<style data-prerender-public="true">
+  .itm-public-fallback {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top right, rgba(59, 130, 246, 0.18), transparent 22rem),
+      linear-gradient(180deg, #e2e8f0 0%, #f8fafc 18rem);
+  }
+
+  .itm-public-fallback-nav,
+  .itm-public-fallback-main {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .itm-public-fallback-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 20px;
+    padding-bottom: 20px;
+  }
+
+  .itm-public-fallback-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 700;
+    text-decoration: none;
+    color: #0f172a;
+  }
+
+  .itm-public-fallback-nav-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .itm-public-fallback-nav-links a,
+  .itm-public-fallback-actions a {
+    color: #334155;
+    text-decoration: none;
+    font-size: 14px;
+  }
+
+  .itm-public-fallback-main {
+    padding-top: 40px;
+    padding-bottom: 64px;
+  }
+
+  .itm-public-fallback-hero {
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 32px;
+    padding: 32px;
+    box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+  }
+
+  .itm-public-fallback-hero h1 {
+    margin: 0;
+    max-width: 880px;
+    font-size: clamp(2rem, 5vw, 3.6rem);
+    line-height: 1.05;
+  }
+
+  .itm-public-fallback-hero p {
+    max-width: 760px;
+    margin: 20px 0 0;
+    font-size: 18px;
+    line-height: 1.7;
+    color: #475569;
+  }
+
+  .itm-public-fallback-actions,
+  .itm-public-fallback-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .itm-public-fallback-actions {
+    margin-top: 28px;
+  }
+
+  .itm-public-fallback-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 12px 18px;
+    background: #0f172a;
+    color: #fff !important;
+    text-decoration: none;
+    font-weight: 700;
+  }
+
+  .itm-public-fallback-button-secondary {
+    background: #fff;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1;
+  }
+
+  .itm-public-fallback-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+
+  .itm-public-fallback-card {
+    border-radius: 24px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    padding: 20px;
+  }
+
+  .itm-public-fallback-card h2 {
+    margin: 0 0 12px;
+    font-size: 20px;
+  }
+
+  .itm-public-fallback-card p,
+  .itm-public-fallback-card li {
+    color: #475569;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  .itm-public-fallback-card ul {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .itm-public-fallback-links {
+    margin-top: 12px;
+  }
+
+  @media (max-width: 860px) {
+    .itm-public-fallback-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .itm-public-fallback-nav {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
+    .itm-public-fallback-hero {
+      padding: 24px;
+    }
+  }
+</style>
+`;
+
+const PUBLIC_FALLBACK_ROOT_HTML = `
+<div class="itm-public-fallback">
+  <header class="itm-public-fallback-nav">
+    <a class="itm-public-fallback-brand" href="/">
+      <img src="/itm-logo.png" alt="Indian Trade Mart" width="44" height="44" />
+      <span>Indian Trade Mart</span>
+    </a>
+    <nav class="itm-public-fallback-nav-links" aria-label="Primary">
+      <a href="/directory">Directory</a>
+      <a href="/directory/vendor">Suppliers</a>
+      <a href="/blog">Blog</a>
+      <a href="/about-us">About Us</a>
+      <a href="/contact">Contact</a>
+    </nav>
+  </header>
+
+  <main class="itm-public-fallback-main">
+    <section class="itm-public-fallback-hero">
+      <h1>Connect with verified manufacturers, suppliers and B2B service providers across India.</h1>
+      <p>
+        Indian Trade Mart is a B2B marketplace for supplier discovery, product sourcing, and business growth across
+        categories, cities, and industries.
+      </p>
+      <div class="itm-public-fallback-actions">
+        <a class="itm-public-fallback-button" href="/directory">Browse directory</a>
+        <a class="itm-public-fallback-button itm-public-fallback-button-secondary" href="/directory/vendor">Find suppliers</a>
+      </div>
+    </section>
+
+    <section class="itm-public-fallback-grid" aria-label="Marketplace overview">
+      <article class="itm-public-fallback-card">
+        <h2>Popular destinations</h2>
+        <div class="itm-public-fallback-links">
+          <a href="/directory/cities">Top cities</a>
+          <a href="/directory/vendor">Featured suppliers</a>
+          <a href="/products">Products</a>
+        </div>
+      </article>
+      <article class="itm-public-fallback-card">
+        <h2>Marketplace content</h2>
+        <ul>
+          <li>B2B supplier discovery across categories and cities</li>
+          <li>Vendor visibility, lead workflows, and buyer enquiries</li>
+          <li>Insights, legal pages, and support routes available without JavaScript</li>
+        </ul>
+      </article>
+      <article class="itm-public-fallback-card">
+        <h2>Quick links</h2>
+        <div class="itm-public-fallback-links">
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Use</a>
+          <a href="/blog">Blog &amp; Insights</a>
+        </div>
+      </article>
+    </section>
+  </main>
+</div>
+`;
+
+const injectPublicFallback = (html) => {
+  let out = html;
+  if (!out.includes('data-prerender-public="true"')) {
+    out = out.replace('</head>', `  ${PUBLIC_FALLBACK_STYLE_BLOCK}\n</head>`);
+  }
+
+  return out.replace(
+    /<div id="root">[\s\S]*?<\/div>\s*<\/body>/i,
+    `<div id="root">${PUBLIC_FALLBACK_ROOT_HTML}</div>\n  </body>`
+  );
+};
+
+const writeRoute = (route, meta, { includePublicFallback = true } = {}) => {
   const cleaned = String(route || '/').trim();
   const isRoot = cleaned === '/' || cleaned === '';
   const targetDir = isRoot
@@ -186,7 +414,9 @@ const writeRoute = (route, meta) => {
   if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true });
 
   const outPath = path.join(targetDir, 'index.html');
-  const finalHtml = applyMeta(templateHtml, meta);
+  const withMeta = applyMeta(templateHtml, meta);
+  const shouldInjectPublicFallback = includePublicFallback && !isRoot;
+  const finalHtml = shouldInjectPublicFallback ? injectPublicFallback(withMeta) : withMeta;
   fs.writeFileSync(outPath, finalHtml);
 };
 

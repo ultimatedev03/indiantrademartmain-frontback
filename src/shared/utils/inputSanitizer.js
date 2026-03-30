@@ -131,9 +131,16 @@ export const detectInputKind = ({
   const isPersonName =
     includesAny(hintText, [
       'full name',
+      'account holder',
+      'account holder name',
+      'holder name',
+      'beneficiary name',
       'owner name',
       'first name',
       'last name',
+      'account_holder',
+      'account_holder_name',
+      'beneficiary_name',
       'full_name',
       'owner_name',
       'first_name',
