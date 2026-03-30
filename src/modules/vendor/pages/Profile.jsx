@@ -304,6 +304,23 @@ const normalizeBankDraft = (bank = {}, index = 0) => {
   };
 };
 
+const createTempBankId = () => `temp-${Math.random().toString(36).slice(2, 11)}`;
+
+const createEmptyBankDraft = () => ({
+  id: createTempBankId(),
+  account_number: '',
+  ifsc_code: '',
+  bank_name: '',
+  branch_name: '',
+  account_holder: '',
+  is_primary: false,
+});
+
+const createBankDrafts = (banks = []) =>
+  Array.isArray(banks) && banks.length > 0
+    ? banks.map((bank) => ({ ...bank }))
+    : [createEmptyBankDraft()];
+
 const Profile = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
@@ -409,7 +426,7 @@ const Profile = () => {
     };
   }, []);
 
-  const refreshKycData = useCallback(async () => {
+  const refreshProfileData = useCallback(async () => {
     await loadData({ silent: true });
   }, [loadData]);
 
@@ -1084,7 +1101,7 @@ const Profile = () => {
 
               {/* 3. BANK DETAILS */}
               <TabsContent value="bank" className="m-0 p-6">
-                <BankingSection banks={banks} onRefresh={loadData} />
+                <BankingSection banks={banks} onRefresh={refreshProfileData} />
               </TabsContent>
 
               {/* 4. BUSINESS PREFERENCES */}
@@ -1096,7 +1113,7 @@ const Profile = () => {
               <TabsContent value="kyc" className="m-0 p-6">
                 <DocumentsSection
                   documents={documents}
-                  onRefresh={refreshKycData}
+                  onRefresh={refreshProfileData}
                   kycStatus={kycStatus}
                 />
               </TabsContent>
@@ -1188,13 +1205,19 @@ const SectionHeaderWithActions = ({ title, onAdd }) => (
 );
 
 const BankingSection = ({ banks, onRefresh }) => {
-  // Generate a temporary client-side ID (will be replaced with UUID on save)
-  const generateTempId = () => `temp-${Math.random().toString(36).substr(2, 9)}`;
-  const [newBanks, setNewBanks] = useState(banks.length > 0 ? banks : [{ id: generateTempId() }]);
+  const hasSavedBanks = banks.length > 0;
+  const [newBanks, setNewBanks] = useState(() => createBankDrafts(banks));
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(() => !hasSavedBanks);
 
   useEffect(() => {
-    setNewBanks(banks.length > 0 ? banks : [{ id: generateTempId() }]);
+    setNewBanks(createBankDrafts(banks));
+    setEditing(banks.length === 0);
+  }, [banks]);
+
+  const resetDraftsFromSavedBanks = useCallback(() => {
+    setNewBanks(createBankDrafts(banks));
+    setEditing(banks.length === 0);
   }, [banks]);
 
   const handleUpdateBank = (index, field, value) => {
@@ -1208,14 +1231,16 @@ const BankingSection = ({ banks, onRefresh }) => {
     } else if (field === 'bank_name' || field === 'branch_name') {
       nextVal = String(value || '').slice(0, 120);
     }
-    const updated = [...newBanks];
-    updated[index] = { ...updated[index], [field]: nextVal };
-    setNewBanks(updated);
+    setNewBanks((currentBanks) =>
+      currentBanks.map((bank, bankIndex) =>
+        bankIndex === index ? { ...bank, [field]: nextVal } : bank
+      )
+    );
   };
 
   const handleAddBank = () => {
-    const tempId = `temp-${Math.random().toString(36).substr(2, 9)}`;
-    setNewBanks([...newBanks, { id: tempId }]);
+    setEditing(true);
+    setNewBanks((currentBanks) => [...currentBanks, createEmptyBankDraft()]);
   };
 
   const handleRemoveBank = async (index) => {
@@ -1232,8 +1257,7 @@ const BankingSection = ({ banks, onRefresh }) => {
       }
     }
     const updated = newBanks.filter((_, i) => i !== index);
-    const tempId = `temp-${Math.random().toString(36).substr(2, 9)}`;
-    setNewBanks(updated.length > 0 ? updated : [{ id: tempId }]);
+    setNewBanks(updated.length > 0 ? updated : [createEmptyBankDraft()]);
   };
 
   const handleSaveAllBanks = async () => {
@@ -1261,56 +1285,120 @@ const BankingSection = ({ banks, onRefresh }) => {
     }
   };
 
+  const readOnly = !editing;
+  const inputClassName = editing
+    ? 'h-9 bg-white'
+    : 'h-9 border-slate-200 bg-slate-100 text-slate-700';
+
   return (
     <div>
       <div className="flex justify-between items-center mb-4 border-b pb-2">
-        <h3 className="font-bold text-lg text-slate-900">Bank Accounts</h3>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
-          onClick={handleAddBank}
-        >
-          <Plus className="w-3.5 h-3.5 mr-1" /> Add Another
-        </Button>
+        <div className="flex items-center gap-3">
+          <h3 className="font-bold text-lg text-slate-900">Bank Accounts</h3>
+          {hasSavedBanks && readOnly ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-green-200 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700">
+              <CheckCircle className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex items-center gap-2">
+          {editing && hasSavedBanks ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+              onClick={resetDraftsFromSavedBanks}
+              disabled={adding}
+            >
+              Cancel
+            </Button>
+          ) : null}
+
+          {editing ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
+              onClick={handleAddBank}
+              disabled={adding}
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" /> Add Another
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-[#003D82] h-8 text-xs font-semibold hover:bg-blue-50"
+              onClick={() => {
+                setNewBanks(createBankDrafts(banks));
+                setEditing(true);
+              }}
+            >
+              <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+            </Button>
+          )}
+        </div>
       </div>
+
+      {hasSavedBanks && readOnly ? (
+        <div className="mb-4 flex items-start gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          <CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-semibold">Bank details saved</p>
+            <p className="text-green-700">The saved details are shown below in read-only mode. Use Edit to make changes.</p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="space-y-4 max-h-96 overflow-y-auto pr-3" style={{
         scrollbarWidth: 'thin',
         scrollbarColor: '#cbd5e1 #f1f5f9'
       }}>
         {newBanks.map((bank, index) => (
-          <div key={bank.id} className="bg-slate-50 p-4 rounded-lg border animate-in fade-in">
+          <div
+            key={bank.id}
+            className={`rounded-lg border p-4 animate-in fade-in ${
+              readOnly ? 'border-slate-200 bg-white' : 'bg-slate-50'
+            }`}
+          >
             <div className="flex justify-between items-center mb-3">
               <h4 className="text-sm font-bold">Bank Account {index + 1}</h4>
-              <Trash2
-                className="w-4 h-4 text-slate-400 hover:text-red-500 cursor-pointer"
-                onClick={() => handleRemoveBank(index)}
-              />
+              {editing ? (
+                <Trash2
+                  className="w-4 h-4 text-slate-400 hover:text-red-500 cursor-pointer"
+                  onClick={() => handleRemoveBank(index)}
+                />
+              ) : null}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Input
                 placeholder="Account Number"
-                className="h-9 bg-white"
+                className={inputClassName}
+                readOnly={readOnly}
                 value={bank.account_number || ''}
                 onChange={e => handleUpdateBank(index, 'account_number', e.target.value)}
               />
               <Input
                 placeholder="IFSC Code"
-                className="h-9 bg-white"
+                className={inputClassName}
+                readOnly={readOnly}
                 value={bank.ifsc_code || ''}
                 onChange={e => handleUpdateBank(index, 'ifsc_code', e.target.value)}
               />
               <Input
                 placeholder="Bank Name"
-                className="h-9 bg-white"
+                className={inputClassName}
+                readOnly={readOnly}
                 value={bank.bank_name || ''}
                 onChange={e => handleUpdateBank(index, 'bank_name', e.target.value)}
               />
               <Input
                 placeholder="Branch Name"
-                className="h-9 bg-white"
+                className={inputClassName}
+                readOnly={readOnly}
                 value={bank.branch_name || ''}
                 onChange={e => handleUpdateBank(index, 'branch_name', e.target.value)}
               />
@@ -1319,7 +1407,8 @@ const BankingSection = ({ banks, onRefresh }) => {
                 placeholder="Account Holder Name"
                 inputMode="text"
                 disableAutoSanitize
-                className="h-9 bg-white md:col-span-2"
+                className={`${inputClassName} md:col-span-2`}
+                readOnly={readOnly}
                 value={bank.account_holder || bank.accountHolder || ''}
                 onChange={e => handleUpdateBank(index, 'account_holder', e.target.value)}
               />
@@ -1328,16 +1417,18 @@ const BankingSection = ({ banks, onRefresh }) => {
         ))}
       </div>
 
-      <div className="flex justify-end gap-2 mt-4">
-        <Button
-          className="bg-[#003D82]"
-          onClick={handleSaveAllBanks}
-          disabled={adding}
-        >
-          {adding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
-          Save Bank Details
-        </Button>
-      </div>
+      {editing ? (
+        <div className="flex justify-end gap-2 mt-4">
+          <Button
+            className="bg-[#003D82]"
+            onClick={handleSaveAllBanks}
+            disabled={adding}
+          >
+            {adding ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Save Bank Details
+          </Button>
+        </div>
+      ) : null}
     </div>
   );
 };
