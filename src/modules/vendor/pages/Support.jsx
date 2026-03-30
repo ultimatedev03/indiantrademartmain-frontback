@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from '@/components/ui/use-toast';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const sanitizeTicketSubject = (value) =>
   String(value || '')
@@ -26,6 +27,7 @@ const sanitizeTicketDescription = (value) =>
     .slice(0, 1500);
 
 const Support = () => {
+  const { resolvePath } = useSubdomain();
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -169,7 +171,7 @@ const Support = () => {
           <div className="divide-y divide-neutral-100">
             {filteredTickets.map(ticket => (
               <div key={ticket.id} className="flex items-center gap-3 hover:bg-neutral-50 px-4 py-3 transition-colors">
-                <Link to={`/vendor/support/${ticket.id}`} className="flex-1 min-w-0 flex items-center gap-3">
+                <Link to={resolvePath(`support/${ticket.id}`, 'vendor')} className="flex-1 min-w-0 flex items-center gap-3">
                   <div className="bg-blue-100 p-2 rounded-full text-blue-600">
                     <MessageCircle className="h-5 w-5" />
                   </div>

@@ -225,8 +225,9 @@ const resolveRegistrationNumbers = (value = '') => {
 
   if (LLPIN_NUMBER_RE.test(normalizedValue)) {
     return {
-      cinNumber: null,
-      llpinNumber: normalizedValue,
+      // Store LLPIN in cin_number because llpin_number is not present in the current schema.
+      cinNumber: normalizedValue,
+      llpinNumber: null,
     };
   }
 
@@ -291,7 +292,7 @@ const validateVendorIdentityFields = (updates = {}) => {
   if (rawCinNumber !== undefined || rawLlpinNumber !== undefined) {
     const registrationNumbers = resolveRegistrationNumbers(rawCinNumber ?? rawLlpinNumber ?? '');
     normalized.cin_number = registrationNumbers.cinNumber;
-    normalized.llpin_number = registrationNumbers.llpinNumber;
+    delete normalized.llpin_number;
     delete normalized.cinNumber;
     delete normalized.llpinNumber;
   }

@@ -10,9 +10,11 @@ import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 import PublicSiteHomeLink from '@/shared/components/PublicSiteHomeLink';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
   const { login } = useInternalAuth();
   const loginCaptcha = useCaptchaGate();
 
@@ -80,7 +82,7 @@ const PortalLogin = ({ portalName, colorScheme, defaultEmail, icon: Icon }) => {
 
         switch (user.role) {
           case 'ADMIN':
-            navigate('/admin/dashboard');
+            navigate(resolvePath('dashboard', 'admin'));
             break;
           case 'FINANCE':
             navigate('/finance-portal/dashboard');

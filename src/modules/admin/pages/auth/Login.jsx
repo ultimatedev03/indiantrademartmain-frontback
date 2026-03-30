@@ -9,9 +9,11 @@ import { Loader2, Lock, Shield } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const Login = () => {
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
   const { login } = useInternalAuth();
   const loginCaptcha = useCaptchaGate();
   const [formData, setFormData] = useState({ email: '', password: '' });
@@ -40,7 +42,7 @@ const Login = () => {
         // Role-based redirection
         switch(user.role) {
           case 'ADMIN':
-            navigate('/admin/dashboard');
+            navigate(resolvePath('dashboard', 'admin'));
             break;
           case 'HR':
             navigate('/hr/dashboard');
@@ -55,7 +57,7 @@ const Login = () => {
             navigate('/employee/sales/dashboard');
             break;
           default:
-            navigate('/admin/dashboard');
+            navigate(resolvePath('dashboard', 'admin'));
         }
       }
     } catch (error) {

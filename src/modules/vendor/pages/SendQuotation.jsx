@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, ArrowLeft, Paperclip, X } from 'lucide-react';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const MAX_PDF_BYTES = 2 * 1024 * 1024; // 2MB (keep Netlify/SMTP payload safe)
 
@@ -28,6 +29,10 @@ const SendQuotation = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const { resolvePath } = useSubdomain();
+  const loginPath = resolvePath('login', 'vendor');
+  const proposalsPath = resolvePath('proposals', 'vendor');
+  const proposalsSentPath = `${proposalsPath}?tab=sent`;
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [products, setProducts] = useState([]);
@@ -41,9 +46,9 @@ const SendQuotation = () => {
   // Redirect if not authenticated
   useEffect(() => {
     if (!user) {
-      navigate('/vendor/login');
+      navigate(loginPath);
     }
-  }, [user, navigate]);
+  }, [loginPath, navigate, user]);
 
   const [formData, setFormData] = useState(() => ({
     product_id: prefill?.product_id || '',
@@ -232,7 +237,7 @@ const SendQuotation = () => {
       });
       setPdfAttachment(null);
 
-      setTimeout(() => navigate('/vendor/proposals?tab=sent'), 1000);
+      setTimeout(() => navigate(proposalsSentPath), 1000);
     } catch (error) {
       toast({
         title: 'Error sending quotation',
@@ -254,7 +259,7 @@ const SendQuotation = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <Button variant="ghost" onClick={() => navigate('/vendor/proposals')} className="mb-4">
+      <Button variant="ghost" onClick={() => navigate(proposalsPath)} className="mb-4">
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Proposals
       </Button>
 
@@ -484,7 +489,7 @@ const SendQuotation = () => {
 
             {/* Buttons */}
             <div className="flex gap-4 justify-end pt-4">
-              <Button type="button" variant="outline" onClick={() => navigate('/vendor/proposals')}>
+              <Button type="button" variant="outline" onClick={() => navigate(proposalsPath)}>
                 Cancel
               </Button>
               <Button type="submit" className="bg-[#003D82]" disabled={submitting}>

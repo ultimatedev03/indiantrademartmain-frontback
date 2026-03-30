@@ -32,6 +32,7 @@ import { phoneUtils } from "@/shared/utils/phoneUtils";
 import LeadStatsPanel from "@/modules/vendor/components/LeadStatsPanel";
 import { supabase } from "@/lib/customSupabaseClient";
 import { leadPaymentApi } from "@/modules/vendor/services/leadPaymentApi";
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const CONTACTED_STORAGE_KEY = "itm_vendor_contacted_lead_ids";
 
@@ -230,6 +231,7 @@ const startOfYear = () => {
 
 const Leads = () => {
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
 
   const [activeTab, setActiveTab] = useState("marketplace");
   const [marketplaceLeads, setMarketplaceLeads] = useState([]);
@@ -825,8 +827,10 @@ const Leads = () => {
 
   const handleViewDetails = (leadId) => {
     if (!leadId) return;
-    navigate(`/vendor/leads/${leadId}`);
+    navigate(resolvePath(`leads/${leadId}`, 'vendor'));
   };
+
+  const subscriptionsPath = resolvePath('subscriptions', 'vendor');
 
   const choiceLeadId = String(purchaseChoiceDialog?.lead?.id || "");
   const choiceBusy = Boolean(choiceLeadId && purchasing?.[choiceLeadId]);
@@ -1301,7 +1305,7 @@ const Leads = () => {
                   <div className="text-sm text-gray-600">
                     {marketplaceInfo?.message || "Activate an active plan to access marketplace leads."}
                   </div>
-                  <Button onClick={() => navigate("/vendor/subscriptions")}>
+                  <Button onClick={() => navigate(subscriptionsPath)}>
                     Go to Subscription Plans
                   </Button>
                 </>

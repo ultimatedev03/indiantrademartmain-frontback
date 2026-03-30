@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from '@/components/ui/use-toast';
 import { Calendar, Clock3, Loader2, Plus, Trash2, User } from 'lucide-react';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -111,6 +112,8 @@ const maskPhone = (value) => {
 const Proposals = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { resolvePath } = useSubdomain();
+  const sendQuotationPath = resolvePath('proposals/send', 'vendor');
   const [activeTab, setActiveTab] = useState(() => {
     const tab = new URLSearchParams(location.search).get('tab');
     return tab === 'sent' ? 'sent' : 'received';
@@ -316,7 +319,7 @@ const Proposals = () => {
           <h1 className="text-2xl font-bold text-gray-900">My Proposals</h1>
           <p className="text-gray-500">Manage your sent and received quotations</p>
         </div>
-        <Button className="bg-[#003D82]" onClick={() => navigate('/vendor/proposals/send')}>
+        <Button className="bg-[#003D82]" onClick={() => navigate(sendQuotationPath)}>
           <Plus className="mr-2 h-4 w-4" /> Send Quotation
         </Button>
       </div>

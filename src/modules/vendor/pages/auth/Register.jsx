@@ -14,6 +14,7 @@ import { otpService } from '@/services/otpService';
 import { validateStrongPassword } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 // ✅ Logo component
 import Logo from '@/shared/components/Logo';
@@ -58,6 +59,7 @@ const Steps = ({ currentStep }) => (
 const VendorRegister = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { resolvePath } = useSubdomain();
   const requestOtpCaptcha = useCaptchaGate();
   const resendOtpCaptcha = useCaptchaGate();
   const [step, setStep] = useState(1);
@@ -88,6 +90,9 @@ const VendorRegister = () => {
     const raw = new URLSearchParams(location.search || '').get('ref');
     return normalizeReferralCode(raw);
   }, [location.search]);
+
+  const dashboardPath = resolvePath('dashboard', 'vendor');
+  const loginPath = resolvePath('login', 'vendor');
 
   useEffect(() => {
     loadStates();
@@ -313,7 +318,7 @@ const VendorRegister = () => {
           type: 'WELCOME',
           title: 'Welcome to Indian Trade Mart',
           message: 'Your vendor account is ready. Complete KYC and start receiving leads.',
-          link: '/vendor/dashboard',
+          link: dashboardPath,
           is_read: false,
           created_at: new Date().toISOString()
         }]);
@@ -329,7 +334,7 @@ const VendorRegister = () => {
         className: 'bg-green-50 border-green-200',
       });
 
-      setTimeout(() => navigate(authData.session ? '/vendor/dashboard' : '/vendor/login'), 500);
+      setTimeout(() => navigate(authData.session ? dashboardPath : loginPath), 500);
     } catch (error) {
       console.error('OTP Verification Error:', error);
       toast({
@@ -480,7 +485,7 @@ const VendorRegister = () => {
 
               <div className="text-center text-sm text-gray-500">
                 Already registered?{' '}
-                <Link to="/vendor/login" className="text-[#003D82] font-semibold">
+                <Link to={loginPath} className="text-[#003D82] font-semibold">
                   Login here
                 </Link>
               </div>

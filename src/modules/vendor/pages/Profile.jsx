@@ -130,7 +130,6 @@ const resolveRegistrationNumbers = (value = '') => {
     return {
       displayValue: null,
       cinNumber: null,
-      llpinNumber: null,
     };
   }
 
@@ -138,15 +137,14 @@ const resolveRegistrationNumbers = (value = '') => {
     return {
       displayValue: normalizedValue,
       cinNumber: normalizedValue,
-      llpinNumber: null,
     };
   }
 
   if (LLPIN_NUMBER_RE.test(normalizedValue)) {
     return {
       displayValue: normalizedValue,
-      cinNumber: null,
-      llpinNumber: normalizedValue,
+      // Persist LLPIN in cin_number because the live schema has no llpin_number column.
+      cinNumber: normalizedValue,
     };
   }
 
@@ -257,7 +255,7 @@ const validateVendorBusinessDraft = (draft = {}, previous = {}) => {
     websiteUrl: websiteUrl || null,
     website_url: websiteUrl || null,
     cinNumber: registrationNumbers.displayValue,
-    cin_number: registrationNumbers.cinNumber,
+    cin_number: registrationNumbers.displayValue,
     tanNumber: tanNumber || null,
     tan_number: tanNumber || null,
     iecCode: iecCode || null,
@@ -473,6 +471,9 @@ const Profile = () => {
         aud,
         id,
         created_at,
+        cin_number,
+        llpinNumber,
+        llpin_number,
 
         confirmed_at,
         email_confirmed_at,

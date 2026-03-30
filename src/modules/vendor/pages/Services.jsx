@@ -32,6 +32,7 @@ import {
   DialogDescription,
   DialogFooter as DialogFooterUI,
 } from '@/components/ui/dialog';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -204,6 +205,8 @@ const planIcon = (name) => {
 const Services = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { resolvePath } = useSubdomain();
+  const leadsPath = resolvePath('leads', 'vendor');
   const [plans, setPlans] = useState([]);
   const [currentSub, setCurrentSub] = useState(null);
   const [quota, setQuota] = useState(null);
@@ -654,7 +657,7 @@ const Services = () => {
   };
 
   const buyLeads = async () => {
-    navigate('/vendor/leads');
+    navigate(leadsPath);
   };
 
   const openPlanDetails = (plan) => {

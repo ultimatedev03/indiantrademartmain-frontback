@@ -21,6 +21,7 @@ import {
   IndianRupee,
 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const safeDate = (v) => {
   try {
@@ -179,6 +180,10 @@ const getBuyer = (lead) => {
 const LeadDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
+  const leadsPath = resolvePath('leads', 'vendor');
+  const sendProposalPath = resolvePath('proposals/send', 'vendor');
+  const messagesPath = resolvePath('messages', 'vendor');
 
   const [lead, setLead] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -270,7 +275,7 @@ const LeadDetail = () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         toast({ title: 'Not authenticated', variant: 'destructive' });
-        navigate('/vendor/leads');
+        navigate(leadsPath);
         return;
       }
 
@@ -297,7 +302,7 @@ const LeadDetail = () => {
           console.warn('Vendor lookup warning:', vendorErr?.message || vendorErr);
         }
         toast({ title: 'Vendor profile not found', variant: 'destructive' });
-        navigate('/vendor/leads');
+        navigate(leadsPath);
         return;
       }
 
@@ -305,7 +310,7 @@ const LeadDetail = () => {
       const leadData = await leadApi.get(id);
       if (!leadData) {
         toast({ title: 'Lead not found', variant: 'destructive' });
-        navigate('/vendor/leads');
+        navigate(leadsPath);
         return;
       }
 
@@ -524,7 +529,7 @@ const LeadDetail = () => {
       });
     }
 
-    navigate('/vendor/proposals/send', { state: { prefill } });
+    navigate(sendProposalPath, { state: { prefill } });
   };
 
   const handleOpenChat = () => {
@@ -537,7 +542,7 @@ const LeadDetail = () => {
       return;
     }
 
-    navigate('/vendor/messages', {
+    navigate(messagesPath, {
       state: { focusProposalId: String(lead.proposal_id) },
     });
   };
@@ -611,7 +616,7 @@ const LeadDetail = () => {
     <div className="max-w-4xl mx-auto space-y-6">
       <Button
         variant="ghost"
-        onClick={() => navigate('/vendor/leads')}
+        onClick={() => navigate(leadsPath)}
         className="pl-0 hover:pl-2 transition-all"
       >
         <ArrowLeft className="mr-2 h-4 w-4" /> Back to Leads

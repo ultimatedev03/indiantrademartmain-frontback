@@ -10,6 +10,7 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2 } from 'lucide-react';
 import TurnstileField from '@/shared/components/TurnstileField';
 import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const OTP_LENGTH = 6;
 const OTP_TTL_SECONDS = 120;
@@ -17,6 +18,7 @@ const OTP_TTL_SECONDS = 120;
 const Verify = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { resolvePath } = useSubdomain();
   const otpCaptcha = useCaptchaGate();
   const captchaToken = otpCaptcha.captchaToken;
   const captchaResetKey = otpCaptcha.captchaResetKey;
@@ -32,6 +34,8 @@ const Verify = () => {
 
   const [timer, setTimer] = useState(0);
   const [initialSent, setInitialSent] = useState(false);
+  const dashboardPath = resolvePath('dashboard', 'vendor');
+  const loginPath = resolvePath('login', 'vendor');
 
   useEffect(() => {
     const getEmail = async () => {
@@ -54,7 +58,7 @@ const Verify = () => {
           description: "Please login again to verify.",
           variant: "destructive"
         });
-        navigate('/vendor/login');
+        navigate(loginPath);
       } catch (e) {
         console.error('[Verify] getEmail failed:', e);
         toast({
@@ -62,12 +66,12 @@ const Verify = () => {
           description: "Please login again to verify.",
           variant: "destructive"
         });
-        navigate('/vendor/login');
+        navigate(loginPath);
       }
     };
 
     getEmail();
-  }, [location, navigate]);
+  }, [location, loginPath, navigate]);
 
   // If vendor is already verified, do not keep user on verify page.
   useEffect(() => {
@@ -77,7 +81,7 @@ const Verify = () => {
         const isVerified =
           me?.is_verified === true || me?.isVerified === true || Boolean(me?.verified_at || me?.verifiedAt);
         if (isVerified) {
-          navigate('/vendor/dashboard', { replace: true });
+          navigate(dashboardPath, { replace: true });
         }
       } catch {
         // Ignore and allow normal verify flow.
@@ -85,7 +89,7 @@ const Verify = () => {
     };
 
     redirectIfAlreadyVerified();
-  }, [navigate]);
+  }, [dashboardPath, navigate]);
 
   // ✅ Countdown timer
   useEffect(() => {
@@ -222,7 +226,7 @@ const Verify = () => {
         className: "bg-green-50"
       });
 
-      navigate('/vendor/dashboard');
+      navigate(dashboardPath);
     } catch (error) {
       console.error('Verification error:', error);
       toast({
@@ -355,7 +359,7 @@ const Verify = () => {
             <div className="text-center">
               <button
                 type="button"
-                onClick={() => navigate('/vendor/login')}
+                onClick={() => navigate(loginPath)}
                 className="text-sm text-gray-500 hover:text-gray-900"
               >
                 Back to Login

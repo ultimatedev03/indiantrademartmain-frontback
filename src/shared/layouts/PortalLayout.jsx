@@ -41,6 +41,7 @@ const PortalLayout = ({ role }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { resolvePath } = useSubdomain();
+  const vendorLoginPath = resolvePath('login', 'vendor');
 
   const vendorAuth = useVendorAuth();
   const internalAuth = useInternalAuth();
@@ -121,7 +122,7 @@ const PortalLayout = ({ role }) => {
         try {
           await logout();
         } finally {
-          window.location.replace('/vendor/login?reason=timeout');
+          window.location.replace(`${vendorLoginPath}?reason=timeout`);
         }
       }, VENDOR_IDLE_TIMEOUT_MS);
     };
@@ -177,13 +178,13 @@ const PortalLayout = ({ role }) => {
     switch (role) {
       case 'VENDOR':
         return [
-          { icon: LayoutDashboard, label: 'Dashboard', path: '/vendor/dashboard' },
-          { icon: Package, label: 'Products', path: '/vendor/products' },
-          { icon: Users, label: 'Leads', path: '/vendor/leads' },
-          { icon: Boxes, label: 'Packages', path: '/vendor/packages' },
-          { icon: ShieldCheck, label: 'KYC & Profile', path: '/vendor/kyc' },
-          { icon: HelpCircle, label: 'Support', path: '/vendor/support' },
-          { icon: Settings, label: 'Settings', path: '/vendor/settings' },
+          { icon: LayoutDashboard, label: 'Dashboard', path: resolvePath('dashboard', 'vendor') },
+          { icon: Package, label: 'Products', path: resolvePath('products', 'vendor') },
+          { icon: Users, label: 'Leads', path: resolvePath('leads', 'vendor') },
+          { icon: Boxes, label: 'Packages', path: resolvePath('packages', 'vendor') },
+          { icon: ShieldCheck, label: 'KYC & Profile', path: resolvePath('kyc', 'vendor') },
+          { icon: HelpCircle, label: 'Support', path: resolvePath('support', 'vendor') },
+          { icon: Settings, label: 'Settings', path: resolvePath('settings', 'vendor') },
         ];
       case 'ADMIN':
         return [

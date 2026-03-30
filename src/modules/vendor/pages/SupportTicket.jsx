@@ -6,10 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/use-toast';
+import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const SupportTicket = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { resolvePath } = useSubdomain();
+  const supportPath = resolvePath('support', 'vendor');
   const [ticket, setTicket] = useState(null);
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -82,7 +85,7 @@ const SupportTicket = () => {
     try {
       await vendorApi.support.deleteTicket(ticket.id);
       toast({ title: 'Ticket deleted' });
-      navigate('/vendor/support');
+      navigate(supportPath);
     } catch (error) {
       console.error(error);
       toast({ title: 'Delete failed', description: error.message || 'Unable to delete ticket', variant: 'destructive' });
@@ -100,7 +103,7 @@ const SupportTicket = () => {
   if (!ticket) {
     return (
       <div className="space-y-4">
-        <Button variant="ghost" onClick={() => navigate('/vendor/support')}>
+        <Button variant="ghost" onClick={() => navigate(supportPath)}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to tickets
         </Button>
         <div className="rounded-lg border p-6 text-center text-gray-500">
@@ -115,7 +118,7 @@ const SupportTicket = () => {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={() => navigate('/vendor/support')}>
+        <Button variant="ghost" onClick={() => navigate(supportPath)}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to tickets
         </Button>
         <div className="flex items-center gap-2">
