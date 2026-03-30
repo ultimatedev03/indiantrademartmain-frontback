@@ -50,53 +50,8 @@
         color: #0f172a;
       }
 
-      .itm-app-boot {
+      #root {
         min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: space-between;
-        gap: 18px;
-        padding: 32px 20px;
-        background:
-          radial-gradient(circle at top right, rgba(59, 130, 246, 0.14), transparent 20rem),
-          linear-gradient(180deg, #e2e8f0 0%, #f8fafc 18rem);
-      }
-
-      .itm-app-boot-logo {
-        width: 56px;
-        height: 56px;
-        border-radius: 16px;
-        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.12);
-      }
-
-      .itm-app-boot-brand {
-        font-size: 1rem;
-        font-weight: 700;
-        letter-spacing: 0.01em;
-      }
-
-      .itm-app-boot-loader {
-        width: 36px;
-        height: 36px;
-        border-radius: 999px;
-        border: 3px solid rgba(148, 163, 184, 0.35);
-        border-top-color: #003d82;
-        animation: itm-app-spin 0.8s linear infinite;
-      }
-
-      .itm-app-boot-copy {
-        max-width: 420px;
-        text-align: center;
-        color: #475569;
-        font-size: 15px;
-        line-height: 1.6;
-      }
-
-      @keyframes itm-app-spin {
-        to {
-          transform: rotate(360deg);
-        }
       }
     </style>
     <script type="application/ld+json">
@@ -132,14 +87,7 @@
     ></script>
   </head>
   <body>
-    <div id="root">
-      <div class="itm-app-boot" aria-hidden="true">
-        <img class="itm-app-boot-logo" src="/itm-logo.png" alt="" width="56" height="56" />
-        <div class="itm-app-boot-brand">Indian Trade Mart</div>
-        <div class="itm-app-boot-loader"></div>
-        <div class="itm-app-boot-copy">Loading your page securely.</div>
-      </div>
-    </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

@@ -3,7 +3,6 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-import AppBootScreen from '@/shared/components/AppBootScreen';
 
 const AuthContext = createContext({});
 
@@ -286,7 +285,7 @@ export const AuthProvider = ({ children }) => {
       logout,
       isAdmin: user?.role === 'ADMIN'
     }}>
-      {!loading ? children : <AppBootScreen />}
+      {children}
     </AuthContext.Provider>
   );
 };

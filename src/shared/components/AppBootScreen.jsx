@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 
 const shellBackground = {
   background:
@@ -8,7 +8,25 @@ const shellBackground = {
 const AppBootScreen = ({
   message = 'Loading your page securely.',
   minHeightClass = 'min-h-screen',
+  showAfterMs = 600,
 }) => {
+  const [visible, setVisible] = useState(showAfterMs <= 0);
+
+  useEffect(() => {
+    if (showAfterMs <= 0) {
+      setVisible(true);
+      return undefined;
+    }
+
+    setVisible(false);
+    const timer = window.setTimeout(() => setVisible(true), showAfterMs);
+    return () => window.clearTimeout(timer);
+  }, [showAfterMs]);
+
+  if (!visible) {
+    return <div className={minHeightClass} aria-hidden="true" />;
+  }
+
   return (
     <div
       className={`${minHeightClass} flex flex-col items-center justify-between gap-[18px] px-5 py-8 text-slate-900`}
