@@ -13,7 +13,13 @@ import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
-import { getPremiumBrandBySlug, getPremiumBrandByVendorSlug } from '@/modules/directory/lib/premiumBrands';
+import {
+  getPremiumBrandBySlug,
+  getPremiumBrandByVendorSlug,
+  getPremiumBrandFallbackOfferings,
+  getPremiumBrandProfileSlug,
+  shouldUsePremiumBrandFallbackContent,
+} from '@/modules/directory/lib/premiumBrands';
 
 const normalizeEstablishedYear = (value) => {
   const year = Number(value);
@@ -27,7 +33,7 @@ const buildPremiumBrandFallbackVendor = (brand = null) => {
 
   return {
     id: '',
-    slug: brand.vendorSlug || '',
+    slug: getPremiumBrandProfileSlug(brand),
     brand_slug: brand.slug || '',
     company_name: brand.name || 'Premium Brand',
     legal_company_name: '',
@@ -159,6 +165,14 @@ const VendorProfileContent = () => {
     () => getPremiumBrandBySlug(requestedBrandSlug) || getPremiumBrandByVendorSlug(vendorSlugOrId),
     [requestedBrandSlug, vendorSlugOrId]
   );
+  const premiumBrandFallbackOfferings = useMemo(
+    () => getPremiumBrandFallbackOfferings(requestedPremiumBrand),
+    [requestedPremiumBrand]
+  );
+  const requestedBrandUsesFallbackContent = useMemo(
+    () => shouldUsePremiumBrandFallbackContent(requestedPremiumBrand),
+    [requestedPremiumBrand]
+  );
 
   // ✅ Favorites (buyer)
   const [isFavorite, setIsFavorite] = useState(false);
@@ -181,6 +195,16 @@ const VendorProfileContent = () => {
     // Fetch vendor data from backend APIs
     const fetchVendor = async () => {
       setLoading(true);
+      if (requestedBrandUsesFallbackContent) {
+        setVendor(null);
+        setProducts([]);
+        setServices([]);
+        setServiceCategories([]);
+        setShowAllProducts(false);
+        setLoading(false);
+        return;
+      }
+
       try {
         const vendorRes = await fetchWithCsrf(apiUrl(`/api/vendors/${requestedVendorKey}`));
         if (!vendorRes.ok) throw new Error('Vendor not found');
@@ -249,7 +273,7 @@ const VendorProfileContent = () => {
     if (requestedVendorKey) {
       fetchVendor();
     }
-  }, [requestedVendorKey, requestedPremiumBrand, navigate, searchParamsString]);
+  }, [requestedVendorKey, requestedPremiumBrand, requestedBrandUsesFallbackContent, navigate, searchParamsString]);
 
   // ✅ Load favorite status
   useEffect(() => {
@@ -327,8 +351,10 @@ const VendorProfileContent = () => {
     () => vendor || buildPremiumBrandFallbackVendor(requestedPremiumBrand),
     [vendor, requestedPremiumBrand]
   );
-  const displayProducts = Array.isArray(products) ? products : [];
-  const displayServices = Array.isArray(services) ? services : [];
+  const displayProducts =
+    Array.isArray(products) && products.length ? products : premiumBrandFallbackOfferings;
+  const displayServices =
+    Array.isArray(services) && services.length ? services : premiumBrandFallbackOfferings;
   const visibleProducts = showAllProducts ? displayProducts : displayProducts.slice(0, 6);
   const groupedCollections = useMemo(() => {
     try {
@@ -396,6 +422,12 @@ const VendorProfileContent = () => {
   };
 
   const handleOpenProduct = (product) => {
+    if (product?.isBrandOffering) {
+      if (!vendorRecordId) return;
+      handleEnquire(product);
+      return;
+    }
+
     const detailPath = getProductDetailPath(product);
     if (!detailPath) {
       handleEnquire(product);
@@ -504,6 +536,7 @@ const VendorProfileContent = () => {
               <Button
                 variant="outline"
                 className="border-gray-300"
+                disabled={!vendorRecordId}
                 onClick={() =>
                   toast({
                     title: 'Lead confirmation required',
@@ -516,6 +549,7 @@ const VendorProfileContent = () => {
 
               <Button
                 className="bg-[#00A699] hover:bg-[#008c81]"
+                disabled={!vendorRecordId}
                 onClick={handleVendorEnquiry}
               >
                 <Send className="h-4 w-4 mr-2" /> Send Enquiry
@@ -898,7 +932,7 @@ const VendorProfileContent = () => {
               ) : null}
 
               <div className="pt-2">
-                <Button className="w-full bg-[#003D82]" onClick={handleVendorEnquiry}>
+                <Button className="w-full bg-[#003D82]" onClick={handleVendorEnquiry} disabled={!vendorRecordId}>
                   Contact Supplier
                 </Button>
               </div>

@@ -7,6 +7,7 @@ const isMissingColumnError = (err) => {
 
 const FEATURED_VENDOR_COLUMNS = [
   'id',
+  'slug',
   'company_name',
   'owner_name',
   'profile_image',
@@ -14,8 +15,12 @@ const FEATURED_VENDOR_COLUMNS = [
   'state',
   'city_id',
   'state_id',
+  'primary_business_type',
+  'secondary_business',
+  'description',
   'kyc_status',
   'is_verified',
+  'verification_badge',
   'is_active',
   'created_at',
 ].join(', ');
@@ -52,8 +57,54 @@ const mapVendorRow = (v) => {
     // best-effort fields used by older UI blocks
     rating: null,
     reviews: null,
-    description: v.primary_business_type || v.secondary_business || '',
+    description: v.description || v.primary_business_type || v.secondary_business || '',
   };
+};
+
+const fetchVendorRows = async ({ onlyActive, from = 0, to = null, limit = null }) => {
+  let query = supabase
+    .from('vendors')
+    .select(FEATURED_VENDOR_COLUMNS)
+    .order('created_at', { ascending: false });
+
+  if (onlyActive) {
+    query = query.eq('is_active', true);
+  }
+
+  if (to !== null) {
+    query = query.range(from, to);
+  } else if (limit !== null) {
+    query = query.limit(limit);
+  }
+
+  let res = await query;
+
+  if (res.error && isMissingColumnError(res.error)) {
+    let fallbackQuery = supabase.from('vendors').select('*');
+    if (onlyActive) {
+      fallbackQuery = fallbackQuery.eq('is_active', true);
+    }
+    fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
+    if (to !== null) {
+      fallbackQuery = fallbackQuery.range(from, to);
+    } else if (limit !== null) {
+      fallbackQuery = fallbackQuery.limit(limit);
+    }
+    res = await fallbackQuery;
+  }
+
+  if (res.error) {
+    console.error('Error fetching featured vendors:', res.error);
+    return [];
+  }
+
+  let rows = Array.isArray(res.data) ? res.data : [];
+  const hasIsActive = rows.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'is_active'));
+  if (onlyActive && hasIsActive) {
+    rows = rows.filter((r) => r?.is_active === true);
+  }
+
+  return rows;
 };
 
 const isVerifiedVendor = (v) => {
@@ -91,7 +142,8 @@ export const vendorService = {
   getFeaturedVendors: async (options = {}) => {
     const limit = Math.max(1, Number(options?.limit || 6));
     const onlyActive = options?.onlyActive !== false;
-    const cacheKey = JSON.stringify({ limit, onlyActive });
+    const exhaustive = options?.exhaustive === true;
+    const cacheKey = JSON.stringify({ limit, onlyActive, exhaustive });
     const cached = getFreshCache(featuredVendorCache, cacheKey);
     if (cached) return cached;
 
@@ -100,35 +152,24 @@ export const vendorService = {
     }
 
     const request = (async () => {
-      let query = supabase
-        .from('vendors')
-        .select(FEATURED_VENDOR_COLUMNS)
-        .order('created_at', { ascending: false })
-        .limit(limit);
+      let rows = [];
 
-      if (onlyActive) {
-        query = query.eq('is_active', true);
-      }
+      if (exhaustive) {
+        const pageSize = Math.min(limit, 1000);
+        let from = 0;
 
-      let res = await query;
-
-      if (res.error && isMissingColumnError(res.error)) {
-        let fallbackQuery = supabase.from('vendors').select('*').limit(limit);
-        if (onlyActive) {
-          fallbackQuery = fallbackQuery.eq('is_active', true);
+        while (rows.length < limit) {
+          const batch = await fetchVendorRows({
+            onlyActive,
+            from,
+            to: from + pageSize - 1,
+          });
+          rows.push(...batch);
+          if (batch.length < pageSize) break;
+          from += pageSize;
         }
-        res = await fallbackQuery;
-      }
-
-      if (res.error) {
-        console.error('Error fetching featured vendors:', res.error);
-        return [];
-      }
-
-      let rows = Array.isArray(res.data) ? res.data : [];
-      const hasIsActive = rows.some((r) => Object.prototype.hasOwnProperty.call(r || {}, 'is_active'));
-      if (onlyActive && hasIsActive) {
-        rows = rows.filter((r) => r?.is_active === true);
+      } else {
+        rows = await fetchVendorRows({ onlyActive, limit });
       }
 
       const normalized = sortFeaturedVendors(rows).slice(0, limit).map(mapVendorRow);

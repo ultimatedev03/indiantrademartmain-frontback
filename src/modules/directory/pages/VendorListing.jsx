@@ -25,7 +25,7 @@ const VendorListing = () => {
   // ✅ Trigger "Search" button
   const [applyTick, setApplyTick] = useState(0);
 
-  const FETCH_LIMIT = 500;
+  const FETCH_LIMIT = 2000;
 
   useEffect(() => {
     const fetchVendors = async () => {
@@ -34,7 +34,8 @@ const VendorListing = () => {
         // NOTE: If Supabase RLS policy filters is_active=true, then inactive vendors won't come at all.
         const data = await vendorService.getFeaturedVendors({
           limit: FETCH_LIMIT,
-          onlyActive: false,
+          onlyActive: true,
+          exhaustive: true,
         });
 
         setVendors(Array.isArray(data) ? data : []);
@@ -120,22 +121,36 @@ const VendorListing = () => {
     const cityQ = cityText.trim().toLowerCase();
 
     return vendors.filter((v) => {
-      const company = String(v?.name || v?.company_name || "").toLowerCase();
+      const company = String(v?.company_name || v?.name || "").toLowerCase();
+      const vendorName = String(v?.name || "").toLowerCase();
+      const ownerName = String(v?.owner_name || "").toLowerCase();
       const city = String(v?.city || "").toLowerCase();
       const state = String(v?.state || "").toLowerCase();
       const primary = String(v?.primary_business_type || "").toLowerCase();
       const secondary = String(v?.secondary_business || "").toLowerCase();
+      const description = String(v?.description || "").toLowerCase();
+      const slug = String(v?.slug || "").toLowerCase();
 
       // dropdown filters
       if (selectedStateId) {
         const vendorStateId = String(v?.state_id || "").trim();
-        const vendorStateName = String(v?.state || "").trim();
-        if (vendorStateId !== String(selectedStateId) && vendorStateName !== selectedStateName) return false;
+        const vendorStateName = String(v?.state || "").trim().toLowerCase();
+        if (
+          vendorStateId !== String(selectedStateId) &&
+          vendorStateName !== String(selectedStateName || "").trim().toLowerCase()
+        ) {
+          return false;
+        }
       }
       if (selectedCityId) {
         const vendorCityId = String(v?.city_id || "").trim();
-        const vendorCityName = String(v?.city || "").trim();
-        if (vendorCityId !== String(selectedCityId) && vendorCityName !== selectedCityName) return false;
+        const vendorCityName = String(v?.city || "").trim().toLowerCase();
+        if (
+          vendorCityId !== String(selectedCityId) &&
+          vendorCityName !== String(selectedCityName || "").trim().toLowerCase()
+        ) {
+          return false;
+        }
       }
 
       // city text input
@@ -145,10 +160,14 @@ const VendorListing = () => {
       if (query) {
         const match =
           company.includes(query) ||
+          vendorName.includes(query) ||
+          ownerName.includes(query) ||
           primary.includes(query) ||
           secondary.includes(query) ||
+          description.includes(query) ||
           city.includes(query) ||
-          state.includes(query);
+          state.includes(query) ||
+          slug.includes(query);
         if (!match) return false;
       }
 

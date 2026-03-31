@@ -41,6 +41,7 @@ const buildEmployeeUser = (authUser, empRow) => {
     role: canonicalizeRole(empRow?.role) || 'UNKNOWN',
     department: empRow?.department || null,
     status: empRow?.status || null,
+    avatar_url: empRow?.avatar_url || authUser?.user_metadata?.avatar_url || null,
     avatar: firstLetter
   };
 };

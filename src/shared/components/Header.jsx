@@ -55,6 +55,14 @@ const Header = () => {
   const NavLinks = ({ mobile = false, onClick = () => {} }) => (
       <>
     <Link 
+      to="/" 
+      onClick={onClick}
+      className={`${mobile ? 'flex items-center p-3 hover:bg-slate-100 rounded-md text-slate-800' : 'text-gray-300 hover:text-white hover:bg-slate-800 px-3 py-2 rounded-md text-sm font-medium transition-colors'}`}
+    >
+      Home
+    </Link>
+
+    <Link 
       to="/directory" 
       onClick={onClick}
       className={`${mobile ? 'flex items-center p-3 hover:bg-slate-100 rounded-md text-slate-800' : 'text-gray-300 hover:text-white hover:bg-slate-800 px-3 py-2 rounded-md text-sm font-medium transition-colors'}`}

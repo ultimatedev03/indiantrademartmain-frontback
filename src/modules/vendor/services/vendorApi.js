@@ -1251,8 +1251,8 @@ export const vendorApi = {
     uploadImage: async (file, bucket = 'avatars', options = {}) => {
       if (!file) throw new Error('No file provided');
       const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
-      const PRODUCT_MIN_BYTES = 100 * 1024;
-      const PRODUCT_MAX_BYTES = 800 * 1024;
+      const PRODUCT_MIN_BYTES = 50 * 1024;
+      const PRODUCT_MAX_BYTES = 1024 * 1024;
       const isProductImage = String(bucket || '').trim() === 'product-images';
 
       if (isProductImage) {

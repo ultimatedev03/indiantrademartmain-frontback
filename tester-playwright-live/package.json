@@ -1,0 +1,30 @@
+{
+  "name": "tester-playwright-live",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:browsers": "playwright install chromium",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:public": "playwright test tests/public tests/navigation tests/security",
+    "test:auth": "playwright test tests/authenticated",
+    "test:mutation": "playwright test tests/mutation",
+    "report": "playwright show-report",
+    "auth:record": "node scripts/record-auth.mjs",
+    "auth:buyer": "node scripts/record-auth.mjs buyer",
+    "auth:vendor": "node scripts/record-auth.mjs vendor",
+    "auth:admin": "node scripts/record-auth.mjs admin",
+    "auth:hr": "node scripts/record-auth.mjs hr",
+    "auth:finance": "node scripts/record-auth.mjs finance",
+    "auth:dataentry": "node scripts/record-auth.mjs dataentry",
+    "auth:support": "node scripts/record-auth.mjs support",
+    "auth:sales": "node scripts/record-auth.mjs sales",
+    "auth:manager": "node scripts/record-auth.mjs manager",
+    "auth:vp": "node scripts/record-auth.mjs vp"
+  },
+  "devDependencies": {
+    "@playwright/test": "latest",
+    "dotenv": "latest"
+  }
+}
+

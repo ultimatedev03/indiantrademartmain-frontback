@@ -2,8 +2,22 @@ import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
 const normalizeBrandSlug = (value = '') => String(value || '').trim().toLowerCase();
 const normalizeVendorSlug = (value = '') => String(value || '').trim().toLowerCase();
+const buildPremiumBrandRouteSlug = (brandSlug = '') =>
+  `premium-brand-${normalizeBrandSlug(brandSlug) || 'brand'}`;
 
 export const PREMIUM_BRANDS = [
+  {
+    id: 'itm',
+    name: 'ITM',
+    slug: 'itm',
+    logo_url: '/itm-logo.png',
+    tagline: 'Marketplace-led sourcing, supplier discovery, and growth support.',
+    description:
+      'ITM connects buyers and suppliers across India through marketplace discovery, lead routing, and business growth support.',
+    primaryBusinessType: 'B2B Marketplace Services',
+    highlights: ['Supplier Discovery', 'Lead Routing', 'Marketplace Support'],
+    preferFallbackContent: true,
+  },
   {
     id: 'pdce',
     name: 'PDCE',
@@ -93,12 +107,12 @@ export const PREMIUM_BRANDS = [
     name: 'PSS Lab',
     slug: 'pss-lab',
     logo_url: 'https://eimager.com/images/pss-lab-now.png',
-    vendorSlug: 'pdce-sristech-testing-and-research-laboratory-pvt-ltd',
     tagline: 'Laboratory evaluation and quality testing support.',
     description:
       'PSS Lab is featured for lab testing, product evaluation, and quality-check workflows.',
     primaryBusinessType: 'Laboratory Testing Services',
     highlights: ['Lab Testing', 'Product Evaluation', 'Quality Checks'],
+    preferFallbackContent: true,
   },
 ];
 
@@ -123,9 +137,54 @@ export const getPremiumBrandByVendorSlug = (vendorSlug = '') => {
   return matches.length === 1 ? matches[0] : null;
 };
 
+export const shouldUsePremiumBrandFallbackContent = (brand = null) => Boolean(brand?.preferFallbackContent);
+
+export const getPremiumBrandProfileSlug = (brandOrSlug = null) => {
+  const brand =
+    typeof brandOrSlug === 'string' ? getPremiumBrandBySlug(brandOrSlug) : brandOrSlug;
+  if (!brand) return buildPremiumBrandRouteSlug('');
+  if (shouldUsePremiumBrandFallbackContent(brand) || !brand.vendorSlug) {
+    return buildPremiumBrandRouteSlug(brand.slug);
+  }
+  return normalizeVendorSlug(brand.vendorSlug);
+};
+
+export const getPremiumBrandFallbackOfferings = (brand = null) => {
+  if (!brand) return [];
+
+  const offeringsSource =
+    Array.isArray(brand.offerings) && brand.offerings.length
+      ? brand.offerings
+      : Array.isArray(brand.highlights)
+        ? brand.highlights
+        : [];
+
+  return offeringsSource
+    .map((entry, index) => {
+      const item = typeof entry === 'string' ? { name: entry } : entry;
+      const name = String(item?.name || item?.title || '').trim();
+      if (!name) return null;
+
+      return {
+        id: `brand-offering-${brand.slug || 'brand'}-${index + 1}`,
+        name,
+        category: item?.category || brand.primaryBusinessType || 'Business Services',
+        head_category_name: item?.category || brand.primaryBusinessType || 'Business Services',
+        sub_category_name: brand.name || 'Premium Brand',
+        micro_category_name: item?.subCategory || null,
+        price: item?.price || 'Price on request',
+        image: item?.image || brand.logo_url || '/itm-logo.png',
+        description: item?.description || brand.description || '',
+        isBrandOffering: true,
+      };
+    })
+    .filter(Boolean);
+};
+
 export const getPremiumBrandTargetPath = (slug = '') => {
   const brand = getPremiumBrandBySlug(slug);
-  if (!brand?.vendorSlug) return '/directory/vendor';
-  const basePath = getVendorProfilePath({ slug: brand.vendorSlug }) || '/directory/vendor';
+  if (!brand) return '/directory/vendor';
+  const basePath =
+    getVendorProfilePath({ slug: getPremiumBrandProfileSlug(brand) }) || '/directory/vendor';
   return `${basePath}?brand=${encodeURIComponent(brand.slug)}`;
 };

@@ -18,9 +18,10 @@ import {
   Building2,
   User,
   MapPin,
-  ArrowLeft
+  Home
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import NotificationBell from '@/shared/components/NotificationBell';
 import { useGlobalInputSanitizer } from '@/shared/hooks/useGlobalInputSanitizer';
 import { getPublicSiteUrl } from '@/shared/lib/publicSite';
@@ -61,8 +62,12 @@ const EmployeeLayout = ({ allowedRole }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const isSupportWorkspace = location.pathname.startsWith('/employee/support');
   const publicHomeUrl = getPublicSiteUrl(typeof window !== 'undefined' ? window.location : null);
+  const employeeAvatarUrl = String(user?.avatar_url || '').trim();
+  const employeeAvatarFallback = String(user?.avatar || user?.name?.charAt(0) || 'E')
+    .trim()
+    .charAt(0)
+    .toUpperCase();
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -176,10 +181,13 @@ const EmployeeLayout = ({ allowedRole }) => {
         </nav>
 
         <div className="p-4 border-t border-neutral-100 bg-neutral-50">
-          <div className="flex items-center gap-3 mb-4 px-2">
-            <div className="w-8 h-8 rounded-full bg-[#8B6F47] flex items-center justify-center text-white font-bold">
-              {user?.avatar || user?.name?.charAt(0) || 'E'}
-            </div>
+          <div className="flex items-center gap-3 mb-4 px-2" aria-label="Employee profile sidebar">
+            <Avatar className="h-8 w-8 border border-[#8B6F47]/15">
+              <AvatarImage src={employeeAvatarUrl} alt={user?.name || 'Employee'} />
+              <AvatarFallback className="bg-[#8B6F47] text-white font-bold">
+                {employeeAvatarFallback}
+              </AvatarFallback>
+            </Avatar>
             <div className="overflow-hidden">
               <p className="text-sm font-medium text-neutral-900 truncate">{user?.name}</p>
               <p className="text-xs text-neutral-500 truncate">{user?.role?.replace('_', ' ')}</p>
@@ -210,19 +218,32 @@ const EmployeeLayout = ({ allowedRole }) => {
             </h1>
           </div>
           <div className="flex items-center gap-3">
-            {isSupportWorkspace ? (
-              <a
-                href={publicHomeUrl}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                <span>Back to Home</span>
-              </a>
-            ) : null}
+            <a
+              href={publicHomeUrl}
+              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900"
+            >
+              <Home className="h-4 w-4" />
+              <span>Home</span>
+            </a>
             <NotificationBell
               userId={user?.user_id || user?.id || null}
               userEmail={user?.email || null}
             />
+            <div
+              className="hidden sm:flex items-center gap-3 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm"
+              aria-label="Employee profile"
+            >
+              <Avatar className="h-8 w-8 border border-[#8B6F47]/15">
+                <AvatarImage src={employeeAvatarUrl} alt={user?.name || 'Employee'} />
+                <AvatarFallback className="bg-[#8B6F47] text-white font-bold">
+                  {employeeAvatarFallback}
+                </AvatarFallback>
+              </Avatar>
+              <div className="hidden md:block min-w-0">
+                <p className="max-w-[160px] truncate text-sm font-medium text-slate-900">{user?.name}</p>
+                <p className="truncate text-xs text-slate-500">{user?.role?.replace('_', ' ')}</p>
+              </div>
+            </div>
           </div>
         </header>
 

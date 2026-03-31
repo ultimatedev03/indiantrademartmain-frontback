@@ -26,8 +26,8 @@ const CATEGORY_TABLE_BY_LEVEL = {
 const CATEGORY_IMAGE_MIN_BYTES = 2 * 1024; // 2KB
 const CATEGORY_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
 const PRODUCT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024; // 10MB
-const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
-const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
+const PRODUCT_IMAGE_MIN_BYTES = 50 * 1024; // 50KB
+const PRODUCT_IMAGE_MAX_BYTES = 1024 * 1024; // 1MB
 const DEFAULT_PRODUCT_UPLOAD_BUCKETS_BY_TYPE = {
   image: ['product-images', 'product-media', 'objects', 'avatars'],
   video: ['product-media', 'product-images', 'objects', 'avatars'],
@@ -810,10 +810,10 @@ router.post('/product-media-upload', requireAuth(), async (req, res) => {
     }
     if (finalType === 'image') {
       if (buffer.length < PRODUCT_IMAGE_MIN_BYTES) {
-        return res.status(400).json({ success: false, error: 'Image too small (minimum 100KB)' });
+        return res.status(400).json({ success: false, error: 'Image too small (minimum 50KB)' });
       }
       if (buffer.length > PRODUCT_IMAGE_MAX_BYTES) {
-        return res.status(413).json({ success: false, error: 'Image too large (maximum 800KB)' });
+        return res.status(413).json({ success: false, error: 'Image too large (maximum 1MB)' });
       }
     }
 

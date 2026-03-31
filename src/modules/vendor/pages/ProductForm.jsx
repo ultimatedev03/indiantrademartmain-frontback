@@ -18,8 +18,8 @@ import { ArrowLeft, ChevronDown, Loader2, Upload, X, Plus } from 'lucide-react';
 import { useSubdomain } from '@/contexts/SubdomainContext';
 
 const MAX_IMAGES = 7;
-const MIN_PRODUCT_IMAGE_BYTES = 100 * 1024;
-const MAX_PRODUCT_IMAGE_BYTES = 800 * 1024;
+const MIN_PRODUCT_IMAGE_BYTES = 50 * 1024;
+const MAX_PRODUCT_IMAGE_BYTES = 1024 * 1024;
 
 // ✅ IndiaMART-style common UOMs (practical + familiar)
 const UNIT_OPTIONS = [
@@ -69,7 +69,11 @@ const SimpleSelect = ({
 );
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
-const bytesToKb = (bytes = 0) => `${Math.ceil(Number(bytes || 0) / 1024)}KB`;
+const formatImageSize = (bytes = 0) => {
+  const size = Number(bytes || 0);
+  if (size >= 1024 * 1024) return `${Math.round(size / (1024 * 1024))}MB`;
+  return `${Math.ceil(size / 1024)}KB`;
+};
 const toNonNegativeNumber = (value) => {
   if (value === null || value === undefined || String(value).trim() === '') return null;
   const parsed = Number(value);
@@ -626,7 +630,7 @@ const ProductForm = () => {
     if (tooSmall.length) {
       toast({
         title: 'Image too small',
-        description: `${tooSmall[0].name}: minimum size is ${bytesToKb(MIN_PRODUCT_IMAGE_BYTES)}.`,
+        description: `${tooSmall[0].name}: minimum size is ${formatImageSize(MIN_PRODUCT_IMAGE_BYTES)}.`,
         variant: 'destructive',
       });
       input.value = '';
@@ -637,7 +641,7 @@ const ProductForm = () => {
     if (tooLarge.length) {
       toast({
         title: 'Image too large',
-        description: `${tooLarge[0].name}: maximum size is ${bytesToKb(MAX_PRODUCT_IMAGE_BYTES)}.`,
+        description: `${tooLarge[0].name}: maximum size is ${formatImageSize(MAX_PRODUCT_IMAGE_BYTES)}.`,
         variant: 'destructive',
       });
       input.value = '';
@@ -1028,7 +1032,7 @@ const ProductForm = () => {
                 </div>
               )}
               <p className="text-[11px] text-slate-500">
-                Allowed image size: {bytesToKb(MIN_PRODUCT_IMAGE_BYTES)} to {bytesToKb(MAX_PRODUCT_IMAGE_BYTES)}.
+                Allowed image size: {formatImageSize(MIN_PRODUCT_IMAGE_BYTES)} to {formatImageSize(MAX_PRODUCT_IMAGE_BYTES)}.
               </p>
             </CardContent>
           </Card>

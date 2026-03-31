@@ -15,8 +15,8 @@ const FALLBACK_SERVICE_IMAGE =
 const ALLOWED_UPLOAD_BUCKETS = new Set(['avatars', 'product-images', 'product-media']);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const GENERIC_IMAGE_MIN_BYTES = 2 * 1024;
-const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024;
-const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024;
+const PRODUCT_IMAGE_MIN_BYTES = 50 * 1024;
+const PRODUCT_IMAGE_MAX_BYTES = 1024 * 1024;
 const KYC_DOC_MIN_BYTES = 100 * 1024;
 const KYC_DOC_MAX_BYTES = 2 * 1024 * 1024;
 const KYC_ALLOWED_DOC_TYPES = new Set(['GST', 'PAN', 'AADHAR', 'BANK']);
@@ -1905,10 +1905,10 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
     }
     if (bucket === 'product-images') {
       if (buffer.length < PRODUCT_IMAGE_MIN_BYTES) {
-        return res.status(400).json({ success: false, error: 'Image too small (minimum 100KB)' });
+        return res.status(400).json({ success: false, error: 'Image too small (minimum 50KB)' });
       }
       if (buffer.length > PRODUCT_IMAGE_MAX_BYTES) {
-        return res.status(413).json({ success: false, error: 'Image too large (maximum 800KB)' });
+        return res.status(413).json({ success: false, error: 'Image too large (maximum 1MB)' });
       }
     }
     if (uploadPurpose === 'KYC_DOCUMENT') {
