@@ -247,6 +247,75 @@ function buildVendorStatusUpdates(current, { isActive, reason = "" }) {
   return updates;
 }
 
+const MIN_VALID_JOIN_DATE_MS = Date.UTC(2000, 0, 1);
+
+function normalizeEpochMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric < 1e12 ? numeric * 1000 : numeric;
+}
+
+function parseJoinedDateValue(value) {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    const time = value.getTime();
+    if (Number.isNaN(time) || time < MIN_VALID_JOIN_DATE_MS) return null;
+    return value;
+  }
+
+  if (typeof value === "number") {
+    const epochMs = normalizeEpochMs(value);
+    if (!epochMs) return null;
+    const parsed = new Date(epochMs);
+    return parseJoinedDateValue(parsed);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{10,13}$/.test(trimmed)) {
+      return parseJoinedDateValue(Number(trimmed));
+    }
+    const parsed = new Date(trimmed);
+    return parseJoinedDateValue(parsed);
+  }
+
+  if (typeof value === "object") {
+    if (typeof value.toDate === "function") {
+      return parseJoinedDateValue(value.toDate());
+    }
+    if ("seconds" in value) {
+      return parseJoinedDateValue(value.seconds);
+    }
+    if ("_seconds" in value) {
+      return parseJoinedDateValue(value._seconds);
+    }
+    if ("milliseconds" in value) {
+      return parseJoinedDateValue(value.milliseconds);
+    }
+    if ("ms" in value) {
+      return parseJoinedDateValue(value.ms);
+    }
+    if ("iso" in value) {
+      return parseJoinedDateValue(value.iso);
+    }
+  }
+
+  return null;
+}
+
+function getVendorJoinedOn(vendor = null) {
+  const parsed =
+    parseJoinedDateValue(vendor?.joined_on) ||
+    parseJoinedDateValue(vendor?.joined_at) ||
+    parseJoinedDateValue(vendor?.registration_date) ||
+    parseJoinedDateValue(vendor?.registered_at) ||
+    parseJoinedDateValue(vendor?.created_at);
+
+  return parsed ? parsed.toISOString() : null;
+}
+
 function buildAdminSupportTicketId() {
   const rand = Math.floor(100 + Math.random() * 900);
   return `TKT-${Date.now()}-${rand}`;
@@ -538,6 +607,7 @@ router.get("/vendors", async (req, res) => {
       const documentCount = documentTypeMap.get(v.id)?.size || 0;
       return {
         ...v,
+        joined_on: getVendorJoinedOn(v),
         document_count: documentCount,
         has_all_required_documents: documentCount >= REQUIRED_VENDOR_DOCUMENT_TYPES.size,
         product_count: countMap[v.id] || 0,

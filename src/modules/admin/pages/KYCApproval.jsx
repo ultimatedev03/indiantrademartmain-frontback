@@ -8,10 +8,11 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { Search, CheckCircle, XCircle, Eye, FileText, Loader2, ShieldAlert, Building2, Mail, Phone, Filter, Download } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
-const KYC_VENDOR_BATCH_SIZE = 1000;
+const KYC_VENDOR_BATCH_SIZE = 5000;
 const MIN_VALID_JOIN_DATE_MS = Date.UTC(2000, 0, 1);
 
 const looksLikePdf = (v = '') => String(v || '').toLowerCase().includes('.pdf');
@@ -21,11 +22,62 @@ const prettyLabel = (t = '') => {
   return x ? x.toUpperCase() : 'DOCUMENT';
 };
 
+const normalizeEpochMs = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return numeric < 1e12 ? numeric * 1000 : numeric;
+};
+
+const parseJoinedDateValue = (value) => {
+  if (!value) return null;
+
+  if (value instanceof Date) {
+    const time = value.getTime();
+    if (Number.isNaN(time) || time < MIN_VALID_JOIN_DATE_MS) return null;
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    const epochMs = normalizeEpochMs(value);
+    if (!epochMs) return null;
+    return parseJoinedDateValue(new Date(epochMs));
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d{10,13}$/.test(trimmed)) {
+      return parseJoinedDateValue(Number(trimmed));
+    }
+    return parseJoinedDateValue(new Date(trimmed));
+  }
+
+  if (typeof value === 'object') {
+    if (typeof value.toDate === 'function') return parseJoinedDateValue(value.toDate());
+    if ('seconds' in value) return parseJoinedDateValue(value.seconds);
+    if ('_seconds' in value) return parseJoinedDateValue(value._seconds);
+    if ('milliseconds' in value) return parseJoinedDateValue(value.milliseconds);
+    if ('ms' in value) return parseJoinedDateValue(value.ms);
+    if ('iso' in value) return parseJoinedDateValue(value.iso);
+  }
+
+  return null;
+};
+
+const resolveVendorJoinedOn = (vendor = null) => {
+  const parsed =
+    parseJoinedDateValue(vendor?.joined_on) ||
+    parseJoinedDateValue(vendor?.joined_at) ||
+    parseJoinedDateValue(vendor?.registration_date) ||
+    parseJoinedDateValue(vendor?.registered_at) ||
+    parseJoinedDateValue(vendor?.created_at);
+
+  return parsed ? parsed.toISOString() : null;
+};
+
 const formatJoinedDate = (value) => {
-  if (!value) return '-';
-  const date = new Date(value);
-  const time = date.getTime();
-  if (Number.isNaN(time) || time < MIN_VALID_JOIN_DATE_MS) return '-';
+  const date = parseJoinedDateValue(value);
+  if (!date) return '-';
   return date.toLocaleDateString('en-IN');
 };
 
@@ -57,6 +109,12 @@ const getKycBase = () => {
   const override = import.meta.env.VITE_KYC_API_BASE;
   if (override && String(override).trim()) return String(override).trim();
   return isLocalHost() ? '/api/kyc' : '/.netlify/functions/kyc';
+};
+
+const getAdminBase = () => {
+  const override = import.meta.env.VITE_ADMIN_API_BASE;
+  if (override && String(override).trim()) return String(override).trim();
+  return isLocalHost() ? '/api/admin' : '/.netlify/functions/admin';
 };
 
 // ✅ Prevent "Unexpected token <" by validating response content-type
@@ -105,6 +163,7 @@ const KYCApproval = () => {
   const [imgErrors, setImgErrors] = useState({});
 
   const KYC_API_BASE = getKycBase();
+  const ADMIN_API_BASE = getAdminBase();
 
   const loadVendors = useCallback(async () => {
     setLoading(true);
@@ -113,25 +172,31 @@ const KYCApproval = () => {
       let expectedTotal = 0;
       let offset = 0;
       const statusMap = { pending: 'PENDING', approved: 'APPROVED', rejected: 'REJECTED', submitted: 'SUBMITTED' };
+      const normalizedStatus = statusMap[filterStatus] || null;
 
       while (true) {
-        let query = offset === 0
-          ? supabase.from('vendors').select('*, products(count)', { count: 'exact' })
-          : supabase.from('vendors').select('*, products(count)');
-
-        if (filterStatus && filterStatus !== 'all') {
-          query = query.eq('kyc_status', statusMap[filterStatus] || filterStatus.toUpperCase());
+        const params = new URLSearchParams({
+          limit: String(KYC_VENDOR_BATCH_SIZE),
+          offset: String(offset),
+        });
+        if (normalizedStatus) {
+          params.set('kyc', normalizedStatus);
         }
 
-        const { data, error, count } = await query
-          .order('created_at', { ascending: false })
-          .range(offset, offset + KYC_VENDOR_BATCH_SIZE - 1);
+        const response = await fetchWithCsrf(`${ADMIN_API_BASE}/vendors?${params.toString()}`);
+        const payload = await safeReadJson(response);
+        if (!payload?.success) {
+          throw new Error(payload?.error || 'Failed to load vendors');
+        }
 
-        if (error) throw error;
-
-        const batch = data || [];
+        const batch = (Array.isArray(payload.vendors) ? payload.vendors : []).map((vendor) => ({
+          ...vendor,
+          joined_on: resolveVendorJoinedOn(vendor),
+          product_count:
+            Number(vendor?.product_count ?? vendor?.products?.[0]?.count ?? vendor?.products_count ?? 0) || 0,
+        }));
         if (offset === 0) {
-          expectedTotal = Number(count) || batch.length;
+          expectedTotal = Number(payload.total) || batch.length;
         }
 
         collectedVendors.push(...batch);
@@ -153,7 +218,7 @@ const KYCApproval = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterStatus, toast]);
+  }, [ADMIN_API_BASE, filterStatus, toast]);
 
   const filteredVendors = useMemo(() => {
     const trimmedSearch = String(searchTerm || '').trim().toLowerCase();
@@ -395,10 +460,10 @@ const KYCApproval = () => {
                     </TableCell>
 
                     <TableCell>
-                      <span className="text-sm font-medium text-gray-600">{vendor.products?.[0]?.count || 0}</span>
+                      <span className="text-sm font-medium text-gray-600">{vendor.product_count || 0}</span>
                     </TableCell>
 
-                    <TableCell className="text-sm text-gray-500">{formatJoinedDate(vendor.created_at)}</TableCell>
+                    <TableCell className="text-sm text-gray-500">{formatJoinedDate(vendor.joined_on || vendor.created_at)}</TableCell>
 
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">

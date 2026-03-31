@@ -305,7 +305,9 @@ export default function Vendors() {
           norm(vendor?.kyc_status || "PENDING"),
           vendor?.package?.plan_name || "FREE",
           vendor?.product_count || 0,
-          vendor?.created_at ? new Date(vendor.created_at).toLocaleDateString("en-GB") : "",
+          vendor?.joined_on || vendor?.created_at
+            ? new Date(vendor.joined_on || vendor.created_at).toLocaleDateString("en-GB")
+            : "",
           vendor?.is_active !== false ? "ACTIVE" : "TERMINATED",
         ]
           .map(escapeCsv)
@@ -643,7 +645,9 @@ export default function Vendors() {
                           </TableCell>
 
                           <TableCell className="px-2 py-2 text-sm text-gray-500">
-                            {v.created_at ? new Date(v.created_at).toLocaleDateString("en-GB") : "—"}
+                            {v.joined_on || v.created_at
+                              ? new Date(v.joined_on || v.created_at).toLocaleDateString("en-GB")
+                              : "—"}
                           </TableCell>
 
                           <TableCell className="px-2 py-2">
