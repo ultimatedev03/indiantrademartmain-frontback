@@ -23,7 +23,7 @@ const CATEGORY_TABLE_BY_LEVEL = {
   sub: 'sub_categories',
   micro: 'micro_categories',
 };
-const CATEGORY_IMAGE_MIN_BYTES = 2 * 1024; // 2KB
+const CATEGORY_IMAGE_MIN_BYTES = 10 * 1024; // 10KB
 const CATEGORY_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
 const PRODUCT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024; // 10MB
 const PRODUCT_IMAGE_MIN_BYTES = 50 * 1024; // 50KB

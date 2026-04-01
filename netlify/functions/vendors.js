@@ -17,7 +17,7 @@ const FALLBACK_SERVICE_IMAGE =
 
 const ALLOWED_UPLOAD_BUCKETS = new Set(['avatars', 'product-images', 'product-media']);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const GENERIC_IMAGE_MIN_BYTES = 2 * 1024;
+const GENERIC_IMAGE_MIN_BYTES = 10 * 1024;
 const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024;
 const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024;
 const KYC_DOC_MIN_BYTES = 100 * 1024;
@@ -1552,7 +1552,7 @@ export const handler = async (event) => {
         const buffer = Buffer.from(parsed.base64, 'base64');
         if (!buffer?.length) return bad(event, 'Empty upload payload');
         if (isImage && bucket !== 'product-images' && uploadPurpose !== 'KYC_DOCUMENT' && buffer.length < GENERIC_IMAGE_MIN_BYTES) {
-          return bad(event, 'Image too small (minimum 2KB)');
+          return bad(event, 'Image too small (minimum 10KB)');
         }
         if (buffer.length > MAX_UPLOAD_BYTES) {
           return json(event, 413, { success: false, error: 'File too large (max 10MB)' });

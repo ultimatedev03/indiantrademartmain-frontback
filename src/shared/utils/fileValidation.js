@@ -1,4 +1,4 @@
-export const MIN_IMAGE_UPLOAD_BYTES = 2 * 1024;
+export const MIN_IMAGE_UPLOAD_BYTES = 10 * 1024;
 
 export const formatFileSize = (bytes = 0) => {
   const size = Number(bytes || 0);

@@ -14,7 +14,7 @@ const FALLBACK_SERVICE_IMAGE =
   'https://images.unsplash.com/photo-1521737604893-d14cc237f11d?auto=format&fit=crop&w=800&q=80';
 const ALLOWED_UPLOAD_BUCKETS = new Set(['avatars', 'product-images', 'product-media']);
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
-const GENERIC_IMAGE_MIN_BYTES = 2 * 1024;
+const GENERIC_IMAGE_MIN_BYTES = 10 * 1024;
 const PRODUCT_IMAGE_MIN_BYTES = 50 * 1024;
 const PRODUCT_IMAGE_MAX_BYTES = 1024 * 1024;
 const KYC_DOC_MIN_BYTES = 100 * 1024;
@@ -1898,7 +1898,7 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
       return res.status(400).json({ success: false, error: 'Empty upload payload' });
     }
     if (isImage && bucket !== 'product-images' && uploadPurpose !== 'KYC_DOCUMENT' && buffer.length < GENERIC_IMAGE_MIN_BYTES) {
-      return res.status(400).json({ success: false, error: 'Image too small (minimum 2KB)' });
+      return res.status(400).json({ success: false, error: 'Image too small (minimum 10KB)' });
     }
     if (buffer.length > MAX_UPLOAD_BYTES) {
       return res.status(413).json({ success: false, error: 'File too large (max 10MB)' });

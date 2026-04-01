@@ -16,8 +16,8 @@ const UploadKYCDocuments = ({ vendorId, onSuccess }) => {
   const handleFileChange = (e) => {
       const f = e.target.files[0];
       if (f) {
-          if (f.size < 2 * 1024) {
-              toast({ title: "Error", description: "File too small (minimum 2KB)", variant: "destructive" });
+          if (f.size < 10 * 1024) {
+              toast({ title: "Error", description: "File too small (minimum 10KB)", variant: "destructive" });
               try { e.target.value = ''; } catch (_) {}
               return;
           }

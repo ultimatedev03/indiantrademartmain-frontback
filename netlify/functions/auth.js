@@ -51,7 +51,7 @@ const normalizeRole = (role) => {
 };
 const BUYER_NOT_REGISTERED_MESSAGE = 'This email is not registered as buyer';
 
-const BUYER_AVATAR_MIN_BYTES = 2 * 1024;
+const BUYER_AVATAR_MIN_BYTES = 10 * 1024;
 const BUYER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 const BUYER_AVATAR_ALLOWED_MIME = new Set([
   'image/jpeg',
@@ -1437,7 +1437,7 @@ export const handler = async (event) => {
       }
 
       if (!buffer || buffer.length === 0) return bad(event, 'Empty upload payload');
-      if (buffer.length < BUYER_AVATAR_MIN_BYTES) return bad(event, 'Image too small (minimum 2KB)');
+      if (buffer.length < BUYER_AVATAR_MIN_BYTES) return bad(event, 'Image too small (minimum 10KB)');
       if (buffer.length > BUYER_AVATAR_MAX_BYTES) return bad(event, 'Image too large (max 5MB)');
 
       const rawName = sanitizeFilename(body?.file_name || body?.fileName || 'avatar');
