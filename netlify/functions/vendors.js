@@ -2296,15 +2296,15 @@ export const handler = async (event) => {
       // /me/leads
       // -------------------------
       if (event.httpMethod === 'GET' && tail[1] === 'leads' && tail.length === 2) {
-        const vendor = await resolveVendorForUser(user);
-        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+        const vendorIds = await resolveVendorIdsForUser(user);
+        if (!vendorIds.length) return bad(event, 'Vendor profile not found', null, 404);
 
         const { data: purchases, error: purchaseError } = await supabase
           .from('lead_purchases')
           .select(
-            'id, lead_id, amount, purchase_price, payment_status, purchase_date, purchase_datetime, consumption_type, lead_status, subscription_plan_name'
+            'id, vendor_id, lead_id, amount, purchase_price, payment_status, purchase_date, purchase_datetime, consumption_type, lead_status, subscription_plan_name'
           )
-          .eq('vendor_id', vendor.id)
+          .in('vendor_id', vendorIds)
           .order('purchase_datetime', { ascending: false, nullsFirst: false })
           .order('purchase_date', { ascending: false });
 
@@ -2357,7 +2357,7 @@ export const handler = async (event) => {
         const { data: directRows, error: directError } = await supabase
           .from('leads')
           .select('*')
-          .eq('vendor_id', vendor.id)
+          .in('vendor_id', vendorIds)
           .order('created_at', { ascending: false });
 
         if (directError) {
