@@ -2,7 +2,7 @@ import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
 import { normalizeEmail } from '../lib/auth.js';
-import { requireAuth } from '../middleware/requireAuth.js';
+import { optionalAuth, requireAuth } from '../middleware/requireAuth.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
 import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
 
@@ -3222,7 +3222,7 @@ router.delete('/:vendorId/favorite', requireAuth({ roles: ['BUYER'] }), async (r
   }
 });
 
-router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
+router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
   try {
     const rawVendorId = String(req.params?.vendorId || '').trim();
     const isMarketplaceRequest = rawVendorId.toLowerCase() === 'marketplace';
@@ -3257,11 +3257,7 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       });
     }
 
-    const buyerProfile = await resolveBuyerProfileForUser(req.user);
-    const role = String(req.user?.role || '').toUpperCase();
-    if (!buyerProfile && role !== 'BUYER') {
-      return res.status(403).json({ success: false, error: 'Buyer account required' });
-    }
+    const buyerProfile = req.user ? await resolveBuyerProfileForUser(req.user) : null;
 
     const fallbackBuyerName = nonEmptyText(
       req.user?.email ? String(req.user.email).split('@')[0] : 'Buyer',
@@ -3292,6 +3288,16 @@ router.post('/:vendorId/leads', requireAuth(), async (req, res) => {
       buyerProfile?.company_name || payload.company_name,
       200
     );
+
+    if (!buyerName) {
+      return res.status(400).json({ success: false, error: 'Buyer name is required' });
+    }
+    if (!buyerEmail) {
+      return res.status(400).json({ success: false, error: 'Buyer email is required' });
+    }
+    if (!buyerPhone) {
+      return res.status(400).json({ success: false, error: 'Buyer phone is required' });
+    }
 
     const title = nonEmptyText(
       payload.title || payload.product_name || payload.product_interest || 'Product enquiry',

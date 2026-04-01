@@ -1,4 +1,5 @@
-import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 const stripUndefined = (payload = {}) =>
   Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
@@ -10,26 +11,6 @@ const sortKeys = (payload = {}) =>
       acc[key] = payload[key];
       return acc;
     }, {});
-
-const columnFromMissingError = (error) => {
-  const raw = `${error?.message || ''} ${error?.details || ''}`.trim();
-  const match =
-    raw.match(/column\s+"([^"]+)"/i) ||
-    raw.match(/column\s+'([^']+)'/i) ||
-    raw.match(/find\s+the\s+'([^']+)'\s+column/i) ||
-    raw.match(/find\s+the\s+"([^"]+)"\s+column/i);
-
-  return String(match?.[1] || '').trim();
-};
-
-const isMissingColumnError = (error) => {
-  const raw = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
-  return (
-    String(error?.code || '').toUpperCase() === '42703' ||
-    raw.includes('does not exist') ||
-    raw.includes('schema cache')
-  );
-};
 
 const buildMinimalLeadPayload = (payload = {}) =>
   stripUndefined({
@@ -62,6 +43,25 @@ export const normalizeIndianPhone = (value) => {
 
 export const isValidIndianPhone = (value) => /^[6-9]\d{9}$/.test(normalizeIndianPhone(value));
 
+const postLeadPayload = async (payload = {}) => {
+  const vendorId = String(payload.vendor_id || '').trim();
+  const endpoint = vendorId
+    ? apiUrl(`/api/vendors/${encodeURIComponent(vendorId)}/leads`)
+    : apiUrl('/api/vendors/marketplace/leads');
+
+  const response = await fetchWithCsrf(endpoint, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok || !json?.success) {
+    throw new Error(json?.error || 'Failed to submit requirement');
+  }
+
+  return json?.lead || json?.proposal || json || null;
+};
+
 export const submitPublicLead = async (leadPayload = {}) => {
   const attempts = [stripUndefined({ ...leadPayload })];
   const minimalPayload = buildMinimalLeadPayload(leadPayload);
@@ -84,24 +84,10 @@ export const submitPublicLead = async (leadPayload = {}) => {
     if (seen.has(signature)) continue;
     seen.add(signature);
 
-    const { data, error } = await supabase
-      .from('leads')
-      .insert([payload])
-      .select()
-      .single();
-
-    if (!error) return data;
-
-    lastError = error;
-
-    if (isMissingColumnError(error)) {
-      const missingColumn = columnFromMissingError(error);
-      if (missingColumn && Object.prototype.hasOwnProperty.call(payload, missingColumn)) {
-        const retryPayload = { ...payload };
-        delete retryPayload[missingColumn];
-        attempts.push(stripUndefined(retryPayload));
-      }
-      continue;
+    try {
+      return await postLeadPayload(payload);
+    } catch (error) {
+      lastError = error;
     }
   }
 

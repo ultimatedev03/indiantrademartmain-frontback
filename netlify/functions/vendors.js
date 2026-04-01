@@ -2604,14 +2604,14 @@ export const handler = async (event) => {
     }
 
     if (event.httpMethod === 'POST' && action === 'leads') {
-      if (!ensureCsrfValid(event)) {
+      const authUser = getAuthUser(event);
+      const hasAuthCookie = Boolean(getCookie(event, AUTH_COOKIE_NAME));
+      if (hasAuthCookie && !parseBearerToken(event.headers || {}) && !ensureCsrfValid(event)) {
         return forbidden(event, 'CSRF token mismatch');
       }
 
       const payload = readBody(event);
-
-      const { user, error } = requireRole(event);
-      if (error) return error;
+      const user = authUser;
 
       const rawVendorId = String(vendorId || '').trim();
       const isMarketplaceRequest = rawVendorId.toLowerCase() === 'marketplace';
@@ -2661,11 +2661,6 @@ export const handler = async (event) => {
         buyerProfile = Array.isArray(buyerByEmail) && buyerByEmail.length ? buyerByEmail[0] : null;
       }
 
-      const role = normalizeRole(user?.role);
-      if (!buyerProfile && role !== 'BUYER') {
-        return forbidden(event, 'Buyer account required');
-      }
-
       const fallbackBuyerName = nonEmptyText(
         user?.email ? String(user.email).split('@')[0] : 'Buyer',
         120
@@ -2694,6 +2689,16 @@ export const handler = async (event) => {
         buyerProfile?.company_name || payload?.company_name,
         200
       );
+
+      if (!buyerName) {
+        return bad(event, 'Buyer name is required');
+      }
+      if (!buyerEmail) {
+        return bad(event, 'Buyer email is required');
+      }
+      if (!buyerPhone) {
+        return bad(event, 'Buyer phone is required');
+      }
 
       const title = nonEmptyText(
         payload?.title || payload?.product_name || payload?.product_interest || 'Product enquiry',

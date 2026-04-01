@@ -18,6 +18,16 @@ function isSafeMethod(method) {
   return m === 'GET' || m === 'HEAD' || m === 'OPTIONS';
 }
 
+function buildActor(decoded = {}, roleOverride = null) {
+  const role = normalizeRole(roleOverride || decoded.role || 'USER');
+  return {
+    id: decoded.sub,
+    email: decoded.email || null,
+    role,
+    type: decoded.type || 'USER',
+  };
+}
+
 const INTERNAL_ROLE_SET = new Set([
   'ADMIN',
   'HR',
@@ -165,24 +175,67 @@ export function requireAuth({ roles = [] } = {}) {
         }
       }
 
-      req.user = {
-        id: decoded.sub,
-        email: decoded.email || null,
-        role,
-        type: decoded.type || 'USER',
-      };
+      req.user = buildActor(decoded, role);
 
       req.actor = {
-        id: decoded.sub,
-        type: decoded.type || 'USER',
-        role,
-        email: decoded.email || null,
+        ...req.user,
       };
 
       return next();
     } catch (error) {
       console.error('[Auth] requireAuth failed:', error?.message || error);
       return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+  };
+}
+
+export function optionalAuth() {
+  return async (req, _res, next) => {
+    try {
+      if (String(req.method || '').toUpperCase() === 'OPTIONS') {
+        return next();
+      }
+
+      const { AUTH_COOKIE_NAME, CSRF_COOKIE_NAME } = getAuthCookieNames();
+      const tokenFromCookie = getCookie(req, AUTH_COOKIE_NAME);
+      const tokenFromBearer = parseBearerToken(req);
+      const token = tokenFromBearer || tokenFromCookie;
+      const tokenSource = tokenFromBearer ? 'bearer' : tokenFromCookie ? 'cookie' : null;
+
+      if (!token) {
+        req.user = null;
+        req.actor = null;
+        return next();
+      }
+
+      const decoded = verifyAuthToken(token);
+      if (!decoded?.sub) {
+        req.user = null;
+        req.actor = null;
+        return next();
+      }
+
+      if (!isSafeMethod(req.method) && tokenSource !== 'bearer') {
+        const csrfCookie = getCookie(req, CSRF_COOKIE_NAME);
+        const csrfHeader =
+          req.headers['x-csrf-token'] ||
+          req.headers['x-xsrf-token'] ||
+          req.headers['csrf-token'];
+
+        if (!csrfCookie || !csrfHeader || String(csrfCookie) !== String(csrfHeader)) {
+          req.user = null;
+          req.actor = null;
+          return next();
+        }
+      }
+
+      req.user = buildActor(decoded);
+      req.actor = { ...req.user };
+      return next();
+    } catch {
+      req.user = null;
+      req.actor = null;
+      return next();
     }
   };
 }
