@@ -69,6 +69,36 @@ async function safeReadJson(res) {
 const norm = (v) => String(v || "").toUpperCase();
 const VENDOR_PAGE_SIZE = 10;
 const VENDOR_EXPORT_BATCH_SIZE = 1000;
+const REQUIRED_VENDOR_DOCUMENT_COUNT = 4;
+
+const getVendorDocumentPriority = (vendor) => {
+  const documentCount = Number(vendor?.document_count || 0);
+  const hasAllRequiredDocuments =
+    vendor?.has_all_required_documents === true || documentCount >= REQUIRED_VENDOR_DOCUMENT_COUNT;
+  const createdAt = vendor?.created_at ? new Date(vendor.created_at).getTime() : 0;
+
+  return {
+    hasAllRequiredDocuments: hasAllRequiredDocuments ? 1 : 0,
+    documentCount,
+    createdAt,
+  };
+};
+
+const sortVendorsByDocumentCompletion = (vendors = []) =>
+  [...vendors].sort((a, b) => {
+    const aPriority = getVendorDocumentPriority(a);
+    const bPriority = getVendorDocumentPriority(b);
+
+    if (bPriority.hasAllRequiredDocuments !== aPriority.hasAllRequiredDocuments) {
+      return bPriority.hasAllRequiredDocuments - aPriority.hasAllRequiredDocuments;
+    }
+
+    if (bPriority.documentCount !== aPriority.documentCount) {
+      return bPriority.documentCount - aPriority.documentCount;
+    }
+
+    return bPriority.createdAt - aPriority.createdAt;
+  });
 
 const kycBadgeClass = (s) => {
   const v = norm(s || "PENDING");
@@ -174,7 +204,9 @@ export default function Vendors() {
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
 
-      const nextVendors = Array.isArray(data.vendors) ? data.vendors : [];
+      const nextVendors = sortVendorsByDocumentCompletion(
+        Array.isArray(data.vendors) ? data.vendors : []
+      );
       return {
         vendors: nextVendors,
         total: Number(data.total) || nextVendors.length,
@@ -291,11 +323,13 @@ export default function Vendors() {
         throw new Error("No vendors available for export");
       }
 
-      if (exportRows.length < serverTotal) {
-        throw new Error(`Export stopped after ${exportRows.length} of ${serverTotal} vendors`);
+      const sortedExportRows = sortVendorsByDocumentCompletion(exportRows);
+
+      if (sortedExportRows.length < serverTotal) {
+        throw new Error(`Export stopped after ${sortedExportRows.length} of ${serverTotal} vendors`);
       }
 
-      const rows = exportRows.map((vendor) =>
+      const rows = sortedExportRows.map((vendor) =>
         [
           vendor?.vendor_id || "",
           vendor?.company_name || "",
