@@ -1761,11 +1761,17 @@ export const handler = async (event) => {
       // /me/marketplace-leads
       // -------------------------
       if (event.httpMethod === 'GET' && tail[1] === 'marketplace-leads' && tail.length === 2) {
-        const vendor = await resolveVendorForUser(user);
-        if (!vendor) return bad(event, 'Vendor profile not found', null, 404);
+        const vendorIds = await resolveVendorIdsForUser(user);
+        if (!vendorIds.length) return bad(event, 'Vendor profile not found', null, 404);
 
-        const activeSubscription = await resolveActiveSubscriptionForVendor(vendor.id);
-        if (!activeSubscription) {
+        const activeSubscriptions = await Promise.all(
+          vendorIds.map(async (vendorId) => ({
+            vendorId,
+            subscription: await resolveActiveSubscriptionForVendor(vendorId),
+          }))
+        );
+        const activeVendorEntry = activeSubscriptions.find((entry) => entry?.subscription);
+        if (!activeVendorEntry?.subscription) {
           return ok(event, {
             success: true,
             leads: [],
@@ -1798,14 +1804,14 @@ export const handler = async (event) => {
           supabase
             .from('lead_purchases')
             .select('lead_id')
-            .eq('vendor_id', vendor.id),
+            .in('vendor_id', vendorIds),
           allLeadIds.length
             ? supabase
                 .from('lead_purchases')
                 .select('lead_id')
                 .in('lead_id', allLeadIds)
             : Promise.resolve({ data: [], error: null }),
-          loadMarketplaceFilterContext(vendor.id),
+          loadMarketplaceFilterContext(activeVendorEntry.vendorId),
         ]);
 
         if (myPurchasesRes?.error) {

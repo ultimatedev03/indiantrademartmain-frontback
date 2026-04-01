@@ -2247,11 +2247,17 @@ router.delete('/me/documents', requireAuth({ roles: ['VENDOR'] }), async (req, r
 // ✅ Vendor My Leads (auth-required, bypasses RLS)
 router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
-    const vendor = await resolveVendorForUser(req.user);
-    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
 
-    const activeSubscription = await resolveActiveSubscriptionForVendor(vendor.id);
-    if (!activeSubscription) {
+    const activeSubscriptions = await Promise.all(
+      vendorIds.map(async (vendorId) => ({
+        vendorId,
+        subscription: await resolveActiveSubscriptionForVendor(vendorId),
+      }))
+    );
+    const activeVendorEntry = activeSubscriptions.find((entry) => entry?.subscription);
+    if (!activeVendorEntry?.subscription) {
       return res.json({
         success: true,
         leads: [],
@@ -2283,12 +2289,12 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
       supabase
         .from('lead_purchases')
         .select('lead_id')
-        .eq('vendor_id', vendor.id),
+        .in('vendor_id', vendorIds),
       supabase
         .from('lead_purchases')
         .select('lead_id')
         .in('lead_id', allLeadIds),
-      loadMarketplaceFilterContext(vendor.id),
+      loadMarketplaceFilterContext(activeVendorEntry.vendorId),
     ]);
 
     if (myPurchasesRes?.error) {
