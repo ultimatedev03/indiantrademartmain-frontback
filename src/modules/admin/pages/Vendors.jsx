@@ -73,12 +73,18 @@ const REQUIRED_VENDOR_DOCUMENT_COUNT = 4;
 
 const getVendorDocumentPriority = (vendor) => {
   const documentCount = Number(vendor?.document_count || 0);
+  const normalizedKycStatus = norm(vendor?.kyc_status || "");
+  const hasSubmittedKyc =
+    vendor?.has_submitted_kyc === true ||
+    documentCount > 0 ||
+    ["SUBMITTED", "APPROVED", "VERIFIED"].includes(normalizedKycStatus);
   const hasAllRequiredDocuments =
     vendor?.has_all_required_documents === true || documentCount >= REQUIRED_VENDOR_DOCUMENT_COUNT;
   const createdAt = vendor?.created_at ? new Date(vendor.created_at).getTime() : 0;
 
   return {
     hasAllRequiredDocuments: hasAllRequiredDocuments ? 1 : 0,
+    hasSubmittedKyc: hasSubmittedKyc ? 1 : 0,
     documentCount,
     createdAt,
   };
@@ -91,6 +97,10 @@ const sortVendorsByDocumentCompletion = (vendors = []) =>
 
     if (bPriority.hasAllRequiredDocuments !== aPriority.hasAllRequiredDocuments) {
       return bPriority.hasAllRequiredDocuments - aPriority.hasAllRequiredDocuments;
+    }
+
+    if (bPriority.hasSubmittedKyc !== aPriority.hasSubmittedKyc) {
+      return bPriority.hasSubmittedKyc - aPriority.hasSubmittedKyc;
     }
 
     if (bPriority.documentCount !== aPriority.documentCount) {

@@ -637,10 +637,15 @@ router.get("/vendors", async (req, res) => {
       const sub = activeSubByVendor[v.id] || null;
       const plan = sub?.plan_id ? planMap[sub.plan_id] : null;
       const documentCount = documentTypeMap.get(v.id)?.size || 0;
+      const normalizedKycStatus = String(v?.kyc_status || "").trim().toUpperCase();
+      const hasSubmittedKyc =
+        documentCount > 0 ||
+        ["SUBMITTED", "APPROVED", "VERIFIED"].includes(normalizedKycStatus);
       return {
         ...v,
         joined_on: getVendorJoinedOn(v),
         document_count: documentCount,
+        has_submitted_kyc: hasSubmittedKyc,
         has_all_required_documents: documentCount >= REQUIRED_VENDOR_DOCUMENT_TYPES.size,
         product_count: countMap[v.id] || 0,
         package: plan
@@ -658,6 +663,10 @@ router.get("/vendors", async (req, res) => {
       const aAllDocs = a?.has_all_required_documents ? 1 : 0;
       const bAllDocs = b?.has_all_required_documents ? 1 : 0;
       if (bAllDocs !== aAllDocs) return bAllDocs - aAllDocs;
+
+      const aSubmitted = a?.has_submitted_kyc ? 1 : 0;
+      const bSubmitted = b?.has_submitted_kyc ? 1 : 0;
+      if (bSubmitted !== aSubmitted) return bSubmitted - aSubmitted;
 
       const aDocCount = Number(a?.document_count || 0);
       const bDocCount = Number(b?.document_count || 0);
