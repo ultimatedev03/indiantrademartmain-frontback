@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ShieldCheck, Users, Briefcase, Database, Headphones, TrendingUp, ChevronLeft, Wallet } from 'lucide-react';
+import { ShieldCheck, Users, Briefcase, Database, Headphones, TrendingUp, ChevronLeft, Wallet, Network, UserCog } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 const ManagementPortal = () => {
@@ -61,7 +61,7 @@ const ManagementPortal = () => {
             title="Employee"
             icon={Briefcase}
             color="from-purple-500 to-purple-700"
-            description="Access for Staff, Support, and Sales Teams"
+            description="Access for staff, support, sales, managers, and VP leadership"
           >
             <div className="grid gap-3 w-full">
               <Link to="/employee/login?portal=dataentry" className="w-full group">
@@ -77,6 +77,16 @@ const ManagementPortal = () => {
               <Link to="/employee/login?portal=sales" className="w-full">
                 <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
                   <TrendingUp className="h-4 w-4" /> Sales Login
+                </Button>
+              </Link>
+              <Link to="/employee/login?portal=manager" className="w-full">
+                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                  <UserCog className="h-4 w-4" /> Manager Login
+                </Button>
+              </Link>
+              <Link to="/employee/login?portal=vp" className="w-full">
+                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                  <Network className="h-4 w-4" /> VP Login
                 </Button>
               </Link>
             </div>

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/SupabaseAuthContext';
 import { supabase } from '@/lib/customSupabaseClient';
 import { vendorApi } from '@/modules/vendor/services/vendorApi';
+import { useAuth as useVendorAuth } from '@/modules/vendor/context/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,7 +17,7 @@ import { useSubdomain } from '@/contexts/SubdomainContext';
 const VendorLogin = () => {
   const navigate = useNavigate();
   const { resolvePath } = useSubdomain();
-  const supaAuth = useAuth();
+  const vendorAuth = useVendorAuth();
   const loginCaptcha = useCaptchaGate();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -30,10 +30,11 @@ const VendorLogin = () => {
 
   // If already authenticated as vendor, send to dashboard
   React.useEffect(() => {
-    if (supaAuth?.userRole === 'VENDOR') {
+    if (vendorAuth?.loading) return;
+    if (vendorAuth?.isAuthenticated && vendorAuth?.user?.role === 'VENDOR') {
       navigate(dashboardPath, { replace: true });
     }
-  }, [dashboardPath, supaAuth?.userRole, navigate]);
+  }, [dashboardPath, navigate, vendorAuth?.isAuthenticated, vendorAuth?.loading, vendorAuth?.user?.role]);
 
   const performLogin = async () => {
     setLoading(true);
@@ -70,6 +71,7 @@ const VendorLogin = () => {
       if (!vendor) {
         // Auth exists but no profile? Should typically go to registration or profile completion
         // For now, let's treat as onboarding needed or error
+        await supabase.auth.signOut().catch(() => {});
         toast({ title: "Profile Missing", description: "Vendor profile not found. Please register.", variant: "destructive" });
         return;
       }

@@ -22,6 +22,7 @@ const MaintenancePage = lazy(() => import('@/shared/components/MaintenancePage')
 const VendorRoutes = lazy(() => import('@/modules/vendor/routes').then((m) => ({ default: m.VendorRoutes })));
 const BuyerRoutes = lazy(() => import('@/modules/buyer/routes').then((m) => ({ default: m.BuyerRoutes })));
 const AdminRoutes = lazy(() => import('@/modules/admin/routes').then((m) => ({ default: m.AdminRoutes })));
+const EmployeeRoutes = lazy(() => import('@/modules/employee/routes').then((m) => ({ default: m.EmployeeRoutes })));
 const DirectoryRoutes = lazy(() => import('@/modules/directory/routes').then((m) => ({ default: m.DirectoryRoutes })));
 const CareerRoutes = lazy(() => import('@/modules/career/routes').then((m) => ({ default: m.CareerRoutes })));
 
@@ -309,6 +310,7 @@ const AppRoutes = () => {
   if (appType === 'buyer') return <BuyerRoutes />;
   if (appType === 'admin') return <AdminRoutes />;
   if (appType === 'management') return <AdminRoutes />;
+  if (appType === 'employee') return <EmployeeRoutes />;
   if (appType === 'directory') return <DirectoryRoutes />;
   if (appType === 'career') return <CareerRoutes />;
 
@@ -330,7 +332,7 @@ const AppRoutes = () => {
       <Route path="/vendor/*" element={<VendorRoutes />} />
       <Route path="/buyer/*" element={<BuyerRoutes />} />
       <Route path="/admin/*" element={<AdminRoutes />} />
-      <Route path="/employee/*" element={<AdminRoutes />} />
+      <Route path="/employee/*" element={<EmployeeRoutes />} />
       <Route path="/finance-portal/*" element={<AdminRoutes />} />
       <Route path="/career/*" element={<CareerRoutes />} />
       <Route path="/hr/*" element={<AdminRoutes />} />

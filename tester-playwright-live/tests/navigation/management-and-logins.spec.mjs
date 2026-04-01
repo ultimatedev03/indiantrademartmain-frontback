@@ -4,6 +4,8 @@ const managementLinks = [
   { bug: 'BUG-215', label: 'Data Entry Login', expected: /\/employee\/login\?portal=dataentry$/i },
   { bug: 'BUG-216', label: 'Support Login', expected: /\/employee\/login\?portal=support$/i },
   { bug: 'BUG-217', label: 'Sales Login', expected: /\/employee\/login\?portal=sales$/i },
+  { bug: 'BUG-274', label: 'Manager Login', expected: /\/employee\/login\?portal=manager$/i },
+  { bug: 'BUG-275', label: 'VP Login', expected: /\/employee\/login\?portal=vp$/i },
 ];
 
 for (const item of managementLinks) {
