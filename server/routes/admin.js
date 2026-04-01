@@ -418,8 +418,10 @@ router.get("/vendors", async (req, res) => {
     const normalizeDocumentType = (value) => {
       const raw = String(value || "").trim().toUpperCase();
       if (!raw) return "";
-      if (raw === "AADHAAR") return "AADHAR";
-      if (raw.startsWith("BANK")) return "BANK";
+      if (["GST", "GST_CERTIFICATE", "GSTIN_CERTIFICATE"].includes(raw)) return "GST";
+      if (["PAN", "PAN_CARD"].includes(raw)) return "PAN";
+      if (["AADHAR", "AADHAAR", "AADHAR_CARD", "AADHAAR_CARD", "COMPANY_REGISTRATION", "REGISTRATION_CERTIFICATE"].includes(raw)) return "AADHAR";
+      if (raw.startsWith("BANK") || ["BANK_PROOF", "BANK_STATEMENT", "CANCELLED_CHEQUE", "CHEQUE_COPY", "PASSBOOK"].includes(raw)) return "BANK";
       return raw;
     };
     const rawSearch = String(req.query?.search || "").trim();
