@@ -486,6 +486,7 @@ router.get("/vendors", async (req, res) => {
 
     const vendorsList = Array.isArray(vendors) ? vendors : [];
     const vendorIds = vendorsList.map((v) => v.id).filter(Boolean);
+    const publicVendorIds = vendorsList.map((v) => v.vendor_id).filter(Boolean);
     const vendorLookupMap = new Map();
     vendorsList.forEach((vendor) => {
       const internalId = String(vendor?.id || "").trim();
@@ -493,6 +494,7 @@ router.get("/vendors", async (req, res) => {
       if (internalId) vendorLookupMap.set(internalId, internalId);
       if (publicId) vendorLookupMap.set(publicId, internalId);
     });
+    const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const chunk = (arr, size = 120) => {
       const out = [];
       for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -534,25 +536,39 @@ router.get("/vendors", async (req, res) => {
 
     if (vendorIds.length) {
       for (const ids of chunk(vendorIds)) {
-        const lookupKeys = ids.flatMap((id) => {
-          const vendor = vendorsList.find((entry) => entry.id === id);
-          return [String(vendor?.id || "").trim(), String(vendor?.vendor_id || "").trim()].filter(Boolean);
-        });
-
         const { data: vendorDocs, error: vendorDocsError } = await supabase
           .from("vendor_documents")
           .select("*")
-          .in("vendor_id", lookupKeys);
+          .in("vendor_id", ids);
 
         if (vendorDocsError) {
           return res.status(500).json({ success: false, error: vendorDocsError.message });
         }
         collectDocumentRows(vendorDocs);
+      }
 
+      const legacyLookupKeys = Array.from(
+        new Set([...vendorIds, ...publicVendorIds].map((value) => String(value || "").trim()).filter(Boolean))
+      );
+      const legacyUuidKeys = legacyLookupKeys.filter((value) => UUID_LIKE_RE.test(value));
+      const legacyPublicKeys = legacyLookupKeys.filter((value) => !UUID_LIKE_RE.test(value));
+
+      for (const ids of chunk(legacyUuidKeys)) {
         const { data: legacyDocs, error: legacyDocsError } = await supabase
           .from("kyc_documents")
           .select("*")
-          .in("vendor_id", lookupKeys);
+          .in("vendor_id", ids);
+
+        if (!legacyDocsError) {
+          collectDocumentRows(legacyDocs);
+        }
+      }
+
+      for (const ids of chunk(legacyPublicKeys)) {
+        const { data: legacyDocs, error: legacyDocsError } = await supabase
+          .from("kyc_documents")
+          .select("*")
+          .in("vendor_id", ids);
 
         if (!legacyDocsError) {
           collectDocumentRows(legacyDocs);
