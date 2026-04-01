@@ -541,7 +541,7 @@ router.get("/vendors", async (req, res) => {
 
         const { data: vendorDocs, error: vendorDocsError } = await supabase
           .from("vendor_documents")
-          .select("vendor_id, document_type, type")
+          .select("*")
           .in("vendor_id", lookupKeys);
 
         if (vendorDocsError) {
@@ -551,7 +551,7 @@ router.get("/vendors", async (req, res) => {
 
         const { data: legacyDocs, error: legacyDocsError } = await supabase
           .from("kyc_documents")
-          .select("vendor_id, document_type, type")
+          .select("*")
           .in("vendor_id", lookupKeys);
 
         if (!legacyDocsError) {

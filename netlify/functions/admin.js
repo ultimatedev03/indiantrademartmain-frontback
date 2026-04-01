@@ -1343,14 +1343,14 @@ export async function handler(event) {
 
           const { data: vendorDocs, error: vendorDocsError } = await supabase
             .from("vendor_documents")
-            .select("vendor_id, document_type, type")
+            .select("*")
             .in("vendor_id", lookupKeys);
           if (vendorDocsError) return fail("Failed to fetch vendor documents", vendorDocsError.message);
           collectDocumentRows(vendorDocs);
 
           const { data: legacyDocs } = await supabase
             .from("kyc_documents")
-            .select("vendor_id, document_type, type")
+            .select("*")
             .in("vendor_id", lookupKeys);
           collectDocumentRows(legacyDocs);
         }
