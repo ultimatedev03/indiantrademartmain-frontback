@@ -4,22 +4,30 @@ const managementLinks = [
   { bug: 'BUG-215', label: 'Data Entry Login', expected: /\/employee\/login\?portal=dataentry$/i },
   { bug: 'BUG-216', label: 'Support Login', expected: /\/employee\/login\?portal=support$/i },
   { bug: 'BUG-217', label: 'Sales Login', expected: /\/employee\/login\?portal=sales$/i },
-  { bug: 'BUG-274', label: 'Manager Login', expected: /\/employee\/login\?portal=manager$/i },
-  { bug: 'BUG-275', label: 'VP Login', expected: /\/employee\/login\?portal=vp$/i },
+  { bug: 'BUG-274', label: 'Manager Login', expected: /\/employee\/manager\/login$/i },
+  { bug: 'BUG-275', label: 'VP Login', expected: /\/employee\/vp\/login$/i },
 ];
+
+const cardTitleByLabel = {
+  'Data Entry Login': 'Employee',
+  'Support Login': 'Employee',
+  'Sales Login': 'Employee',
+  'Manager Login': 'Management',
+  'VP Login': 'Management',
+};
 
 for (const item of managementLinks) {
   test(`${item.bug} management role card routes correctly`, async ({ page }) => {
     await page.goto('/management', { waitUntil: 'domcontentloaded' });
-    await page.hover(`text=${item.label}`);
+    await page.hover(`text=${cardTitleByLabel[item.label]}`);
     await page.getByRole('link', { name: item.label }).click();
     await expect(page).toHaveURL(item.expected);
   });
 }
 
 const portalPages = [
-  { bug: 'BUG-274', path: '/employee/login?portal=manager', heading: /manager portal/i },
-  { bug: 'BUG-275', path: '/employee/login?portal=vp', heading: /vp portal/i },
+  { bug: 'BUG-274', path: '/employee/manager/login', heading: /manager portal/i },
+  { bug: 'BUG-275', path: '/employee/vp/login', heading: /vp portal/i },
   { bug: 'BUG-276', path: '/employee/login?portal=sales', heading: /sales portal/i },
 ];
 

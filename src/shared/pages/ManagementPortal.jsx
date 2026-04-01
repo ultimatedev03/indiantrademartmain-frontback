@@ -35,7 +35,7 @@ const ManagementPortal = () => {
             title="Management"
             icon={ShieldCheck}
             color="from-blue-500 to-blue-700"
-            description="Access for Administrators and HR Personnel"
+            description="Access for administrators, HR, finance, managers, and VP leadership"
           >
             <div className="grid gap-3 w-full">
               <Link to="/admin/login" className="w-full">
@@ -53,6 +53,16 @@ const ManagementPortal = () => {
                   <Wallet className="h-5 w-5" /> Finance Portal
                 </Button>
               </Link>
+              <Link to="/employee/manager/login" className="w-full">
+                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                  <UserCog className="h-4 w-4" /> Manager Login
+                </Button>
+              </Link>
+              <Link to="/employee/vp/login" className="w-full">
+                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
+                  <Network className="h-4 w-4" /> VP Login
+                </Button>
+              </Link>
             </div>
           </PortalCard>
 
@@ -61,7 +71,7 @@ const ManagementPortal = () => {
             title="Employee"
             icon={Briefcase}
             color="from-purple-500 to-purple-700"
-            description="Access for staff, support, sales, managers, and VP leadership"
+            description="Access for data entry, support, and sales staff"
           >
             <div className="grid gap-3 w-full">
               <Link to="/employee/login?portal=dataentry" className="w-full group">
@@ -77,16 +87,6 @@ const ManagementPortal = () => {
               <Link to="/employee/login?portal=sales" className="w-full">
                 <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
                   <TrendingUp className="h-4 w-4" /> Sales Login
-                </Button>
-              </Link>
-              <Link to="/employee/login?portal=manager" className="w-full">
-                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
-                  <UserCog className="h-4 w-4" /> Manager Login
-                </Button>
-              </Link>
-              <Link to="/employee/login?portal=vp" className="w-full">
-                <Button className="w-full h-12 bg-transparent border-2 border-white/30 text-white hover:bg-white/10 font-semibold transition-all hover:scale-[1.02] flex items-center justify-center gap-2">
-                  <Network className="h-4 w-4" /> VP Login
                 </Button>
               </Link>
             </div>
@@ -114,7 +114,7 @@ const PortalCard = ({ title, icon: Icon, color, description, children }) => {
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${color} rounded-2xl blur-lg opacity-20 group-hover:opacity-40 transition-opacity duration-500`}></div>
       
-      <div className="relative h-[420px] bg-neutral-800/50 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 group-hover:bg-neutral-800/80 group-hover:border-white/20 group-hover:translate-y-[-5px]">
+      <div className="relative min-h-[420px] md:min-h-[500px] bg-neutral-800/50 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden shadow-2xl transition-all duration-300 group-hover:bg-neutral-800/80 group-hover:border-white/20 group-hover:translate-y-[-5px]">
         {/* Default State Content */}
         <div className="absolute inset-0 flex flex-col items-center justify-center p-8 transition-all duration-300 group-hover:opacity-0 group-hover:scale-95 group-hover:translate-y-[-20px]">
           <div className={`w-24 h-24 rounded-full bg-gradient-to-br ${color} flex items-center justify-center mb-6 shadow-lg`}>

@@ -26,6 +26,8 @@ export const EmployeeRoutes = () => {
   return (
     <Routes>
       <Route path="login" element={<EmployeeLogin />} />
+      <Route path="manager/login" element={<EmployeeLogin forcedPortalKey="manager" />} />
+      <Route path="vp/login" element={<EmployeeLogin forcedPortalKey="vp" />} />
 
       <Route path="dataentry" element={<EmployeeLayout allowedRole="DATA_ENTRY" />}>
         <Route index element={<Navigate to="dashboard" replace />} />
@@ -62,8 +64,8 @@ export const EmployeeRoutes = () => {
         <Route path="territory-engagements" element={<TerritoryEngagements />} />
       </Route>
 
-      <ManagerRoutes />
-      <VpRoutes />
+      {ManagerRoutes()}
+      {VpRoutes()}
 
       <Route path="*" element={<Navigate to="login" replace />} />
     </Routes>

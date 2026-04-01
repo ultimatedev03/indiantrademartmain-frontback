@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Briefcase, Lock, Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import Logo from '@/shared/components/Logo';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
 import { PASSWORD_MIN_LENGTH } from '@/lib/passwordPolicy';
 import TurnstileField from '@/shared/components/TurnstileField';
@@ -72,8 +72,9 @@ const DEFAULT_PORTAL_CONFIG = {
   expectedRole: '',
 };
 
-const Login = () => {
+const Login = ({ forcedPortalKey = '' }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const { login } = useEmployeeAuth();
   const loginCaptcha = useCaptchaGate();
@@ -81,11 +82,14 @@ const Login = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const showDemoCredentials = Boolean(import.meta.env.DEV);
   const portalConfig = useMemo(() => {
-    const portalKey = String(searchParams.get('portal') || '').trim().toLowerCase();
+    const pathPortalKey = String(location.pathname || '')
+      .split('/')
+      .filter(Boolean)
+      .slice(-2, -1)[0] || '';
+    const portalKey = String(forcedPortalKey || searchParams.get('portal') || pathPortalKey).trim().toLowerCase();
     return PORTAL_CONFIGS[portalKey] || DEFAULT_PORTAL_CONFIG;
-  }, [searchParams]);
+  }, [forcedPortalKey, location.pathname, searchParams]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -284,37 +288,6 @@ const Login = () => {
               />
             </form>
           </CardContent>
-
-          {showDemoCredentials && (
-            <CardFooter className="bg-slate-900/50 border-t border-slate-800 p-4 rounded-b-xl">
-              <div className="w-full">
-                <p className="text-xs text-center text-slate-500 mb-2">Test Credentials (Dev Only)</p>
-                <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400 text-center">
-                  <div
-                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                    onClick={() => setFormData({ email: 'deepak@yourcompany.com', password: '123456789' })}
-                  >
-                    <span className="font-bold text-blue-400">Data Entry</span><br />
-                    deepak@yourcompany.com
-                  </div>
-                  <div
-                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                    onClick={() => setFormData({ email: 'support@itm.com', password: 'support123' })}
-                  >
-                    <span className="font-bold text-purple-400">Support</span><br />
-                    support@itm.com
-                  </div>
-                  <div
-                    className="p-1 bg-slate-800 rounded border border-slate-700 cursor-pointer hover:bg-slate-700"
-                    onClick={() => setFormData({ email: 'sales@itm.com', password: 'sales123' })}
-                  >
-                    <span className="font-bold text-emerald-400">Sales</span><br />
-                    sales@itm.com
-                  </div>
-                </div>
-              </div>
-            </CardFooter>
-          )}
         </Card>
       </div>
     </div>

@@ -299,8 +299,8 @@ export const AdminRoutes = () => {
         </Route>
       ) : null}
 
-      {isEmployeeScope ? <ManagerRoutes /> : null}
-      {isEmployeeScope ? <VpRoutes /> : null}
+      {isEmployeeScope ? ManagerRoutes() : null}
+      {isEmployeeScope ? VpRoutes() : null}
 
       <Route path="*" element={<Navigate to="login" replace />} />
     </Routes>
