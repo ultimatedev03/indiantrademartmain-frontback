@@ -1291,7 +1291,15 @@ export async function handler(event) {
       const { data: vendors, error: vErr, count } = await vendorQuery;
       if (vErr) return fail("Failed to fetch vendors", vErr.message);
 
-      const vendorIds = (vendors || []).map((v) => v.id).filter(Boolean);
+      const vendorsList = Array.isArray(vendors) ? vendors : [];
+      const vendorIds = vendorsList.map((v) => v.id).filter(Boolean);
+      const vendorLookupMap = new Map();
+      vendorsList.forEach((vendor) => {
+        const internalId = String(vendor?.id || "").trim();
+        const publicId = String(vendor?.vendor_id || "").trim();
+        if (internalId) vendorLookupMap.set(internalId, internalId);
+        if (publicId) vendorLookupMap.set(publicId, internalId);
+      });
       const chunk = (arr, size = 120) => {
         const out = [];
         for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -1314,8 +1322,9 @@ export async function handler(event) {
       const documentTypeMap = new Map();
       const collectDocumentRows = (rows = []) => {
         (rows || []).forEach((row) => {
-          const vendorId = String(row?.vendor_id || "").trim();
-          const docType = normalizeDocumentType(row?.document_type);
+          const vendorLookupKey = String(row?.vendor_id || "").trim();
+          const vendorId = vendorLookupMap.get(vendorLookupKey) || "";
+          const docType = normalizeDocumentType(row?.document_type || row?.type);
           if (!vendorId || !REQUIRED_VENDOR_DOCUMENT_TYPES.has(docType)) return;
 
           if (!documentTypeMap.has(vendorId)) {
@@ -1327,17 +1336,22 @@ export async function handler(event) {
 
       if (vendorIds.length) {
         for (const ids of chunk(vendorIds)) {
+          const lookupKeys = ids.flatMap((id) => {
+            const vendor = vendorsList.find((entry) => entry.id === id);
+            return [String(vendor?.id || "").trim(), String(vendor?.vendor_id || "").trim()].filter(Boolean);
+          });
+
           const { data: vendorDocs, error: vendorDocsError } = await supabase
             .from("vendor_documents")
-            .select("vendor_id, document_type")
-            .in("vendor_id", ids);
+            .select("vendor_id, document_type, type")
+            .in("vendor_id", lookupKeys);
           if (vendorDocsError) return fail("Failed to fetch vendor documents", vendorDocsError.message);
           collectDocumentRows(vendorDocs);
 
           const { data: legacyDocs } = await supabase
             .from("kyc_documents")
-            .select("vendor_id, document_type")
-            .in("vendor_id", ids);
+            .select("vendor_id, document_type, type")
+            .in("vendor_id", lookupKeys);
           collectDocumentRows(legacyDocs);
         }
       }
