@@ -700,12 +700,12 @@ export const leadApi = {
         Number.isFinite(ctx.maxBudget)
       );
       
-      // Get all marketplace leads (where vendor_id is null)
+      // Marketplace rows are identified primarily by source; older rows may only have vendor_id null.
       const { data: available, error: availError } = await supabase
         .from('leads')
         .select('*')
         .in('status', ['AVAILABLE', 'PURCHASED'])
-        .is('vendor_id', null) // Only leads without a vendor (true marketplace)
+        .or('vendor_id.is.null,source.eq.MARKETPLACE,source.is.null')
         .order('created_at', { ascending: false })
         .limit(300);
 

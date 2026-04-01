@@ -2271,8 +2271,8 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
     const { data: marketplaceRows, error: rowsError } = await supabase
       .from('leads')
       .select('*')
-      .is('vendor_id', null)
       .in('status', ['AVAILABLE', 'PURCHASED'])
+      .or('vendor_id.is.null,source.eq.MARKETPLACE,source.is.null')
       .order('created_at', { ascending: false })
       .limit(500);
 
