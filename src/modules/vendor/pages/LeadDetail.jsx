@@ -467,9 +467,9 @@ const LeadDetail = () => {
     lead?.buyer_id ||
     lead?.buyer_user_id ||
     lead?.buyers?.id ||
-    lead?.buyers?.user_id ||
-    lead?.proposal_id
+    lead?.buyers?.user_id
   );
+  const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
 
   const logContactSafe = async (type) => {
     try {
@@ -533,10 +533,19 @@ const LeadDetail = () => {
   };
 
   const handleOpenChat = () => {
-    if (!isRegisteredBuyer || !lead?.proposal_id) {
+    if (!isRegisteredBuyer) {
       toast({
         title: 'Chat unavailable',
-        description: 'Chat is available only for registered buyers with an active conversation thread.',
+        description: 'Chat is available only for registered buyers.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!hasExistingChatThread) {
+      toast({
+        title: 'Chat not started yet',
+        description: 'This buyer is registered, but no active chat thread exists for this lead yet. Use Email or Call for now.',
         variant: 'destructive',
       });
       return;
