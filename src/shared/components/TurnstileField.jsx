@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 import {
+  CAPTCHA_BYPASS_TOKEN,
   CAPTCHA_STATUS,
   TURNSTILE_SITE_KEY,
   canRetryCaptcha,
+  getCaptchaBypassMessage,
   getCaptchaStatusMessage,
   getInitialCaptchaStatus,
+  isCaptchaBypassed,
   isCaptchaConfigured,
-  isCaptchaDevBypass,
   getCaptchaValidationTitle,
 } from '@/shared/lib/captcha';
 
@@ -124,6 +126,13 @@ const TurnstileField = ({
   }, [onStatusChange, status]);
 
   useEffect(() => {
+    if (isCaptchaBypassed()) {
+      onTokenChange?.(CAPTCHA_BYPASS_TOKEN);
+      onWidgetReady?.(null);
+      setStatus(CAPTCHA_STATUS.DEV_BYPASS);
+      return undefined;
+    }
+
     if (!isCaptchaConfigured()) {
       onTokenChange?.('');
       onWidgetReady?.(null);
@@ -244,10 +253,10 @@ const TurnstileField = ({
     setRetryKey((prev) => prev + 1);
   };
 
-  if (isCaptchaDevBypass()) {
+  if (isCaptchaBypassed()) {
     return (
       <div className={cn('rounded-md border border-dashed border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800', className)}>
-        Captcha bypass is active in local development because `VITE_TURNSTILE_SITE_KEY` is not set.
+        {getCaptchaBypassMessage()}
       </div>
     );
   }

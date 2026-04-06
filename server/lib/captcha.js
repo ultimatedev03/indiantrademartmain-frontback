@@ -2,6 +2,26 @@ const TURNSTILE_VERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/sit
 
 const normalizeText = (value) => String(value || '').trim();
 
+const normalizeBooleanEnv = (value) => normalizeText(value).toLowerCase();
+
+const parseBooleanEnv = (value) => {
+  const normalized = normalizeBooleanEnv(value);
+
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+
+  return null;
+};
+
+const readCaptchaEnabledOverride = () =>
+  [
+    process.env.CAPTCHA_ENABLED,
+    process.env.VITE_CAPTCHA_ENABLED,
+  ].find((value) => parseBooleanEnv(value) !== null);
+
+const isCaptchaExplicitlyDisabled = () =>
+  parseBooleanEnv(readCaptchaEnabledOverride()) === false;
+
 const readCaptchaSecret = () =>
   [
     process.env.TURNSTILE_SECRET_KEY,
@@ -61,6 +81,10 @@ export async function verifyCaptchaToken({ token, remoteIp = '', action = '' } =
   const normalizedToken = normalizeText(token);
   const normalizedAction = normalizeText(action);
   const secret = readCaptchaSecret();
+
+  if (isCaptchaExplicitlyDisabled()) {
+    return { success: true, skipped: true, reason: 'explicit_bypass' };
+  }
 
   if (!secret) {
     if (allowDevBypass()) {

@@ -1,4 +1,16 @@
 export const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+export const CAPTCHA_BYPASS_TOKEN = 'captcha_bypass';
+
+const normalizeBooleanEnv = (value) => String(value ?? '').trim().toLowerCase();
+
+const readCaptchaEnabledOverride = () => {
+  const normalized = normalizeBooleanEnv(import.meta.env.VITE_CAPTCHA_ENABLED);
+
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+
+  return null;
+};
 
 export const CAPTCHA_STATUS = {
   IDLE: 'idle',
@@ -15,8 +27,25 @@ export const isCaptchaConfigured = () => Boolean(TURNSTILE_SITE_KEY);
 
 export const isCaptchaDevBypass = () => import.meta.env.DEV && !TURNSTILE_SITE_KEY;
 
+export const isCaptchaExplicitlyDisabled = () => readCaptchaEnabledOverride() === false;
+
+export const isCaptchaBypassed = () =>
+  isCaptchaExplicitlyDisabled() || isCaptchaDevBypass();
+
+export const getCaptchaBypassMessage = () => {
+  if (isCaptchaExplicitlyDisabled()) {
+    return 'Captcha is disabled because `VITE_CAPTCHA_ENABLED=false`.';
+  }
+
+  if (isCaptchaDevBypass()) {
+    return 'Captcha bypass is active in local development because `VITE_TURNSTILE_SITE_KEY` is not set.';
+  }
+
+  return '';
+};
+
 export const getInitialCaptchaStatus = () => {
-  if (isCaptchaDevBypass()) return CAPTCHA_STATUS.DEV_BYPASS;
+  if (isCaptchaBypassed()) return CAPTCHA_STATUS.DEV_BYPASS;
   if (!isCaptchaConfigured()) return CAPTCHA_STATUS.UNAVAILABLE;
   return CAPTCHA_STATUS.IDLE;
 };
@@ -76,7 +105,7 @@ export const getCaptchaValidationError = (token, status) => {
   const normalizedStatus = String(status || '').trim().toLowerCase();
 
   if (normalizedToken) return '';
-  if (isCaptchaDevBypass()) return '';
+  if (isCaptchaBypassed()) return '';
   if (!isCaptchaConfigured() || normalizedStatus === CAPTCHA_STATUS.UNAVAILABLE) {
     return 'Captcha failed to load. Use Reload CAPTCHA to try again.';
   }
