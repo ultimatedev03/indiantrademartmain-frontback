@@ -106,6 +106,7 @@ const Staff = () => {
   const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [showPwPassword, setShowPwPassword] = useState(false);
   const [showPwConfirm, setShowPwConfirm] = useState(false);
+  const [statusUpdatingId, setStatusUpdatingId] = useState("");
 
   const [formData, setFormData] = useState({
     full_name: "",
@@ -224,6 +225,41 @@ const Staff = () => {
         description: error?.message || "Something went wrong",
         variant: "destructive",
       });
+    }
+  };
+
+  const handleToggleStatus = async (employee) => {
+    const employeeId = String(employee?.id || "").trim();
+    if (!employeeId) return;
+
+    const nextStatus = isActiveStatus(employee?.status) ? "INACTIVE" : "ACTIVE";
+    setStatusUpdatingId(employeeId);
+
+    try {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/staff/${employeeId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      const data = await safeReadJson(res);
+      if (!data?.success) throw new Error(buildApiError(data, "Failed to update employee status"));
+
+      setEmployees((prev) =>
+        (prev || []).map((entry) =>
+          entry.id === employeeId ? { ...entry, ...(data.employee || {}), status: nextStatus } : entry
+        )
+      );
+      toast({
+        title: `Employee ${nextStatus === "ACTIVE" ? "activated" : "deactivated"}`,
+        description: `${employee.full_name || employee.name || "Employee"} is now ${nextStatus}.`,
+      });
+    } catch (error) {
+      toast({
+        title: "Status update failed",
+        description: error?.message || "Something went wrong",
+        variant: "destructive",
+      });
+    } finally {
+      setStatusUpdatingId("");
     }
   };
 
@@ -501,6 +537,23 @@ const Staff = () => {
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
                       <Button
+                        variant="outline"
+                        size="sm"
+                        className={isActiveStatus(employee.status) ? "text-amber-700" : "text-emerald-700"}
+                        title={isActiveStatus(employee.status) ? "Deactivate employee" : "Activate employee"}
+                        onClick={() => handleToggleStatus(employee)}
+                        disabled={statusUpdatingId === employee.id}
+                      >
+                        {statusUpdatingId === employee.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : isActiveStatus(employee.status) ? (
+                          "Deactivate"
+                        ) : (
+                          "Activate"
+                        )}
+                      </Button>
+
+                      <Button
                         variant="ghost"
                         size="icon"
                         className="h-8 w-8 text-blue-700 hover:text-blue-800 hover:bg-blue-50"
@@ -516,6 +569,7 @@ const Staff = () => {
                         className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
                         title="Delete Employee"
                         onClick={() => handleDelete(employee.id)}
+                        disabled={statusUpdatingId === employee.id}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>

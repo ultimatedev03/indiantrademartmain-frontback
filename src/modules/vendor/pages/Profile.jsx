@@ -667,7 +667,7 @@ const Profile = () => {
               <div className="p-5 space-y-4">
                 <div className="flex items-start gap-3 text-sm">
                   <MapPin className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />
-                  <span className="text-slate-600 leading-relaxed">
+                  <span className="min-w-0 break-words whitespace-normal text-slate-600 leading-relaxed">
                     {profile.address || 'Add Address'} <br />
                     {profile.city || 'City'}, {profile.state || 'State'} - {profile.pincode || 'Pincode'}
                   </span>
@@ -680,7 +680,7 @@ const Profile = () => {
 
                 <div className="flex items-center gap-3 text-sm">
                   <Mail className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="text-slate-600 truncate">{profile.email || '—'}</span>
+                  <span className="min-w-0 break-all text-slate-600">{profile.email || '—'}</span>
                 </div>
 
                 <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">

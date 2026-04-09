@@ -97,6 +97,23 @@ const resolveLocationSlugs = async (locText) => {
   return { stateSlug: '', citySlug: '' };
 };
 
+const buildVendorListingUrl = (stateSlugValue = '', citySlugValue = '', extraParams = {}) => {
+  const params = new URLSearchParams();
+
+  if (stateSlugValue) params.set('state', stateSlugValue);
+  if (citySlugValue) params.set('city', citySlugValue);
+
+  Object.entries(extraParams || {}).forEach(([key, value]) => {
+    const normalizedValue = String(value || '').trim();
+    if (normalizedValue) {
+      params.set(key, normalizedValue);
+    }
+  });
+
+  const query = params.toString();
+  return query ? `/directory/vendor?${query}` : '/directory/vendor';
+};
+
 const DirectorySearchBar = ({
   initialService = '',
   initialQuery = '',
@@ -232,12 +249,14 @@ const DirectorySearchBar = ({
       }
     }
 
-    const finalServiceSlug = serviceSlug || slugify(finalServiceText);
-    if (!finalServiceSlug) return;
-
-    const searchParams = { q: finalServiceText };
-
     if (selectedStateSlug || selectedCitySlug) {
+      const finalServiceSlug = serviceSlug || slugify(finalServiceText);
+      if (!finalServiceSlug) {
+        navigate(buildVendorListingUrl(selectedStateSlug || '', selectedCitySlug || ''));
+        return;
+      }
+
+      const searchParams = { q: finalServiceText };
       const url = buildSearchUrl(
         finalServiceSlug,
         selectedStateSlug || '',
@@ -252,10 +271,21 @@ const DirectorySearchBar = ({
       setSubmitting(true);
       try {
         const resolved = await resolveLocationSlugs(freeLocText);
+        const finalServiceSlug = serviceSlug || slugify(finalServiceText);
 
         setServiceText(finalServiceText);
         setServiceSlug('');
 
+        if (!finalServiceSlug) {
+          navigate(
+            buildVendorListingUrl(resolved.stateSlug || '', resolved.citySlug || '', {
+              cityText: resolved?.citySlug ? '' : freeLocText,
+            })
+          );
+          return;
+        }
+
+        const searchParams = { q: finalServiceText };
         if (resolved?.stateSlug || resolved?.citySlug) {
           const url = buildSearchUrl(
             finalServiceSlug,
@@ -276,6 +306,10 @@ const DirectorySearchBar = ({
       return;
     }
 
+    const finalServiceSlug = serviceSlug || slugify(finalServiceText);
+    if (!finalServiceSlug) return;
+
+    const searchParams = { q: finalServiceText };
     const url = buildSearchUrl(finalServiceSlug, '', '', searchParams);
     navigate(url);
   };

@@ -145,6 +145,15 @@ const matchesSearchValue = (candidate, query) => {
   return normalizeSearchValue(candidate).includes(normalizedQuery);
 };
 
+const normalizeKycStatus = (status = '') => {
+  const normalized = String(status || '').trim().toUpperCase();
+  return normalized === 'VERIFIED' ? 'APPROVED' : normalized || 'PENDING';
+};
+
+const isPendingKycStatus = (status = '') => ['PENDING', 'SUBMITTED'].includes(normalizeKycStatus(status));
+const isApprovedKycStatus = (status = '') => normalizeKycStatus(status) === 'APPROVED';
+const isRejectedKycStatus = (status = '') => normalizeKycStatus(status) === 'REJECTED';
+
 const KYCApproval = () => {
   const [vendors, setVendors] = useState([]);
   const [totalVendors, setTotalVendors] = useState(0);
@@ -363,6 +372,10 @@ const KYCApproval = () => {
     setShowRejectModal(true);
   };
 
+  const canApproveKyc = (vendor) => isPendingKycStatus(vendor?.kyc_status) || isRejectedKycStatus(vendor?.kyc_status);
+  const canRejectKyc = (vendor) => isPendingKycStatus(vendor?.kyc_status) || isApprovedKycStatus(vendor?.kyc_status);
+  const getRejectLabel = (vendor) => (isApprovedKycStatus(vendor?.kyc_status) ? 'Re-KYC' : 'Reject KYC');
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
@@ -455,7 +468,7 @@ const KYCApproval = () => {
 
                     <TableCell>
                       <Badge className={getKycBadgeStyle(vendor.kyc_status)}>
-                        {vendor.kyc_status === 'VERIFIED' ? 'APPROVED' : vendor.kyc_status || 'PENDING'}
+                        {normalizeKycStatus(vendor.kyc_status)}
                       </Badge>
                     </TableCell>
 
@@ -471,16 +484,28 @@ const KYCApproval = () => {
                           <Eye className="w-4 h-4 mr-1" /> View
                         </Button>
 
-                        {(vendor.kyc_status === 'PENDING' || vendor.kyc_status === 'SUBMITTED') && (
-                          <>
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(vendor)} disabled={processing}>
-                              <CheckCircle className="w-4 h-4" />
-                            </Button>
-                            <Button size="sm" variant="destructive" onClick={() => openReject(vendor)} disabled={processing}>
-                              <XCircle className="w-4 h-4" />
-                            </Button>
-                          </>
-                        )}
+                        {canApproveKyc(vendor) ? (
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => handleApprove(vendor)}
+                            disabled={processing}
+                            title={isRejectedKycStatus(vendor?.kyc_status) ? 'Re-approve KYC' : 'Approve KYC'}
+                          >
+                            <CheckCircle className="w-4 h-4" />
+                          </Button>
+                        ) : null}
+                        {canRejectKyc(vendor) ? (
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => openReject(vendor)}
+                            disabled={processing}
+                            title={getRejectLabel(vendor)}
+                          >
+                            <XCircle className="w-4 h-4" />
+                          </Button>
+                        ) : null}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -511,7 +536,7 @@ const KYCApproval = () => {
 
                 <div className="flex items-center gap-2">
                   <Badge className={getKycBadgeStyle(selectedVendor.kyc_status)}>
-                    {selectedVendor.kyc_status === 'VERIFIED' ? 'APPROVED' : selectedVendor.kyc_status || 'PENDING'}
+                    {normalizeKycStatus(selectedVendor.kyc_status)}
                   </Badge>
                   <Badge variant="outline" className="text-xs">
                     {vendorDocs?.length || 0} Docs
@@ -602,23 +627,23 @@ const KYCApproval = () => {
           )}
 
           <DialogFooter className="gap-2 sm:gap-0">
-            {(selectedVendor?.kyc_status === 'PENDING' || selectedVendor?.kyc_status === 'SUBMITTED') && (
-              <>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    setShowDocsModal(false);
-                    openReject(selectedVendor);
-                  }}
-                  disabled={processing}
-                >
-                  Reject KYC
-                </Button>
-                <Button className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(selectedVendor)} disabled={processing}>
-                  Approve KYC
-                </Button>
-              </>
-            )}
+            {canRejectKyc(selectedVendor) ? (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setShowDocsModal(false);
+                  openReject(selectedVendor);
+                }}
+                disabled={processing}
+              >
+                {getRejectLabel(selectedVendor)}
+              </Button>
+            ) : null}
+            {canApproveKyc(selectedVendor) ? (
+              <Button className="bg-green-600 hover:bg-green-700" onClick={() => handleApprove(selectedVendor)} disabled={processing}>
+                {isRejectedKycStatus(selectedVendor?.kyc_status) ? 'Re-approve KYC' : 'Approve KYC'}
+              </Button>
+            ) : null}
             <Button variant="outline" onClick={() => setShowDocsModal(false)}>
               Close
             </Button>

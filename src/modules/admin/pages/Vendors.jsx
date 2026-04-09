@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -179,6 +179,7 @@ export default function Vendors() {
   const [showTerminateModal, setShowTerminateModal] = useState(false);
   const [terminationReason, setTerminationReason] = useState("");
   const [processing, setProcessing] = useState(false);
+  const loadRequestIdRef = useRef(0);
 
   const isTerminationReasonValid = useMemo(
     () => terminationReason.trim().length > 0,
@@ -226,6 +227,8 @@ export default function Vendors() {
   );
 
   const load = useCallback(async () => {
+    const requestId = loadRequestIdRef.current + 1;
+    loadRequestIdRef.current = requestId;
     setLoading(true);
     try {
       const offset = (currentPage - 1) * VENDOR_PAGE_SIZE;
@@ -234,9 +237,11 @@ export default function Vendors() {
         offset,
       });
 
+      if (requestId !== loadRequestIdRef.current) return;
       setVendors(nextVendors);
       setServerTotal(total);
     } catch (e) {
+      if (requestId !== loadRequestIdRef.current) return;
       console.error(e);
       toast({
         title: "Error",
@@ -246,7 +251,9 @@ export default function Vendors() {
       setVendors([]);
       setServerTotal(0);
     } finally {
-      setLoading(false);
+      if (requestId === loadRequestIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [currentPage, fetchVendorPage, toast]);
 

@@ -108,8 +108,9 @@ const VendorLogin = () => {
       }
 
       // 4. Success
+      // Redirect is handled by auth state effect above. Avoid pushing twice, which causes
+      // the login page to flash when guards/auth bootstrap settle a moment later.
       toast({ title: "Welcome back!", description: "Logged in successfully." });
-      navigate(dashboardPath, { replace: true });
 
     } catch (error) {
       loginCaptcha.resetCaptcha();

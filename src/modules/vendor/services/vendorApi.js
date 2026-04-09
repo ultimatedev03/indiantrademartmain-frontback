@@ -1253,9 +1253,18 @@ export const vendorApi = {
       const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
       const PRODUCT_MIN_BYTES = 50 * 1024;
       const PRODUCT_MAX_BYTES = 1024 * 1024;
-      const isProductImage = String(bucket || '').trim() === 'product-images';
+      const normalizedBucket = String(bucket || '').trim();
+      const normalizedUploadPurpose = String(options?.uploadPurpose || '').trim().toUpperCase();
+      const isProductImage = normalizedBucket === 'product-images';
+      const isKycDocument = normalizedUploadPurpose === 'KYC_DOCUMENT';
 
-      if (isProductImage) {
+      if (isKycDocument) {
+        validateImageFile(file, {
+          minBytes: 100 * 1024,
+          maxBytes: 2 * 1024 * 1024,
+          label: 'KYC image',
+        });
+      } else if (isProductImage) {
         validateImageFile(file, {
           minBytes: PRODUCT_MIN_BYTES,
           maxBytes: PRODUCT_MAX_BYTES,
@@ -1298,7 +1307,7 @@ export const vendorApi = {
       });
 
       const payload = {
-        bucket,
+        bucket: normalizedBucket,
         file_name: file.name,
         content_type: file.type,
         data_url: dataUrl,

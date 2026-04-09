@@ -89,7 +89,7 @@ const buildPremiumBrandFallbackVendor = (brand = null) => {
 };
 
 const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null, options = {}) => {
-  const { preferBrandName = false } = options;
+  const { preferBrandName = false, preferBrandContent = false } = options;
   const brandFallback = buildPremiumBrandFallbackVendor(brand) || {};
   const legalCompanyName = String(vendorData.company_name || '').trim();
 
@@ -107,14 +107,14 @@ const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null, options = {}
     reviews: 0,
     verified: Boolean(vendorData.verification_badge || vendorData.is_verified || brand),
     primary_business_type:
+      (preferBrandContent ? brand?.primaryBusinessType : '') ||
       vendorData.primary_business_type ||
-      brand?.primaryBusinessType ||
       brandFallback.primary_business_type ||
       'Business Services',
     description:
+      (preferBrandContent ? brand?.description : '') ||
       vendorData.description ||
       vendorData.business_description ||
-      brand?.description ||
       brandFallback.description ||
       vendorData.primary_business_type ||
       'Established business',
@@ -124,7 +124,7 @@ const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null, options = {}
     gst: vendorData.gst_number || '',
     email: vendorData.email || '',
     website: vendorData.website_url || '',
-    profile_image: vendorData.profile_image || brand?.logo_url || '',
+    profile_image: (preferBrandContent ? brand?.logo_url : '') || vendorData.profile_image || brand?.logo_url || '',
     annual_turnover: vendorData.annual_turnover || vendorData.annualTurnover || '',
     tagline: brand?.tagline || '',
     highlights: Array.isArray(brand?.highlights) ? brand.highlights : [],
@@ -246,11 +246,12 @@ const VendorProfileContent = () => {
             requestedVendorKey,
             vendorData.slug || vendorData.id || requestedVendorKey
           );
-          const shouldPreferBrandName =
+          const shouldPreferBrandPresentation =
             Boolean(String(requestedBrandSlug || '').trim()) &&
             normalizePremiumBrandKey(resolvedPremiumBrand?.slug) === normalizePremiumBrandKey(requestedBrandSlug);
           const nextVendor = mergeVendorWithPremiumBrand(vendorData, resolvedPremiumBrand, {
-            preferBrandName: shouldPreferBrandName,
+            preferBrandName: shouldPreferBrandPresentation,
+            preferBrandContent: shouldPreferBrandPresentation,
           });
           setVendor(nextVendor);
 

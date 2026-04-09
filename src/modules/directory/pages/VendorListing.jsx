@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { directoryApi } from "@/modules/directory/services/directoryApi";
 import { vendorService } from "@/modules/directory/services/vendorService";
 import Card from "@/shared/components/Card";
@@ -9,6 +9,7 @@ import { getVendorProfilePath } from "@/shared/utils/vendorRoutes";
 
 const VendorListing = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,15 +18,44 @@ const VendorListing = () => {
   const [citiesLoading, setCitiesLoading] = useState(false);
 
   // ✅ Filters
-  const [q, setQ] = useState(""); // search products/services/company
-  const [cityText, setCityText] = useState(""); // city text input
+  const [q, setQ] = useState(() => searchParams.get("q") || ""); // search products/services/company
+  const [cityText, setCityText] = useState(() => searchParams.get("cityText") || ""); // city text input
   const [selectedStateId, setSelectedStateId] = useState("");
   const [selectedCityId, setSelectedCityId] = useState("");
-
-  // ✅ Trigger "Search" button
-  const [applyTick, setApplyTick] = useState(0);
+  const [pendingStateFilter, setPendingStateFilter] = useState(() => searchParams.get("state") || "");
+  const [pendingCityFilter, setPendingCityFilter] = useState(() => searchParams.get("city") || "");
 
   const FETCH_LIMIT = 2000;
+
+  const matchesParamValue = (entry, rawValue) => {
+    const normalizedValue = String(rawValue || "").trim().toLowerCase();
+    if (!normalizedValue) return false;
+
+    return [
+      entry?.id,
+      entry?.slug,
+      entry?.name,
+    ].some((candidate) => String(candidate || "").trim().toLowerCase() === normalizedValue);
+  };
+
+  useEffect(() => {
+    const nextQuery = searchParams.get("q") || "";
+    const nextCityText = searchParams.get("cityText") || "";
+    const nextState = searchParams.get("state") || "";
+    const nextCity = searchParams.get("city") || "";
+
+    setQ((prev) => (prev === nextQuery ? prev : nextQuery));
+    setCityText((prev) => (prev === nextCityText ? prev : nextCityText));
+    setPendingStateFilter(nextState);
+    setPendingCityFilter(nextCity);
+
+    if (!nextState) {
+      setSelectedStateId("");
+      setSelectedCityId("");
+    } else if (!nextCity) {
+      setSelectedCityId("");
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchVendors = async () => {
@@ -65,6 +95,18 @@ const VendorListing = () => {
   }, []);
 
   useEffect(() => {
+    if (!pendingStateFilter || states.length === 0) return;
+
+    const matchedState = states.find((state) => matchesParamValue(state, pendingStateFilter));
+    if (!matchedState) return;
+
+    const nextStateId = String(matchedState.id || "");
+    if (nextStateId && nextStateId !== String(selectedStateId || "")) {
+      setSelectedStateId(nextStateId);
+    }
+  }, [pendingStateFilter, selectedStateId, states]);
+
+  useEffect(() => {
     setSelectedCityId("");
 
     if (!selectedStateId) {
@@ -101,6 +143,18 @@ const VendorListing = () => {
     };
   }, [selectedStateId]);
 
+  useEffect(() => {
+    if (!pendingCityFilter || cities.length === 0) return;
+
+    const matchedCity = cities.find((city) => matchesParamValue(city, pendingCityFilter));
+    if (!matchedCity) return;
+
+    const nextCityId = String(matchedCity.id || "");
+    if (nextCityId && nextCityId !== String(selectedCityId || "")) {
+      setSelectedCityId(nextCityId);
+    }
+  }, [cities, pendingCityFilter, selectedCityId]);
+
   const selectedStateName = useMemo(() => {
     const match = states.find((state) => String(state?.id || "") === String(selectedStateId || ""));
     return String(match?.name || "").trim();
@@ -113,9 +167,12 @@ const VendorListing = () => {
 
   // ✅ filtering logic (applies when applyTick changes OR when vendors change)
   const filteredVendors = useMemo(() => {
-    // only apply after user clicks Search (applyTick)
-    // but we also want initial list => if applyTick=0, show all vendors
-    if (applyTick === 0) return vendors;
+    const shouldApplyFilters =
+      Boolean(q.trim()) ||
+      Boolean(cityText.trim()) ||
+      Boolean(selectedStateId) ||
+      Boolean(selectedCityId);
+    if (!shouldApplyFilters) return vendors;
 
     const query = q.trim().toLowerCase();
     const cityQ = cityText.trim().toLowerCase();
@@ -173,7 +230,7 @@ const VendorListing = () => {
 
       return true;
     });
-  }, [vendors, q, cityText, selectedStateId, selectedCityId, selectedStateName, selectedCityName, applyTick]);
+  }, [vendors, q, cityText, selectedStateId, selectedCityId, selectedStateName, selectedCityName]);
 
   const VendorImage = ({ src, name }) => {
     const [failed, setFailed] = useState(false);
@@ -199,7 +256,16 @@ const VendorListing = () => {
   };
 
   const onSearch = () => {
-    setApplyTick((x) => x + 1);
+    const params = new URLSearchParams();
+    const selectedState = states.find((state) => String(state?.id || "") === String(selectedStateId || ""));
+    const selectedCity = cities.find((city) => String(city?.id || "") === String(selectedCityId || ""));
+
+    if (q.trim()) params.set("q", q.trim());
+    if (cityText.trim()) params.set("cityText", cityText.trim());
+    if (selectedState?.slug || selectedStateId) params.set("state", selectedState?.slug || selectedStateId);
+    if (selectedCity?.slug || selectedCityId) params.set("city", selectedCity?.slug || selectedCityId);
+
+    setSearchParams(params, { replace: false });
   };
 
   const onReset = () => {
@@ -207,7 +273,9 @@ const VendorListing = () => {
     setCityText("");
     setSelectedStateId("");
     setSelectedCityId("");
-    setApplyTick(0);
+    setPendingStateFilter("");
+    setPendingCityFilter("");
+    setSearchParams({}, { replace: false });
   };
 
   const citySelectDisabled = !selectedStateId || citiesLoading;
