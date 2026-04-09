@@ -10,11 +10,11 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { territoryApi } from '@/modules/employee/services/territoryApi';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
-import { locationService } from '@/shared/services/locationService';
 
 const ALL_STATES_VALUE = 'all';
 const ALL_CITIES_VALUE = 'all';
 const normalizeId = (value) => String(value || '').trim();
+const normalizeName = (value) => String(value || '').trim().toLowerCase();
 
 const ManagerDashboard = () => {
   const { user } = useEmployeeAuth();
@@ -25,64 +25,78 @@ const ManagerDashboard = () => {
   const [salesUsers, setSalesUsers] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [allocations, setAllocations] = useState([]);
-  const [states, setStates] = useState([]);
-  const [cities, setCities] = useState([]);
-  const [statesLoading, setStatesLoading] = useState(false);
-  const [citiesLoading, setCitiesLoading] = useState(false);
 
   const [selectedSalesUser, setSelectedSalesUser] = useState('');
   const [selectedDivisionIds, setSelectedDivisionIds] = useState([]);
   const [selectedStateId, setSelectedStateId] = useState(ALL_STATES_VALUE);
   const [selectedCityId, setSelectedCityId] = useState(ALL_CITIES_VALUE);
 
+  const stateLookup = useMemo(() => {
+    const idByName = new Map();
+    const nameById = new Map();
+    const options = [];
+
+    (divisions || []).forEach((division) => {
+      const id = normalizeId(division?.state_id || division?.state?.id);
+      const name = String(division?.state?.name || 'State N/A').trim() || 'State N/A';
+      if (!id || nameById.has(id)) return;
+      nameById.set(id, name);
+      const normalizedName = normalizeName(name);
+      if (normalizedName) idByName.set(normalizedName, id);
+      options.push({ id, name });
+    });
+
+    options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    return { options, idByName, nameById };
+  }, [divisions]);
+
+  const cityLookup = useMemo(() => {
+    const idByName = new Map();
+    const nameById = new Map();
+    const options = [];
+
+    (divisions || []).forEach((division) => {
+      const id = normalizeId(division?.city_id || division?.city?.id);
+      const name = String(division?.city?.name || 'City N/A').trim() || 'City N/A';
+      const stateId = normalizeId(division?.state_id || division?.state?.id);
+      if (!id || nameById.has(id)) return;
+      nameById.set(id, name);
+      const normalizedName = normalizeName(name);
+      if (normalizedName) idByName.set(normalizedName, id);
+      options.push({ id, name, stateId });
+    });
+
+    options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    return { options, idByName, nameById };
+  }, [divisions]);
+
   const filteredDivisions = useMemo(() => {
     const term = String(search || '').trim().toLowerCase();
     return (divisions || []).filter((d) => {
-      if (selectedStateId !== ALL_STATES_VALUE && normalizeId(d?.state_id) !== selectedStateId) return false;
-      if (selectedCityId !== ALL_CITIES_VALUE && normalizeId(d?.city_id) !== selectedCityId) return false;
+      const divisionStateId = normalizeId(
+        d?.state_id || d?.state?.id || stateLookup.idByName.get(normalizeName(d?.state?.name))
+      );
+      const divisionCityId = normalizeId(
+        d?.city_id || d?.city?.id || cityLookup.idByName.get(normalizeName(d?.city?.name))
+      );
+
+      if (selectedStateId !== ALL_STATES_VALUE && divisionStateId !== selectedStateId) return false;
+      if (selectedCityId !== ALL_CITIES_VALUE && divisionCityId !== selectedCityId) return false;
       if (!term) return true;
       return [d?.name, d?.city?.name, d?.state?.name, d?.district_name, d?.subdistrict_name, d?.pincode_count]
         .filter(Boolean)
         .some((x) => String(x).toLowerCase().includes(term));
     });
-  }, [divisions, search, selectedStateId, selectedCityId]);
+  }, [cityLookup.idByName, divisions, search, selectedCityId, selectedStateId, stateLookup.idByName]);
 
-  const stateOptions = useMemo(() => {
-    const divisionStateIds = new Set((divisions || []).map((d) => normalizeId(d?.state_id)).filter(Boolean));
-    const options = (states || [])
-      .filter((state) => divisionStateIds.has(normalizeId(state?.id)))
-      .map((state) => ({
-        id: normalizeId(state?.id),
-        name: state?.name || 'State N/A',
-      }));
-
-    if (options.length === divisionStateIds.size) {
-      return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    }
-
-    const seen = new Set(options.map((state) => state.id));
-    (divisions || []).forEach((d) => {
-      const stateId = normalizeId(d?.state_id);
-      if (!stateId || seen.has(stateId)) return;
-      seen.add(stateId);
-      options.push({
-        id: stateId,
-        name: d?.state?.name || 'State N/A',
-      });
-    });
-
-    return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [divisions, states]);
+  const stateOptions = useMemo(() => stateLookup.options, [stateLookup.options]);
 
   const cityOptions = useMemo(() => {
-    return (cities || [])
-      .map((city) => ({
-        id: normalizeId(city?.id),
-        name: city?.name || 'City N/A',
-      }))
-      .filter((city) => city.id)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [cities]);
+    if (selectedStateId === ALL_STATES_VALUE) return [];
+    return (cityLookup.options || []).filter((city) => city.stateId === selectedStateId);
+  }, [cityLookup.options, selectedStateId]);
 
   const loadBase = async () => {
     try {
@@ -112,37 +126,6 @@ const ManagerDashboard = () => {
   }, []);
 
   useEffect(() => {
-    let mounted = true;
-
-    const loadStates = async () => {
-      try {
-        setStatesLoading(true);
-        const rows = await locationService.getStates();
-        if (mounted) {
-          setStates(rows || []);
-        }
-      } catch (error) {
-        if (mounted) {
-          toast({
-            title: 'Failed to load states',
-            description: error?.message || 'Unable to load available states',
-            variant: 'destructive',
-          });
-        }
-      } finally {
-        if (mounted) {
-          setStatesLoading(false);
-        }
-      }
-    };
-
-    loadStates();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (!selectedSalesUser) {
       setSelectedDivisionIds([]);
       return;
@@ -159,42 +142,10 @@ const ManagerDashboard = () => {
   }, [selectedStateId]);
 
   useEffect(() => {
-    let mounted = true;
-
-    const loadCities = async () => {
-      if (selectedStateId === ALL_STATES_VALUE) {
-        setCitiesLoading(false);
-        setCities([]);
-        return;
-      }
-
-      try {
-        setCitiesLoading(true);
-        const rows = await locationService.getCities(selectedStateId);
-        if (mounted) {
-          setCities(rows || []);
-        }
-      } catch (error) {
-        if (mounted) {
-          setCities([]);
-          toast({
-            title: 'Failed to load cities',
-            description: error?.message || 'Unable to load cities for the selected state',
-            variant: 'destructive',
-          });
-        }
-      } finally {
-        if (mounted) {
-          setCitiesLoading(false);
-        }
-      }
-    };
-
-    loadCities();
-    return () => {
-      mounted = false;
-    };
-  }, [selectedStateId]);
+    if (selectedCityId === ALL_CITIES_VALUE) return;
+    if (cityOptions.some((city) => city.id === selectedCityId)) return;
+    setSelectedCityId(ALL_CITIES_VALUE);
+  }, [cityOptions, selectedCityId]);
 
   const toggleDivision = (divisionId, checked) => {
     setSelectedDivisionIds((prev) => {
@@ -244,7 +195,7 @@ const ManagerDashboard = () => {
   }, [allocations]);
 
   const isStateScoped = selectedStateId !== ALL_STATES_VALUE;
-  const citySelectDisabled = !isStateScoped || citiesLoading;
+  const citySelectDisabled = !isStateScoped || cityOptions.length === 0;
 
   if (loading) {
     return (
@@ -311,7 +262,7 @@ const ManagerDashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={selectedStateId} onValueChange={setSelectedStateId} disabled={statesLoading}>
+            <Select value={selectedStateId} onValueChange={setSelectedStateId}>
               <SelectTrigger>
                 <SelectValue placeholder="Filter by state" />
               </SelectTrigger>
@@ -329,7 +280,7 @@ const ManagerDashboard = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Select value={selectedCityId} onValueChange={setSelectedCityId} disabled={citySelectDisabled}>
               <SelectTrigger>
-                <SelectValue placeholder={isStateScoped ? 'Filter by city' : 'Select a state first'} />
+                <SelectValue placeholder={isStateScoped ? (cityOptions.length ? 'Filter by city' : 'No cities available') : 'Select a state first'} />
               </SelectTrigger>
               <SelectContent className="max-h-72">
                 <SelectItem value={ALL_CITIES_VALUE}>All cities</SelectItem>

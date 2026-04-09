@@ -28,6 +28,33 @@ const normalizeEstablishedYear = (value) => {
   return year;
 };
 
+const normalizePremiumBrandKey = (value = '') => String(value || '').trim().toLowerCase();
+
+const resolvePremiumBrandForVendor = (requestedBrandSlug = '', requestedVendorKey = '', resolvedVendorKey = '') => {
+  const vendorKeys = Array.from(
+    new Set(
+      [requestedVendorKey, resolvedVendorKey]
+        .map((value) => normalizePremiumBrandKey(value))
+        .filter(Boolean)
+    )
+  );
+
+  const brandFromVendorKey = vendorKeys
+    .map((key) => getPremiumBrandByVendorSlug(key))
+    .find(Boolean) || null;
+  const brandFromQuery = getPremiumBrandBySlug(requestedBrandSlug);
+
+  if (!brandFromQuery) return brandFromVendorKey;
+
+  const fallbackProfileSlug = normalizePremiumBrandKey(getPremiumBrandProfileSlug(brandFromQuery));
+  const configuredVendorSlug = normalizePremiumBrandKey(brandFromQuery.vendorSlug);
+  const queryMatchesVendor =
+    (fallbackProfileSlug && vendorKeys.includes(fallbackProfileSlug)) ||
+    (configuredVendorSlug && vendorKeys.includes(configuredVendorSlug));
+
+  return queryMatchesVendor ? brandFromQuery : brandFromVendorKey;
+};
+
 const buildPremiumBrandFallbackVendor = (brand = null) => {
   if (!brand) return null;
 
@@ -61,7 +88,8 @@ const buildPremiumBrandFallbackVendor = (brand = null) => {
   };
 };
 
-const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null) => {
+const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null, options = {}) => {
+  const { preferBrandName = false } = options;
   const brandFallback = buildPremiumBrandFallbackVendor(brand) || {};
   const legalCompanyName = String(vendorData.company_name || '').trim();
 
@@ -69,7 +97,8 @@ const mergeVendorWithPremiumBrand = (vendorData = {}, brand = null) => {
     id: vendorData.id || '',
     slug: vendorData.slug || brand?.vendorSlug || '',
     brand_slug: brand?.slug || '',
-    company_name: brand?.name || legalCompanyName || brandFallback.company_name || 'Company Name',
+    company_name:
+      (preferBrandName ? brand?.name : '') || legalCompanyName || brandFallback.company_name || 'Company Name',
     legal_company_name: legalCompanyName,
     name: vendorData.owner_name || vendorData.first_name || brandFallback.name || 'Contact',
     city: vendorData.city || brandFallback.city || '',
@@ -162,7 +191,7 @@ const VendorProfileContent = () => {
   const { user, userRole } = useAuth();
   const isBuyer = userRole === 'BUYER' && !!user;
   const requestedPremiumBrand = useMemo(
-    () => getPremiumBrandBySlug(requestedBrandSlug) || getPremiumBrandByVendorSlug(vendorSlugOrId),
+    () => resolvePremiumBrandForVendor(requestedBrandSlug, vendorSlugOrId),
     [requestedBrandSlug, vendorSlugOrId]
   );
   const premiumBrandFallbackOfferings = useMemo(
@@ -212,10 +241,17 @@ const VendorProfileContent = () => {
         const vendorData = vendorJson?.vendor;
 
         if (vendorData) {
-          const resolvedPremiumBrand =
-            requestedPremiumBrand ||
-            getPremiumBrandByVendorSlug(vendorData.slug || vendorData.id || requestedVendorKey);
-          const nextVendor = mergeVendorWithPremiumBrand(vendorData, resolvedPremiumBrand);
+          const resolvedPremiumBrand = resolvePremiumBrandForVendor(
+            requestedBrandSlug,
+            requestedVendorKey,
+            vendorData.slug || vendorData.id || requestedVendorKey
+          );
+          const shouldPreferBrandName =
+            Boolean(String(requestedBrandSlug || '').trim()) &&
+            normalizePremiumBrandKey(resolvedPremiumBrand?.slug) === normalizePremiumBrandKey(requestedBrandSlug);
+          const nextVendor = mergeVendorWithPremiumBrand(vendorData, resolvedPremiumBrand, {
+            preferBrandName: shouldPreferBrandName,
+          });
           setVendor(nextVendor);
 
           const canonicalPath = getVendorProfilePath(vendorData);
@@ -273,7 +309,7 @@ const VendorProfileContent = () => {
     if (requestedVendorKey) {
       fetchVendor();
     }
-  }, [requestedVendorKey, requestedPremiumBrand, requestedBrandUsesFallbackContent, navigate, searchParamsString]);
+  }, [requestedBrandSlug, requestedVendorKey, requestedBrandUsesFallbackContent, navigate, searchParamsString]);
 
   // ✅ Load favorite status
   useEffect(() => {

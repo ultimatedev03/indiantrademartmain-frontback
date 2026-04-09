@@ -42,7 +42,7 @@ const StripPrefixRedirect = ({ prefix, fallback }) => {
 export const VendorRoutes = () => {
   const { appType, resolvePath } = useSubdomain();
   const vendorLoginPath = resolvePath('login', 'vendor');
-  const vendorProfilePath = `${resolvePath('profile', 'vendor')}?tab=primary`;
+  const vendorProfilePath = `${resolvePath('profile', 'vendor')}?tab=kyc`;
 
   return (
     <Routes>

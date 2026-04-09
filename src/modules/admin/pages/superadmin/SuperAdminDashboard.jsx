@@ -51,7 +51,9 @@ import {
   Package,
 } from 'lucide-react';
 
-const EMPLOYEE_ROLES = ['ADMIN', 'HR', 'DATA_ENTRY', 'SUPPORT', 'SALES', 'FINANCE'];
+// SUPERADMIN (ITM Owner) can only create ADMIN employees.
+// ADMIN creates HR/FINANCE. HR creates SALES/SUPPORT/DATA_ENTRY/MANAGER/VP.
+const EMPLOYEE_ROLES = ['ADMIN'];
 const NOTICE_VARIANTS = ['info', 'warning', 'critical'];
 const PLAN_BADGE_VARIANTS = ['neutral', 'green', 'blue', 'purple', 'gold', 'diamond', 'slate'];
 
@@ -200,7 +202,14 @@ const planToDraft = (plan) => {
 };
 
 export default function SuperAdminDashboard() {
-  const { superAdmin, logout, changePassword } = useSuperAdmin();
+  const { superAdmin, logout, changePassword, isGodMode, isSuperAdmin } = useSuperAdmin();
+
+  // GOD MODE superadmins management state
+  const [superadminsList, setSuperadminsList] = useState([]);
+  const [superadminsLoading, setSuperadminsLoading] = useState(false);
+  const [superadminForm, setSuperadminForm] = useState({ email: '', password: '', full_name: '' });
+  const [superadminSaving, setSuperadminSaving] = useState(false);
+  const [superadminModalOpen, setSuperadminModalOpen] = useState(false);
 
   // System + pages
   const [systemConfig, setSystemConfig] = useState({
@@ -418,6 +427,19 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const fetchSuperadmins = async () => {
+    if (!isGodMode) return;
+    setSuperadminsLoading(true);
+    try {
+      const data = await superAdminServerApi.godmode.listSuperadmins();
+      setSuperadminsList(data?.superadmins || []);
+    } catch (err) {
+      toast({ title: 'Error', description: err?.message || 'Failed to load superadmins', variant: 'destructive' });
+    } finally {
+      setSuperadminsLoading(false);
+    }
+  };
+
   useEffect(() => {
     void Promise.all([
       fetchSystemConfig(),
@@ -427,6 +449,7 @@ export default function SuperAdminDashboard() {
       fetchPlans(),
       fetchFinance(),
       fetchAuditLogs(),
+      fetchSuperadmins(),
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1082,10 +1105,14 @@ export default function SuperAdminDashboard() {
     <div className="min-h-screen bg-neutral-900 text-neutral-200">
       <header className="bg-black border-b border-neutral-800 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <ShieldAlert className="h-8 w-8 text-red-600" />
+          <ShieldAlert className={`h-8 w-8 ${isGodMode ? 'text-red-600' : 'text-yellow-500'}`} />
           <div>
-            <h1 className="text-xl font-bold text-white tracking-tight">GOD MODE</h1>
-            <p className="text-xs text-neutral-500 font-mono">Super Admin Console</p>
+            <h1 className="text-xl font-bold text-white tracking-tight">
+              {isGodMode ? '🔥 GOD MODE' : '👑 SUPER ADMIN'}
+            </h1>
+            <p className="text-xs text-neutral-500 font-mono">
+              {isGodMode ? 'Developer Console — Full Platform Access' : 'ITM Owner Console — Business Control'}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-6">
@@ -1133,6 +1160,12 @@ export default function SuperAdminDashboard() {
             <TabsTrigger value="settings" className="data-[state=active]:bg-neutral-700">
               <Settings className="h-4 w-4 mr-2" /> Security
             </TabsTrigger>
+            {/* GOD MODE only tab */}
+            {isGodMode && (
+              <TabsTrigger value="godmode" className="data-[state=active]:bg-red-900 text-red-400 data-[state=active]:text-red-200">
+                <ShieldAlert className="h-4 w-4 mr-2" /> GOD MODE
+              </TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="system" className="space-y-4">
@@ -2316,8 +2349,176 @@ export default function SuperAdminDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+
+          {/* GOD MODE ONLY — Manage SUPERADMIN accounts */}
+          {isGodMode && (
+            <TabsContent value="godmode" className="space-y-4">
+              <Card className="bg-neutral-900 border-red-900">
+                <CardHeader className="flex flex-row items-center justify-between">
+                  <div>
+                    <CardTitle className="text-red-400 flex items-center gap-2">
+                      <ShieldAlert className="h-5 w-5" /> Super Admin Accounts (ITM Owner)
+                    </CardTitle>
+                    <CardDescription className="text-neutral-400">
+                      Only you (GOD MODE) can create, deactivate, or delete SUPERADMIN accounts.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="border-red-800 text-red-400 hover:bg-red-950"
+                    onClick={() => setSuperadminModalOpen(true)}
+                  >
+                    <Plus className="h-4 w-4 mr-2" /> Add SuperAdmin
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  {superadminsLoading ? (
+                    <p className="text-neutral-400 text-sm">Loading...</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-neutral-800">
+                          <TableHead className="text-neutral-400">Email</TableHead>
+                          <TableHead className="text-neutral-400">Role</TableHead>
+                          <TableHead className="text-neutral-400">Status</TableHead>
+                          <TableHead className="text-neutral-400">Last Login</TableHead>
+                          <TableHead className="text-neutral-400">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(superadminsList || []).map((sa) => (
+                          <TableRow key={sa.id} className="border-neutral-800">
+                            <TableCell className="text-white">{sa.email}</TableCell>
+                            <TableCell>
+                              <Badge className={sa.role === 'GODMODE' ? 'bg-red-900 text-red-200' : 'bg-yellow-900 text-yellow-200'}>
+                                {sa.role === 'GODMODE' ? '🔥 GOD MODE' : '👑 SUPERADMIN'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge className={sa.is_active ? 'bg-green-900 text-green-300' : 'bg-neutral-700 text-neutral-400'}>
+                                {sa.is_active ? 'Active' : 'Inactive'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-neutral-400 text-sm">{formatDateTime(sa.last_login)}</TableCell>
+                            <TableCell className="flex gap-2">
+                              {sa.role !== 'GODMODE' && (
+                                <>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="border-neutral-700 text-neutral-300 text-xs"
+                                    onClick={async () => {
+                                      try {
+                                        await superAdminServerApi.godmode.toggleActive(sa.id);
+                                        await fetchSuperadmins();
+                                        toast({ title: 'Done', description: `Account ${sa.is_active ? 'deactivated' : 'activated'}` });
+                                      } catch (err) {
+                                        toast({ title: 'Error', description: err?.message, variant: 'destructive' });
+                                      }
+                                    }}
+                                  >
+                                    {sa.is_active ? 'Deactivate' : 'Activate'}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="text-xs"
+                                    onClick={async () => {
+                                      if (!window.confirm(`Delete superadmin ${sa.email}?`)) return;
+                                      try {
+                                        await superAdminServerApi.godmode.deleteSuperadmin(sa.id);
+                                        await fetchSuperadmins();
+                                        toast({ title: 'Deleted', description: `${sa.email} removed` });
+                                      } catch (err) {
+                                        toast({ title: 'Error', description: err?.message, variant: 'destructive' });
+                                      }
+                                    }}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
+
+      {/* GOD MODE — Create Superadmin Modal */}
+      <Dialog open={superadminModalOpen} onOpenChange={setSuperadminModalOpen}>
+        <DialogContent className="bg-neutral-900 border-red-900 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-red-400">Create SUPERADMIN Account</DialogTitle>
+            <DialogDescription className="text-neutral-400">
+              This creates an ITM Owner (SUPERADMIN) account. Only GOD MODE can do this.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setSuperadminSaving(true);
+              try {
+                await superAdminServerApi.godmode.createSuperadmin(superadminForm);
+                await fetchSuperadmins();
+                setSuperadminModalOpen(false);
+                setSuperadminForm({ email: '', password: '', full_name: '' });
+                toast({ title: 'Created', description: 'SUPERADMIN account created successfully' });
+              } catch (err) {
+                toast({ title: 'Error', description: err?.message, variant: 'destructive' });
+              } finally {
+                setSuperadminSaving(false);
+              }
+            }}
+            className="space-y-4 mt-4"
+          >
+            <div className="space-y-2">
+              <Label className="text-neutral-300">Full Name</Label>
+              <Input
+                value={superadminForm.full_name}
+                onChange={(e) => setSuperadminForm((p) => ({ ...p, full_name: e.target.value }))}
+                className="bg-neutral-800 border-neutral-700"
+                placeholder="ITM Owner Name"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-neutral-300">Email</Label>
+              <Input
+                type="email"
+                value={superadminForm.email}
+                onChange={(e) => setSuperadminForm((p) => ({ ...p, email: e.target.value }))}
+                className="bg-neutral-800 border-neutral-700"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-neutral-300">Password</Label>
+              <Input
+                type="password"
+                value={superadminForm.password}
+                onChange={(e) => setSuperadminForm((p) => ({ ...p, password: e.target.value }))}
+                className="bg-neutral-800 border-neutral-700"
+                required
+                minLength={8}
+              />
+            </div>
+            <div className="flex gap-3 justify-end pt-2">
+              <Button type="button" variant="ghost" onClick={() => setSuperadminModalOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={superadminSaving} className="bg-red-900 hover:bg-red-800">
+                {superadminSaving ? 'Creating...' : 'Create SUPERADMIN'}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={employeeModalOpen} onOpenChange={setEmployeeModalOpen}>
         <DialogContent className="bg-neutral-900 border-neutral-800 text-white">

@@ -15,7 +15,8 @@ const SuperAdminProtectedRoute = () => {
 
   const isSuperAdminRole = (role) => {
     const r = normalizeRole(role);
-    return r === 'SUPERADMIN' || r === 'SUPERUSER' || r === 'GODMODE';
+    // Both GODMODE (developer) and SUPERADMIN (ITM owner) can access this portal
+    return r === 'GODMODE' || r === 'SUPERADMIN' || r === 'SUPERUSER';
   };
 
   // ✅ Use consistent login route (works on localhost + admin subdomain)
@@ -48,7 +49,7 @@ const SuperAdminProtectedRoute = () => {
         <div className="max-w-md text-center">
           <ShieldAlert className="h-16 w-16 text-red-600 mx-auto mb-4" />
           <h1 className="text-2xl font-bold mb-2">Access Denied</h1>
-          <p className="text-neutral-400 mb-6">Your account credentials do not have GOD MODE privileges.</p>
+          <p className="text-neutral-400 mb-6">Your account does not have Super Admin or GOD MODE privileges.</p>
           <Navigate to={loginPath} />
         </div>
       </div>

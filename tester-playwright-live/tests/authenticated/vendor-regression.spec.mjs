@@ -42,11 +42,19 @@ test.describe('Vendor portal regression', () => {
   test('BUG-268 BUG-269 subscription modal opens with visible actions', async ({ page }) => {
     test.skip(!hasVendorState, 'Run npm run auth:vendor first.');
     await page.goto('/vendor/subscriptions', { waitUntil: 'domcontentloaded' });
-    const detailsButton = page.getByRole('button', { name: /view full details|current plan|proceed to pay|active plan/i }).first();
-    await expect(detailsButton).toBeVisible();
-    await detailsButton.click();
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('button', { name: /cancel|proceed|active plan|apply & proceed/i }).first()).toBeVisible();
+    await expect(page.locator('body')).toContainText(/subscription plans/i);
+    await expect(page.getByText(/^current plan$/i).first()).toBeVisible();
+    expect(await page.getByRole('button', { name: /active plan/i }).count()).toBe(0);
+
+    const planCard = page.locator('div[role="button"]').filter({ hasText: /tap card to view full details/i }).first();
+    await expect(planCard).toBeVisible();
+    await planCard.click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText(/payable now/i)).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /^close$/i })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /cancel/i })).toHaveCount(0);
   });
 
   test('BUG-163 vendor KYC shortcut opens the KYC documents tab', async ({ page }) => {

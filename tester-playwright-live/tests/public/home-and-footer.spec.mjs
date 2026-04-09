@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+const escapeRegExp = (value = '') => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 test('BUG-198 BUG-199 homepage Tell Us Your Requirement CTA opens the requirement modal', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: /tell us your requirement/i }).click();
@@ -106,7 +108,7 @@ test('BUG-203 homepage requirement modal stays closed until the user triggers it
 
 test('BUG-278 premium brands section shows the ITM brand card', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('button', { name: /open itm brand page/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /open itm brand page/i }).first()).toBeVisible();
 });
 
 test('BUG-279 public header shows a Home navigation link', async ({ page }) => {
@@ -116,19 +118,19 @@ test('BUG-279 public header shows a Home navigation link', async ({ page }) => {
 
 test('BUG-201 BUG-240 BUG-241 BUG-242 premium brand card opens a populated matching brand page', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  const brandButton = page.getByRole('button', { name: /open .* brand page/i }).first();
-  const clickedName = await brandButton.getAttribute('title');
+  const brandButton = page.getByRole('button', { name: /open pdce brand page/i }).first();
+  const clickedName = (await brandButton.getAttribute('title')) || 'PDCE';
   await brandButton.evaluate((element) => element.click());
   await page.waitForLoadState('domcontentloaded');
   await expect(page).toHaveURL(/\/directory\/vendor\/.+|\/directory\/brand\/.+/i);
-  await expect(page.locator('body')).toContainText(String(clickedName || '').trim().split(' ')[0]);
+  await expect(page.getByRole('heading', { name: new RegExp(`^${escapeRegExp(clickedName)}$`, 'i') })).toBeVisible();
   const bodyText = await page.locator('body').innerText();
   expect(bodyText.trim().length).toBeGreaterThan(200);
 });
 
 test('BUG-277 premium-brand fallback page keeps the selected brand content aligned', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('button', { name: /open pss lab brand page/i }).evaluate((element) => element.click());
+  await page.getByRole('button', { name: /open pss lab brand page/i }).first().evaluate((element) => element.click());
   await page.waitForLoadState('domcontentloaded');
   await expect(page.getByRole('heading', { name: /^pss lab$/i })).toBeVisible();
   await expect(page.locator('body')).toContainText(/lab testing|product evaluation|quality checks/i);

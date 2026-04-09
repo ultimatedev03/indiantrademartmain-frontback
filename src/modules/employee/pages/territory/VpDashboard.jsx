@@ -14,6 +14,7 @@ import { locationService } from '@/shared/services/locationService';
 const ALL_STATES_VALUE = 'all';
 const ALL_CITIES_VALUE = 'all';
 const normalizeId = (value) => String(value || '').trim();
+const normalizeName = (value) => String(value || '').trim().toLowerCase();
 
 const VpDashboard = () => {
   const [loading, setLoading] = useState(true);
@@ -33,54 +34,109 @@ const VpDashboard = () => {
   const [selectedStateId, setSelectedStateId] = useState(ALL_STATES_VALUE);
   const [selectedCityId, setSelectedCityId] = useState(ALL_CITIES_VALUE);
 
+  const stateLookup = useMemo(() => {
+    const idByName = new Map();
+    const nameById = new Map();
+    const options = (states || [])
+      .map((state) => {
+        const id = normalizeId(state?.id);
+        if (!id) return null;
+        const name = String(state?.name || 'State N/A').trim() || 'State N/A';
+        nameById.set(id, name);
+        const normalizedName = normalizeName(name);
+        if (normalizedName) idByName.set(normalizedName, id);
+        return { id, name };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    return { options, idByName, nameById };
+  }, [states]);
+
+  const cityLookup = useMemo(() => {
+    const idByName = new Map();
+    const nameById = new Map();
+    const options = (cities || [])
+      .map((city) => {
+        const id = normalizeId(city?.id);
+        if (!id) return null;
+        const name = String(city?.name || 'City N/A').trim() || 'City N/A';
+        nameById.set(id, name);
+        const normalizedName = normalizeName(name);
+        if (normalizedName) idByName.set(normalizedName, id);
+        return { id, name };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    return { options, idByName, nameById };
+  }, [cities]);
+
   const filteredDivisions = useMemo(() => {
     const term = String(search || '').trim().toLowerCase();
     return (divisions || []).filter((d) => {
-      if (selectedStateId !== ALL_STATES_VALUE && normalizeId(d?.state_id) !== selectedStateId) return false;
-      if (selectedCityId !== ALL_CITIES_VALUE && normalizeId(d?.city_id) !== selectedCityId) return false;
+      const divisionStateId = normalizeId(
+        d?.state_id || d?.state?.id || stateLookup.idByName.get(normalizeName(d?.state?.name))
+      );
+      const divisionCityId = normalizeId(
+        d?.city_id || d?.city?.id || cityLookup.idByName.get(normalizeName(d?.city?.name))
+      );
+
+      if (selectedStateId !== ALL_STATES_VALUE && divisionStateId !== selectedStateId) return false;
+      if (selectedCityId !== ALL_CITIES_VALUE && divisionCityId !== selectedCityId) return false;
       if (!term) return true;
       return [d?.name, d?.city?.name, d?.state?.name, d?.district_name, d?.subdistrict_name, d?.pincode_count]
         .filter(Boolean)
         .some((x) => String(x).toLowerCase().includes(term));
     });
-  }, [divisions, search, selectedStateId, selectedCityId]);
+  }, [cityLookup.idByName, divisions, search, selectedCityId, selectedStateId, stateLookup.idByName]);
 
   const stateOptions = useMemo(() => {
-    const divisionStateIds = new Set((divisions || []).map((d) => normalizeId(d?.state_id)).filter(Boolean));
-    const options = (states || [])
-      .filter((state) => divisionStateIds.has(normalizeId(state?.id)))
-      .map((state) => ({
-        id: normalizeId(state?.id),
-        name: state?.name || 'State N/A',
-      }));
+    const optionsById = new Map(stateLookup.options.map((state) => [state.id, state]));
 
-    if (options.length === divisionStateIds.size) {
-      return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    }
+    (divisions || []).forEach((division) => {
+      const stateId = normalizeId(
+        division?.state_id || division?.state?.id || stateLookup.idByName.get(normalizeName(division?.state?.name))
+      );
+      if (!stateId || optionsById.has(stateId)) return;
 
-    const seen = new Set(options.map((state) => state.id));
-    (divisions || []).forEach((d) => {
-      const stateId = normalizeId(d?.state_id);
-      if (!stateId || seen.has(stateId)) return;
-      seen.add(stateId);
-      options.push({
-        id: stateId,
-        name: d?.state?.name || 'State N/A',
-      });
+      const stateName =
+        String(division?.state?.name || stateLookup.nameById.get(stateId) || 'State N/A').trim() || 'State N/A';
+      optionsById.set(stateId, { id: stateId, name: stateName });
     });
 
-    return options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [divisions, states]);
+    return Array.from(optionsById.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [divisions, stateLookup.idByName, stateLookup.nameById, stateLookup.options]);
 
   const cityOptions = useMemo(() => {
-    return (cities || [])
-      .map((city) => ({
-        id: normalizeId(city?.id),
-        name: city?.name || 'City N/A',
-      }))
-      .filter((city) => city.id)
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [cities]);
+    const optionsById = new Map(cityLookup.options.map((city) => [city.id, city]));
+
+    (divisions || []).forEach((division) => {
+      const divisionStateId = normalizeId(
+        division?.state_id || division?.state?.id || stateLookup.idByName.get(normalizeName(division?.state?.name))
+      );
+      if (selectedStateId !== ALL_STATES_VALUE && divisionStateId !== selectedStateId) return;
+
+      const cityId = normalizeId(
+        division?.city_id || division?.city?.id || cityLookup.idByName.get(normalizeName(division?.city?.name))
+      );
+      if (!cityId || optionsById.has(cityId)) return;
+
+      const cityName =
+        String(division?.city?.name || cityLookup.nameById.get(cityId) || 'City N/A').trim() || 'City N/A';
+      optionsById.set(cityId, { id: cityId, name: cityName });
+    });
+
+    return Array.from(optionsById.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [
+    cities,
+    cityLookup.idByName,
+    cityLookup.nameById,
+    cityLookup.options,
+    divisions,
+    selectedStateId,
+    stateLookup.idByName,
+  ]);
 
   const managerById = useMemo(() => {
     const map = new Map();
@@ -247,7 +303,7 @@ const VpDashboard = () => {
   }, [allocations]);
 
   const isStateScoped = selectedStateId !== ALL_STATES_VALUE;
-  const citySelectDisabled = !isStateScoped || citiesLoading;
+  const citySelectDisabled = !isStateScoped || (citiesLoading && cityOptions.length === 0);
 
   if (loading) {
     return (

@@ -1256,12 +1256,15 @@ router.get("/staff", async (req, res) => {
   }
 });
 
+// Roles ADMIN portal is allowed to create (HR and FINANCE only)
+const ADMIN_CREATABLE_ROLES = ['HR', 'FINANCE'];
+
 router.post("/staff", async (req, res) => {
   try {
     const full_name = String(req.body?.full_name || "").trim();
     const email = normalizeEmail(req.body?.email || "");
     const password = String(req.body?.password || "").trim();
-    const role = normalizeRole(req.body?.role || "DATA_ENTRY") || "DATA_ENTRY";
+    const role = normalizeRole(req.body?.role || "HR") || "HR";
     const phone = String(req.body?.phone || "").trim() || null;
     const department = String(req.body?.department || "").trim() || roleToDepartment(role);
 
@@ -1269,6 +1272,15 @@ router.post("/staff", async (req, res) => {
       return res
         .status(400)
         .json({ success: false, error: "full_name, email and password are required" });
+    }
+
+    // ADMIN can only create HR and FINANCE roles.
+    // SUPERADMIN creates ADMIN. HR creates SALES/SUPPORT/DATA_ENTRY/MANAGER/VP.
+    if (!ADMIN_CREATABLE_ROLES.includes(role)) {
+      return res.status(403).json({
+        success: false,
+        error: `ADMIN can only create roles: ${ADMIN_CREATABLE_ROLES.join(', ')}. Use the correct portal for other roles.`,
+      });
     }
 
     const passwordValidation = validateStrongPassword(password);

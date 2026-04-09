@@ -67,12 +67,19 @@ async function maybeUpgradePasswordHash(superadmin, password) {
   }
 }
 
+// Normalize role: GODMODE stays GODMODE, everything else is SUPERADMIN
+function normalizeSuperAdminRole(role) {
+  const r = String(role || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
+  if (r === 'GODMODE') return 'GODMODE';
+  return 'SUPERADMIN';
+}
+
 function signSuperAdminToken(superadmin) {
   const secret = getJwtSecret();
   const payload = {
     sub: superadmin.id,
     email: superadmin.email,
-    role: (superadmin.role || 'SUPERADMIN').toUpperCase(),
+    role: normalizeSuperAdminRole(superadmin.role),
     type: 'SUPERADMIN',
   };
 
@@ -147,7 +154,7 @@ export async function loginSuperAdmin(req, res) {
       superadmin: {
         id: superadmin.id,
         email: superadmin.email,
-        role: (superadmin.role || 'SUPERADMIN').toUpperCase(),
+        role: normalizeSuperAdminRole(superadmin.role),
         is_active: superadmin.is_active !== false,
         last_login: new Date().toISOString(),
       },
@@ -200,17 +207,82 @@ export function requireSuperAdmin(req, res, next) {
         return res.status(403).json({ success: false, error: 'Superadmin account is inactive' });
       }
 
-      req.superadmin = superadmin;
+      const resolvedRole = normalizeSuperAdminRole(superadmin.role);
+      req.superadmin = { ...superadmin, role: resolvedRole };
       req.actor = {
         id: superadmin.id,
         type: 'SUPERADMIN',
-        role: (superadmin.role || 'SUPERADMIN').toUpperCase(),
+        role: resolvedRole,
         email: superadmin.email,
       };
 
       return next();
     } catch (error) {
       console.error('[SuperAdminAuth] Superadmin check failed:', error?.message || error);
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+  };
+
+  run();
+}
+
+// requireGodMode — GODMODE only (developer). SUPERADMIN (ITM owner) is blocked.
+export function requireGodMode(req, res, next) {
+  const run = async () => {
+    try {
+      const token = parseBearerToken(req);
+      if (!token) {
+        return res.status(401).json({ success: false, error: 'Missing superadmin token' });
+      }
+
+      const secret = getJwtSecret();
+      let decoded;
+      try {
+        decoded = jwt.verify(token, secret);
+      } catch (error) {
+        return res.status(401).json({ success: false, error: 'Invalid or expired superadmin token' });
+      }
+
+      const superadminId = decoded?.sub;
+      if (!superadminId) {
+        return res.status(401).json({ success: false, error: 'Invalid superadmin token payload' });
+      }
+
+      const { data: superadmin, error } = await supabase
+        .from('superadmin_users')
+        .select('*')
+        .eq('id', superadminId)
+        .maybeSingle();
+
+      if (error) {
+        return res.status(500).json({ success: false, error: error.message });
+      }
+
+      if (!superadmin || superadmin.is_active === false) {
+        return res.status(403).json({ success: false, error: 'Account is inactive' });
+      }
+
+      const resolvedRole = normalizeSuperAdminRole(superadmin.role);
+
+      // Only GODMODE allowed here
+      if (resolvedRole !== 'GODMODE') {
+        return res.status(403).json({
+          success: false,
+          error: 'GOD MODE access required. This action is restricted to the platform developer.',
+        });
+      }
+
+      req.superadmin = { ...superadmin, role: resolvedRole };
+      req.actor = {
+        id: superadmin.id,
+        type: 'SUPERADMIN',
+        role: resolvedRole,
+        email: superadmin.email,
+      };
+
+      return next();
+    } catch (error) {
+      console.error('[SuperAdminAuth] GodMode check failed:', error?.message || error);
       return res.status(401).json({ success: false, error: 'Unauthorized' });
     }
   };

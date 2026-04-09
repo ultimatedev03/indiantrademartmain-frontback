@@ -16,9 +16,10 @@ export const SuperAdminProvider = ({ children }) => {
   const normalizeRole = (role) => {
     if (!role) return undefined;
     const r = String(role).trim().toUpperCase();
-    // accept common variants
     const compact = r.replace(/[^A-Z]/g, '');
-    if (compact === 'SUPERADMIN' || compact === 'SUPERUSER' || compact === 'GODMODE') return 'SUPERADMIN';
+    // GOD MODE stays GOD MODE (developer), SUPERADMIN stays SUPERADMIN (ITM owner)
+    if (compact === 'GODMODE') return 'GODMODE';
+    if (compact === 'SUPERADMIN' || compact === 'SUPERUSER') return 'SUPERADMIN';
     return r;
   };
 
@@ -117,8 +118,12 @@ export const SuperAdminProvider = ({ children }) => {
     }
   };
 
+  // Convenience flags for components to check role
+  const isGodMode = superAdmin?.role === 'GODMODE';
+  const isSuperAdmin = superAdmin?.role === 'SUPERADMIN';
+
   return (
-    <SuperAdminContext.Provider value={{ superAdmin, isLoading, login, logout, changePassword }}>
+    <SuperAdminContext.Provider value={{ superAdmin, isLoading, login, logout, changePassword, isGodMode, isSuperAdmin }}>
       {children}
     </SuperAdminContext.Provider>
   );

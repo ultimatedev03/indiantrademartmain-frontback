@@ -57,7 +57,20 @@ test.describe('Manager portal regression', () => {
     test.skip(!hasManagerState, 'Run npm run auth:manager first.');
     await page.goto('/employee/manager/dashboard', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('body')).toContainText(/sales allocation/i);
-    await expect(page.getByText(/all states|filter by state/i).first()).toBeVisible();
+    const selectSnapshots = await page.locator('select').evaluateAll((elements) =>
+      elements.map((element) => ({
+        disabled: element.disabled,
+        options: Array.from(element.options).map((option) => ({
+          label: option.textContent?.trim() || '',
+          value: option.value,
+        })),
+      }))
+    );
+    const stateSelect = selectSnapshots.find((snapshot) =>
+      snapshot.options.some((option) => /all states/i.test(option.label))
+    );
+    expect(stateSelect).toBeTruthy();
+    expect(stateSelect.options.length).toBeGreaterThan(1);
     const bodyText = await page.locator('body').innerText();
     expect(bodyText.toLowerCase()).not.toContain('undefined');
   });

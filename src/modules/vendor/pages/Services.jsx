@@ -1025,23 +1025,27 @@ const Services = () => {
               </CardContent>
 
               <CardFooter className="pt-1">
-                <Button
-                  data-plan-action="upgrade"
-                  className={cx(
-                    'w-full rounded-xl h-10 font-semibold',
-                    isCurrent ? 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50' : ''
-                  )}
-                  variant={isCurrent ? 'outline' : 'default'}
-                  disabled={isCurrent}
-                  onClick={(e) => {
-                    // Upgrade opens details modal first so coupon can be applied before checkout.
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (!isCurrent) openPlanDetails(plan);
-                  }}
-                >
-                  {isCurrent ? 'Active Plan' : 'Upgrade'}
-                </Button>
+                {isCurrent ? (
+                  <div
+                    className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-center text-sm font-semibold text-emerald-700"
+                    role="status"
+                  >
+                    Current plan
+                  </div>
+                ) : (
+                  <Button
+                    data-plan-action="upgrade"
+                    className="w-full rounded-xl h-10 font-semibold"
+                    onClick={(e) => {
+                      // Upgrade opens details modal first so coupon can be applied before checkout.
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openPlanDetails(plan);
+                    }}
+                  >
+                    Upgrade
+                  </Button>
+                )}
               </CardFooter>
             </Card>
           );
@@ -1050,10 +1054,10 @@ const Services = () => {
 
       {/* ✅ Plan Details Dialog */}
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="mx-auto flex max-h-[90vh] w-[calc(100vw-1.5rem)] max-w-2xl flex-col overflow-hidden p-0 sm:w-[86vw] md:max-w-[1100px] md:w-[76vw] lg:w-[66vw]">
+        <DialogContent className="mx-auto max-h-[90vh] w-[calc(100vw-1.5rem)] max-w-2xl overflow-y-auto p-0 sm:w-[86vw] md:max-w-[1100px] md:w-[76vw] lg:w-[66vw]">
           {!selectedPlan ? null : (
-            <>
-              <DialogHeader className="pb-1 px-3 pt-3">
+            <div className="space-y-3">
+              <DialogHeader className="border-b bg-white px-3 pb-3 pt-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-xl border bg-slate-50 flex items-center justify-center text-slate-900">
@@ -1127,7 +1131,7 @@ const Services = () => {
                 </div>
               </DialogHeader>
 
-              <div className="mt-2 flex-1 space-y-1.5 overflow-y-auto px-3 pb-3">
+              <div className="space-y-1.5 px-3">
                 {/* lead limits */}
                 <div className="rounded-2xl border bg-slate-50 p-2 space-y-1.5">
                   <div className="flex items-center justify-between">
@@ -1299,35 +1303,37 @@ const Services = () => {
                     className="w-full h-12"
                     onClick={() => setDetailsOpen(false)}
                   >
-                    Cancel
+                    Close
                   </Button>
-                  <Button
-                    className={cx(
-                      'w-full rounded-xl h-12 font-semibold text-base',
-                      selectedIsCurrent ? 'bg-white text-slate-900 border border-slate-200 hover:bg-slate-50' : ''
-                    )}
-                    variant={selectedIsCurrent ? 'outline' : 'default'}
-                    disabled={selectedIsCurrent}
-                    onClick={() => handleSubscribe(selectedPlan)}
-                  >
-                    {selectedIsCurrent
-                      ? 'Active Plan'
-                      : couponCode.trim()
-                        ? 'Apply & Proceed'
-                        : 'Proceed to Pay'}
-                  </Button>
-                  {!selectedIsCurrent && couponCode.trim() && (
-                    <Button
-                      variant="ghost"
-                      className="w-full h-12 border border-dashed border-slate-200"
-                      onClick={() => handleSubscribe(selectedPlan, '')}
+                  {selectedIsCurrent ? (
+                    <div
+                      className="w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-sm font-semibold text-emerald-700"
+                      role="status"
                     >
-                      Proceed without coupon
-                    </Button>
+                      This is your current active plan.
+                    </div>
+                  ) : (
+                    <>
+                      <Button
+                        className="w-full rounded-xl h-12 font-semibold text-base"
+                        onClick={() => handleSubscribe(selectedPlan)}
+                      >
+                        {couponCode.trim() ? 'Apply & Proceed' : 'Proceed to Pay'}
+                      </Button>
+                      {couponCode.trim() && (
+                        <Button
+                          variant="ghost"
+                          className="w-full h-12 border border-dashed border-slate-200"
+                          onClick={() => handleSubscribe(selectedPlan, '')}
+                        >
+                          Proceed without coupon
+                        </Button>
+                      )}
+                    </>
                   )}
                 </div>
               </DialogFooterUI>
-            </>
+            </div>
           )}
         </DialogContent>
       </Dialog>

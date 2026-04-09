@@ -111,8 +111,8 @@ const Staff = () => {
     full_name: "",
     email: "",
     phone: "",
-    role: "DATA_ENTRY",
-    department: "Operations",
+    role: "HR",
+    department: "Human Resources",
     password: "",
   });
 
@@ -193,8 +193,8 @@ const Staff = () => {
         full_name: "",
         email: "",
         phone: "",
-        role: "DATA_ENTRY",
-        department: "Operations",
+        role: "HR",
+        department: "Human Resources",
         password: "",
       });
       setShowCreatePassword(false);
@@ -381,13 +381,11 @@ const Staff = () => {
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
+                    {/* ADMIN can only create HR and FINANCE.
+                        SUPERADMIN creates ADMIN. HR creates SALES/SUPPORT/DATA_ENTRY/MANAGER/VP. */}
                     <SelectContent>
-                      <SelectItem value="DATA_ENTRY">Data Entry</SelectItem>
-                      <SelectItem value="FINANCE">Finance</SelectItem>
-                      <SelectItem value="SALES">Sales</SelectItem>
-                      <SelectItem value="SUPPORT">Support</SelectItem>
                       <SelectItem value="HR">HR</SelectItem>
-                      <SelectItem value="ADMIN">Admin</SelectItem>
+                      <SelectItem value="FINANCE">Finance</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

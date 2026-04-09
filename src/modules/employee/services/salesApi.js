@@ -17,6 +17,19 @@ const unwrap = async (res, fallbackMessage) => {
   return data;
 };
 
+const isMissingSalesNoteSchemaError = (message = '') => {
+  const normalized = String(message || '').toLowerCase();
+  return normalized.includes('sales_note') && (normalized.includes('schema cache') || normalized.includes('column'));
+};
+
+const patchLead = async (leadId, updates = {}) => {
+  const res = await fetchWithCsrf(apiUrl(`/api/employee/sales/leads/${leadId}`), {
+    method: 'PATCH',
+    body: JSON.stringify(updates || {}),
+  });
+  return unwrap(res, 'Failed to update lead');
+};
+
 export const salesApi = {
   getStats: async () => {
     const res = await fetchWithCsrf(apiUrl('/api/employee/sales/stats'));
@@ -51,12 +64,20 @@ export const salesApi = {
       throw new Error('leadId is required');
     }
 
-    const res = await fetchWithCsrf(apiUrl(`/api/employee/sales/leads/${leadId}`), {
-      method: 'PATCH',
-      body: JSON.stringify(updates || {}),
-    });
-    const data = await unwrap(res, 'Failed to update lead');
-    return data?.lead || null;
+    try {
+      const data = await patchLead(leadId, updates);
+      return data?.lead || null;
+    } catch (error) {
+      if (!Object.prototype.hasOwnProperty.call(updates || {}, 'sales_note') || !isMissingSalesNoteSchemaError(error?.message)) {
+        throw error;
+      }
+
+      const retryPayload = { ...(updates || {}) };
+      delete retryPayload.sales_note;
+
+      const data = await patchLead(leadId, retryPayload);
+      return data?.lead || null;
+    }
   },
 
   getPricingRules: async () => {

@@ -463,14 +463,16 @@ const LeadDetail = () => {
   const isDirect = String(lead?.__source || '').toLowerCase() === 'direct';
   const purchasedAt = isPurchased ? safeDate(lead?.__purchaseDate) : null;
   const purchasedAtLabel = purchasedAt ? formatDateTime(purchasedAt) : null;
+  const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
   const isRegisteredBuyer = Boolean(
+    hasExistingChatThread ||
     lead?.buyer_id ||
     lead?.buyer_user_id ||
     lead?.buyers?.id ||
     lead?.buyers?.user_id ||
+    String(lead?.buyers?.email || '').trim() ||
     typeof lead?.buyers?.is_active === 'boolean'
   );
-  const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
 
   const logContactSafe = async (type) => {
     try {

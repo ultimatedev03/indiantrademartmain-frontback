@@ -16,24 +16,23 @@ const hasStartedForm = (data = {}) =>
   Object.values(data || {}).some((value) => String(value || '').trim().length > 0);
 const QUOTE_POPUP_SHOW_DELAY_MS = 35000;
 const QUOTE_POPUP_AUTO_CLOSE_MS = 35000;
-const QUOTE_POPUP_SESSION_KEY = 'itm_quote_popup_state_v2';
+const QUOTE_POPUP_SESSION_KEY = 'itm_quote_popup_state_v3';
 
 const readPopupSessionState = () => {
   if (typeof window === 'undefined') {
-    return { firstEligibleAt: 0, shown: false, dismissed: false };
+    return { shown: false, dismissed: false };
   }
 
   try {
     const raw = window.sessionStorage.getItem(QUOTE_POPUP_SESSION_KEY);
-    if (!raw) return { firstEligibleAt: 0, shown: false, dismissed: false };
+    if (!raw) return { shown: false, dismissed: false };
     const parsed = JSON.parse(raw);
     return {
-      firstEligibleAt: Number(parsed?.firstEligibleAt || 0),
       shown: Boolean(parsed?.shown),
       dismissed: Boolean(parsed?.dismissed),
     };
   } catch {
-    return { firstEligibleAt: 0, shown: false, dismissed: false };
+    return { shown: false, dismissed: false };
   }
 };
 
@@ -130,18 +129,11 @@ const QuotePopup = () => {
     const popupState = readPopupSessionState();
     if (popupState.shown || popupState.dismissed) return;
 
-    const firstEligibleAt = popupState.firstEligibleAt || Date.now();
-    if (!popupState.firstEligibleAt) {
-      writePopupSessionState({ firstEligibleAt });
-    }
-
-    const elapsed = Math.max(0, Date.now() - firstEligibleAt);
-    const remainingDelay = Math.max(0, QUOTE_POPUP_SHOW_DELAY_MS - elapsed);
-
-    // 3. Start a session-stable timer so refresh does not reset popup timing.
+    // 3. Start a fresh timer for each eligible visit so the popup never appears
+    // instantly on refresh because of an older hidden session timestamp.
     showTimerRef.current = setTimeout(() => {
       showPopup();
-    }, remainingDelay);
+    }, QUOTE_POPUP_SHOW_DELAY_MS);
 
     return () => clearTimers();
   }, [user, location.pathname]);

@@ -98,6 +98,92 @@ const normalizeText = (value) =>
     .trim();
 
 const dedupe = (arr = []) => Array.from(new Set(arr.filter(Boolean)));
+const normalizeEmailValue = (value) => String(value || '').trim().toLowerCase();
+
+const pickFirstTextValue = (...values) => {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return null;
+};
+
+const mapBuyerMeta = (buyer = {}) => ({
+  id: String(buyer?.id || '').trim() || null,
+  user_id: String(buyer?.user_id || '').trim() || null,
+  full_name: pickFirstTextValue(buyer?.full_name, buyer?.company_name),
+  company_name: pickFirstTextValue(buyer?.company_name),
+  email: normalizeEmailValue(buyer?.email) || null,
+  phone: pickFirstTextValue(buyer?.phone, buyer?.mobile_number, buyer?.mobile),
+  avatar_url: pickFirstTextValue(buyer?.avatar_url),
+  is_active: typeof buyer?.is_active === 'boolean' ? buyer.is_active : null,
+});
+
+const hasBuyerMeta = (buyer = null) =>
+  Boolean(
+    buyer &&
+      Object.values(buyer).some((value) => {
+        if (typeof value === 'boolean') return true;
+        return String(value || '').trim().length > 0;
+      })
+  );
+
+const enrichLeadBuyerMeta = async (lead = {}) => {
+  if (!lead || typeof lead !== 'object') return lead;
+
+  let buyerMeta = mapBuyerMeta(lead?.buyers || {});
+  if (!hasBuyerMeta(buyerMeta)) buyerMeta = null;
+
+  const leadBuyerId = String(lead?.buyer_id || '').trim();
+  const leadBuyerEmail = normalizeEmailValue(lead?.buyer_email);
+
+  if (!buyerMeta && leadBuyerId) {
+    const { data: buyerById, error: buyerByIdError } = await supabase
+      .from('buyers')
+      .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
+      .eq('id', leadBuyerId)
+      .maybeSingle();
+
+    if (!buyerByIdError && buyerById) {
+      buyerMeta = mapBuyerMeta(buyerById);
+    }
+  }
+
+  if (!buyerMeta && leadBuyerEmail) {
+    const { data: buyerByEmail, error: buyerByEmailError } = await supabase
+      .from('buyers')
+      .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
+      .eq('email', leadBuyerEmail)
+      .maybeSingle();
+
+    if (!buyerByEmailError && buyerByEmail) {
+      buyerMeta = mapBuyerMeta(buyerByEmail);
+    }
+  }
+
+  return {
+    ...lead,
+    buyer_id: buyerMeta?.id || lead?.buyer_id || null,
+    buyer_user_id: buyerMeta?.user_id || lead?.buyer_user_id || null,
+    buyer_name: pickFirstTextValue(
+      buyerMeta?.full_name,
+      lead?.buyer_name,
+      lead?.buyerName,
+      lead?.client_name,
+      lead?.clientName,
+      lead?.name
+    ),
+    buyer_email: buyerMeta?.email || leadBuyerEmail || null,
+    buyer_phone: pickFirstTextValue(
+      buyerMeta?.phone,
+      lead?.buyer_phone,
+      lead?.buyerPhone,
+      lead?.phone
+    ),
+    company_name: pickFirstTextValue(buyerMeta?.company_name, lead?.company_name),
+    buyers: buyerMeta || lead?.buyers || null,
+  };
+};
 
 const fetchVendorJson = async (path, options = {}) => {
   const res = await fetchWithCsrf(apiUrl(path), options);
@@ -340,7 +426,7 @@ export const leadApi = {
       .eq('id', leadId)
       .maybeSingle();
 
-    if (!error && data) return data;
+    if (!error && data) return await enrichLeadBuyerMeta(data);
 
     // Fallback to backend endpoints which bypass client-side RLS.
     try {
@@ -349,7 +435,7 @@ export const leadApi = {
         const rowId = row?.id || row?.lead_id || row?.leads?.id;
         return rowId && String(rowId) === leadId;
       });
-      if (match) return match?.leads || match;
+      if (match) return await enrichLeadBuyerMeta(match?.leads || match);
     } catch (fallbackErr) {
       console.warn('[leadApi] fallback lead fetch failed:', fallbackErr?.message || fallbackErr);
     }
@@ -361,7 +447,7 @@ export const leadApi = {
         const rowId = row?.id || row?.lead_id || row?.leads?.id;
         return rowId && String(rowId) === leadId;
       });
-      if (match) return match?.leads || match;
+      if (match) return await enrichLeadBuyerMeta(match?.leads || match);
     } catch (marketplaceErr) {
       console.warn('[leadApi] marketplace fallback lead fetch failed:', marketplaceErr?.message || marketplaceErr);
     }

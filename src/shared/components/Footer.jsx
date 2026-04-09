@@ -247,11 +247,11 @@ const Footer = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Customer Care</p>
                   <a
                     href="mailto:customercare@indiantrademart.com"
-                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     customercare@indiantrademart.com
                   </a>
@@ -260,11 +260,11 @@ const Footer = () => {
 
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Support</p>
                   <a
                     href="mailto:support@indiantrademart.com"
-                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     support@indiantrademart.com
                   </a>
@@ -273,11 +273,11 @@ const Footer = () => {
 
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Business</p>
                   <a
                     href="mailto:business@indiantrademart.com"
-                    className="text-gray-300 hover:text-blue-400 transition-colors text-sm"
+                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     business@indiantrademart.com
                   </a>

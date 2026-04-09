@@ -138,4 +138,23 @@ export const superAdminServerApi = {
       return request(`/audit-logs${query ? `?${query}` : ''}`);
     },
   },
+
+  // GOD MODE only — manage SUPERADMIN accounts
+  godmode: {
+    listSuperadmins: () => request('/godmode/superadmins'),
+    createSuperadmin: (payload) =>
+      request('/godmode/superadmins', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    toggleActive: (id) =>
+      request(`/godmode/superadmins/${id}/toggle-active`, { method: 'PUT' }),
+    deleteSuperadmin: (id) =>
+      request(`/godmode/superadmins/${id}`, { method: 'DELETE' }),
+    resetPassword: (id, password) =>
+      request(`/godmode/superadmins/${id}/password`, {
+        method: 'PUT',
+        body: JSON.stringify({ password }),
+      }),
+  },
 };

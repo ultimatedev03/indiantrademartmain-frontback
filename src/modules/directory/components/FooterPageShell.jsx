@@ -43,9 +43,9 @@ export const FooterPageShell = ({ eyebrow, title, description, stats = [], aside
             {stats.map((stat) => (
               <div
                 key={`${stat.label}-${stat.value}`}
-                className="rounded-2xl border border-white/10 bg-white/10 px-5 py-4 backdrop-blur-sm"
+                className="min-w-0 rounded-2xl border border-white/10 bg-white/10 px-5 py-4 backdrop-blur-sm"
               >
-                <p className="text-2xl font-semibold text-white">{stat.value}</p>
+                <p className="break-all text-xl font-semibold leading-tight text-white sm:text-2xl">{stat.value}</p>
                 <p className="mt-1 text-sm text-slate-300">{stat.label}</p>
               </div>
             ))}

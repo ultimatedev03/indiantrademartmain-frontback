@@ -300,8 +300,22 @@ const roleToDepartment = (role) => {
 
 const PRIVILEGED_STAFF_ROLES = new Set(['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN']);
 
+// Roles each level is allowed to CREATE:
+// ADMIN → HR, FINANCE only
+// HR → SALES, SUPPORT, DATA_ENTRY, MANAGER, VP only
+const ADMIN_CREATABLE_ROLES = new Set(['HR', 'FINANCE']);
+const HR_CREATABLE_ROLES = new Set(['SALES', 'SUPPORT', 'DATA_ENTRY', 'MANAGER', 'VP']);
+
 const canHrManageRole = (managerRole, targetRole) =>
   normalizeRole(managerRole) !== 'HR' || !PRIVILEGED_STAFF_ROLES.has(normalizeRole(targetRole));
+
+const canManagerCreateRole = (managerRole, targetRole) => {
+  const mgr = normalizeRole(managerRole);
+  const tgt = normalizeRole(targetRole);
+  if (mgr === 'ADMIN') return ADMIN_CREATABLE_ROLES.has(tgt);
+  if (mgr === 'HR') return HR_CREATABLE_ROLES.has(tgt);
+  return false;
+};
 
 const syncEmployeePublicUser = async (employee) => {
   const email = normalizeEmail(employee?.email || '');
@@ -400,8 +414,18 @@ router.post('/staff', requireAuth(), async (req, res) => {
       return res.status(400).json({ success: false, error: 'full_name, email and password are required' });
     }
 
-    if (normalizeRole(manager?.role) === 'HR' && ['ADMIN', 'HR', 'FINANCE', 'SUPERADMIN'].includes(role)) {
-      return res.status(403).json({ success: false, error: 'HR portal cannot create privileged staff roles' });
+    // Enforce role creation hierarchy:
+    // ADMIN → can only create HR, FINANCE
+    // HR   → can only create SALES, SUPPORT, DATA_ENTRY, MANAGER, VP
+    if (!canManagerCreateRole(manager?.role, role)) {
+      const managerRole = normalizeRole(manager?.role);
+      const allowed = managerRole === 'ADMIN'
+        ? [...ADMIN_CREATABLE_ROLES].join(', ')
+        : [...HR_CREATABLE_ROLES].join(', ');
+      return res.status(403).json({
+        success: false,
+        error: `${managerRole} can only create: ${allowed}`,
+      });
     }
 
     const passwordValidation = validateStrongPassword(password);

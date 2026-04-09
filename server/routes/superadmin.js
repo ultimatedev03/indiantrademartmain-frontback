@@ -12,19 +12,15 @@ import {
 import {
   loginSuperAdmin,
   requireSuperAdmin,
+  requireGodMode,
   changeSuperAdminPassword,
 } from '../lib/superadminAuth.js';
 
 const router = express.Router();
 
-const EMPLOYEE_ALLOWED_ROLES = [
-  'ADMIN',
-  'HR',
-  'DATA_ENTRY',
-  'SUPPORT',
-  'SALES',
-  'FINANCE',
-];
+// SUPERADMIN (ITM Owner) can only create ADMIN role employees.
+// ADMIN creates HR/FINANCE. HR creates SALES/SUPPORT/DATA_ENTRY/MANAGER/VP.
+const EMPLOYEE_ALLOWED_ROLES = ['ADMIN'];
 
 const normalizeRole = (role) => String(role || '').trim().toUpperCase();
 
@@ -1422,6 +1418,223 @@ router.get('/audit-logs', async (req, res) => {
         },
       })),
     });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ===========================================================
+// GOD MODE ONLY ROUTES — Developer only, SUPERADMIN blocked
+// ===========================================================
+
+// List all superadmin accounts (GOD MODE sees everyone)
+router.get('/godmode/superadmins', requireGodMode, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('superadmin_users')
+      .select('id, email, role, is_active, last_login, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'GODMODE_SUPERADMINS_VIEWED',
+      entityType: 'superadmin_users',
+      details: { count: data?.length || 0 },
+    });
+
+    return res.json({ success: true, superadmins: data || [] });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Create a SUPERADMIN account (ITM owner) — GOD MODE only
+router.post('/godmode/superadmins', requireGodMode, async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const password = String(req.body?.password || '').trim();
+    const fullName = String(req.body?.full_name || '').trim();
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, error: 'email and password are required' });
+    }
+
+    // Only SUPERADMIN role can be created here (not GODMODE — there can only be 1 GOD MODE)
+    const role = 'SUPERADMIN';
+
+    const { data: existing } = await supabase
+      .from('superadmin_users')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (existing?.id) {
+      return res.status(400).json({ success: false, error: 'A superadmin with this email already exists' });
+    }
+
+    const bcrypt = await import('bcryptjs');
+    const password_hash = await bcrypt.default.hash(password, 10);
+
+    const { data, error } = await supabase
+      .from('superadmin_users')
+      .insert([{
+        email,
+        full_name: fullName || email,
+        role,
+        password_hash,
+        is_active: true,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      }])
+      .select('id, email, role, is_active, created_at')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'SUPERADMIN_CREATED',
+      entityType: 'superadmin_users',
+      entityId: data?.id || null,
+      details: { email, role },
+    });
+
+    return res.json({ success: true, superadmin: data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Toggle active/inactive for a SUPERADMIN account — GOD MODE only
+router.put('/godmode/superadmins/:id/toggle-active', requireGodMode, async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+
+    const { data: target, error: fetchError } = await supabase
+      .from('superadmin_users')
+      .select('id, email, role, is_active')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchError) return res.status(500).json({ success: false, error: fetchError.message });
+    if (!target) return res.status(404).json({ success: false, error: 'Superadmin not found' });
+
+    // Cannot deactivate GOD MODE account via this endpoint
+    if (target.role === 'GODMODE') {
+      return res.status(403).json({ success: false, error: 'Cannot deactivate GOD MODE account' });
+    }
+
+    const newStatus = !target.is_active;
+
+    const { data, error } = await supabase
+      .from('superadmin_users')
+      .update({ is_active: newStatus, updated_at: nowIso() })
+      .eq('id', id)
+      .select('id, email, role, is_active')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: newStatus ? 'SUPERADMIN_ACTIVATED' : 'SUPERADMIN_DEACTIVATED',
+      entityType: 'superadmin_users',
+      entityId: id,
+      details: { email: target.email, role: target.role, is_active: newStatus },
+    });
+
+    return res.json({ success: true, superadmin: data });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Delete a SUPERADMIN account — GOD MODE only
+router.delete('/godmode/superadmins/:id', requireGodMode, async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+
+    const { data: target, error: fetchError } = await supabase
+      .from('superadmin_users')
+      .select('id, email, role')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchError) return res.status(500).json({ success: false, error: fetchError.message });
+    if (!target) return res.status(404).json({ success: false, error: 'Superadmin not found' });
+
+    // Cannot delete own GOD MODE account
+    if (target.role === 'GODMODE') {
+      return res.status(403).json({ success: false, error: 'Cannot delete GOD MODE account' });
+    }
+
+    const { error } = await supabase.from('superadmin_users').delete().eq('id', id);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'SUPERADMIN_DELETED',
+      entityType: 'superadmin_users',
+      entityId: id,
+      details: { email: target.email, role: target.role },
+    });
+
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Reset SUPERADMIN password — GOD MODE only
+router.put('/godmode/superadmins/:id/password', requireGodMode, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const newPassword = String(req.body?.password || '').trim();
+
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 8 characters' });
+    }
+
+    const { data: target } = await supabase
+      .from('superadmin_users')
+      .select('id, email, role')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!target) return res.status(404).json({ success: false, error: 'Superadmin not found' });
+    if (target.role === 'GODMODE') {
+      return res.status(403).json({ success: false, error: 'Use /password endpoint to change your own GOD MODE password' });
+    }
+
+    const bcrypt = await import('bcryptjs');
+    const password_hash = await bcrypt.default.hash(newPassword, 10);
+
+    const { error } = await supabase
+      .from('superadmin_users')
+      .update({ password_hash, updated_at: nowIso() })
+      .eq('id', id);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'SUPERADMIN_PASSWORD_RESET',
+      entityType: 'superadmin_users',
+      entityId: id,
+      details: { email: target.email },
+    });
+
+    return res.json({ success: true });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
