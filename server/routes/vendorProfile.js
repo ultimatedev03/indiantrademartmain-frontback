@@ -847,6 +847,7 @@ async function attachBuyerMetaToProposals(rows = [], options = {}) {
     return false;
   };
   const toBuyerData = (buyer = {}) => ({
+    id: buyer?.id || null,
     user_id: buyer?.user_id || null,
     full_name: buyer?.full_name || buyer?.company_name || null,
     company_name: buyer?.company_name || null,
@@ -2532,8 +2533,62 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
       purchase?.purchase_date ||
       lead?.created_at ||
       null;
+    const normalizeLeadBuyerEmail = (value) => String(value || '').trim().toLowerCase();
+    const pickLeadBuyerText = (...values) => {
+      for (const value of values) {
+        const text = String(value || '').trim();
+        if (text) return text;
+      }
+      return null;
+    };
+    const mapLeadBuyerMeta = (buyer = {}) => ({
+      id: String(buyer?.id || '').trim() || null,
+      user_id: String(buyer?.user_id || '').trim() || null,
+      full_name: pickLeadBuyerText(buyer?.full_name, buyer?.company_name),
+      company_name: pickLeadBuyerText(buyer?.company_name),
+      email: normalizeLeadBuyerEmail(buyer?.email) || null,
+      phone: pickLeadBuyerText(buyer?.phone, buyer?.mobile_number, buyer?.mobile),
+      avatar_url: pickLeadBuyerText(buyer?.avatar_url),
+      is_active: typeof buyer?.is_active === 'boolean' ? buyer.is_active : null,
+    });
+
+    let buyerMeta = null;
+    const leadBuyerId = String(lead?.buyer_id || '').trim();
+    const leadBuyerEmail = normalizeLeadBuyerEmail(lead?.buyer_email);
+
+    if (leadBuyerId) {
+      const { data: buyerById, error: buyerByIdError } = await supabase
+        .from('buyers')
+        .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
+        .eq('id', leadBuyerId)
+        .maybeSingle();
+
+      if (!buyerByIdError && buyerById) {
+        buyerMeta = mapLeadBuyerMeta(buyerById);
+      }
+    }
+
+    if (!buyerMeta && leadBuyerEmail) {
+      const { data: buyerByEmail, error: buyerByEmailError } = await supabase
+        .from('buyers')
+        .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
+        .eq('email', leadBuyerEmail)
+        .maybeSingle();
+
+      if (!buyerByEmailError && buyerByEmail) {
+        buyerMeta = mapLeadBuyerMeta(buyerByEmail);
+      }
+    }
+
     const responseLead = {
       ...lead,
+      buyer_id: buyerMeta?.id || lead?.buyer_id || null,
+      buyer_user_id: buyerMeta?.user_id || lead?.buyer_user_id || null,
+      buyer_name: pickLeadBuyerText(buyerMeta?.full_name, lead?.buyer_name),
+      buyer_email: buyerMeta?.email || leadBuyerEmail || null,
+      buyer_phone: pickLeadBuyerText(buyerMeta?.phone, lead?.buyer_phone),
+      company_name: pickLeadBuyerText(buyerMeta?.company_name, lead?.company_name),
+      buyers: buyerMeta,
       source,
       purchase_date: normalizedPurchaseDatetime,
       purchase_datetime: normalizedPurchaseDatetime,

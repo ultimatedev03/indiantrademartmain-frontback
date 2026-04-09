@@ -72,12 +72,36 @@ test('BUG-118 Link to Us page is reachable and contains an action link', async (
   await expect(action).toHaveAttribute('href', /.+/);
 });
 
+test('BUG-118 footer Link to Us navigation works from the homepage footer', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  const footerLink = page.getByRole('link', { name: /^link to us$/i });
+  await footerLink.scrollIntoViewIfNeeded();
+  await footerLink.click();
+  await expect(page).toHaveURL(/\/link-to-us$/i);
+  await expect(page.getByRole('heading', { name: /link to indian trade mart/i })).toBeVisible();
+});
+
 test('BUG-200 customer care email does not overflow its card', async ({ page }) => {
   await page.goto('/customer-care', { waitUntil: 'domcontentloaded' });
-  const emailLink = page.getByRole('link', { name: /support@indiantrademart\.com/i });
+  const emailLink = page
+    .locator('main')
+    .getByRole('link', { name: /support@indiantrademart\.com/i })
+    .first();
   await expect(emailLink).toBeVisible();
   const overflow = await emailLink.evaluate((element) => element.scrollWidth > element.clientWidth + 1);
   expect(overflow).toBeFalsy();
+});
+
+test('BUG-203 homepage requirement modal stays closed until the user triggers it', async ({ page }) => {
+  const modalHeading = page.getByRole('heading', { name: /post your requirement/i });
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    await expect(modalHeading).toHaveCount(0);
+  }
+
+  await page.getByRole('button', { name: /tell us your requirement/i }).click();
+  await expect(page.getByRole('heading', { name: /post your requirement/i })).toBeVisible();
 });
 
 test('BUG-278 premium brands section shows the ITM brand card', async ({ page }) => {

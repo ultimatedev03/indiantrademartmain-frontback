@@ -7,7 +7,7 @@ import { useSubdomain } from '@/contexts/SubdomainContext';
 // CRITICAL FIX: Use absolute path redirect to prevent loops
 const Kyc = () => {
   const { resolvePath } = useSubdomain();
-  return <Navigate to={`${resolvePath('profile', 'vendor')}?tab=primary`} replace />;
+  return <Navigate to={`${resolvePath('profile', 'vendor')}?tab=kyc`} replace />;
 };
 
 export default Kyc;

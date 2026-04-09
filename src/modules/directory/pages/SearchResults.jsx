@@ -208,6 +208,50 @@ const runKeywordQuery = async ({ selectString, stateId, cityId, applyFilter }) =
   }
 };
 
+const sanitizeOrFilterValue = (value = '') =>
+  String(value || '')
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildOrFilterString = (clauses = []) =>
+  Array.from(
+    new Set(
+      (Array.isArray(clauses) ? clauses : [])
+        .map((clause) => {
+          const column = String(clause?.column || '').trim();
+          const operator = String(clause?.operator || '').trim();
+          const value = sanitizeOrFilterValue(clause?.value);
+          if (!column || !operator || !value) return '';
+          return `${column}.${operator}.${value}`;
+        })
+        .filter(Boolean)
+    )
+  ).join(',');
+
+const runKeywordOrQuery = async ({ selectString, stateId, cityId, clauses }) => {
+  const orFilter = buildOrFilterString(clauses);
+  if (!orFilter) return [];
+
+  try {
+    let query = buildKeywordProductQuery({ selectString, stateId, cityId });
+    const { data, error } = await query
+      .or(orFilter)
+      .order('created_at', { ascending: false })
+      .limit(300);
+
+    if (error) {
+      if (isBadRequest400(error)) return [];
+      throw error;
+    }
+
+    return data || [];
+  } catch (error) {
+    if (isBadRequest400(error)) return [];
+    throw error;
+  }
+};
+
 const tokenizeSearchTerms = (...values) =>
   Array.from(
     new Set(
@@ -491,44 +535,25 @@ const SearchResults = () => {
     const slugTokens = Array.from(
       new Set(searchTokens.map((value) => slugify(value)).filter((value) => value.length >= 2))
     );
+    const limitedSearchTokens = searchTokens.slice(0, 6);
+    const limitedSlugTokens = slugTokens.slice(0, 6);
 
     const exactMatches = dedupeProducts(
-      (
-        await Promise.all([
-          ...exactSlugCandidates.map((slug) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.eq('slug', slug),
-            })
-          ),
-          ...exactSlugCandidates.map((slug) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.eq('category_slug', slug),
-            })
-          ),
-          ...textVariants.map((text) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('name', text),
-            })
-          ),
-          ...textVariants.map((text) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('category', text),
-            })
-          ),
-        ])
-      ).flat()
+      await runKeywordOrQuery({
+        selectString,
+        stateId,
+        cityId,
+        clauses: [
+          ...exactSlugCandidates.flatMap((slug) => [
+            { column: 'slug', operator: 'eq', value: slug },
+            { column: 'category_slug', operator: 'eq', value: slug },
+          ]),
+          ...textVariants.flatMap((text) => [
+            { column: 'name', operator: 'ilike', value: text },
+            { column: 'category', operator: 'ilike', value: text },
+          ]),
+        ],
+      })
     );
 
     if (exactMatches.length > 0) {
@@ -536,66 +561,26 @@ const SearchResults = () => {
     }
 
     const broadMatches = dedupeProducts(
-      (
-        await Promise.all([
-          ...textVariants.map((text) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('name', `%${text}%`),
-            })
-          ),
-          ...textVariants.map((text) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('category', `%${text}%`),
-            })
-          ),
-          ...slugTokens.map((token) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('slug', `%${token}%`),
-            })
-          ),
-          ...slugTokens.map((token) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('category_slug', `%${token}%`),
-            })
-          ),
-          ...searchTokens.map((token) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('name', `%${token}%`),
-            })
-          ),
-          ...searchTokens.map((token) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('category', `%${token}%`),
-            })
-          ),
-          ...searchTokens.map((token) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('description', `%${token}%`),
-            })
-          ),
-        ])
-      ).flat()
+      await runKeywordOrQuery({
+        selectString,
+        stateId,
+        cityId,
+        clauses: [
+          ...textVariants.flatMap((text) => [
+            { column: 'name', operator: 'ilike', value: `%${text}%` },
+            { column: 'category', operator: 'ilike', value: `%${text}%` },
+          ]),
+          ...limitedSlugTokens.flatMap((token) => [
+            { column: 'slug', operator: 'ilike', value: `%${token}%` },
+            { column: 'category_slug', operator: 'ilike', value: `%${token}%` },
+          ]),
+          ...limitedSearchTokens.flatMap((token) => [
+            { column: 'name', operator: 'ilike', value: `%${token}%` },
+            { column: 'category', operator: 'ilike', value: `%${token}%` },
+            { column: 'description', operator: 'ilike', value: `%${token}%` },
+          ]),
+        ],
+      })
     );
 
     if (broadMatches.length > 0) {
@@ -603,18 +588,16 @@ const SearchResults = () => {
     }
 
     return dedupeProducts(
-      (
-        await Promise.all(
-          textVariants.map((text) =>
-            runKeywordQuery({
-              selectString,
-              stateId,
-              cityId,
-              applyFilter: (query) => query.ilike('description', `%${text}%`),
-            })
-          )
-        )
-      ).flat()
+      await runKeywordOrQuery({
+        selectString,
+        stateId,
+        cityId,
+        clauses: textVariants.map((text) => ({
+          column: 'description',
+          operator: 'ilike',
+          value: `%${text}%`,
+        })),
+      })
     );
   };
 

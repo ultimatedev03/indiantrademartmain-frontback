@@ -16,23 +16,60 @@ import NotificationBell from '@/shared/components/NotificationBell';
 import { getPublicSiteUrl } from '@/shared/lib/publicSite';
 import { useSubdomain } from '@/contexts/SubdomainContext';
 
-const SidebarItem = ({ icon: Icon, label, path, active, collapsed }) => (
-  <Link to={path}>
-    <div
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group ${
-        active
-          ? 'bg-[#003D82] text-white shadow-md'
-          : 'text-neutral-600 hover:bg-neutral-100 hover:text-[#003D82]'
-      }`}
-    >
-      <Icon className={`h-5 w-5 ${active ? 'text-white' : 'text-neutral-500 group-hover:text-[#003D82]'}`} />
-      {!collapsed && <span className="font-medium text-sm">{label}</span>}
-      {active && !collapsed && (
-        <motion.div layoutId="activeIndicator" className="ml-auto w-1 h-1 rounded-full bg-white" />
-      )}
-    </div>
-  </Link>
-);
+const parseSidebarPath = (path = '') => {
+  const [pathnamePart, hashPart] = String(path || '').split('#');
+  return {
+    pathname: pathnamePart || '/',
+    hash: hashPart ? `#${hashPart.replace(/^#/, '')}` : '',
+  };
+};
+
+const SidebarItem = ({ icon: Icon, label, path, collapsed, exact = false }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { pathname, hash } = parseSidebarPath(path);
+  const isHashTarget = Boolean(hash);
+  const active = isHashTarget
+    ? location.pathname === pathname && location.hash === hash
+    : exact
+      ? location.pathname === pathname && !location.hash
+      : location.pathname.startsWith(pathname);
+
+  const handleClick = (event) => {
+    if (!isHashTarget) return;
+
+    event.preventDefault();
+    navigate(path);
+
+    if (location.pathname === pathname) {
+      const targetId = hash.slice(1);
+      const scrollToTarget = () => {
+        document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+
+      window.requestAnimationFrame(scrollToTarget);
+      window.setTimeout(scrollToTarget, 120);
+    }
+  };
+
+  return (
+    <Link to={path} onClick={handleClick}>
+      <div
+        className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group ${
+          active
+            ? 'bg-[#003D82] text-white shadow-md'
+            : 'text-neutral-600 hover:bg-neutral-100 hover:text-[#003D82]'
+        }`}
+      >
+        <Icon className={`h-5 w-5 ${active ? 'text-white' : 'text-neutral-500 group-hover:text-[#003D82]'}`} />
+        {!collapsed && <span className="font-medium text-sm">{label}</span>}
+        {active && !collapsed && (
+          <motion.div layoutId="activeIndicator" className="ml-auto w-1 h-1 rounded-full bg-white" />
+        )}
+      </div>
+    </Link>
+  );
+};
 
 const PortalLayout = ({ role }) => {
   const VENDOR_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -199,7 +236,7 @@ const PortalLayout = ({ role }) => {
         ];
       case 'FINANCE':
         return [
-          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/finance-portal/dashboard' },
+          { icon: LayoutDashboard, label: 'Finance Dashboard', path: '/finance-portal/dashboard', exact: true },
           { icon: BarChart3, label: 'Payments', path: '/finance-portal/dashboard#payments' },
         ];
       case 'HR':
@@ -279,7 +316,6 @@ const PortalLayout = ({ role }) => {
             <SidebarItem
               key={item.path}
               {...item}
-              active={location.pathname.startsWith(item.path)}
               collapsed={collapsed}
             />
           ))}
@@ -361,7 +397,6 @@ const PortalLayout = ({ role }) => {
                   <SidebarItem
                     key={item.path}
                     {...item}
-                    active={location.pathname.startsWith(item.path)}
                     collapsed={false}
                   />
                 ))}

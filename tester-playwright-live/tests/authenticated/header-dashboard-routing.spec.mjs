@@ -30,3 +30,18 @@ for (const roleCase of roleCases) {
   });
 }
 
+const hasFinanceState = hasStoredState('finance');
+
+test.describe('BUG-053 finance portal navigation', () => {
+  if (hasFinanceState) {
+    test.use({ storageState: getStoredStatePath('finance') });
+  }
+
+  test('BUG-053 Payments sidebar link opens the payments section', async ({ page }) => {
+    test.skip(!hasFinanceState, 'Run npm run auth:finance first.');
+    await page.goto('/finance-portal/dashboard', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('link', { name: /^payments$/i }).click();
+    await expect(page).toHaveURL(/\/finance-portal\/dashboard#payments$/i);
+    await expect(page.locator('#payments')).toBeVisible();
+  });
+});

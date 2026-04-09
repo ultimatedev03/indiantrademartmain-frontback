@@ -48,4 +48,12 @@ test.describe('Vendor portal regression', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
     await expect(page.getByRole('button', { name: /cancel|proceed|active plan|apply & proceed/i }).first()).toBeVisible();
   });
+
+  test('BUG-163 vendor KYC shortcut opens the KYC documents tab', async ({ page }) => {
+    test.skip(!hasVendorState, 'Run npm run auth:vendor first.');
+    await page.goto('/vendor/kyc', { waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(/\/vendor\/profile\?tab=kyc/i);
+    await expect(page.locator('body')).toContainText(/KYC Documents/i);
+    await expect(page.locator('body')).toContainText(/GST Certificate/i);
+  });
 });

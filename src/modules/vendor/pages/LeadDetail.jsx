@@ -467,7 +467,8 @@ const LeadDetail = () => {
     lead?.buyer_id ||
     lead?.buyer_user_id ||
     lead?.buyers?.id ||
-    lead?.buyers?.user_id
+    lead?.buyers?.user_id ||
+    typeof lead?.buyers?.is_active === 'boolean'
   );
   const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
 

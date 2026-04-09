@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -77,6 +77,7 @@ const ProductDetail = () => {
   const [ratingSummary, setRatingSummary] = useState({ average: 0, count: 0 });
   const [recentFeedback, setRecentFeedback] = useState([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [descriptionNeedsClamp, setDescriptionNeedsClamp] = useState(false);
   const isBuyer = String(userRole || user?.role || '').toUpperCase() === 'BUYER';
 
   // Enquiry modal
@@ -189,14 +190,27 @@ const ProductDetail = () => {
       .trim();
 
   const plainDescription = useMemo(() => getPlainDescription(data?.description), [data?.description]);
-  const descriptionNeedsClamp = useMemo(() => {
-    if (!plainDescription) return false;
-    return plainDescription.length > 700 || plainDescription.split('\n').length > 12;
-  }, [plainDescription]);
+  const descriptionRef = useRef(null);
 
   useEffect(() => {
     setDescriptionExpanded(false);
   }, [data?.id]);
+
+  useEffect(() => {
+    const measureDescription = () => {
+      const element = descriptionRef.current;
+      if (!element) {
+        setDescriptionNeedsClamp(false);
+        return;
+      }
+
+      setDescriptionNeedsClamp(element.scrollHeight > 18 * 16 + 8);
+    };
+
+    measureDescription();
+    window.addEventListener('resize', measureDescription);
+    return () => window.removeEventListener('resize', measureDescription);
+  }, [plainDescription, descriptionExpanded]);
 
   const handleCopyLink = async () => {
     const url = canonicalProductUrl || shareUtils.getCurrentUrl();
@@ -1117,6 +1131,7 @@ const ProductDetail = () => {
 
           <div className="overflow-hidden rounded border bg-white shadow-sm">
             <div
+              ref={descriptionRef}
               className={`prose prose-sm max-w-none break-words p-4 text-slate-600 whitespace-pre-wrap ${
                 descriptionExpanded ? 'max-h-[30rem] overflow-y-auto pr-3' : 'max-h-[18rem] overflow-y-auto pr-3'
               }`}

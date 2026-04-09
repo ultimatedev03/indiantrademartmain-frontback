@@ -325,6 +325,15 @@ export const leadApi = {
     const leadId = String(id || '').trim();
     if (!leadId) throw new Error('Lead id is required');
 
+    // Prefer backend lookup so vendor lead detail stays aligned with server-side
+    // visibility rules and buyer-registration enrichment.
+    try {
+      const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(leadId)}`);
+      if (payload?.lead) return payload.lead;
+    } catch (byIdErr) {
+      console.warn('[leadApi] backend lead by-id fetch failed:', byIdErr?.message || byIdErr);
+    }
+
     const { data, error } = await supabase
       .from('leads')
       .select('*')
@@ -332,14 +341,6 @@ export const leadApi = {
       .maybeSingle();
 
     if (!error && data) return data;
-
-    // Direct backend lookup by lead id (service-role path; bypasses client RLS).
-    try {
-      const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(leadId)}`);
-      if (payload?.lead) return payload.lead;
-    } catch (byIdErr) {
-      console.warn('[leadApi] backend lead by-id fetch failed:', byIdErr?.message || byIdErr);
-    }
 
     // Fallback to backend endpoints which bypass client-side RLS.
     try {
