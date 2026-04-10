@@ -561,6 +561,111 @@ const ensureSystemConfigRow = async (supabase, superadminId) => {
   return inserted || payload;
 };
 
+const STATE_REGION_MAP = {
+  // NORTH
+  'uttar pradesh': 'NORTH', up: 'NORTH',
+  bihar: 'NORTH',
+  jharkhand: 'NORTH',
+  uttarakhand: 'NORTH',
+  'himachal pradesh': 'NORTH',
+  punjab: 'NORTH',
+  haryana: 'NORTH',
+  delhi: 'NORTH',
+  'jammu and kashmir': 'NORTH',
+  'jammu & kashmir': 'NORTH',
+  ladakh: 'NORTH',
+
+  // WEST
+  maharashtra: 'WEST', mh: 'WEST',
+  gujarat: 'WEST', gj: 'WEST',
+  rajasthan: 'WEST', rj: 'WEST',
+  goa: 'WEST',
+
+  // SOUTH
+  karnataka: 'SOUTH', ka: 'SOUTH',
+  'tamil nadu': 'SOUTH', tn: 'SOUTH',
+  kerala: 'SOUTH', kl: 'SOUTH',
+  'andhra pradesh': 'SOUTH', ap: 'SOUTH',
+  telangana: 'SOUTH', tg: 'SOUTH',
+
+  // EAST
+  'west bengal': 'EAST', wb: 'EAST',
+  odisha: 'EAST',
+  assam: 'EAST',
+  chhattisgarh: 'EAST',
+  manipur: 'EAST',
+  meghalaya: 'EAST',
+  mizoram: 'EAST',
+  nagaland: 'EAST',
+  sikkim: 'EAST',
+  tripura: 'EAST',
+  'arunachal pradesh': 'EAST',
+
+  // CENTRAL
+  'madhya pradesh': 'CENTRAL', mp: 'CENTRAL',
+};
+
+const getRegion = (stateName) => {
+  if (!stateName) return 'OTHER';
+  return STATE_REGION_MAP[String(stateName).toLowerCase().trim()] || 'OTHER';
+};
+
+const isMissingColumnError = (error, tableName, columnName) => {
+  const table = String(tableName || '').trim().toLowerCase();
+  const column = String(columnName || '').trim().toLowerCase();
+  if (!table || !column || !error) return false;
+
+  const text = `${error?.message || ''} ${error?.details || ''} ${error?.hint || ''}`.toLowerCase();
+  const mentionsColumn =
+    text.includes(`'${column}'`) ||
+    text.includes(`"${column}"`) ||
+    text.includes(`${table}.${column}`) ||
+    text.includes(`column "${table}.${column}"`) ||
+    text.includes(`column ${table}.${column}`) ||
+    text.includes(`column "${column}"`) ||
+    text.includes(`column ${column}`) ||
+    text.includes(`column '${column}'`);
+  const mentionsTable =
+    text.includes(`'${table}'`) ||
+    text.includes(`"${table}"`) ||
+    text.includes(`relation "${table}"`) ||
+    text.includes(`relation '${table}'`) ||
+    text.includes(`${table}.`);
+  const missingSignal = text.includes('schema cache') || text.includes('does not exist');
+
+  return mentionsColumn && mentionsTable && missingSignal;
+};
+
+const selectAdminEmployeesForMonitoring = async (
+  supabase,
+  { includeCreatedAt = false, orderByCreatedAt = false } = {}
+) => {
+  const selectColumns = ['id', 'full_name', 'email', 'role', 'status', 'states_scope', 'last_login'];
+  if (includeCreatedAt) selectColumns.push('created_at');
+
+  let query = supabase.from('employees').select(selectColumns.join(', ')).eq('role', 'ADMIN');
+  if (orderByCreatedAt) {
+    query = query.order('created_at', { ascending: false });
+  }
+
+  const first = await query;
+  if (!isMissingColumnError(first?.error, 'employees', 'last_login')) {
+    return first;
+  }
+
+  const fallbackColumns = selectColumns.filter((column) => column !== 'last_login');
+  let retry = supabase.from('employees').select(fallbackColumns.join(', ')).eq('role', 'ADMIN');
+  if (orderByCreatedAt) {
+    retry = retry.order('created_at', { ascending: false });
+  }
+
+  const fallback = await retry;
+  if (!fallback?.error && Array.isArray(fallback?.data)) {
+    fallback.data = fallback.data.map((row) => ({ ...row, last_login: null }));
+  }
+  return fallback;
+};
+
 const deleteVendorCascade = async (supabase, vendorId) => {
   const { data: vendor, error: vendorErr } = await supabase
     .from('vendors')
@@ -1101,6 +1206,270 @@ export const handler = async (event) => {
         },
       });
       return json(200, { success: true });
+    }
+
+    if (event.httpMethod === 'PUT' && tail[0] === 'employees' && tail[1] && tail[2] === 'states-scope') {
+      const employeeId = tail[1];
+      const rawStates = body?.states_scope;
+
+      if (!Array.isArray(rawStates)) {
+        return json(400, { success: false, error: 'states_scope must be an array' });
+      }
+
+      const states = rawStates.map((state) => String(state).trim()).filter(Boolean);
+
+      const { data: employee, error: employeeError } = await supabase
+        .from('employees')
+        .select('id, role, full_name, email')
+        .eq('id', employeeId)
+        .maybeSingle();
+
+      if (employeeError) return json(500, { success: false, error: employeeError.message });
+      if (!employee) return json(404, { success: false, error: 'Employee not found' });
+      if (employee.role !== 'ADMIN') {
+        return json(400, { success: false, error: 'states_scope can only be set on ADMIN employees' });
+      }
+
+      const { error: updateError } = await supabase
+        .from('employees')
+        .update({ states_scope: states, updated_at: nowIso() })
+        .eq('id', employeeId);
+
+      if (updateError) return json(500, { success: false, error: updateError.message });
+
+      await writeAuditLog(supabase, {
+        actor,
+        action: 'ADMIN_STATES_SCOPE_UPDATED',
+        entityType: 'employees',
+        entityId: employeeId,
+        details: { email: employee.email, states_scope: states },
+      });
+
+      return json(200, { success: true });
+    }
+
+    if (event.httpMethod === 'GET' && tail[0] === 'monitoring' && tail[1] === 'overview') {
+      const [
+        { data: adminEmployees, error: adminError },
+        { data: vendors, error: vendorError },
+        { data: payments, error: paymentError },
+        { data: tickets, error: ticketError },
+      ] = await Promise.all([
+        selectAdminEmployeesForMonitoring(supabase, { includeCreatedAt: true, orderByCreatedAt: true }),
+        supabase
+          .from('vendors')
+          .select('id, state, kyc_status, is_active, created_at'),
+        supabase
+          .from('vendor_payments')
+          .select('vendor_id, amount, net_amount, payment_date, vendors!inner(state)'),
+        supabase
+          .from('support_tickets')
+          .select('id, status, vendor_id, created_at, vendors(state)')
+          .not('status', 'eq', 'RESOLVED'),
+      ]);
+
+      if (adminError) return json(500, { success: false, error: adminError.message });
+      if (vendorError) return json(500, { success: false, error: vendorError.message });
+      if (paymentError) return json(500, { success: false, error: paymentError.message });
+      if (ticketError) return json(500, { success: false, error: ticketError.message });
+
+      const allVendors = vendors || [];
+      const allPayments = payments || [];
+      const allTickets = tickets || [];
+
+      const totalRevenue = allPayments.reduce((sum, payment) => sum + Number(payment.net_amount ?? payment.amount ?? 0), 0);
+      const totalVendors = allVendors.filter((vendor) => vendor.is_active).length;
+      const kycPending = allVendors.filter((vendor) => vendor.kyc_status === 'PENDING').length;
+      const openTickets = allTickets.length;
+
+      const byState = {};
+
+      allVendors.forEach((vendor) => {
+        const state = String(vendor.state || 'Unknown').trim();
+        if (!byState[state]) {
+          byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+        }
+        if (vendor.is_active) byState[state].vendors += 1;
+        if (vendor.kyc_status === 'PENDING') byState[state].kycPending += 1;
+      });
+
+      allPayments.forEach((payment) => {
+        const state = String(payment.vendors?.state || 'Unknown').trim();
+        if (!byState[state]) {
+          byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+        }
+        byState[state].revenue += Number(payment.net_amount ?? payment.amount ?? 0);
+      });
+
+      allTickets.forEach((ticket) => {
+        const state = String(ticket.vendors?.state || 'Unknown').trim();
+        if (!byState[state]) {
+          byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+        }
+        byState[state].openTickets += 1;
+      });
+
+      const byRegion = {};
+      Object.values(byState).forEach((stateSummary) => {
+        const region = stateSummary.region;
+        if (!byRegion[region]) {
+          byRegion[region] = { region, revenue: 0, vendors: 0, kycPending: 0, openTickets: 0, states: [] };
+        }
+        byRegion[region].revenue += stateSummary.revenue;
+        byRegion[region].vendors += stateSummary.vendors;
+        byRegion[region].kycPending += stateSummary.kycPending;
+        byRegion[region].openTickets += stateSummary.openTickets;
+        byRegion[region].states.push(stateSummary.state);
+      });
+
+      const admins = (adminEmployees || []).map((employee) => {
+        const scope = Array.isArray(employee.states_scope) ? employee.states_scope : [];
+        const scopedStates = scope.map((state) => String(state).toLowerCase().trim());
+        let revenue = 0;
+        let vendorCount = 0;
+        let pendingCount = 0;
+        let ticketCount = 0;
+
+        Object.values(byState).forEach((stateSummary) => {
+          if (scopedStates.length === 0 || scopedStates.includes(stateSummary.state.toLowerCase())) {
+            revenue += stateSummary.revenue;
+            vendorCount += stateSummary.vendors;
+            pendingCount += stateSummary.kycPending;
+            ticketCount += stateSummary.openTickets;
+          }
+        });
+
+        return {
+          id: employee.id,
+          full_name: employee.full_name,
+          email: employee.email,
+          status: employee.status,
+          states_scope: scope,
+          last_login: employee.last_login,
+          revenue: scopedStates.length > 0 ? revenue : null,
+          vendors: scopedStates.length > 0 ? vendorCount : null,
+          kycPending: scopedStates.length > 0 ? pendingCount : null,
+          openTickets: scopedStates.length > 0 ? ticketCount : null,
+        };
+      });
+
+      return json(200, {
+        success: true,
+        data: {
+          allIndia: { totalRevenue, totalVendors, kycPending, openTickets },
+          byRegion: Object.values(byRegion).sort((a, b) => b.revenue - a.revenue),
+          byState: Object.values(byState).sort((a, b) => b.revenue - a.revenue),
+          admins,
+        },
+      });
+    }
+
+    if (event.httpMethod === 'GET' && tail[0] === 'monitoring' && tail[1] === 'admin-activity') {
+      const days = Math.min(Number(event.queryStringParameters?.days ?? 7), 90);
+      const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+      const [{ data: logs, error: logsError }, { data: admins, error: adminsError }] = await Promise.all([
+        supabase
+          .from('audit_logs')
+          .select('user_id, action, details, created_at')
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .limit(5000),
+        selectAdminEmployeesForMonitoring(supabase),
+      ]);
+
+      if (logsError) return json(500, { success: false, error: logsError.message });
+      if (adminsError) return json(500, { success: false, error: adminsError.message });
+
+      const adminMap = {};
+      (admins || []).forEach((admin) => {
+        adminMap[admin.id] = {
+          ...admin,
+          actionsTotal: 0,
+          kycApproved: 0,
+          kycRejected: 0,
+          vendorsTerminated: 0,
+          vendorsActivated: 0,
+          staffCreated: 0,
+          ticketsResolved: 0,
+          recentActions: [],
+        };
+      });
+
+      (logs || []).forEach((log) => {
+        const actorId = log.details?.actor_id || log.user_id;
+        if (!actorId || !adminMap[actorId]) return;
+
+        const entry = adminMap[actorId];
+        entry.actionsTotal += 1;
+
+        const action = String(log.action || '').toUpperCase();
+        if (action.includes('KYC_APPROV')) entry.kycApproved += 1;
+        else if (action.includes('KYC_REJECT')) entry.kycRejected += 1;
+        else if (action.includes('VENDOR_TERM')) entry.vendorsTerminated += 1;
+        else if (action.includes('VENDOR_ACTIV')) entry.vendorsActivated += 1;
+        else if (action.includes('STAFF_CREAT') || action.includes('EMPLOYEE_CREAT')) entry.staffCreated += 1;
+        else if (action.includes('TICKET') && action.includes('RESOLV')) entry.ticketsResolved += 1;
+
+        if (entry.recentActions.length < 5) {
+          entry.recentActions.push({ action: log.action, created_at: log.created_at });
+        }
+      });
+
+      return json(200, {
+        success: true,
+        data: {
+          days,
+          activity: Object.values(adminMap).sort((a, b) => b.actionsTotal - a.actionsTotal),
+        },
+      });
+    }
+
+    if (event.httpMethod === 'GET' && tail[0] === 'monitoring' && tail[1] === 'revenue-by-state') {
+      const { data: payments, error } = await supabase
+        .from('vendor_payments')
+        .select('amount, net_amount, payment_date, vendors!inner(state)')
+        .order('payment_date', { ascending: false })
+        .limit(10000);
+
+      if (error) return json(500, { success: false, error: error.message });
+
+      const now = new Date();
+      const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const byState = {};
+
+      (payments || []).forEach((payment) => {
+        const state = String(payment.vendors?.state || 'Unknown').trim();
+        const region = getRegion(state);
+        const amount = Number(payment.net_amount ?? payment.amount ?? 0);
+        const date = payment.payment_date ? new Date(payment.payment_date) : null;
+
+        if (!byState[state]) {
+          byState[state] = { state, region, totalRevenue: 0, paymentCount: 0, thisMonth: 0, lastMonth: 0 };
+        }
+
+        byState[state].totalRevenue += amount;
+        byState[state].paymentCount += 1;
+
+        if (date) {
+          if (date >= thisMonthStart) byState[state].thisMonth += amount;
+          else if (date >= lastMonthStart) byState[state].lastMonth += amount;
+        }
+      });
+
+      return json(200, {
+        success: true,
+        data: Object.values(byState)
+          .sort((a, b) => b.totalRevenue - a.totalRevenue)
+          .map((stateSummary) => ({
+            ...stateSummary,
+            trend:
+              stateSummary.lastMonth > 0
+                ? ((stateSummary.thisMonth - stateSummary.lastMonth) / stateSummary.lastMonth) * 100
+                : null,
+          })),
+      });
     }
 
     if (event.httpMethod === 'GET' && tail[0] === 'vendors' && tail.length === 1) {
