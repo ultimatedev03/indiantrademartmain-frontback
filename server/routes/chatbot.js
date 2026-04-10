@@ -147,7 +147,7 @@ router.post('/', async (req, res) => {
       } catch (err) {
         const status = err?.status || err?.response?.status;
         const detail = err?.error?.message || err?.response?.data || err?.message;
-        console.error('[chatbot] OpenAI error', status, detail);
+        logger.error('[chatbot] OpenAI error', status, detail);
         const quotaError =
           status === 429 || (typeof detail === 'string' && detail.toLowerCase().includes('quota'));
 
@@ -180,7 +180,7 @@ router.post('/', async (req, res) => {
       } catch (err) {
         const status = err?.status || err?.response?.status;
         const detail = err?.error?.message || err?.response?.data || err?.message;
-        console.error('[chatbot] Groq error', status, detail);
+        logger.error('[chatbot] Groq error', status, detail);
         return res.json({
           text: buildFallbackReply(lang, messages),
           provider: 'fallback',
@@ -210,7 +210,7 @@ router.post('/', async (req, res) => {
 
     return res.json({ text, provider: providerUsed });
   } catch (err) {
-    console.error('[chatbot] error', err);
+    logger.error('[chatbot] error', err);
     res.status(500).json({ error: 'Internal error generating reply' });
   }
 });

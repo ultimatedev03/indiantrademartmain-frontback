@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
@@ -65,7 +66,7 @@ const sendReminderEmail = async ({ to, subject, text, html }) => {
     });
     return true;
   } catch (error) {
-    console.warn('[KYC] Reminder email failed:', error?.message || error);
+    logger.warn('[KYC] Reminder email failed:', error?.message || error);
     return false;
   }
 };

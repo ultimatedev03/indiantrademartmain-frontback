@@ -13,6 +13,7 @@ import { apiUrl } from '@/lib/apiBase';
 import { toast } from '@/components/ui/use-toast';
 import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 import { getProductDetailPath } from '@/shared/utils/productRoutes';
+import { phoneUtils } from '@/shared/utils/phoneUtils';
 import {
   getPremiumBrandBySlug,
   getPremiumBrandByVendorSlug,
@@ -174,12 +175,10 @@ class VendorProfileErrorBoundary extends React.Component {
   }
 }
 
-// Mask phone number to show only first 2 and last 2 digits
 const maskPhoneNumber = (phone) => {
   if (!phone) return '+91-XXXXXXXXXX';
-  const cleaned = String(phone).replace(/\D/g, '');
-  if (cleaned.length < 4) return '+91-XXXXXXXXXX';
-  return '+91' + cleaned.slice(0, 2) + 'XXXXXXXX' + cleaned.slice(-2);
+  const masked = phoneUtils.maskPhone(phone);
+  return masked ? `+91-${masked}` : '+91-XXXXXXXXXX';
 };
 
 const VendorProfileContent = () => {

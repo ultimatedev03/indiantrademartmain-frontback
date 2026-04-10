@@ -1413,4 +1413,285 @@ router.post('/manager/pricing-approvals/:ruleId/decision', requireAuth(), async 
   }
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SUBSCRIPTION EXTENSION REQUEST ESCALATION
+// Chain: SALES creates → MANAGER forwards → VP forwards → ADMIN resolves
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SUB_EXT_SALES_ROLES    = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
+const SUB_EXT_MANAGER_ROLES  = new Set(['MANAGER', 'ADMIN', 'SUPERADMIN']);
+const SUB_EXT_VP_ROLES       = new Set(['VP', 'ADMIN', 'SUPERADMIN']);
+
+// SALES: Search vendors (for subscription request form auto-fill)
+router.get('/sales/vendors', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    if (!SUB_EXT_SALES_ROLES.has(normalizeRole(employee?.role || req.user?.role || ''))) {
+      return res.status(403).json({ success: false, error: 'Sales access required' });
+    }
+
+    const q = String(req.query?.q || '').trim().toLowerCase();
+
+    let query = supabase
+      .from('vendors')
+      .select('id, company_name, state, city, email, phone')
+      .eq('is_active', true)
+      .order('company_name', { ascending: true })
+      .limit(50);
+
+    if (q) {
+      query = query.ilike('company_name', `%${q}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return res.json({ success: true, vendors: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to search vendors' });
+  }
+});
+
+// SALES: Create a new subscription extension request
+router.post('/subscription-requests', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_SALES_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'Only SALES staff can create extension requests' });
+    }
+
+    const vendor_id     = String(req.body?.vendor_id || '').trim();
+    const vendor_name   = String(req.body?.vendor_name || '').trim();
+    const vendor_state  = String(req.body?.vendor_state || '').trim();
+    const reason        = String(req.body?.reason || '').trim();
+    const extension_days = parseInt(req.body?.extension_days, 10);
+
+    if (!vendor_id)     return res.status(400).json({ success: false, error: 'vendor_id is required' });
+    if (!vendor_name)   return res.status(400).json({ success: false, error: 'vendor_name is required' });
+    if (!reason)        return res.status(400).json({ success: false, error: 'reason is required' });
+    if (!Number.isFinite(extension_days) || extension_days < 1 || extension_days > 365) {
+      return res.status(400).json({ success: false, error: 'extension_days must be between 1 and 365' });
+    }
+
+    const { data: inserted, error } = await supabase
+      .from('subscription_extension_requests')
+      .insert({
+        vendor_id,
+        vendor_name,
+        vendor_state,
+        reason,
+        extension_days,
+        current_level: 'SALES',
+        status: 'OPEN',
+        sales_note: String(req.body?.sales_note || '').trim() || null,
+        created_by_email: String(employee.email || '').trim(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    await writeAuditLog({
+      req,
+      actor: req.actor || { email: employee.email, role: employee.role },
+      action: 'SUB_EXT_REQUEST_CREATED',
+      entityType: 'subscription_extension_request',
+      entityId: inserted.id,
+      details: { vendor_id, vendor_name, extension_days, reason },
+    });
+
+    return res.status(201).json({ success: true, request: inserted });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to create extension request' });
+  }
+});
+
+// SALES: List own requests
+router.get('/subscription-requests', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_SALES_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'Sales access required' });
+    }
+
+    const { data, error } = await supabase
+      .from('subscription_extension_requests')
+      .select('*')
+      .eq('created_by_email', String(employee.email || '').trim())
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return res.json({ success: true, requests: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to list extension requests' });
+  }
+});
+
+// MANAGER: List requests at SALES level (needs manager review)
+router.get('/subscription-requests/manager', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_MANAGER_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'Manager access required' });
+    }
+
+    const { data, error } = await supabase
+      .from('subscription_extension_requests')
+      .select('*')
+      .in('status', ['OPEN', 'FORWARDED'])
+      .eq('current_level', 'SALES')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return res.json({ success: true, requests: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to list manager requests' });
+  }
+});
+
+// MANAGER: Forward request to VP
+router.post('/subscription-requests/:id/manager-forward', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_MANAGER_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'Manager access required' });
+    }
+
+    const { id } = req.params;
+    const manager_note = String(req.body?.manager_note || '').trim();
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('subscription_extension_requests')
+      .select('id, status, current_level')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (existing.current_level !== 'SALES') {
+      return res.status(409).json({ success: false, error: 'Request is not at SALES level' });
+    }
+    if (!['OPEN', 'FORWARDED'].includes(existing.status)) {
+      return res.status(409).json({ success: false, error: 'Request is already resolved or rejected' });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('subscription_extension_requests')
+      .update({
+        current_level: 'MANAGER',
+        status: 'FORWARDED',
+        manager_note: manager_note || null,
+        forwarded_by_manager: String(employee.email || '').trim(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    await writeAuditLog({
+      req,
+      actor: req.actor || { email: employee.email, role: employee.role },
+      action: 'SUB_EXT_FORWARDED_TO_VP',
+      entityType: 'subscription_extension_request',
+      entityId: id,
+      details: { manager_note },
+    });
+
+    return res.json({ success: true, request: updated });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to forward request' });
+  }
+});
+
+// VP: List requests at MANAGER level (needs VP review)
+router.get('/subscription-requests/vp', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_VP_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'VP access required' });
+    }
+
+    const { data, error } = await supabase
+      .from('subscription_extension_requests')
+      .select('*')
+      .eq('status', 'FORWARDED')
+      .eq('current_level', 'MANAGER')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return res.json({ success: true, requests: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to list VP requests' });
+  }
+});
+
+// VP: Forward request to ADMIN
+router.post('/subscription-requests/:id/vp-forward', requireAuth(), async (req, res) => {
+  try {
+    const employee = await resolveEmployeeProfile(req.user);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    const role = normalizeRole(employee?.role || req.user?.role || '');
+    if (!SUB_EXT_VP_ROLES.has(role)) {
+      return res.status(403).json({ success: false, error: 'VP access required' });
+    }
+
+    const { id } = req.params;
+    const vp_note = String(req.body?.vp_note || '').trim();
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from('subscription_extension_requests')
+      .select('id, status, current_level')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!existing) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (existing.current_level !== 'MANAGER') {
+      return res.status(409).json({ success: false, error: 'Request is not at MANAGER level' });
+    }
+    if (existing.status !== 'FORWARDED') {
+      return res.status(409).json({ success: false, error: 'Request is already resolved or rejected' });
+    }
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('subscription_extension_requests')
+      .update({
+        current_level: 'VP',
+        status: 'FORWARDED',
+        vp_note: vp_note || null,
+        forwarded_by_vp: String(employee.email || '').trim(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateErr) throw updateErr;
+
+    await writeAuditLog({
+      req,
+      actor: req.actor || { email: employee.email, role: employee.role },
+      action: 'SUB_EXT_FORWARDED_TO_ADMIN',
+      entityType: 'subscription_extension_request',
+      entityId: id,
+      details: { vp_note },
+    });
+
+    return res.json({ success: true, request: updated });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to forward request to admin' });
+  }
+});
+
 export default router;

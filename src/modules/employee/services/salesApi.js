@@ -117,4 +117,60 @@ export const salesApi = {
     const data = await unwrap(res, 'Failed to update pricing rule approval');
     return data?.rule || null;
   },
+
+  // ── Vendor search (for subscription request form) ─────────────────────────
+
+  searchVendors: async (q = '') => {
+    const query = q ? `?q=${encodeURIComponent(q)}` : '';
+    const res = await fetchWithCsrf(apiUrl(`/api/employee/sales/vendors${query}`));
+    const data = await unwrap(res, 'Failed to search vendors');
+    return data?.vendors || [];
+  },
+
+  // ── Subscription Extension Requests ──────────────────────────────────────
+
+  createExtensionRequest: async (payload = {}) => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/subscription-requests'), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const data = await unwrap(res, 'Failed to create extension request');
+    return data?.request || null;
+  },
+
+  getMyExtensionRequests: async () => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/subscription-requests'));
+    const data = await unwrap(res, 'Failed to load extension requests');
+    return data?.requests || [];
+  },
+
+  getManagerExtensionRequests: async () => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/subscription-requests/manager'));
+    const data = await unwrap(res, 'Failed to load manager extension requests');
+    return data?.requests || [];
+  },
+
+  forwardToVp: async (id, manager_note = '') => {
+    const res = await fetchWithCsrf(apiUrl(`/api/employee/subscription-requests/${id}/manager-forward`), {
+      method: 'POST',
+      body: JSON.stringify({ manager_note }),
+    });
+    const data = await unwrap(res, 'Failed to forward request to VP');
+    return data?.request || null;
+  },
+
+  getVpExtensionRequests: async () => {
+    const res = await fetchWithCsrf(apiUrl('/api/employee/subscription-requests/vp'));
+    const data = await unwrap(res, 'Failed to load VP extension requests');
+    return data?.requests || [];
+  },
+
+  forwardToAdmin: async (id, vp_note = '') => {
+    const res = await fetchWithCsrf(apiUrl(`/api/employee/subscription-requests/${id}/vp-forward`), {
+      method: 'POST',
+      body: JSON.stringify({ vp_note }),
+    });
+    const data = await unwrap(res, 'Failed to forward request to Admin');
+    return data?.request || null;
+  },
 };

@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { writeAuditLog } from '../lib/audit.js';
@@ -376,7 +377,7 @@ router.get('/summary', async (_req, res) => {
       .select('amount, purchase_date, created_at');
     if (leadErr) {
       // Do not fail summary if lead_purchases is missing/blocked.
-      console.warn('[finance/summary] lead_purchases error:', leadErr.message);
+      logger.warn('[finance/summary] lead_purchases error:', leadErr.message);
     }
 
     const now = new Date();
@@ -428,6 +429,21 @@ router.get('/summary', async (_req, res) => {
 
 // Coupons ---------------------------------------------------
 
+// GET /api/finance/coupons/pending — FINANCE sees their own pending submissions
+router.get('/coupons/pending', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('vendor_plan_coupons')
+      .select('*')
+      .eq('approval_status', 'PENDING_APPROVAL')
+      .order('created_at', { ascending: false });
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, data: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 // GET /api/finance/coupons
 router.get('/coupons', async (_req, res) => {
   try {
@@ -454,7 +470,7 @@ router.get('/coupons', async (_req, res) => {
         .select('id, name')
         .in('id', planIds);
       if (planErr) {
-        console.warn('[finance/coupons] plan lookup failed:', planErr.message);
+        logger.warn('[finance/coupons] plan lookup failed:', planErr.message);
       } else {
         planMap = (plans || []).reduce((acc, p) => {
           if (p?.id) acc[p.id] = p;
@@ -469,7 +485,7 @@ router.get('/coupons', async (_req, res) => {
         .select('id, company_name, owner_name, vendor_id')
         .in('id', vendorIds);
       if (vendorErr) {
-        console.warn('[finance/coupons] vendor lookup failed:', vendorErr.message);
+        logger.warn('[finance/coupons] vendor lookup failed:', vendorErr.message);
       } else {
         vendorMap = (vendors || []).reduce((acc, v) => {
           if (v?.id) acc[v.id] = v;
@@ -545,6 +561,12 @@ router.post('/coupons', async (req, res) => {
     const resolvedVendorId = await resolveVendorScopeId(vendor_id);
     const normalizedPlanId = normalizePlanScopeId(plan_id);
 
+    // ADMIN can activate directly; FINANCE submissions require ADMIN approval.
+    const actorRole = String(req.actor?.role || '').toUpperCase();
+    const isAdminActor = actorRole === 'ADMIN';
+    const approvalStatus = isAdminActor ? 'APPROVED' : 'PENDING_APPROVAL';
+    const couponIsActive = isAdminActor ? Boolean(is_active) : false;
+
     const payload = {
       code: normalizedCode,
       discount_type: normalizedDiscountType,
@@ -553,7 +575,10 @@ router.post('/coupons', async (req, res) => {
       vendor_id: resolvedVendorId,
       max_uses: Math.trunc(numericMaxUses),
       expires_at: normalizedExpiresAt ? normalizedExpiresAt.toISOString() : null,
-      is_active,
+      is_active: couponIsActive,
+      approval_status: approvalStatus,
+      approved_by: isAdminActor ? (req.actor?.email || null) : null,
+      approved_at: isAdminActor ? new Date().toISOString() : null,
       created_at: new Date().toISOString(),
     };
 
@@ -583,7 +608,102 @@ router.post('/coupons', async (req, res) => {
         vendor_id: payload.vendor_id,
         vendor_input: vendor_id || null,
         expires_at: payload.expires_at,
+        approval_status: approvalStatus,
       },
+    });
+
+    return res.json({
+      success: true,
+      data,
+      pending_approval: !isAdminActor,
+      message: isAdminActor
+        ? 'Coupon created and activated.'
+        : 'Coupon submitted for Admin approval.',
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// PUT /api/finance/coupons/:id — Update coupon fields
+router.put('/coupons/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ success: false, error: 'id is required' });
+
+    const { data: existing, error: findErr } = await supabase
+      .from('vendor_plan_coupons')
+      .select('id, code')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (findErr) return res.status(500).json({ success: false, error: findErr.message });
+    if (!existing) return res.status(404).json({ success: false, error: 'Coupon not found' });
+
+    const updates = {};
+
+    if (req.body?.discount_type !== undefined) {
+      const dt = String(req.body.discount_type).trim().toUpperCase();
+      if (!['PERCENT', 'FLAT'].includes(dt)) {
+        return res.status(400).json({ success: false, error: 'discount_type must be PERCENT or FLAT' });
+      }
+      updates.discount_type = dt;
+    }
+
+    if (req.body?.value !== undefined) {
+      const v = Number(req.body.value);
+      if (!Number.isFinite(v) || v <= 0) {
+        return res.status(400).json({ success: false, error: 'value must be greater than 0' });
+      }
+      updates.value = v;
+    }
+
+    if (req.body?.max_uses !== undefined) {
+      const m = Number(req.body.max_uses);
+      if (!Number.isFinite(m) || m < 0) {
+        return res.status(400).json({ success: false, error: 'max_uses must be 0 or more' });
+      }
+      updates.max_uses = Math.trunc(m);
+    }
+
+    if (req.body?.expires_at !== undefined) {
+      const parsed = parseCouponExpiryInput(req.body.expires_at);
+      if (req.body.expires_at && !parsed) {
+        return res.status(400).json({ success: false, error: 'expires_at must be a valid date/time' });
+      }
+      updates.expires_at = parsed ? parsed.toISOString() : null;
+    }
+
+    if (req.body?.is_active !== undefined) {
+      updates.is_active = req.body.is_active === true || req.body.is_active === 'true';
+    }
+
+    if (req.body?.plan_id !== undefined) {
+      updates.plan_id = normalizePlanScopeId(req.body.plan_id);
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, error: 'No valid fields provided to update' });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('vendor_plan_coupons')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'COUPON_UPDATED',
+      entityType: 'vendor_plan_coupons',
+      entityId: id,
+      details: { code: existing.code, updates },
     });
 
     return res.json({ success: true, data });

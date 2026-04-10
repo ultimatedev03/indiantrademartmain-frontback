@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
@@ -97,7 +98,7 @@ router.get('/tickets', async (req, res) => {
     const { data: tickets, error, count } = await query;
     
     if (error) {
-      console.error('❌ Database error:', error);
+      logger.error('❌ Database error:', error);
       return res.status(500).json({ 
         error: 'Failed to fetch tickets', 
         details: error.message 
@@ -115,7 +116,7 @@ router.get('/tickets', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error fetching tickets:', error);
+    logger.error('❌ Error fetching tickets:', error);
     res.status(500).json({ 
       error: 'Failed to fetch support tickets', 
       details: error.message 
@@ -128,7 +129,7 @@ router.get('/tickets/:id', async (req, res) => {
   try {
     const { id } = req.params;
     
-    console.log(`🔍 Fetching ticket: ${id}`);
+    logger.log(`🔍 Fetching ticket: ${id}`);
     
     const { data: ticket, error } = await supabase
       .from('support_tickets')
@@ -137,7 +138,7 @@ router.get('/tickets/:id', async (req, res) => {
       .single();
     
     if (error || !ticket) {
-      console.error('❌ Ticket not found:', error);
+      logger.error('❌ Ticket not found:', error);
       return res.status(404).json({ error: 'Ticket not found' });
     }
     
@@ -147,7 +148,7 @@ router.get('/tickets/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error fetching ticket:', error);
+    logger.error('❌ Error fetching ticket:', error);
     res.status(500).json({ 
       error: 'Failed to fetch ticket', 
       details: error.message 
@@ -302,7 +303,7 @@ router.post('/tickets', async (req, res) => {
       created_at: nowIso()
     };
     
-    console.log('📝 Creating support ticket:', ticketNumber);
+    logger.log('📝 Creating support ticket:', ticketNumber);
     
     const { data: newTicket, error } = await supabase
       .from('support_tickets')
@@ -311,14 +312,14 @@ router.post('/tickets', async (req, res) => {
       .single();
     
     if (error) {
-      console.error('❌ Database error:', error);
+      logger.error('❌ Database error:', error);
       return res.status(500).json({
         error: 'Failed to create ticket',
         details: error.message
       });
     }
     
-    console.log('✅ Ticket created:', newTicket.id);
+    logger.log('✅ Ticket created:', newTicket.id);
 
     await notifyAdmins(
       {
@@ -341,7 +342,7 @@ router.post('/tickets', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error creating ticket:', error);
+    logger.error('❌ Error creating ticket:', error);
     res.status(500).json({
       error: 'Failed to create support ticket',
       details: error.message
@@ -438,7 +439,7 @@ router.patch('/tickets/:id', async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
     
-    console.log(`🔄 Updating ticket ${id}:`, updates);
+    logger.log(`🔄 Updating ticket ${id}:`, updates);
     
     // Sanitize updates - only allow specific fields
     const allowedFields = ['status', 'priority', 'category', 'attachments'];
@@ -464,7 +465,7 @@ router.patch('/tickets/:id', async (req, res) => {
       .single();
     
     if (error) {
-      console.error('❌ Update error:', error);
+      logger.error('❌ Update error:', error);
       return res.status(500).json({
         error: 'Failed to update ticket',
         details: error.message
@@ -475,7 +476,7 @@ router.patch('/tickets/:id', async (req, res) => {
       return res.status(404).json({ error: 'Ticket not found' });
     }
     
-    console.log('✅ Ticket updated:', id);
+    logger.log('✅ Ticket updated:', id);
     
     res.json({
       success: true,
@@ -484,7 +485,7 @@ router.patch('/tickets/:id', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error updating ticket:', error);
+    logger.error('❌ Error updating ticket:', error);
     res.status(500).json({
       error: 'Failed to update ticket',
       details: error.message
@@ -510,7 +511,7 @@ router.put('/tickets/:id/status', async (req, res) => {
       });
     }
     
-    console.log(`🔄 Updating ticket ${id} status to: ${status}`);
+    logger.log(`🔄 Updating ticket ${id} status to: ${status}`);
     
     const updatePayload = {
       status: status.toUpperCase()
@@ -529,7 +530,7 @@ router.put('/tickets/:id/status', async (req, res) => {
       .single();
     
     if (error) {
-      console.error('❌ Status update error:', error);
+      logger.error('❌ Status update error:', error);
       return res.status(500).json({
         error: 'Failed to update ticket status',
         details: error.message
@@ -540,7 +541,7 @@ router.put('/tickets/:id/status', async (req, res) => {
       return res.status(404).json({ error: 'Ticket not found' });
     }
     
-    console.log('✅ Ticket status updated:', id);
+    logger.log('✅ Ticket status updated:', id);
 
     if (updatedTicket) {
       const { vendorUserId, vendorEmail, buyerUserId, buyerEmail } = await getTicketUsers(updatedTicket);
@@ -575,7 +576,7 @@ router.put('/tickets/:id/status', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error updating status:', error);
+    logger.error('❌ Error updating status:', error);
     res.status(500).json({
       error: 'Failed to update ticket status',
       details: error.message
@@ -759,7 +760,7 @@ router.post('/tickets/:id/escalate', requireAuth({ roles: ['ADMIN', 'SUPPORT', '
 // GET /api/support/stats - Get ticket statistics
 router.get('/stats', async (req, res) => {
   try {
-    console.log('📊 Fetching ticket statistics');
+    logger.log('📊 Fetching ticket statistics');
     
     // Get count by status
     const { data: tickets, error } = await supabase
@@ -767,7 +768,7 @@ router.get('/stats', async (req, res) => {
       .select('status, priority');
     
     if (error) {
-      console.error('❌ Stats fetch error:', error);
+      logger.error('❌ Stats fetch error:', error);
       return res.status(500).json({
         error: 'Failed to fetch statistics',
         details: error.message
@@ -826,7 +827,7 @@ router.get('/stats', async (req, res) => {
         : 0;
     }
     
-    console.log('✅ Statistics calculated');
+    logger.log('✅ Statistics calculated');
     
     res.json({
       success: true,
@@ -834,7 +835,7 @@ router.get('/stats', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error fetching stats:', error);
+    logger.error('❌ Error fetching stats:', error);
     res.status(500).json({
       error: 'Failed to fetch statistics',
       details: error.message
@@ -848,7 +849,7 @@ router.get('/vendor/:vendorId', async (req, res) => {
     const { vendorId } = req.params;
     const { status, priority } = req.query;
     
-    console.log(`🔍 Fetching tickets for vendor: ${vendorId}`);
+    logger.log(`🔍 Fetching tickets for vendor: ${vendorId}`);
     
     let query = supabase
       .from('support_tickets')
@@ -867,7 +868,7 @@ router.get('/vendor/:vendorId', async (req, res) => {
     const { data: tickets, error } = await query;
     
     if (error) {
-      console.error('❌ Database error:', error);
+      logger.error('❌ Database error:', error);
       return res.status(500).json({
         error: 'Failed to fetch vendor tickets',
         details: error.message
@@ -881,7 +882,7 @@ router.get('/vendor/:vendorId', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error fetching vendor tickets:', error);
+    logger.error('❌ Error fetching vendor tickets:', error);
     res.status(500).json({
       error: 'Failed to fetch vendor tickets',
       details: error.message
@@ -895,7 +896,7 @@ router.get('/buyer/:buyerId', async (req, res) => {
     const { buyerId } = req.params;
     const { status, priority } = req.query;
     
-    console.log(`🔍 Fetching tickets for buyer: ${buyerId}`);
+    logger.log(`🔍 Fetching tickets for buyer: ${buyerId}`);
     
     let query = supabase
       .from('support_tickets')
@@ -914,7 +915,7 @@ router.get('/buyer/:buyerId', async (req, res) => {
     const { data: tickets, error } = await query;
     
     if (error) {
-      console.error('❌ Database error:', error);
+      logger.error('❌ Database error:', error);
       return res.status(500).json({
         error: 'Failed to fetch buyer tickets',
         details: error.message
@@ -928,7 +929,7 @@ router.get('/buyer/:buyerId', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error fetching buyer tickets:', error);
+    logger.error('❌ Error fetching buyer tickets:', error);
     res.status(500).json({
       error: 'Failed to fetch buyer tickets',
       details: error.message

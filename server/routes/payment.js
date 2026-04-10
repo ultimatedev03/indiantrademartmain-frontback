@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import crypto from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
@@ -191,7 +192,7 @@ async function fetchVendorPlanForPricing(planId) {
 
   if (!full?.error) return full?.data || null;
   if (!isMissingPlanFeaturesColumn(full.error)) {
-    console.warn('Failed to fetch vendor plan pricing meta:', full.error?.message || full.error);
+    logger.warn('Failed to fetch vendor plan pricing meta:', full.error?.message || full.error);
     return null;
   }
 
@@ -202,7 +203,7 @@ async function fetchVendorPlanForPricing(planId) {
     .maybeSingle();
 
   if (fallback?.error) {
-    console.warn('Failed to fetch vendor plan fallback pricing meta:', fallback.error?.message || fallback.error);
+    logger.warn('Failed to fetch vendor plan fallback pricing meta:', fallback.error?.message || fallback.error);
     return null;
   }
   return fallback?.data || null;
@@ -331,7 +332,7 @@ async function resolveOfferForPayment({
       };
     }
   } catch (referralError) {
-    console.warn('[payment] referral offer lookup failed:', referralError?.message || referralError);
+    logger.warn('[payment] referral offer lookup failed:', referralError?.message || referralError);
   }
 
   if (strictCoupon && hasProvidedCode) {
@@ -384,7 +385,7 @@ router.post('/initiate', async (req, res) => {
 
     // Check if Razorpay keys are configured
     if (!process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID.includes('your_razorpay')) {
-      console.error('âŒ Razorpay KEY_ID not configured');
+      logger.error('âŒ Razorpay KEY_ID not configured');
       return res.status(500).json({ error: 'Payment gateway not configured. Please add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET to .env.local' });
     }
 
@@ -400,7 +401,7 @@ router.post('/initiate', async (req, res) => {
       .single();
 
     if (vendorError || !vendor) {
-      console.error('Vendor not found:', vendor_id, vendorError);
+      logger.error('Vendor not found:', vendor_id, vendorError);
       return res.status(404).json({ error: 'Vendor not found' });
     }
 
@@ -477,7 +478,7 @@ router.post('/initiate', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Payment initiation error:', error);
+    logger.error('Payment initiation error:', error);
     res.status(500).json({ error: error.message || 'Failed to initiate payment' });
   }
 });
@@ -560,7 +561,7 @@ router.post('/verify', async (req, res) => {
       .single();
 
     if (subscriptionError) {
-      console.error('Subscription creation error:', subscriptionError);
+      logger.error('Subscription creation error:', subscriptionError);
       return res.status(500).json({ error: 'Failed to create subscription' });
     }
 
@@ -608,7 +609,7 @@ router.post('/verify', async (req, res) => {
       .single();
 
     if (paymentError) {
-      console.error('Payment record error:', paymentError);
+      logger.error('Payment record error:', paymentError);
     } else if (coupon) {
       await supabase
         .from('vendor_plan_coupons')
@@ -638,7 +639,7 @@ router.post('/verify', async (req, res) => {
           supabase
         );
       } catch (referralRewardError) {
-        console.warn(
+        logger.warn(
           '[payment] referral reward application failed:',
           referralRewardError?.message || referralRewardError
         );
@@ -703,13 +704,13 @@ router.post('/verify', async (req, res) => {
         });
       }
     } catch (emailError) {
-      console.error('Email sending error:', emailError);
+      logger.error('Email sending error:', emailError);
     }
 
     try {
       await sendSubscriptionActivatedNotification(vendor_id, plan.name, endDate);
     } catch (notifError) {
-      console.error('Subscription notification error:', notifError);
+      logger.error('Subscription notification error:', notifError);
     }
 
     res.json({
@@ -719,7 +720,7 @@ router.post('/verify', async (req, res) => {
       payment,
     });
   } catch (error) {
-    console.error('Payment verification error:', error);
+    logger.error('Payment verification error:', error);
     res.status(500).json({ error: error.message || 'Payment verification failed' });
   }
 });
@@ -840,7 +841,7 @@ router.post('/lead/initiate', requireAuth({ roles: ['VENDOR'] }), async (req, re
       },
     });
   } catch (error) {
-    console.error('Lead payment initiation error:', error);
+    logger.error('Lead payment initiation error:', error);
     return res.status(500).json({ error: error.message || 'Failed to initiate lead payment' });
   }
 });
@@ -898,7 +899,7 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
       const activePlan = await fetchVendorPlanForPricing(activeSubscription?.plan_id);
       purchaseAmount = resolvePaidLeadPrice(lead, activePlan);
     } catch (priceResolveError) {
-      console.warn('Failed to resolve paid lead price from plan:', priceResolveError?.message || priceResolveError);
+      logger.warn('Failed to resolve paid lead price from plan:', priceResolveError?.message || priceResolveError);
     }
     const consumeResult = await consumeLeadForVendor({
       vendorId: vendor.id,
@@ -948,7 +949,7 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
         },
       });
     } catch (auditErr) {
-      console.warn('Lead purchase audit log failed:', auditErr?.message || auditErr);
+      logger.warn('Lead purchase audit log failed:', auditErr?.message || auditErr);
     }
 
     try {
@@ -966,11 +967,11 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
           },
         ]);
         if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
-          console.warn('Paid lead purchase history insert failed:', historyError?.message || historyError);
+          logger.warn('Paid lead purchase history insert failed:', historyError?.message || historyError);
         }
       }
     } catch (historyInsertError) {
-      console.warn('Paid lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
+      logger.warn('Paid lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
     }
 
     return res.json({
@@ -998,7 +999,7 @@ router.post('/lead/verify', requireAuth({ roles: ['VENDOR'] }), async (req, res)
       purchase: purchaseRow,
     });
   } catch (error) {
-    console.error('Lead payment verification error:', error);
+    logger.error('Lead payment verification error:', error);
     return res.status(500).json({ error: error.message || 'Payment verification failed' });
   }
 });
@@ -1035,7 +1036,7 @@ router.get('/history/:vendor_id', async (req, res) => {
 
     res.json({ success: true, data: payments || [] });
   } catch (error) {
-    console.error('Payment history error:', error);
+    logger.error('Payment history error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1113,7 +1114,7 @@ router.get('/invoice/:payment_id', async (req, res) => {
       invoice: payment.invoice_url,
     });
   } catch (error) {
-    console.error('Invoice retrieval error:', error);
+    logger.error('Invoice retrieval error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1180,7 +1181,7 @@ router.get('/invoice/by-tx/:transaction_id', async (req, res) => {
       invoice: payment.invoice_url,
     });
   } catch (error) {
-    console.error('Invoice by transaction retrieval error:', error);
+    logger.error('Invoice by transaction retrieval error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1203,7 +1204,7 @@ router.get('/plans', async (req, res) => {
 
     res.json({ success: true, data: plans || [] });
   } catch (error) {
-    console.error('Plans retrieval error:', error);
+    logger.error('Plans retrieval error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1272,7 +1273,7 @@ router.get('/referral-offers/:vendor_id', async (req, res) => {
             : 0;
           offerCode = referralOffer?.offer_code || null;
         } catch (error) {
-          console.warn('[payment/referral-offers] offer lookup failed:', error?.message || error);
+          logger.warn('[payment/referral-offers] offer lookup failed:', error?.message || error);
         }
       }
 
@@ -1311,7 +1312,7 @@ router.get('/referral-offers/:vendor_id', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('[payment/referral-offers] error:', error);
+    logger.error('[payment/referral-offers] error:', error);
     return res.status(500).json({ error: error.message || 'Failed to load referral offers' });
   }
 });

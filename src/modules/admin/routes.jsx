@@ -27,6 +27,7 @@ const SupportTickets = lazy(() => import('@/modules/employee/pages/support/Ticke
 // HR Pages
 const HrDashboard = lazy(() => import('@/modules/hr/pages/Dashboard'));
 const HrStaff = lazy(() => import('@/modules/hr/pages/Staff'));
+const HrLeave = lazy(() => import('@/modules/hr/pages/Leave'));
 
 // Employee Pages
 const EmployeeLogin = lazy(() => import('@/modules/employee/pages/auth/Login'));
@@ -44,7 +45,9 @@ const SupportDashboard = lazy(() => import('@/modules/employee/pages/support/Das
 const SalesDashboard = lazy(() => import('@/modules/employee/pages/sales/Dashboard'));
 const SalesLeads = lazy(() => import('@/modules/employee/pages/sales/Leads'));
 const PricingRules = lazy(() => import('@/modules/employee/pages/sales/PricingRules'));
+const SalesSubscriptionRequests = lazy(() => import('@/modules/employee/pages/sales/SubscriptionRequests'));
 const TerritoryEngagements = lazy(() => import('@/modules/employee/pages/territory/TerritoryEngagements'));
+const AdminSubscriptionRequests = lazy(() => import('@/modules/admin/pages/SubscriptionRequests'));
 
 const PortalLogin = lazy(() => import('@/shared/pages/PortalLogin'));
 import { ShieldCheck, Users } from 'lucide-react';
@@ -236,6 +239,7 @@ export const AdminRoutes = () => {
             <Route path="staff" element={<Staff />} />
             <Route path="audit-logs" element={<AuditLogs />} />
             <Route path="settings" element={<AdminSettings />} />
+            <Route path="subscription-requests" element={<AdminSubscriptionRequests />} />
           </Route>
         </Route>
       ) : null}
@@ -251,6 +255,7 @@ export const AdminRoutes = () => {
             <Route index element={<Navigate to="dashboard" replace />} />
             <Route path="dashboard" element={<HrDashboard />} />
             <Route path="staff" element={<HrStaff />} />
+            <Route path="leave" element={<HrLeave />} />
           </Route>
         </Route>
       ) : null}
@@ -295,6 +300,7 @@ export const AdminRoutes = () => {
           <Route path="dashboard" element={<SalesDashboard />} />
           <Route path="leads" element={<SalesLeads />} />
           <Route path="pricing-rules" element={<PricingRules />} />
+          <Route path="subscription-requests" element={<SalesSubscriptionRequests />} />
           <Route path="territory-engagements" element={<TerritoryEngagements />} />
         </Route>
       ) : null}

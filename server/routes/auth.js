@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase, supabaseAnon } from '../lib/supabaseClient.js';
@@ -589,7 +590,7 @@ router.post('/login', async (req, res) => {
         .maybeSingle();
 
       if (buyerLookupError) {
-        console.error('[Auth] Buyer lookup failed during login:', buyerLookupError?.message || buyerLookupError);
+        logger.error('[Auth] Buyer lookup failed during login:', buyerLookupError?.message || buyerLookupError);
         return res.status(500).json({ success: false, error: 'Login failed' });
       }
 
@@ -685,7 +686,7 @@ router.post('/login', async (req, res) => {
           .eq('id', vendor.id);
 
         if (linkError) {
-          console.warn('[Auth] Vendor relink failed during login:', linkError?.message || linkError);
+          logger.warn('[Auth] Vendor relink failed during login:', linkError?.message || linkError);
         }
       }
     }
@@ -746,7 +747,7 @@ router.post('/login', async (req, res) => {
     }
     return res.json({ success: true, user: payload });
   } catch (error) {
-    console.error('[Auth] Login failed:', error?.message || error);
+    logger.error('[Auth] Login failed:', error?.message || error);
     const statusCode = error?.statusCode || 500;
     return res.status(statusCode).json({
       success: false,
@@ -859,7 +860,7 @@ router.post('/register', async (req, res) => {
 
     return res.json({ success: true, user: sessionPayload });
   } catch (error) {
-    console.error('[Auth] Register failed:', error?.message || error);
+    logger.error('[Auth] Register failed:', error?.message || error);
     return res.status(500).json({ success: false, error: 'Registration failed' });
   }
 });
@@ -891,7 +892,7 @@ router.get('/me', async (req, res) => {
       try {
         buyerProfile = await resolveBuyerProfileForUser(user);
       } catch (profileError) {
-        console.error('[Auth] Buyer profile resolve failed:', profileError?.message || profileError);
+        logger.error('[Auth] Buyer profile resolve failed:', profileError?.message || profileError);
       }
     }
 
@@ -920,10 +921,10 @@ router.get('/me', async (req, res) => {
     const formattedError = formatRuntimeError(error);
     const isTransient = isTransientUpstreamError(error);
     if (isTransient) {
-      console.warn('[Auth] Me temporary upstream failure:', formattedError);
+      logger.warn('[Auth] Me temporary upstream failure:', formattedError);
       return res.status(503).json({ error: 'Auth service temporarily unavailable. Please retry.' });
     }
-    console.error('[Auth] Me failed:', formattedError);
+    logger.error('[Auth] Me failed:', formattedError);
     return res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
@@ -954,13 +955,13 @@ router.get('/buyer/profile', requireAuth({ roles: ['BUYER'] }), async (req, res)
     const formattedError = formatRuntimeError(error);
     const isTransient = isTransientUpstreamError(error);
     if (isTransient) {
-      console.warn('[Auth] Buyer profile temporary upstream failure:', formattedError);
+      logger.warn('[Auth] Buyer profile temporary upstream failure:', formattedError);
       return res.status(503).json({
         success: false,
         error: 'Buyer profile service temporarily unavailable. Please retry.',
       });
     }
-    console.error('[Auth] Buyer profile failed:', formattedError);
+    logger.error('[Auth] Buyer profile failed:', formattedError);
     return res.status(500).json({ success: false, error: 'Failed to fetch buyer profile' });
   }
 });
@@ -1029,7 +1030,7 @@ router.patch('/buyer/profile', requireAuth({ roles: ['BUYER'] }), async (req, re
       user: refreshedUserPayload || (user ? buildAuthUserPayload(user) : null),
     });
   } catch (error) {
-    console.error('[Auth] Buyer profile update failed:', error?.message || error);
+    logger.error('[Auth] Buyer profile update failed:', error?.message || error);
     const statusCode = error?.statusCode || 500;
     return res.status(statusCode).json({
       success: false,
@@ -1121,7 +1122,7 @@ router.post('/buyer/profile/avatar', requireAuth({ roles: ['BUYER'] }), async (r
 
     return res.json({ success: true, publicUrl });
   } catch (error) {
-    console.error('[Auth] Buyer avatar upload failed:', error?.message || error);
+    logger.error('[Auth] Buyer avatar upload failed:', error?.message || error);
     return res.status(500).json({ success: false, error: 'Failed to upload avatar' });
   }
 });
@@ -1190,7 +1191,7 @@ router.patch('/password', requireAuth(), async (req, res) => {
 
     return res.json({ success: true, auth_password_synced: authPasswordSynced });
   } catch (error) {
-    console.error('[Auth] Password update failed:', error?.message || error);
+    logger.error('[Auth] Password update failed:', error?.message || error);
     return res.status(500).json({ success: false, error: 'Failed to update password' });
   }
 });

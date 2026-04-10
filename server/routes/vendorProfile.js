@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
@@ -1483,7 +1484,7 @@ async function notifyQuotaExhausted({ userId, remaining, consumptionType }) {
         .gte('created_at', dayStartIso);
 
       if (countError) {
-        console.warn('Failed to check quota notification dedupe:', countError?.message || countError);
+        logger.warn('Failed to check quota notification dedupe:', countError?.message || countError);
         continue;
       }
       if ((count || 0) > 0) continue;
@@ -1498,7 +1499,7 @@ async function notifyQuotaExhausted({ userId, remaining, consumptionType }) {
         created_at: new Date().toISOString(),
       });
     } catch (error) {
-      console.warn('Failed to send quota exhausted notification:', error?.message || error);
+      logger.warn('Failed to send quota exhausted notification:', error?.message || error);
     }
   }
 }
@@ -2420,7 +2421,7 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
         });
       }
     } catch (notifError) {
-      console.warn('Lead purchase notification failed:', notifError?.message || notifError);
+      logger.warn('Lead purchase notification failed:', notifError?.message || notifError);
     }
 
     try {
@@ -2440,11 +2441,11 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
           },
         ]);
         if (historyError && !isMissingRelationError(historyError, 'lead_status_history')) {
-          console.warn('Lead purchase history insert failed:', historyError?.message || historyError);
+          logger.warn('Lead purchase history insert failed:', historyError?.message || historyError);
         }
       }
     } catch (historyInsertError) {
-      console.warn('Lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
+      logger.warn('Lead purchase history insert failed:', historyInsertError?.message || historyInsertError);
     }
 
     return res.status(wasExistingPurchase ? 200 : 201).json({
@@ -3563,7 +3564,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
     }
 
     if (!createdLead) {
-      console.warn('Lead insert failed after proposal create:', lastError?.message || lastError);
+      logger.warn('Lead insert failed after proposal create:', lastError?.message || lastError);
     }
 
     if (vendor?.id) {
@@ -3592,7 +3593,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
             created_at: new Date().toISOString(),
           });
         } catch (notifError) {
-          console.warn('Vendor lead notification failed:', notifError?.message || notifError);
+          logger.warn('Vendor lead notification failed:', notifError?.message || notifError);
         }
       }
     }

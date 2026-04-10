@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   LayoutDashboard, Package, Users, FileText, Settings, LogOut,
   Menu, X, ShieldCheck, HelpCircle, ChevronRight, Boxes,
-  BarChart3, UserCheck, Ticket, Database, Home
+  BarChart3, UserCheck, Ticket, Database, Home, CalendarClock, ClipboardList
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -227,9 +227,11 @@ const PortalLayout = ({ role }) => {
         return [
           { icon: LayoutDashboard, label: 'Dashboard', path: resolvePath('dashboard', 'admin') },
           { icon: Package, label: 'Vendors', path: resolvePath('vendors', 'admin') },
+          { icon: Users, label: 'Buyers', path: resolvePath('buyers', 'admin') },
           { icon: Ticket, label: 'Support Tickets', path: resolvePath('tickets', 'admin') },
           { icon: UserCheck, label: 'KYC Approvals', path: resolvePath('kyc', 'admin') },
           { icon: BarChart3, label: 'Finance', path: resolvePath('finance', 'admin') },
+          { icon: ClipboardList, label: 'Sub. Requests', path: resolvePath('subscription-requests', 'admin') },
           { icon: Users, label: 'Staff', path: resolvePath('staff', 'admin') },
           { icon: FileText, label: 'Audit Logs', path: resolvePath('audit-logs', 'admin') },
           { icon: Settings, label: 'Settings', path: resolvePath('settings', 'admin') },
@@ -243,6 +245,7 @@ const PortalLayout = ({ role }) => {
         return [
           { icon: LayoutDashboard, label: 'Dashboard', path: '/hr/dashboard' },
           { icon: Users, label: 'Employees', path: '/hr/staff' },
+          { icon: CalendarClock, label: 'Leave Management', path: '/hr/leave' },
         ];
       case 'DATA_ENTRY':
         return [
@@ -263,6 +266,7 @@ const PortalLayout = ({ role }) => {
           { icon: LayoutDashboard, label: 'Dashboard', path: '/employee/sales/dashboard' },
           { icon: Users, label: 'Leads', path: '/employee/sales/leads' },
           { icon: BarChart3, label: 'Pricing Rules', path: '/employee/sales/pricing-rules' },
+          { icon: ClipboardList, label: 'Sub. Requests', path: '/employee/sales/subscription-requests' },
         ];
       default:
         return [];

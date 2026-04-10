@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import Modal from '@/shared/components/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Eye, EyeOff, Loader2, Plus, UserCheck, UserCog, UserMinus } from 'lucide-react';
+import { CalendarClock, Eye, EyeOff, Loader2, Plus, UserCheck, UserCog, UserMinus } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { hrApi } from '@/modules/hr/services/hrApi';
 import { PASSWORD_POLICY_MESSAGE } from '@/lib/passwordPolicy';
@@ -30,6 +30,7 @@ const DEFAULT_FORM = {
 
 const normalizeRole = (value = '') => String(value || '').trim().toUpperCase();
 const isActiveStatus = (value = '') => String(value || 'ACTIVE').trim().toUpperCase() === 'ACTIVE';
+const isOnLeaveStatus = (value = '') => String(value || '').trim().toUpperCase().includes('LEAVE');
 const defaultDepartmentForRole = (role) =>
   ROLE_OPTIONS.find((option) => option.value === normalizeRole(role))?.department || 'Operations';
 
@@ -215,6 +216,38 @@ const HrStaff = () => {
     }
   };
 
+  const handleToggleLeave = async (employee) => {
+    if (!employee?.id) return;
+
+    const onLeave = isOnLeaveStatus(employee.status);
+    const nextStatus = onLeave ? 'ACTIVE' : 'ON_LEAVE';
+    const confirmed = window.confirm(
+      onLeave
+        ? `Mark ${employee.displayName} as Active (return from leave)?`
+        : `Mark ${employee.displayName} as On Leave?`
+    );
+
+    if (!confirmed) return;
+
+    setBusyEmployeeId(employee.id);
+    try {
+      await hrApi.updateEmployeeStatus(employee.id, nextStatus);
+      await fetchStaff({ silent: true });
+      toast({
+        title: onLeave ? 'Returned from leave' : 'Marked as On Leave',
+        description: `${employee.displayName} is now ${nextStatus === 'ON_LEAVE' ? 'on leave' : 'active'}.`,
+      });
+    } catch (error) {
+      toast({
+        title: 'Status update failed',
+        description: error?.message || 'Could not update leave status.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyEmployeeId('');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -261,10 +294,14 @@ const HrStaff = () => {
                   <TableCell>
                     <span
                       className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                        employee.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-neutral-100 text-neutral-800'
+                        employee.status === 'ACTIVE'
+                          ? 'bg-green-100 text-green-800'
+                          : isOnLeaveStatus(employee.status)
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-neutral-100 text-neutral-800'
                       }`}
                     >
-                      {employee.status}
+                      {isOnLeaveStatus(employee.status) ? 'ON LEAVE' : employee.status}
                     </span>
                   </TableCell>
                   <TableCell>{employee.joinedLabel}</TableCell>
@@ -278,6 +315,15 @@ const HrStaff = () => {
                         disabled={busyEmployeeId === employee.id}
                       >
                         <UserCog className="h-4 w-4 text-blue-500" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        title={isOnLeaveStatus(employee.status) ? 'Return from Leave' : 'Mark On Leave'}
+                        onClick={() => handleToggleLeave(employee)}
+                        disabled={busyEmployeeId === employee.id}
+                      >
+                        <CalendarClock className={`h-4 w-4 ${isOnLeaveStatus(employee.status) ? 'text-amber-600' : 'text-slate-400'}`} />
                       </Button>
                       <Button
                         variant="ghost"

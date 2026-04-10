@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from '@/components/ui/use-toast';
 import { Calendar, Clock3, Loader2, Plus, Trash2, User } from 'lucide-react';
 import { useSubdomain } from '@/contexts/SubdomainContext';
+import { phoneUtils } from '@/shared/utils/phoneUtils';
 
 const formatDateTime = (value) => {
   if (!value) return '-';
@@ -100,14 +101,7 @@ const maskEmail = (value) => {
   return `${maskedLocal}@${maskedDomain}${domainSuffix}`;
 };
 
-const maskPhone = (value) => {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  const digits = text.replace(/\D/g, '');
-  if (!digits) return '';
-  if (digits.length <= 4) return `${digits.slice(0, 1)}${'*'.repeat(Math.max(digits.length - 1, 2))}`;
-  return `${digits.slice(0, 2)}${'*'.repeat(Math.max(digits.length - 4, 4))}${digits.slice(-2)}`;
-};
+const maskPhone = (value) => phoneUtils.maskPhone(value);
 
 const Proposals = () => {
   const navigate = useNavigate();

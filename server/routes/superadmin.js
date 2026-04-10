@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { notifyUser } from '../lib/notify.js';
@@ -83,7 +84,7 @@ async function ensureEmployeeAuthUser(employee, password) {
   try {
     publicUser = await findAuthUserByEmail(email);
   } catch (error) {
-    console.warn('[SuperAdmin] Failed to find user by email:', error?.message || error);
+    logger.warn('[SuperAdmin] Failed to find user by email:', error?.message || error);
   }
 
   let created = false;
@@ -492,7 +493,7 @@ async function deleteVendorCascade(vendorId) {
     try {
       await supabase.from('users').delete().eq('id', vendorUserId);
     } catch (error) {
-      console.warn('[SuperAdmin] Failed to delete vendor public user:', error?.message || error);
+      logger.warn('[SuperAdmin] Failed to delete vendor public user:', error?.message || error);
     }
   }
 
@@ -557,10 +558,16 @@ router.post('/employees', async (req, res) => {
       .trim()
       .toLowerCase();
     const password = String(req.body?.password || '').trim();
-    const role = normalizeRole(req.body?.role || 'DATA_ENTRY');
+    const role = normalizeRole(req.body?.role || 'ADMIN');
     const phone = String(req.body?.phone || '').trim() || null;
-    const department = String(req.body?.department || '').trim() || 'Operations';
+    const department = String(req.body?.department || '').trim() || 'Administration';
     const status = normalizeRole(req.body?.status || 'ACTIVE') || 'ACTIVE';
+
+    // states_scope: array of state names, only meaningful for ADMIN role
+    const rawScope = req.body?.states_scope;
+    const statesScope = role === 'ADMIN' && Array.isArray(rawScope)
+      ? rawScope.map((s) => String(s).trim()).filter(Boolean)
+      : [];
 
     if (!fullName || !email || !password) {
       return res
@@ -595,6 +602,7 @@ router.post('/employees', async (req, res) => {
       role,
       department,
       status,
+      states_scope: statesScope,
       created_at: nowIso(),
     };
 
@@ -608,7 +616,7 @@ router.post('/employees', async (req, res) => {
         try {
           await supabase.from('users').delete().eq('id', userId);
         } catch (error) {
-          console.warn('[SuperAdmin] Failed to rollback public user:', error?.message || error);
+          logger.warn('[SuperAdmin] Failed to rollback public user:', error?.message || error);
         }
       return res.status(500).json({ success: false, error: empError.message });
     }
@@ -1420,6 +1428,337 @@ router.get('/audit-logs', async (req, res) => {
     });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ===========================================================
+// MONITORING ROUTES — SuperAdmin sees all regions
+// ===========================================================
+
+// State → Region lookup
+const STATE_REGION_MAP = {
+  // NORTH
+  'uttar pradesh': 'NORTH', 'up': 'NORTH',
+  'bihar': 'NORTH',
+  'jharkhand': 'NORTH',
+  'uttarakhand': 'NORTH',
+  'himachal pradesh': 'NORTH',
+  'punjab': 'NORTH',
+  'haryana': 'NORTH',
+  'delhi': 'NORTH',
+  'jammu and kashmir': 'NORTH',
+  'jammu & kashmir': 'NORTH',
+  'ladakh': 'NORTH',
+
+  // WEST
+  'maharashtra': 'WEST', 'mh': 'WEST',
+  'gujarat': 'WEST', 'gj': 'WEST',
+  'rajasthan': 'WEST', 'rj': 'WEST',
+  'goa': 'WEST',
+
+  // SOUTH
+  'karnataka': 'SOUTH', 'ka': 'SOUTH',
+  'tamil nadu': 'SOUTH', 'tn': 'SOUTH',
+  'kerala': 'SOUTH', 'kl': 'SOUTH',
+  'andhra pradesh': 'SOUTH', 'ap': 'SOUTH',
+  'telangana': 'SOUTH', 'tg': 'SOUTH',
+
+  // EAST
+  'west bengal': 'EAST', 'wb': 'EAST',
+  'odisha': 'EAST',
+  'assam': 'EAST',
+  'chhattisgarh': 'EAST',
+  'manipur': 'EAST',
+  'meghalaya': 'EAST',
+  'mizoram': 'EAST',
+  'nagaland': 'EAST',
+  'sikkim': 'EAST',
+  'tripura': 'EAST',
+  'arunachal pradesh': 'EAST',
+
+  // CENTRAL
+  'madhya pradesh': 'CENTRAL', 'mp': 'CENTRAL',
+};
+
+function getRegion(stateName) {
+  if (!stateName) return 'OTHER';
+  return STATE_REGION_MAP[String(stateName).toLowerCase().trim()] || 'OTHER';
+}
+
+// GET /monitoring/overview
+// All-India + per-region: revenue, vendor count, KYC pending, open tickets, admin list
+router.get('/monitoring/overview', requireSuperAdmin, async (req, res) => {
+  try {
+    const [
+      { data: adminEmployees, error: empErr },
+      { data: vendors, error: vendorErr },
+      { data: payments, error: payErr },
+      { data: tickets, error: ticketErr },
+    ] = await Promise.all([
+      supabase
+        .from('employees')
+        .select('id, full_name, email, role, status, states_scope, last_login, created_at')
+        .eq('role', 'ADMIN')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('vendors')
+        .select('id, state, kyc_status, is_active, created_at'),
+      supabase
+        .from('vendor_payments')
+        .select('vendor_id, amount, net_amount, payment_date, vendors!inner(state)'),
+      supabase
+        .from('support_tickets')
+        .select('id, status, vendor_id, created_at, vendors(state)')
+        .not('status', 'eq', 'RESOLVED'),
+    ]);
+
+    if (empErr) return res.status(500).json({ success: false, error: empErr.message });
+    if (vendorErr) return res.status(500).json({ success: false, error: vendorErr.message });
+
+    // --- All-India totals ---
+    const allVendors = vendors || [];
+    const allPayments = payments || [];
+    const allTickets = tickets || [];
+
+    const totalRevenue = allPayments.reduce((s, p) => s + Number(p.net_amount ?? p.amount ?? 0), 0);
+    const totalVendors = allVendors.filter((v) => v.is_active).length;
+    const kycPending = allVendors.filter((v) => v.kyc_status === 'PENDING').length;
+    const openTickets = allTickets.length;
+
+    // --- Per-state aggregation ---
+    const byState = {};
+
+    allVendors.forEach((v) => {
+      const state = String(v.state || 'Unknown').trim();
+      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      if (v.is_active) byState[state].vendors += 1;
+      if (v.kyc_status === 'PENDING') byState[state].kycPending += 1;
+    });
+
+    allPayments.forEach((p) => {
+      const state = String(p.vendors?.state || 'Unknown').trim();
+      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      byState[state].revenue += Number(p.net_amount ?? p.amount ?? 0);
+    });
+
+    allTickets.forEach((t) => {
+      const state = String(t.vendors?.state || 'Unknown').trim();
+      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      byState[state].openTickets += 1;
+    });
+
+    // --- Per-region rollup ---
+    const byRegion = {};
+    Object.values(byState).forEach((s) => {
+      const r = s.region;
+      if (!byRegion[r]) byRegion[r] = { region: r, revenue: 0, vendors: 0, kycPending: 0, openTickets: 0, states: [] };
+      byRegion[r].revenue += s.revenue;
+      byRegion[r].vendors += s.vendors;
+      byRegion[r].kycPending += s.kycPending;
+      byRegion[r].openTickets += s.openTickets;
+      byRegion[r].states.push(s.state);
+    });
+
+    // --- Per-admin enrichment: attach region/states + stats from their states_scope ---
+    const admins = (adminEmployees || []).map((emp) => {
+      const scope = Array.isArray(emp.states_scope) ? emp.states_scope : [];
+      const scopeLower = scope.map((s) => String(s).toLowerCase().trim());
+      let empRevenue = 0, empVendors = 0, empKyc = 0, empTickets = 0;
+
+      Object.values(byState).forEach((s) => {
+        if (scopeLower.length === 0 || scopeLower.includes(s.state.toLowerCase())) {
+          empRevenue += s.revenue;
+          empVendors += s.vendors;
+          empKyc += s.kycPending;
+          empTickets += s.openTickets;
+        }
+      });
+
+      return {
+        id: emp.id,
+        full_name: emp.full_name,
+        email: emp.email,
+        status: emp.status,
+        states_scope: scope,
+        last_login: emp.last_login,
+        revenue: scopeLower.length > 0 ? empRevenue : null,
+        vendors: scopeLower.length > 0 ? empVendors : null,
+        kycPending: scopeLower.length > 0 ? empKyc : null,
+        openTickets: scopeLower.length > 0 ? empTickets : null,
+      };
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        allIndia: { totalRevenue, totalVendors, kycPending, openTickets },
+        byRegion: Object.values(byRegion).sort((a, b) => b.revenue - a.revenue),
+        byState: Object.values(byState).sort((a, b) => b.revenue - a.revenue),
+        admins,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /monitoring/admin-activity
+// Per-admin: actions this week from audit_logs
+router.get('/monitoring/admin-activity', requireSuperAdmin, async (req, res) => {
+  try {
+    const days = Math.min(Number(req.query.days ?? 7), 90);
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const [{ data: logs, error: logsErr }, { data: admins, error: adminsErr }] = await Promise.all([
+      supabase
+        .from('audit_logs')
+        .select('user_id, action, details, created_at')
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(5000),
+      supabase
+        .from('employees')
+        .select('id, full_name, email, role, states_scope, last_login, status')
+        .eq('role', 'ADMIN'),
+    ]);
+
+    if (logsErr) return res.status(500).json({ success: false, error: logsErr.message });
+    if (adminsErr) return res.status(500).json({ success: false, error: adminsErr.message });
+
+    const adminMap = {};
+    (admins || []).forEach((a) => {
+      adminMap[a.id] = {
+        ...a,
+        actionsTotal: 0,
+        kycApproved: 0,
+        kycRejected: 0,
+        vendorsTerminated: 0,
+        vendorsActivated: 0,
+        staffCreated: 0,
+        ticketsResolved: 0,
+        recentActions: [],
+      };
+    });
+
+    (logs || []).forEach((log) => {
+      const actorId = log.details?.actor_id || log.user_id;
+      if (!actorId || !adminMap[actorId]) return;
+      const entry = adminMap[actorId];
+      entry.actionsTotal += 1;
+
+      const action = String(log.action || '').toUpperCase();
+      if (action.includes('KYC_APPROV')) entry.kycApproved += 1;
+      else if (action.includes('KYC_REJECT')) entry.kycRejected += 1;
+      else if (action.includes('VENDOR_TERM')) entry.vendorsTerminated += 1;
+      else if (action.includes('VENDOR_ACTIV')) entry.vendorsActivated += 1;
+      else if (action.includes('STAFF_CREAT') || action.includes('EMPLOYEE_CREAT')) entry.staffCreated += 1;
+      else if (action.includes('TICKET') && action.includes('RESOLV')) entry.ticketsResolved += 1;
+
+      if (entry.recentActions.length < 5) {
+        entry.recentActions.push({ action: log.action, created_at: log.created_at });
+      }
+    });
+
+    const activity = Object.values(adminMap).sort((a, b) => b.actionsTotal - a.actionsTotal);
+
+    return res.json({ success: true, data: { days, activity } });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /monitoring/revenue-by-state
+// Revenue + payment count per state, with this-month vs last-month comparison
+router.get('/monitoring/revenue-by-state', requireSuperAdmin, async (req, res) => {
+  try {
+    const { data: payments, error } = await supabase
+      .from('vendor_payments')
+      .select('amount, net_amount, payment_date, vendors!inner(state)')
+      .order('payment_date', { ascending: false })
+      .limit(10000);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+    const byState = {};
+
+    (payments || []).forEach((p) => {
+      const state = String(p.vendors?.state || 'Unknown').trim();
+      const region = getRegion(state);
+      const amt = Number(p.net_amount ?? p.amount ?? 0);
+      const date = p.payment_date ? new Date(p.payment_date) : null;
+
+      if (!byState[state]) {
+        byState[state] = { state, region, totalRevenue: 0, paymentCount: 0, thisMonth: 0, lastMonth: 0 };
+      }
+
+      byState[state].totalRevenue += amt;
+      byState[state].paymentCount += 1;
+
+      if (date) {
+        if (date >= thisMonthStart) byState[state].thisMonth += amt;
+        else if (date >= lastMonthStart) byState[state].lastMonth += amt;
+      }
+    });
+
+    const stateList = Object.values(byState)
+      .sort((a, b) => b.totalRevenue - a.totalRevenue)
+      .map((s) => ({
+        ...s,
+        trend: s.lastMonth > 0 ? ((s.thisMonth - s.lastMonth) / s.lastMonth) * 100 : null,
+      }));
+
+    return res.json({ success: true, data: stateList });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /employees/:id/states-scope — SuperAdmin updates an Admin's state coverage
+router.put('/employees/:id/states-scope', requireSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const rawStates = req.body?.states_scope;
+
+    if (!Array.isArray(rawStates)) {
+      return res.status(400).json({ success: false, error: 'states_scope must be an array' });
+    }
+
+    const states = rawStates.map((s) => String(s).trim()).filter(Boolean);
+
+    const { data: emp } = await supabase
+      .from('employees')
+      .select('id, role, full_name, email')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (!emp) return res.status(404).json({ success: false, error: 'Employee not found' });
+    if (emp.role !== 'ADMIN') {
+      return res.status(400).json({ success: false, error: 'states_scope can only be set on ADMIN employees' });
+    }
+
+    const { error } = await supabase
+      .from('employees')
+      .update({ states_scope: states, updated_at: nowIso() })
+      .eq('id', id);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: 'ADMIN_STATES_SCOPE_UPDATED',
+      entityType: 'employees',
+      entityId: id,
+      details: { email: emp.email, states_scope: states },
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

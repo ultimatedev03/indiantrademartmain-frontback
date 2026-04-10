@@ -147,7 +147,7 @@ router.get('/me', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('[referrals/me] error:', error);
+    logger.error('[referrals/me] error:', error);
     return res.status(500).json({ success: false, error: error.message || 'Failed to load referral profile' });
   }
 });

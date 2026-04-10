@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -92,11 +93,11 @@ router.post('/vendor-ids/migrate-single', async (req, res) => {
       .eq('id', vendorId);
 
     if (updateError) {
-      console.error('Update error:', updateError);
+      logger.error('Update error:', updateError);
       return res.status(500).json({ error: 'Failed to update vendor: ' + updateError.message });
     }
 
-    console.log(`✅ Migrated vendor ${vendorId}: ${newVendorId}`);
+    logger.log(`✅ Migrated vendor ${vendorId}: ${newVendorId}`);
 
     res.json({
       success: true,
@@ -105,7 +106,7 @@ router.post('/vendor-ids/migrate-single', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Migration error:', error);
+    logger.error('Migration error:', error);
     res.status(500).json({ error: error.message || 'Migration failed' });
   }
 });
@@ -175,7 +176,7 @@ router.post('/vendor-ids/migrate-all', async (req, res) => {
 
         if (updateError) throw updateError;
 
-        console.log(`✅ Migrated vendor ${vendor.id}: ${newVendorId}`);
+        logger.log(`✅ Migrated vendor ${vendor.id}: ${newVendorId}`);
         results.push({
           vendorId: vendor.id,
           status: 'success',
@@ -183,7 +184,7 @@ router.post('/vendor-ids/migrate-all', async (req, res) => {
         });
         successful++;
       } catch (error) {
-        console.error(`❌ Failed to migrate vendor ${vendor.id}:`, error);
+        logger.error(`❌ Failed to migrate vendor ${vendor.id}:`, error);
         results.push({
           vendorId: vendor.id,
           status: 'error',
@@ -203,7 +204,7 @@ router.post('/vendor-ids/migrate-all', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Batch migration error:', error);
+    logger.error('Batch migration error:', error);
     res.status(500).json({ error: error.message || 'Batch migration failed' });
   }
 });

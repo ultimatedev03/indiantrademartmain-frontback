@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from "express";
 import { supabase } from "../lib/supabaseClient.js";
 import { notifyRole, notifyUser } from "../lib/notify.js";
@@ -18,6 +19,17 @@ const router = express.Router();
 
 // All admin routes require a valid ADMIN employee session.
 router.use(requireEmployeeRoles(["ADMIN"]));
+
+/**
+ * Returns the state scope for the logged-in admin.
+ * - If states_scope is a non-empty array  → return that array (admin is region-scoped)
+ * - If states_scope is empty / null       → return null (admin sees all India)
+ */
+function getAdminScope(req) {
+  const raw = req.employee?.states_scope;
+  const arr = Array.isArray(raw) ? raw.map((s) => String(s).trim()).filter(Boolean) : [];
+  return arr.length > 0 ? arr : null;
+}
 
 /**
  * =========================
@@ -354,13 +366,13 @@ async function createSupportStatusTicket({
   try {
     const { error } = await supabase.from("support_tickets").insert([payload]);
     if (error) {
-      console.warn(
+      logger.warn(
         `[admin] support ticket create failed for ${normalizedEntity} ${normalizedAction}:`,
         error?.message || error
       );
     }
   } catch (err) {
-    console.warn(
+    logger.warn(
       `[admin] support ticket create exception for ${normalizedEntity} ${normalizedAction}:`,
       err?.message || err
     );
@@ -368,6 +380,108 @@ async function createSupportStatusTicket({
 }
 
 /**
+ * =========================
+ * COUPON APPROVALS (ADMIN)
+ * =========================
+ */
+
+// GET /api/admin/coupons/pending — list all coupons awaiting approval
+router.get("/coupons/pending", async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vendor_plan_coupons")
+      .select("*")
+      .eq("approval_status", "PENDING_APPROVAL")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, data: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// POST /api/admin/coupons/:id/decision — approve or reject a pending coupon
+router.post("/coupons/:id/decision", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ success: false, error: "id is required" });
+
+    const decision = String(req.body?.decision || "").toUpperCase();
+    if (!["APPROVE", "REJECT"].includes(decision)) {
+      return res.status(400).json({ success: false, error: "decision must be APPROVE or REJECT" });
+    }
+
+    const rejectionReason = String(req.body?.reason || "").trim() || null;
+    if (decision === "REJECT" && !rejectionReason) {
+      return res.status(400).json({ success: false, error: "reason is required when rejecting" });
+    }
+
+    const { data: existing, error: fetchErr } = await supabase
+      .from("vendor_plan_coupons")
+      .select("id, code, approval_status")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (fetchErr) return res.status(500).json({ success: false, error: fetchErr.message });
+    if (!existing) return res.status(404).json({ success: false, error: "Coupon not found" });
+    if (existing.approval_status !== "PENDING_APPROVAL") {
+      return res.status(409).json({
+        success: false,
+        error: `Coupon is already ${existing.approval_status.toLowerCase().replace("_", " ")}`,
+      });
+    }
+
+    const updates =
+      decision === "APPROVE"
+        ? {
+            approval_status: "APPROVED",
+            is_active: true,
+            approved_by: req.actor?.email || null,
+            approved_at: new Date().toISOString(),
+            rejection_reason: null,
+          }
+        : {
+            approval_status: "REJECTED",
+            is_active: false,
+            rejection_reason: rejectionReason,
+            approved_by: req.actor?.email || null,
+            approved_at: new Date().toISOString(),
+          };
+
+    const { data, error } = await supabase
+      .from("vendor_plan_coupons")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    await writeAuditLog({
+      req,
+      actor: req.actor,
+      action: decision === "APPROVE" ? "COUPON_APPROVED" : "COUPON_REJECTED",
+      entityType: "vendor_plan_coupons",
+      entityId: id,
+      details: {
+        code: existing.code,
+        decision,
+        reason: rejectionReason,
+        approved_by: req.actor?.email || null,
+      },
+    });
+
+    return res.json({
+      success: true,
+      data,
+      message: decision === "APPROVE" ? "Coupon approved and activated." : "Coupon rejected.",
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+/*
  * =========================
  * AUDIT LOGS (READ)
  * =========================
@@ -452,6 +566,12 @@ router.get("/vendors", async (req, res) => {
       )
       .order("created_at", { ascending: false })
       .range(0, MAX_VENDOR_LIMIT - 1);
+
+    // State-scope filtering: admin only sees vendors from their assigned states
+    const adminScope = getAdminScope(req);
+    if (adminScope) {
+      vendorQuery = vendorQuery.in("state", adminScope);
+    }
 
     const kyc = kycRaw.toUpperCase();
     if (kyc && kyc !== "ALL") {
@@ -946,10 +1066,18 @@ router.post("/vendors/:vendorId/activate", async (req, res) => {
  */
 router.get("/buyers", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    let buyerQuery = supabase
       .from("buyers")
       .select("*")
       .order("created_at", { ascending: false });
+
+    // State-scope filtering: admin only sees buyers from their assigned states
+    const adminScope = getAdminScope(req);
+    if (adminScope) {
+      buyerQuery = buyerQuery.in("state", adminScope);
+    }
+
+    const { data, error } = await buyerQuery;
 
     if (error)
       return res.status(500).json({ success: false, error: error.message });
@@ -1486,6 +1614,46 @@ router.put("/staff/:employeeId/password", async (req, res) => {
 
 router.get("/dashboard/overview", async (req, res) => {
   try {
+    const scope = getAdminScope(req);
+
+    // Base queries — scoped by admin's states if assigned
+    let vendorsActiveQ = supabase.from("vendors").select("*", { count: "exact", head: true }).eq("is_active", true);
+    let buyersQ        = supabase.from("buyers").select("*", { count: "exact", head: true });
+    let pendingKycQ    = supabase.from("vendors").select("*", { count: "exact", head: true }).in("kyc_status", ["PENDING", "SUBMITTED"]);
+    let recentVendorsQ = supabase.from("vendors").select("id");
+    let openTicketsQ   = supabase.from("support_tickets").select("*", { count: "exact", head: true }).in("status", ["OPEN", "IN_PROGRESS"]);
+
+    if (scope) {
+      vendorsActiveQ = vendorsActiveQ.in("state", scope);
+      buyersQ        = buyersQ.in("state", scope);
+      pendingKycQ    = pendingKycQ.in("state", scope);
+      recentVendorsQ = recentVendorsQ.in("state", scope);
+      // tickets: filter via vendor state join
+      openTicketsQ   = supabase
+        .from("support_tickets")
+        .select("id, vendors!inner(state)", { count: "exact", head: true })
+        .in("status", ["OPEN", "IN_PROGRESS"])
+        .in("vendors.state", scope);
+    }
+
+    // If scoped, first get vendor IDs in this admin's states to filter revenue/orders
+    let scopedVendorIdList = null;
+    if (scope) {
+      const { data: sv } = await recentVendorsQ;
+      scopedVendorIdList = (sv || []).map((v) => v.id).filter(Boolean);
+    }
+
+    // Revenue queries — scoped by vendorIds when admin is region-restricted
+    let leadPurchasesAmtQ = supabase.from("lead_purchases").select("amount");
+    let vendorPaymentsQ   = supabase.from("vendor_payments").select("amount, net_amount");
+    let ordersCountQ      = supabase.from("lead_purchases").select("*", { count: "exact", head: true });
+
+    if (scopedVendorIdList && scopedVendorIdList.length > 0) {
+      leadPurchasesAmtQ = leadPurchasesAmtQ.in("vendor_id", scopedVendorIdList);
+      vendorPaymentsQ   = vendorPaymentsQ.in("vendor_id", scopedVendorIdList);
+      ordersCountQ      = ordersCountQ.in("vendor_id", scopedVendorIdList);
+    }
+
     const [
       usersRes,
       vendorsRes,
@@ -1498,20 +1666,14 @@ router.get("/dashboard/overview", async (req, res) => {
       openTicketsRes,
     ] = await Promise.all([
       supabase.from("users").select("*", { count: "exact", head: true }),
-      supabase.from("vendors").select("*", { count: "exact", head: true }).eq("is_active", true),
-      supabase.from("buyers").select("*", { count: "exact", head: true }),
+      vendorsActiveQ,
+      buyersQ,
       supabase.from("products").select("*", { count: "exact", head: true }),
-      supabase
-        .from("vendors")
-        .select("*", { count: "exact", head: true })
-        .in("kyc_status", ["PENDING", "SUBMITTED"]),
-      supabase.from("lead_purchases").select("*", { count: "exact", head: true }),
-      supabase.from("lead_purchases").select("amount"),
-      supabase.from("vendor_payments").select("amount, net_amount"),
-      supabase
-        .from("support_tickets")
-        .select("*", { count: "exact", head: true })
-        .in("status", ["OPEN", "IN_PROGRESS"]),
+      pendingKycQ,
+      ordersCountQ,
+      leadPurchasesAmtQ,
+      vendorPaymentsQ,
+      openTicketsQ,
     ]);
 
     const countErrors = [
@@ -1550,6 +1712,7 @@ router.get("/dashboard/overview", async (req, res) => {
         totalProducts: productsRes.count || 0,
         pendingKyc: pendingKycRes.count || 0,
         openTickets: openTicketsRes.count || 0,
+        scopedToStates: scope || null,
       },
     });
   } catch (e) {
@@ -1561,13 +1724,20 @@ router.get("/dashboard/overview", async (req, res) => {
 // Dashboard counts (buyers/products/pending KYC)
 router.get("/dashboard/counts", async (req, res) => {
   try {
+    const scope = getAdminScope(req);
+
+    let buyersQ     = supabase.from("buyers").select("*", { count: "exact", head: true });
+    let pendingKycQ = supabase.from("vendors").select("*", { count: "exact", head: true }).in("kyc_status", ["PENDING", "SUBMITTED"]);
+
+    if (scope) {
+      buyersQ     = buyersQ.in("state", scope);
+      pendingKycQ = pendingKycQ.in("state", scope);
+    }
+
     const [buyersRes, productsRes, pendingKycRes] = await Promise.all([
-      supabase.from("buyers").select("*", { count: "exact", head: true }),
+      buyersQ,
       supabase.from("products").select("*", { count: "exact", head: true }),
-      supabase
-        .from("vendors")
-        .select("*", { count: "exact", head: true })
-        .in("kyc_status", ["PENDING", "SUBMITTED"]),
+      pendingKycQ,
     ]);
 
     if (buyersRes.error) return res.status(500).json({ success: false, error: buyersRes.error.message });
@@ -1594,19 +1764,37 @@ router.get("/dashboard/counts", async (req, res) => {
 router.get("/dashboard/recent-support-tickets", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query?.limit || 5), 50);
-    const { data, error } = await supabase
+    const scope = getAdminScope(req);
+
+    // When scoped: only show tickets whose vendor is in this admin's states
+    // Tickets with no vendor (buyer-only) are included when unscoped, excluded when scoped
+    let q = supabase
       .from("support_tickets")
       .select(
-        "id, subject, priority, status, created_at, vendor_id, buyer_id, vendors(company_name, owner_name), buyers(full_name, company_name)"
+        "id, subject, priority, status, created_at, vendor_id, buyer_id, vendors(company_name, owner_name, state), buyers(full_name, company_name)"
       )
       .order("created_at", { ascending: false })
       .limit(limit);
+
+    // Fetch more rows then post-filter by vendor state when scoped
+    if (scope) q = q.limit(limit * 10); // fetch extra so we have enough after filtering
+    const { data, error } = await q;
 
     if (error) {
       return res.status(500).json({ success: false, error: error.message });
     }
 
-    return res.json({ success: true, tickets: data || [] });
+    const tickets = scope
+      ? (data || [])
+          .filter((t) => {
+            const vendorState = t.vendors?.state;
+            // Include if vendor state matches scope; exclude buyer-only tickets when scoped
+            return vendorState && scope.includes(vendorState);
+          })
+          .slice(0, limit)
+      : (data || []);
+
+    return res.json({ success: true, tickets });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
@@ -1615,12 +1803,18 @@ router.get("/dashboard/recent-support-tickets", async (req, res) => {
 router.get("/dashboard/recent-vendors", async (req, res) => {
   try {
     const limit = Math.min(Number(req.query?.limit || 5), 50);
-    const { data, error } = await supabase
+    const scope = getAdminScope(req);
+
+    let q = supabase
       .from("vendors")
-      .select("id, company_name, kyc_status, created_at, owner_name")
+      .select("id, company_name, kyc_status, created_at, owner_name, state")
       .not("created_at", "is", null)
       .order("created_at", { ascending: false })
       .limit(limit);
+
+    if (scope) q = q.in("state", scope);
+
+    const { data, error } = await q;
 
     if (error) {
       return res.status(500).json({ success: false, error: error.message });
@@ -1723,6 +1917,159 @@ router.get("/dashboard/data-entry-performance", async (req, res) => {
     return res.json({ success: true, performance });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SUBSCRIPTION EXTENSION REQUEST — ADMIN RESOLUTION (state-scoped)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ADMIN: List pending extension requests forwarded to admin level (state-scoped)
+router.get('/subscription-requests/pending', async (req, res) => {
+  try {
+    const adminScope = getAdminScope(req); // null = all India, array = specific states
+
+    let query = supabase
+      .from('subscription_extension_requests')
+      .select('*')
+      .eq('status', 'FORWARDED')
+      .eq('current_level', 'VP')
+      .order('created_at', { ascending: false });
+
+    if (adminScope) {
+      query = query.in('vendor_state', adminScope);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    return res.json({ success: true, requests: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to list pending subscription requests' });
+  }
+});
+
+// ADMIN: Resolve (approve + extend) or reject a subscription extension request
+router.post('/subscription-requests/:id/resolve', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const decision = String(req.body?.decision || '').toUpperCase();
+    const admin_note = String(req.body?.admin_note || '').trim();
+    const extension_granted_days = parseInt(req.body?.extension_granted_days, 10);
+
+    if (!['APPROVE', 'REJECT'].includes(decision)) {
+      return res.status(400).json({ success: false, error: 'decision must be APPROVE or REJECT' });
+    }
+    if (decision === 'REJECT' && !admin_note) {
+      return res.status(400).json({ success: false, error: 'admin_note (reason) is required when rejecting' });
+    }
+    if (decision === 'APPROVE') {
+      if (!Number.isFinite(extension_granted_days) || extension_granted_days < 1 || extension_granted_days > 365) {
+        return res.status(400).json({ success: false, error: 'extension_granted_days must be between 1 and 365' });
+      }
+    }
+
+    // Fetch the request
+    const { data: extReq, error: fetchErr } = await supabase
+      .from('subscription_extension_requests')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (fetchErr) throw fetchErr;
+    if (!extReq) return res.status(404).json({ success: false, error: 'Request not found' });
+    if (extReq.status === 'RESOLVED' || extReq.status === 'REJECTED') {
+      return res.status(409).json({ success: false, error: 'Request already resolved/rejected' });
+    }
+    if (extReq.current_level !== 'VP') {
+      return res.status(409).json({ success: false, error: 'Request has not been forwarded to admin yet' });
+    }
+
+    // State-scope check
+    const adminScope = getAdminScope(req);
+    if (adminScope && extReq.vendor_state && !adminScope.includes(extReq.vendor_state)) {
+      return res.status(403).json({ success: false, error: 'This vendor is outside your zone' });
+    }
+
+    const resolvedAt = new Date().toISOString();
+    const adminEmail = req.actor?.email || req.employee?.email || null;
+
+    if (decision === 'APPROVE') {
+      // Extend vendor's active subscription end_date
+      const { data: sub, error: subErr } = await supabase
+        .from('vendor_plan_subscriptions')
+        .select('id, end_date')
+        .eq('vendor_id', extReq.vendor_id)
+        .eq('status', 'ACTIVE')
+        .order('end_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (subErr) throw subErr;
+      if (!sub) {
+        return res.status(404).json({ success: false, error: 'No active subscription found for this vendor' });
+      }
+
+      const currentEnd = sub.end_date ? new Date(sub.end_date) : new Date();
+      currentEnd.setDate(currentEnd.getDate() + extension_granted_days);
+      const newEndDate = currentEnd.toISOString();
+
+      const { error: subUpdateErr } = await supabase
+        .from('vendor_plan_subscriptions')
+        .update({ end_date: newEndDate })
+        .eq('id', sub.id);
+
+      if (subUpdateErr) throw subUpdateErr;
+
+      // Mark request resolved
+      await supabase
+        .from('subscription_extension_requests')
+        .update({
+          status: 'RESOLVED',
+          current_level: 'ADMIN',
+          admin_note: admin_note || null,
+          resolved_by: adminEmail,
+          resolved_at: resolvedAt,
+          extension_granted_days,
+        })
+        .eq('id', id);
+
+      await writeAuditLog({
+        req,
+        actor: req.actor,
+        action: 'SUB_EXT_APPROVED',
+        entityType: 'subscription_extension_request',
+        entityId: id,
+        details: { vendor_id: extReq.vendor_id, extension_granted_days, new_end_date: newEndDate },
+      });
+
+      return res.json({ success: true, message: `Subscription extended by ${extension_granted_days} days`, new_end_date: newEndDate });
+    } else {
+      // REJECT
+      await supabase
+        .from('subscription_extension_requests')
+        .update({
+          status: 'REJECTED',
+          current_level: 'ADMIN',
+          admin_note,
+          resolved_by: adminEmail,
+          resolved_at: resolvedAt,
+        })
+        .eq('id', id);
+
+      await writeAuditLog({
+        req,
+        actor: req.actor,
+        action: 'SUB_EXT_REJECTED',
+        entityType: 'subscription_extension_request',
+        entityId: id,
+        details: { vendor_id: extReq.vendor_id, admin_note },
+      });
+
+      return res.json({ success: true, message: 'Extension request rejected' });
+    }
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to resolve extension request' });
   }
 });
 

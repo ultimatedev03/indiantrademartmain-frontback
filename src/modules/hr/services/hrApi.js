@@ -52,12 +52,19 @@ export const hrApi = {
   getStats: async () => {
     const employees = await hrApi.getEmployees();
     const totalEmployees = employees.length;
-    const active = employees.filter((employee) => String(employee?.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length;
+    const onLeave = employees.filter((emp) =>
+      String(emp?.status || '').toUpperCase().includes('LEAVE')
+    ).length;
+    const inactive = employees.filter((emp) => {
+      const s = String(emp?.status || 'ACTIVE').toUpperCase();
+      return s === 'INACTIVE' || s === 'SUSPENDED' || s === 'TERMINATED';
+    }).length;
+    const active = Math.max(totalEmployees - onLeave - inactive, 0);
 
     return {
       totalEmployees,
       active,
-      onLeave: 0,
+      onLeave,
     };
   },
 };

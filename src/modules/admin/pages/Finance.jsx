@@ -119,6 +119,10 @@ const AdminFinance = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [couponStatusNow, setCouponStatusNow] = useState(() => Date.now());
+  const [pendingCoupons, setPendingCoupons] = useState([]);
+  const [decisionLoading, setDecisionLoading] = useState({});
+  const [rejectModal, setRejectModal] = useState(null); // { id, code }
+  const [rejectReason, setRejectReason] = useState('');
   const [form, setForm] = useState({
     code: '',
     discount_type: 'PERCENT',
@@ -201,11 +205,39 @@ const AdminFinance = () => {
       if (cashJson.success) {
         setCashouts(cashJson.data || []);
       }
+
+      // Load pending coupon approvals
+      const pendingRes = await fetchWithCsrf('/api/admin/coupons/pending');
+      const pendingJson = await pendingRes.json();
+      if (pendingJson.success) setPendingCoupons(pendingJson.data || []);
     } catch (e) {
       toast({ title: 'Error', description: 'Failed to load finance data', variant: 'destructive' });
     } finally {
       if (initial) setLoading(false);
       else setRefreshing(false);
+    }
+  };
+
+  const decideCoupon = async (id, decision, reason = '') => {
+    setDecisionLoading((prev) => ({ ...prev, [id]: true }));
+    try {
+      const res = await fetchWithCsrf(`/api/admin/coupons/${id}/decision`, {
+        method: 'POST',
+        body: JSON.stringify({ decision, reason }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Failed');
+      toast({
+        title: decision === 'APPROVE' ? 'Coupon Approved' : 'Coupon Rejected',
+        description: json.message,
+      });
+      setRejectModal(null);
+      setRejectReason('');
+      fetchData(cashoutStatus, false);
+    } catch (e) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setDecisionLoading((prev) => ({ ...prev, [id]: false }));
     }
   };
 
@@ -569,6 +601,99 @@ const AdminFinance = () => {
         </CardContent>
       </Card>
 
+      {/* ── PENDING COUPON APPROVALS ─────────────────────────── */}
+      {pendingCoupons.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-amber-800">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-600 text-white text-xs font-bold">
+                {pendingCoupons.length}
+              </span>
+              Coupon Approvals Pending
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Code</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Value</TableHead>
+                  <TableHead>Max Uses</TableHead>
+                  <TableHead>Expires</TableHead>
+                  <TableHead>Submitted</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingCoupons.map((c) => (
+                  <TableRow key={c.id} className="bg-white">
+                    <TableCell className="font-mono font-semibold">{c.code}</TableCell>
+                    <TableCell>{c.discount_type}</TableCell>
+                    <TableCell>
+                      {c.discount_type === 'PERCENT' ? `${c.value}%` : `₹${c.value}`}
+                    </TableCell>
+                    <TableCell>{c.max_uses || '∞'}</TableCell>
+                    <TableCell>{c.expires_at ? fmtDateTime(c.expires_at) : '—'}</TableCell>
+                    <TableCell className="text-xs text-neutral-500">{fmtDateTime(c.created_at)}</TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          className="bg-green-600 hover:bg-green-700 h-8"
+                          disabled={decisionLoading[c.id]}
+                          onClick={() => decideCoupon(c.id, 'APPROVE')}
+                        >
+                          {decisionLoading[c.id] ? '...' : 'Approve'}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-8"
+                          disabled={decisionLoading[c.id]}
+                          onClick={() => { setRejectModal({ id: c.id, code: c.code }); setRejectReason(''); }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Reject reason modal */}
+      {rejectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4">
+            <h3 className="font-semibold text-lg">Reject Coupon: {rejectModal.code}</h3>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Reason (required)</label>
+              <textarea
+                className="w-full border rounded-md px-3 py-2 text-sm resize-none"
+                rows={3}
+                placeholder="Explain why this coupon is rejected..."
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRejectModal(null)}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={!rejectReason.trim() || decisionLoading[rejectModal.id]}
+                onClick={() => decideCoupon(rejectModal.id, 'REJECT', rejectReason)}
+              >
+                {decisionLoading[rejectModal.id] ? 'Rejecting...' : 'Confirm Reject'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Create Coupon</CardTitle>
@@ -672,9 +797,15 @@ const AdminFinance = () => {
                     </TableCell>
                     <TableCell>{c.used_count || 0}/{c.max_uses || '∞'}</TableCell>
                     <TableCell>
-                      <Badge variant={statusMeta.variant}>
-                        {statusMeta.label}
-                      </Badge>
+                      {String(c.approval_status || 'APPROVED').toUpperCase() === 'PENDING_APPROVAL' ? (
+                        <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-300">
+                          Pending Approval
+                        </Badge>
+                      ) : String(c.approval_status || '').toUpperCase() === 'REJECTED' ? (
+                        <Badge variant="destructive">Rejected</Badge>
+                      ) : (
+                        <Badge variant={statusMeta.variant}>{statusMeta.label}</Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Button size="sm" variant="destructive" onClick={() => deleteCoupon(c.id)}>

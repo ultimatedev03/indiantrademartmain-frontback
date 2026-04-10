@@ -49,6 +49,16 @@ import {
   History,
   Settings,
   Package,
+  BarChart3,
+  MapPin,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Activity,
+  Download,
 } from 'lucide-react';
 
 // SUPERADMIN (ITM Owner) can only create ADMIN employees.
@@ -74,6 +84,32 @@ const toNonNegativeNumber = (value, fallback = 0) => {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return n;
+};
+
+const exportPaymentsCsv = (payments) => {
+  const escape = (v) => {
+    const s = String(v ?? '').replace(/"/g, '""');
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+  };
+  const headers = ['Vendor', 'Email', 'Plan', 'Gross (INR)', 'Net (INR)', 'Coupon', 'Date', 'Transaction ID'];
+  const rows = payments.map((p) => [
+    escape(p.vendor?.company_name || p.vendor_id || ''),
+    escape(p.vendor?.email || ''),
+    escape(p.plan?.name || p.plan_id || ''),
+    escape(p.amount ?? 0),
+    escape(p.net_amount ?? p.amount ?? 0),
+    escape(p.coupon_code || ''),
+    escape(p.payment_date ? new Date(p.payment_date).toLocaleString() : ''),
+    escape(p.transaction_id || ''),
+  ]);
+  const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `payments_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 };
 
 const clampDiscountPercent = (value) => {
@@ -240,9 +276,10 @@ export default function SuperAdminDashboard() {
     email: '',
     password: '',
     phone: '',
-    role: 'DATA_ENTRY',
-    department: 'Operations',
+    role: 'ADMIN',
+    department: 'Administration',
     status: 'ACTIVE',
+    states_scope: '',   // comma-separated string, only shown when role=ADMIN
   });
 
   // Vendors
@@ -296,6 +333,17 @@ export default function SuperAdminDashboard() {
     actor_type: 'ALL',
     action_contains: '',
   });
+
+  // Monitoring
+  const [monitoringOverview, setMonitoringOverview] = useState(null);
+  const [monitoringActivity, setMonitoringActivity] = useState(null);
+  const [monitoringRevenue, setMonitoringRevenue] = useState([]);
+  const [monitoringLoading, setMonitoringLoading] = useState(false);
+  const [monitoringActivityDays, setMonitoringActivityDays] = useState(7);
+  const [statesScopeModalOpen, setStatesScopeModalOpen] = useState(false);
+  const [statesScopeTarget, setStatesScopeTarget] = useState(null);
+  const [statesScopeInput, setStatesScopeInput] = useState('');
+  const [statesScopeSaving, setStatesScopeSaving] = useState(false);
 
   // Settings
   const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
@@ -437,6 +485,45 @@ export default function SuperAdminDashboard() {
       toast({ title: 'Error', description: err?.message || 'Failed to load superadmins', variant: 'destructive' });
     } finally {
       setSuperadminsLoading(false);
+    }
+  };
+
+  const fetchMonitoring = async (days = monitoringActivityDays) => {
+    setMonitoringLoading(true);
+    try {
+      const [overviewRes, activityRes, revenueRes] = await Promise.all([
+        superAdminServerApi.monitoring.overview(),
+        superAdminServerApi.monitoring.adminActivity(days),
+        superAdminServerApi.monitoring.revenueByState(),
+      ]);
+      setMonitoringOverview(overviewRes?.data || null);
+      setMonitoringActivity(activityRes?.data || null);
+      setMonitoringRevenue(revenueRes?.data || []);
+    } catch (err) {
+      handleError(err, 'Failed to load monitoring data');
+    } finally {
+      setMonitoringLoading(false);
+    }
+  };
+
+  const saveStatesScope = async () => {
+    if (!statesScopeTarget) return;
+    setStatesScopeSaving(true);
+    try {
+      const states = statesScopeInput
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      await superAdminServerApi.monitoring.updateStatesScope(statesScopeTarget.id, states);
+      toast({ title: 'Saved', description: `States scope updated for ${statesScopeTarget.full_name}` });
+      setStatesScopeModalOpen(false);
+      setStatesScopeTarget(null);
+      setStatesScopeInput('');
+      await fetchMonitoring();
+    } catch (err) {
+      handleError(err, 'Failed to update states scope');
+    } finally {
+      setStatesScopeSaving(false);
     }
   };
 
@@ -956,9 +1043,10 @@ export default function SuperAdminDashboard() {
       email: '',
       password: '',
       phone: '',
-      role: 'DATA_ENTRY',
-      department: 'Operations',
+      role: 'ADMIN',
+      department: 'Administration',
       status: 'ACTIVE',
+      states_scope: '',
     });
   };
 
@@ -975,7 +1063,17 @@ export default function SuperAdminDashboard() {
 
     setEmployeeSaving(true);
     try {
-      await superAdminServerApi.employees.create(employeeForm);
+      const payload = { ...employeeForm };
+      // Convert states_scope CSV string → array (only relevant for ADMIN role)
+      if (payload.role === 'ADMIN') {
+        payload.states_scope = String(payload.states_scope || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else {
+        delete payload.states_scope;
+      }
+      await superAdminServerApi.employees.create(payload);
       toast({ title: 'Employee created', description: employeeForm.email });
       setEmployeeModalOpen(false);
       resetEmployeeForm();
@@ -1153,6 +1251,9 @@ export default function SuperAdminDashboard() {
             </TabsTrigger>
             <TabsTrigger value="finance" className="data-[state=active]:bg-neutral-700">
               <IndianRupee className="h-4 w-4 mr-2" /> Finance
+            </TabsTrigger>
+            <TabsTrigger value="monitoring" className="data-[state=active]:bg-neutral-700" onClick={() => { if (!monitoringOverview && !monitoringLoading) fetchMonitoring(); }}>
+              <BarChart3 className="h-4 w-4 mr-2" /> Monitoring
             </TabsTrigger>
             <TabsTrigger value="audit" className="data-[state=active]:bg-neutral-700">
               <History className="h-4 w-4 mr-2" /> Audit Logs
@@ -2039,7 +2140,16 @@ export default function SuperAdminDashboard() {
           </TabsContent>
 
           <TabsContent value="finance" className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => exportPaymentsCsv(financePayments)}
+                disabled={financePayments.length === 0}
+                className="border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
               <Button
                 variant="outline"
                 onClick={fetchFinance}
@@ -2129,6 +2239,352 @@ export default function SuperAdminDashboard() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ═══════════════════════════════════════════════════════
+              MONITORING TAB
+          ═══════════════════════════════════════════════════════ */}
+          <TabsContent value="monitoring" className="space-y-6">
+
+            {/* All-India Summary Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                {
+                  label: 'Total Revenue',
+                  icon: <IndianRupee className="h-5 w-5 text-green-400" />,
+                  value: monitoringOverview
+                    ? `₹ ${Number(monitoringOverview.allIndia.totalRevenue).toLocaleString('en-IN')}`
+                    : '—',
+                  sub: 'All India',
+                  color: 'text-green-400',
+                },
+                {
+                  label: 'Active Vendors',
+                  icon: <Building2 className="h-5 w-5 text-blue-400" />,
+                  value: monitoringOverview ? monitoringOverview.allIndia.totalVendors : '—',
+                  sub: 'All India',
+                  color: 'text-blue-400',
+                },
+                {
+                  label: 'KYC Pending',
+                  icon: <Clock className="h-5 w-5 text-yellow-400" />,
+                  value: monitoringOverview ? monitoringOverview.allIndia.kycPending : '—',
+                  sub: 'Awaiting review',
+                  color: monitoringOverview?.allIndia.kycPending > 20 ? 'text-red-400' : 'text-yellow-400',
+                },
+                {
+                  label: 'Open Complaints',
+                  icon: <AlertTriangle className="h-5 w-5 text-orange-400" />,
+                  value: monitoringOverview ? monitoringOverview.allIndia.openTickets : '—',
+                  sub: 'Unresolved tickets',
+                  color: monitoringOverview?.allIndia.openTickets > 50 ? 'text-red-400' : 'text-orange-400',
+                },
+              ].map((card) => (
+                <Card key={card.label} className="bg-neutral-900 border-neutral-800">
+                  <CardContent className="pt-5 pb-4">
+                    <div className="flex items-center gap-2 mb-1">{card.icon}<span className="text-neutral-400 text-xs">{card.label}</span></div>
+                    <div className={`text-2xl font-bold ${card.color}`}>{monitoringLoading ? '...' : card.value}</div>
+                    <div className="text-neutral-500 text-xs mt-1">{card.sub}</div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Admin Activity Monitor */}
+            <Card className="bg-neutral-900 border-neutral-800">
+              <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <Activity className="h-5 w-5 text-purple-400" /> Admin Activity Monitor
+                  </CardTitle>
+                  <CardDescription className="text-neutral-400">
+                    Kaun kya kar rha hai — per admin breakdown
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Select
+                    value={String(monitoringActivityDays)}
+                    onValueChange={(v) => {
+                      const d = Number(v);
+                      setMonitoringActivityDays(d);
+                      fetchMonitoring(d);
+                    }}
+                  >
+                    <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white w-32">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-neutral-800 border-neutral-700 text-white">
+                      <SelectItem value="7">Last 7 days</SelectItem>
+                      <SelectItem value="14">Last 14 days</SelectItem>
+                      <SelectItem value="30">Last 30 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-neutral-700 text-neutral-300"
+                    onClick={() => fetchMonitoring(monitoringActivityDays)}
+                    disabled={monitoringLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${monitoringLoading ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {monitoringLoading ? (
+                  <div className="text-neutral-400 text-sm py-8 text-center">Loading...</div>
+                ) : !monitoringActivity?.activity?.length ? (
+                  <div className="text-neutral-500 text-sm py-8 text-center">No ADMIN employees found.</div>
+                ) : (
+                  <div className="space-y-4">
+                    {(monitoringActivity?.activity || []).map((admin) => {
+                      const lastActive = admin.last_login ? new Date(admin.last_login) : null;
+                      const hoursSince = lastActive ? (Date.now() - lastActive.getTime()) / 3_600_000 : null;
+                      const inactive = hoursSince !== null && hoursSince > 48;
+                      const scope = Array.isArray(admin.states_scope) && admin.states_scope.length > 0
+                        ? admin.states_scope.join(', ')
+                        : <span className="text-yellow-500 text-xs">No states assigned</span>;
+
+                      return (
+                        <div
+                          key={admin.id}
+                          className={`rounded-lg border p-4 space-y-3 ${inactive ? 'border-red-800 bg-red-950/20' : 'border-neutral-800 bg-neutral-800/40'}`}
+                        >
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-semibold">{admin.full_name || admin.email}</span>
+                                {inactive && (
+                                  <Badge className="bg-red-900 text-red-300 text-xs">
+                                    <AlertTriangle className="h-3 w-3 mr-1" />
+                                    {Math.floor(hoursSince / 24)}d inactive
+                                  </Badge>
+                                )}
+                                {!inactive && lastActive && (
+                                  <Badge className="bg-green-900/40 text-green-400 text-xs">Active</Badge>
+                                )}
+                              </div>
+                              <div className="text-neutral-400 text-xs mt-0.5">
+                                {admin.email} &nbsp;·&nbsp; Last login: {lastActive ? lastActive.toLocaleString() : 'Never'}
+                              </div>
+                              <div className="text-neutral-500 text-xs mt-0.5 flex items-center gap-1">
+                                <MapPin className="h-3 w-3" />
+                                States: {scope}
+                                <button
+                                  className="ml-2 text-blue-400 hover:text-blue-300 underline text-xs"
+                                  onClick={() => {
+                                    setStatesScopeTarget(admin);
+                                    setStatesScopeInput(Array.isArray(admin.states_scope) ? admin.states_scope.join(', ') : '');
+                                    setStatesScopeModalOpen(true);
+                                  }}
+                                >
+                                  Edit
+                                </button>
+                              </div>
+                            </div>
+                            <Badge className="bg-neutral-700 text-neutral-200 text-xs">
+                              {admin.actionsTotal} actions in {monitoringActivityDays}d
+                            </Badge>
+                          </div>
+
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                            {[
+                              { label: 'KYC Approved', val: admin.kycApproved, good: true },
+                              { label: 'KYC Rejected', val: admin.kycRejected, neutral: true },
+                              { label: 'Vendors Terminated', val: admin.vendorsTerminated, warn: admin.vendorsTerminated > 5 },
+                              { label: 'Vendors Activated', val: admin.vendorsActivated, good: true },
+                              { label: 'Staff Created', val: admin.staffCreated, neutral: true },
+                              { label: 'Tickets Resolved', val: admin.ticketsResolved, good: true },
+                            ].map((stat) => (
+                              <div key={stat.label} className="bg-neutral-900 rounded p-2 text-center">
+                                <div className={`text-lg font-bold ${stat.good ? 'text-green-400' : stat.warn ? 'text-red-400' : 'text-neutral-300'}`}>
+                                  {stat.val}
+                                </div>
+                                <div className="text-neutral-500 text-xs leading-tight">{stat.label}</div>
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Region stats (if states assigned) */}
+                          {admin.revenue !== null && (
+                            <div className="flex flex-wrap gap-3 text-xs text-neutral-400 border-t border-neutral-700 pt-2">
+                              <span>💰 Revenue: <span className="text-green-400 font-medium">₹{Number(admin.revenue).toLocaleString('en-IN')}</span></span>
+                              <span>🏢 Vendors: <span className="text-blue-400 font-medium">{admin.vendors}</span></span>
+                              <span>📋 KYC Pending: <span className={admin.kycPending > 10 ? 'text-red-400 font-medium' : 'text-yellow-400 font-medium'}>{admin.kycPending}</span></span>
+                              <span>🎧 Open Tickets: <span className={admin.openTickets > 30 ? 'text-red-400 font-medium' : 'text-orange-400 font-medium'}>{admin.openTickets}</span></span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Region Summary Table */}
+            {monitoringOverview?.byRegion?.length > 0 && (
+              <Card className="bg-neutral-900 border-neutral-800">
+                <CardHeader>
+                  <CardTitle className="text-white flex items-center gap-2">
+                    <MapPin className="h-5 w-5 text-blue-400" /> Region-wise Summary
+                  </CardTitle>
+                  <CardDescription className="text-neutral-400">Revenue, vendors, complaints, KYC by region</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-neutral-800 hover:bg-transparent">
+                          <TableHead className="text-neutral-400">Region</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Revenue</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Vendors</TableHead>
+                          <TableHead className="text-neutral-400 text-right">KYC Pending</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Open Tickets</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(monitoringOverview.byRegion || []).map((r) => (
+                          <TableRow key={r.region} className="border-neutral-800 hover:bg-neutral-800/40">
+                            <TableCell className="text-white font-medium">
+                              {r.region}
+                              <div className="text-neutral-500 text-xs">{(r.states || []).slice(0, 5).join(', ')}{r.states?.length > 5 ? '…' : ''}</div>
+                            </TableCell>
+                            <TableCell className="text-green-400 font-semibold text-right">
+                              ₹{Number(r.revenue).toLocaleString('en-IN')}
+                            </TableCell>
+                            <TableCell className="text-blue-400 text-right">{r.vendors}</TableCell>
+                            <TableCell className="text-right">
+                              <span className={r.kycPending > 20 ? 'text-red-400 font-semibold' : r.kycPending > 10 ? 'text-yellow-400' : 'text-neutral-300'}>
+                                {r.kycPending}
+                              </span>
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <span className={r.openTickets > 50 ? 'text-red-400 font-semibold' : r.openTickets > 20 ? 'text-orange-400' : 'text-neutral-300'}>
+                                {r.openTickets}
+                              </span>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Revenue by State Table */}
+            <Card className="bg-neutral-900 border-neutral-800">
+              <CardHeader>
+                <CardTitle className="text-white flex items-center gap-2">
+                  <IndianRupee className="h-5 w-5 text-green-400" /> Revenue by State
+                </CardTitle>
+                <CardDescription className="text-neutral-400">This month vs last month, state-wise breakdown</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {monitoringLoading ? (
+                  <div className="text-neutral-400 text-sm py-6 text-center">Loading...</div>
+                ) : !monitoringRevenue.length ? (
+                  <div className="text-neutral-500 text-sm py-6 text-center">No payment data available.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-neutral-800 hover:bg-transparent">
+                          <TableHead className="text-neutral-400">State</TableHead>
+                          <TableHead className="text-neutral-400">Region</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Total Revenue</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Payments</TableHead>
+                          <TableHead className="text-neutral-400 text-right">This Month</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Last Month</TableHead>
+                          <TableHead className="text-neutral-400 text-right">Trend</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {monitoringRevenue.slice(0, 30).map((s) => (
+                          <TableRow key={s.state} className="border-neutral-800 hover:bg-neutral-800/40">
+                            <TableCell className="text-white font-medium">{s.state}</TableCell>
+                            <TableCell>
+                              <Badge className="bg-neutral-700 text-neutral-300 text-xs">{s.region}</Badge>
+                            </TableCell>
+                            <TableCell className="text-green-400 font-semibold text-right">
+                              ₹{Number(s.totalRevenue).toLocaleString('en-IN')}
+                            </TableCell>
+                            <TableCell className="text-neutral-300 text-right">{s.paymentCount}</TableCell>
+                            <TableCell className="text-blue-300 text-right">
+                              ₹{Number(s.thisMonth).toLocaleString('en-IN')}
+                            </TableCell>
+                            <TableCell className="text-neutral-400 text-right">
+                              ₹{Number(s.lastMonth).toLocaleString('en-IN')}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {s.trend === null ? (
+                                <span className="text-neutral-600 text-xs">—</span>
+                              ) : s.trend > 0 ? (
+                                <span className="text-green-400 flex items-center justify-end gap-1 text-xs">
+                                  <TrendingUp className="h-3 w-3" /> +{s.trend.toFixed(1)}%
+                                </span>
+                              ) : s.trend < 0 ? (
+                                <span className="text-red-400 flex items-center justify-end gap-1 text-xs">
+                                  <TrendingDown className="h-3 w-3" /> {s.trend.toFixed(1)}%
+                                </span>
+                              ) : (
+                                <span className="text-neutral-500 flex items-center justify-end gap-1 text-xs">
+                                  <Minus className="h-3 w-3" /> 0%
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* States Scope Edit Modal */}
+            <Dialog open={statesScopeModalOpen} onOpenChange={(o) => { if (!o) { setStatesScopeModalOpen(false); setStatesScopeTarget(null); } }}>
+              <DialogContent className="bg-neutral-900 border-neutral-700 text-white max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>Edit States Scope</DialogTitle>
+                  <DialogDescription className="text-neutral-400">
+                    {statesScopeTarget?.full_name} — comma-separated state names.
+                    <br />
+                    Example: <span className="text-neutral-300">Maharashtra, Gujarat, Rajasthan</span>
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div>
+                    <Label className="text-neutral-300 text-sm">States (comma-separated)</Label>
+                    <Input
+                      className="mt-1 bg-neutral-800 border-neutral-700 text-white placeholder:text-neutral-500"
+                      placeholder="e.g. Maharashtra, Gujarat, Rajasthan"
+                      value={statesScopeInput}
+                      onChange={(e) => setStatesScopeInput(e.target.value)}
+                    />
+                    <p className="text-neutral-500 text-xs mt-1">
+                      Current: {Array.isArray(statesScopeTarget?.states_scope) && statesScopeTarget.states_scope.length > 0
+                        ? statesScopeTarget.states_scope.join(', ')
+                        : 'None assigned'}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" className="border-neutral-700 text-neutral-300" onClick={() => setStatesScopeModalOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      className="bg-blue-700 hover:bg-blue-600 text-white"
+                      onClick={saveStatesScope}
+                      disabled={statesScopeSaving}
+                    >
+                      {statesScopeSaving ? 'Saving…' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
           </TabsContent>
 
           <TabsContent value="audit" className="space-y-4">
@@ -2584,7 +3040,12 @@ export default function SuperAdminDashboard() {
                 <Select
                   value={employeeForm.role}
                   onValueChange={(value) =>
-                    setEmployeeForm((prev) => ({ ...prev, role: value }))
+                    setEmployeeForm((prev) => ({
+                      ...prev,
+                      role: value,
+                      department: value === 'ADMIN' ? 'Administration' : prev.department,
+                      states_scope: value === 'ADMIN' ? prev.states_scope : '',
+                    }))
                   }
                 >
                   <SelectTrigger className="bg-neutral-800 border-neutral-700 text-white">
@@ -2610,6 +3071,28 @@ export default function SuperAdminDashboard() {
                 />
               </div>
             </div>
+
+            {/* States Scope — only for ADMIN role */}
+            {employeeForm.role === 'ADMIN' && (
+              <div className="space-y-2">
+                <Label className="text-neutral-300 flex items-center gap-1">
+                  <MapPin className="h-3.5 w-3.5 text-blue-400" />
+                  States Scope
+                  <span className="text-neutral-500 text-xs ml-1">(comma-separated)</span>
+                </Label>
+                <Input
+                  value={employeeForm.states_scope}
+                  onChange={(e) =>
+                    setEmployeeForm((prev) => ({ ...prev, states_scope: e.target.value }))
+                  }
+                  placeholder="e.g. Maharashtra, Gujarat, Rajasthan"
+                  className="bg-neutral-800 border-neutral-700 text-white placeholder:text-neutral-500"
+                />
+                <p className="text-neutral-500 text-xs">
+                  Which states this Admin will manage. Leave blank = All India access.
+                </p>
+              </div>
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <Button

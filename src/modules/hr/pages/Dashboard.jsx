@@ -72,6 +72,7 @@ const Dashboard = () => {
       setStats({
         totalEmployees: total,
         active: summary?.active ?? active,
+        // summary.onLeave is now always computed (never hardcoded 0), use it directly
         onLeave: summary?.onLeave ?? onLeave,
         newHires,
       });

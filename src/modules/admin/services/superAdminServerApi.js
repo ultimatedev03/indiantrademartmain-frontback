@@ -139,6 +139,17 @@ export const superAdminServerApi = {
     },
   },
 
+  monitoring: {
+    overview: () => request('/monitoring/overview'),
+    adminActivity: (days = 7) => request(`/monitoring/admin-activity?days=${encodeURIComponent(days)}`),
+    revenueByState: () => request('/monitoring/revenue-by-state'),
+    updateStatesScope: (employeeId, states_scope) =>
+      request(`/employees/${employeeId}/states-scope`, {
+        method: 'PUT',
+        body: JSON.stringify({ states_scope }),
+      }),
+  },
+
   // GOD MODE only — manage SUPERADMIN accounts
   godmode: {
     listSuperadmins: () => request('/godmode/superadmins'),

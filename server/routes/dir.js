@@ -1,4 +1,5 @@
 // ✅ File: server/routes/dir.js
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 
@@ -248,7 +249,7 @@ async function handleRankedProducts(req, res) {
       return res.json({ success: true, data: rows, count: totalCount });
     } catch (rpcErr) {
       // Continue to legacy logic below.
-      console.warn('[dir] dir_ranked_products RPC failed, using legacy ranking:', rpcErr?.message);
+      logger.warn('[dir] dir_ranked_products RPC failed, using legacy ranking:', rpcErr?.message);
     }
 
     const { planNameByVendor, tierKeyByVendor } = await getActivePlanMaps();

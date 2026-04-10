@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
@@ -557,7 +558,7 @@ let hasWarnedMissingChatBlocks = false;
 const warnMissingChatBlocksOnce = () => {
   if (hasWarnedMissingChatBlocks) return;
   hasWarnedMissingChatBlocks = true;
-  console.warn('chat_blocks relation missing while reading block status (run migration: 20260224_chat_blocks_safe.sql)');
+  logger.warn('chat_blocks relation missing while reading block status (run migration: 20260224_chat_blocks_safe.sql)');
 };
 
 const isMissingChatBlocksRelation = (error) => {
@@ -1258,7 +1259,7 @@ router.post('/:proposalId/messages', requireAuth(), async (req, res) => {
         }
       }
     } catch (notificationError) {
-      console.warn('Proposal message notification failed:', notificationError);
+      logger.warn('Proposal message notification failed:', notificationError);
     }
 
     return res.status(201).json({
@@ -1461,7 +1462,7 @@ async function sendQuotationEmail(to, data, isRegistered) {
     }
   } catch (e) {
     // Attachment errors should not break the full flow; send without attachment.
-    console.warn('Attachment skipped:', e?.message || e);
+    logger.warn('Attachment skipped:', e?.message || e);
     attachments = [];
   }
 
@@ -1586,7 +1587,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
       .order('created_at', { ascending: false })
       .limit(5);
 
-    if (buyerErr) console.warn('Buyer lookup warning:', buyerErr);
+    if (buyerErr) logger.warn('Buyer lookup warning:', buyerErr);
 
     const buyerMatches = Array.isArray(buyerRows) ? buyerRows : [];
     const buyerCheck = buyerMatches.find((row) => row?.user_id) || buyerMatches[0] || null;
@@ -1603,7 +1604,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
 
       const userErrMessage = String(userErr?.message || '').toLowerCase();
       if (userErr && !userErrMessage.includes('multiple')) {
-        console.warn('Public user lookup warning:', userErr);
+        logger.warn('Public user lookup warning:', userErr);
       }
       buyerUserId = userRow?.id || null;
     }
@@ -1700,7 +1701,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
     }
 
     if (!savedQuotation) {
-      console.error('Database INSERT error:', lastError);
+      logger.error('Database INSERT error:', lastError);
       return res.status(500).json({
         error: lastError?.message || 'Failed to save quotation',
         details: lastError,
@@ -1748,7 +1749,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
         },
       ]);
     } catch (emailError) {
-      console.error('Email sending error (non-blocking):', emailError);
+      logger.error('Email sending error (non-blocking):', emailError);
       try {
         await supabase.from('quotation_emails').insert([
           {
@@ -1794,7 +1795,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
           });
         }
       } catch (notifError) {
-        console.warn('Notification creation failed:', notifError);
+        logger.warn('Notification creation failed:', notifError);
       }
     } else {
       // Track unregistered buyer
@@ -1808,7 +1809,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
           },
         ]);
       } catch (trackError) {
-        console.warn('Unregistered tracking failed:', trackError);
+        logger.warn('Unregistered tracking failed:', trackError);
       }
     }
 
@@ -1849,7 +1850,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
         });
       }
     } catch (vendorNotifError) {
-      console.warn('Vendor quotation notification failed:', vendorNotifError);
+      logger.warn('Vendor quotation notification failed:', vendorNotifError);
     }
 
     return res.status(200).json({
@@ -1861,7 +1862,7 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
       buyer_registered: isRegistered,
     });
   } catch (e) {
-    console.error('Quotation route error:', e);
+    logger.error('Quotation route error:', e);
     return res.status(500).json({ error: e.message || 'Server error' });
   }
 });

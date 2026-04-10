@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
@@ -182,7 +183,7 @@ async function sendOtpEmail(email, otp) {
         code: error?.code,
         responseCode,
       });
-      console.error(`[OTP] ${mailer.provider} send failed`, {
+      logger.error(`[OTP] ${mailer.provider} send failed`, {
         code: error?.code,
         responseCode: error?.responseCode,
       });
@@ -202,11 +203,11 @@ const deliverOtpEmail = async (email, otp) => {
   } catch (error) {
     if (!OTP_DEV_FALLBACK_ENABLED) throw error;
 
-    console.warn('[OTP] Email delivery failed. Using local dev fallback.', {
+    logger.warn('[OTP] Email delivery failed. Using local dev fallback.', {
       email,
       reason: error?.message || 'Unknown email delivery error',
     });
-    console.info(`[OTP][DEV_FALLBACK] ${email} -> ${otp}`);
+    logger.log(`[OTP][DEV_FALLBACK] ${email} -> ${otp}`);
 
     return {
       delivered: false,
@@ -264,7 +265,7 @@ const upsertOtpForEmail = async (email) => {
     ]);
 
   if (dbError) {
-    console.error('[OTP] Upsert failed:', dbError);
+    logger.error('[OTP] Upsert failed:', dbError);
     throw new Error('Failed to generate OTP');
   }
 
@@ -295,7 +296,7 @@ router.post('/request', async (req, res) => {
         : 'OTP sent successfully to your email',
     }));
   } catch (error) {
-    console.error('OTP request error:', error);
+    logger.error('OTP request error:', error);
     return res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to send OTP' });
   }
 });
@@ -322,7 +323,7 @@ router.post('/verify', async (req, res) => {
       .maybeSingle();
 
     if (error) {
-      console.error('Database error:', error);
+      logger.error('Database error:', error);
       return res.status(500).json({ error: 'Verification failed' });
     }
     if (!data) {
@@ -340,7 +341,7 @@ router.post('/verify', async (req, res) => {
       email,
     });
   } catch (error) {
-    console.error('OTP verification error:', error);
+    logger.error('OTP verification error:', error);
     return res.status(500).json({ error: error.message || 'Verification failed' });
   }
 });
@@ -369,7 +370,7 @@ router.post('/resend', async (req, res) => {
         : 'New OTP sent to your email',
     }));
   } catch (error) {
-    console.error('Resend OTP error:', error);
+    logger.error('Resend OTP error:', error);
     return res.status(error?.statusCode || 500).json({ error: error.message || 'Failed to resend OTP' });
   }
 });
