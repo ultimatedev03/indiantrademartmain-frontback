@@ -17,9 +17,9 @@ export const SuperAdminProvider = ({ children }) => {
     if (!role) return undefined;
     const r = String(role).trim().toUpperCase();
     const compact = r.replace(/[^A-Z]/g, '');
-    // GOD MODE stays GOD MODE (developer), SUPERADMIN stays SUPERADMIN (ITM owner)
-    if (compact === 'GODMODE') return 'GODMODE';
-    if (compact === 'SUPERADMIN' || compact === 'SUPERUSER') return 'SUPERADMIN';
+    // Preserve legacy developer aliases as GODMODE.
+    if (compact === 'GODMODE' || compact === 'SUPERUSER' || compact === 'DEVELOPER') return 'GODMODE';
+    if (compact === 'SUPERADMIN') return 'SUPERADMIN';
     return r;
   };
 

@@ -23,7 +23,11 @@ const nowIso = () => new Date().toISOString();
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 const normalizeRole = (v) => {
   const r = String(v || '').trim().toUpperCase();
-  return r === 'DATAENTRY' ? 'DATA_ENTRY' : r;
+  const compact = r.replace(/[^A-Z]/g, '');
+  if (compact === 'DATAENTRY') return 'DATA_ENTRY';
+  if (compact === 'GODMODE' || compact === 'SUPERUSER' || compact === 'DEVELOPER') return 'GODMODE';
+  if (compact === 'SUPERADMIN') return 'SUPERADMIN';
+  return r;
 };
 const clampLimit = (limit, fallback = 200, max = 1000) => {
   const n = Number(limit);

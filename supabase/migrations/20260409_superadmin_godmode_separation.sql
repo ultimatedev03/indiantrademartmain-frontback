@@ -15,10 +15,28 @@ alter table public.superadmin_users
   add constraint superadmin_users_role_check
   check (role in ('GODMODE', 'SUPERADMIN'));
 
--- Normalize any existing rows: anything that was SUPERUSER/GODMODE stays GODMODE, rest → SUPERADMIN
+-- Normalize any existing rows:
+-- 1. Legacy developer aliases stay GODMODE.
+-- 2. If the old system only had one root account, preserve it as GODMODE.
+-- 3. Everyone else becomes SUPERADMIN.
 update public.superadmin_users
   set role = 'GODMODE'
-  where upper(replace(role, '_', '')) in ('GODMODE', 'SUPERUSER');
+  where regexp_replace(upper(coalesce(role, '')), '[^A-Z]', '', 'g') in ('GODMODE', 'SUPERUSER', 'DEVELOPER');
+
+update public.superadmin_users
+  set role = 'GODMODE'
+  where id in (
+    select id
+    from public.superadmin_users
+    order by created_at nulls first, id
+    limit 1
+  )
+    and not exists (
+      select 1
+      from public.superadmin_users
+      where role = 'GODMODE'
+    )
+    and (select count(*) from public.superadmin_users) = 1;
 
 update public.superadmin_users
   set role = 'SUPERADMIN'

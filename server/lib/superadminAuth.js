@@ -67,10 +67,12 @@ async function maybeUpgradePasswordHash(superadmin, password) {
   }
 }
 
-// Normalize role: GODMODE stays GODMODE, everything else is SUPERADMIN
+const GODMODE_ROLE_ALIASES = new Set(['GODMODE', 'SUPERUSER', 'DEVELOPER']);
+
+// Preserve legacy developer labels as GODMODE; everything else falls back to SUPERADMIN.
 function normalizeSuperAdminRole(role) {
   const r = String(role || '').trim().toUpperCase().replace(/[^A-Z]/g, '');
-  if (r === 'GODMODE') return 'GODMODE';
+  if (GODMODE_ROLE_ALIASES.has(r)) return 'GODMODE';
   return 'SUPERADMIN';
 }
 
@@ -134,7 +136,7 @@ export async function loginSuperAdmin(req, res) {
     const actor = {
       id: superadmin.id,
       type: 'SUPERADMIN',
-      role: (superadmin.role || 'SUPERADMIN').toUpperCase(),
+      role: normalizeSuperAdminRole(superadmin.role),
       email: superadmin.email,
     };
 

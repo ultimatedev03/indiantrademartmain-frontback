@@ -320,8 +320,10 @@ const AppRoutes = () => {
 
       {/* GLOBAL SUPER ADMIN ACCESS */}
       <Route path="/admin/register/superadmin" element={<SuperAdminLogin />} />
+      <Route path="/superadmin/login" element={<SuperAdminLogin />} />
       <Route element={<SuperAdminProtectedRoute />}>
         <Route path="/admin/register/superadmin/dashboard" element={<SuperAdminDashboard />} />
+        <Route path="/superadmin/dashboard" element={<SuperAdminDashboard />} />
       </Route>
 
       {/* MIGRATION TOOLS */}

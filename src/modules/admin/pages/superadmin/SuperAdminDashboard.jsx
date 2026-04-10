@@ -488,6 +488,12 @@ export default function SuperAdminDashboard() {
     }
   };
 
+  const openSuperadminModal = () => {
+    if (!isGodMode) return;
+    setSuperadminForm({ email: '', password: '', full_name: '' });
+    setSuperadminModalOpen(true);
+  };
+
   const fetchMonitoring = async (days = monitoringActivityDays) => {
     setMonitoringLoading(true);
     try {
@@ -1558,6 +1564,14 @@ export default function SuperAdminDashboard() {
                   >
                     <RefreshCw className={`h-4 w-4 ${employeesLoading ? 'animate-spin' : ''}`} />
                   </Button>
+                  {isGodMode && (
+                    <Button
+                      onClick={openSuperadminModal}
+                      className="bg-red-900 hover:bg-red-800"
+                    >
+                      <ShieldAlert className="h-4 w-4 mr-2" /> Create SuperAdmin
+                    </Button>
+                  )}
                   <Button
                     onClick={() => setEmployeeModalOpen(true)}
                     className="bg-blue-600 hover:bg-blue-700"
@@ -2822,7 +2836,7 @@ export default function SuperAdminDashboard() {
                   <Button
                     variant="outline"
                     className="border-red-800 text-red-400 hover:bg-red-950"
-                    onClick={() => setSuperadminModalOpen(true)}
+                    onClick={openSuperadminModal}
                   >
                     <Plus className="h-4 w-4 mr-2" /> Add SuperAdmin
                   </Button>
@@ -3337,4 +3351,3 @@ export default function SuperAdminDashboard() {
     </div>
   );
 }
-

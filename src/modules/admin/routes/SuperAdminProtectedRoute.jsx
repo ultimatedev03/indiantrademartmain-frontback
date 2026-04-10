@@ -16,7 +16,7 @@ const SuperAdminProtectedRoute = () => {
   const isSuperAdminRole = (role) => {
     const r = normalizeRole(role);
     // Both GODMODE (developer) and SUPERADMIN (ITM owner) can access this portal
-    return r === 'GODMODE' || r === 'SUPERADMIN' || r === 'SUPERUSER';
+    return r === 'GODMODE' || r === 'SUPERADMIN' || r === 'SUPERUSER' || r === 'DEVELOPER';
   };
 
   // ✅ Use consistent login route (works on localhost + admin subdomain)
