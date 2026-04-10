@@ -4,6 +4,17 @@ import { toast } from '@/components/ui/use-toast';
 import { Loader2, RefreshCw, CheckCircle, XCircle } from 'lucide-react';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
+const isLocalHost = () => {
+  const h = window.location.hostname;
+  return h === 'localhost' || h === '127.0.0.1';
+};
+
+const getAdminBase = () => {
+  const override = import.meta.env.VITE_ADMIN_API_BASE;
+  if (override && String(override).trim()) return String(override).trim();
+  return isLocalHost() ? '/api/admin' : '/.netlify/functions/admin';
+};
+
 const fmt = (d) => {
   if (!d) return '—';
   return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -17,6 +28,7 @@ const statusBadge = (status) => {
 };
 
 export default function SubscriptionRequests() {
+  const ADMIN_API_BASE = getAdminBase();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [resolveModal, setResolveModal] = useState(null); // { id, vendor_name, extension_days }
@@ -28,7 +40,7 @@ export default function SubscriptionRequests() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetchWithCsrf('/api/admin/subscription-requests/pending');
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/subscription-requests/pending`);
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Failed to load');
       setRequests(json.requests || []);
@@ -48,7 +60,7 @@ export default function SubscriptionRequests() {
     }
     setResolving(true);
     try {
-      const res = await fetchWithCsrf(`/api/admin/subscription-requests/${resolveModal.id}/resolve`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/subscription-requests/${resolveModal.id}/resolve`, {
         method: 'POST',
         body: JSON.stringify({
           decision: 'APPROVE',
@@ -75,7 +87,7 @@ export default function SubscriptionRequests() {
     }
     setResolving(true);
     try {
-      const res = await fetchWithCsrf(`/api/admin/subscription-requests/${rejectModal.id}/resolve`, {
+      const res = await fetchWithCsrf(`${ADMIN_API_BASE}/subscription-requests/${rejectModal.id}/resolve`, {
         method: 'POST',
         body: JSON.stringify({ decision: 'REJECT', admin_note: rejectNote.trim() }),
       });

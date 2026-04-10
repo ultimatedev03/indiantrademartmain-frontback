@@ -32,12 +32,20 @@ const json = (statusCode, body) => ({
 const ok = (b) => json(200, b);
 const bad = (msg, details) => json(400, { success: false, error: msg, details });
 const fail = (msg, details) => json(500, { success: false, error: msg, details });
+const normalizeRole = (value = "") => String(value || "").trim().toUpperCase();
+const ADMIN_ALLOWED_ROLES = new Set(["ADMIN", "SUPERADMIN"]);
 
 function parseTail(eventPath) {
   const parts = String(eventPath || "").split("/").filter(Boolean);
   const fnIndex = parts.indexOf("admin");
   if (fnIndex >= 0) return parts.slice(fnIndex + 1);
   return parts;
+}
+
+function parseBearerToken(headers = {}) {
+  const header = headers.Authorization || headers.authorization;
+  if (!header || typeof header !== "string" || !header.startsWith("Bearer ")) return null;
+  return header.replace("Bearer ", "").trim();
 }
 
 async function readBody(event) {
@@ -544,6 +552,63 @@ async function ensureEmployeeAuthUser(employee, password) {
   return authUser;
 }
 
+async function resolveAuthenticatedAdmin(event) {
+  const accessToken = parseBearerToken(event?.headers || {});
+  if (!accessToken) return null;
+
+  const { data, error } = await supabase.auth.getUser(accessToken);
+  if (error || !data?.user) return null;
+
+  const authUser = {
+    id: String(data.user.id || "").trim(),
+    email: normalizeEmail(data.user.email || ""),
+    role: normalizeRole(
+      data.user?.app_metadata?.role ||
+      data.user?.user_metadata?.role ||
+      data.user?.role ||
+      ""
+    ),
+  };
+
+  let employee = null;
+
+  if (authUser.id) {
+    const { data: byUserId } = await supabase
+      .from("employees")
+      .select("*")
+      .eq("user_id", authUser.id)
+      .maybeSingle();
+    if (byUserId) employee = byUserId;
+  }
+
+  if (!employee && authUser.email) {
+    const { data: byEmail } = await supabase
+      .from("employees")
+      .select("*")
+      .ilike("email", authUser.email)
+      .maybeSingle();
+    if (byEmail) employee = byEmail;
+  }
+
+  if (employee?.id && authUser.id && employee.user_id !== authUser.id) {
+    await supabase.from("employees").update({ user_id: authUser.id }).eq("id", employee.id);
+    employee.user_id = authUser.id;
+  }
+
+  return {
+    authUser,
+    employee,
+  };
+}
+
+function getAdminScopeFromEmployee(employee) {
+  const raw = employee?.states_scope;
+  const states = Array.isArray(raw)
+    ? raw.map((state) => String(state || "").trim()).filter(Boolean)
+    : [];
+  return states.length ? states : null;
+}
+
 export async function handler(event) {
   try {
     if (event.httpMethod === "OPTIONS") return ok({ ok: true });
@@ -1024,12 +1089,35 @@ export async function handler(event) {
         const limit = Math.min(Number(event.queryStringParameters?.limit || 10), 50);
         const { data, error } = await supabase
           .from("lead_purchases")
-          .select("id, vendor_id, amount, payment_status, purchase_date, created_at, vendor:vendors(company_name)")
+          .select("id, vendor_id, amount, payment_status, purchase_date, purchase_datetime")
           .order("purchase_date", { ascending: false })
           .limit(limit);
 
         if (error) return fail("Failed to fetch lead purchases", error.message);
-        return ok({ success: true, orders: data || [] });
+
+        const vendorIds = [...new Set((data || []).map((row) => String(row?.vendor_id || "").trim()).filter(Boolean))];
+        let vendorNameById = new Map();
+
+        if (vendorIds.length > 0) {
+          const { data: vendors, error: vendorError } = await supabase
+            .from("vendors")
+            .select("id, company_name")
+            .in("id", vendorIds);
+
+          if (vendorError) return fail("Failed to fetch purchase vendors", vendorError.message);
+
+          vendorNameById = new Map((vendors || []).map((vendor) => [String(vendor.id), vendor.company_name || "Unknown Vendor"]));
+        }
+
+        const orders = (data || []).map((row) => ({
+          ...row,
+          vendor: {
+            company_name: vendorNameById.get(String(row?.vendor_id || "")) || "Unknown Vendor",
+          },
+          created_at: row?.purchase_datetime || row?.purchase_date || null,
+        }));
+
+        return ok({ success: true, orders });
       }
 
       if (event.httpMethod === "GET" && tail[1] === "data-entry-performance") {
@@ -1094,6 +1182,178 @@ export async function handler(event) {
         );
 
         return ok({ success: true, performance });
+      }
+    }
+
+    // -------------------------
+    // SUBSCRIPTION EXTENSION REQUESTS (ADMIN)
+    // GET /subscription-requests/pending
+    // POST /subscription-requests/:id/resolve
+    // -------------------------
+    if (tail[0] === "subscription-requests") {
+      if (event.httpMethod === "GET" && tail[1] === "pending") {
+        const adminContext = await resolveAuthenticatedAdmin(event);
+        const adminScope = getAdminScopeFromEmployee(adminContext?.employee);
+        const employeeRole = normalizeRole(adminContext?.employee?.role || adminContext?.authUser?.role || "");
+
+        if (adminContext?.employee && !ADMIN_ALLOWED_ROLES.has(employeeRole)) {
+          return json(403, { success: false, error: "Admin access required" });
+        }
+
+        let query = supabase
+          .from("subscription_extension_requests")
+          .select("*")
+          .eq("status", "FORWARDED")
+          .eq("current_level", "VP")
+          .order("created_at", { ascending: false });
+
+        if (adminScope) {
+          query = query.in("vendor_state", adminScope);
+        }
+
+        const { data, error } = await query;
+        if (error) return fail("Failed to list pending subscription requests", error.message);
+
+        return ok({ success: true, requests: data || [] });
+      }
+
+      if (event.httpMethod === "POST" && tail[1] && tail[2] === "resolve") {
+        const adminContext = await resolveAuthenticatedAdmin(event);
+        const adminScope = getAdminScopeFromEmployee(adminContext?.employee);
+        const employeeRole = normalizeRole(adminContext?.employee?.role || adminContext?.authUser?.role || "");
+
+        if (adminContext?.employee && !ADMIN_ALLOWED_ROLES.has(employeeRole)) {
+          return json(403, { success: false, error: "Admin access required" });
+        }
+
+        const requestId = String(tail[1] || "").trim();
+        const body = await readBody(event);
+        const decision = String(body?.decision || "").trim().toUpperCase();
+        const admin_note = String(body?.admin_note || "").trim();
+        const extension_granted_days = parseInt(body?.extension_granted_days, 10);
+
+        if (!["APPROVE", "REJECT"].includes(decision)) {
+          return bad("decision must be APPROVE or REJECT");
+        }
+        if (decision === "REJECT" && !admin_note) {
+          return bad("admin_note (reason) is required when rejecting");
+        }
+        if (
+          decision === "APPROVE" &&
+          (!Number.isFinite(extension_granted_days) || extension_granted_days < 1 || extension_granted_days > 365)
+        ) {
+          return bad("extension_granted_days must be between 1 and 365");
+        }
+
+        const { data: extReq, error: extReqError } = await supabase
+          .from("subscription_extension_requests")
+          .select("*")
+          .eq("id", requestId)
+          .maybeSingle();
+
+        if (extReqError) return fail("Failed to fetch extension request", extReqError.message);
+        if (!extReq) return json(404, { success: false, error: "Request not found" });
+        if (["RESOLVED", "REJECTED"].includes(String(extReq.status || "").trim().toUpperCase())) {
+          return json(409, { success: false, error: "Request already resolved/rejected" });
+        }
+        if (String(extReq.current_level || "").trim().toUpperCase() !== "VP") {
+          return json(409, { success: false, error: "Request has not been forwarded to admin yet" });
+        }
+        if (adminScope && extReq.vendor_state && !adminScope.includes(String(extReq.vendor_state).trim())) {
+          return json(403, { success: false, error: "This vendor is outside your zone" });
+        }
+
+        const resolvedAt = nowIso();
+        const adminEmail =
+          adminContext?.employee?.email ||
+          adminContext?.authUser?.email ||
+          null;
+
+        if (decision === "APPROVE") {
+          const { data: subscription, error: subscriptionError } = await supabase
+            .from("vendor_plan_subscriptions")
+            .select("id, end_date")
+            .eq("vendor_id", extReq.vendor_id)
+            .eq("status", "ACTIVE")
+            .order("end_date", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (subscriptionError) return fail("Failed to fetch active subscription", subscriptionError.message);
+          if (!subscription) {
+            return json(404, { success: false, error: "No active subscription found for this vendor" });
+          }
+
+          const currentEnd = subscription.end_date ? new Date(subscription.end_date) : new Date();
+          currentEnd.setDate(currentEnd.getDate() + extension_granted_days);
+          const newEndDate = currentEnd.toISOString();
+
+          const { error: subscriptionUpdateError } = await supabase
+            .from("vendor_plan_subscriptions")
+            .update({ end_date: newEndDate })
+            .eq("id", subscription.id);
+
+          if (subscriptionUpdateError) {
+            return fail("Failed to extend subscription", subscriptionUpdateError.message);
+          }
+
+          const { error: requestUpdateError } = await supabase
+            .from("subscription_extension_requests")
+            .update({
+              status: "RESOLVED",
+              current_level: "ADMIN",
+              admin_note: admin_note || null,
+              resolved_by: adminEmail,
+              resolved_at: resolvedAt,
+              extension_granted_days,
+              updated_at: nowIso(),
+            })
+            .eq("id", requestId);
+
+          if (requestUpdateError) {
+            return fail("Failed to update extension request", requestUpdateError.message);
+          }
+
+          await writeAudit({
+            user_id: adminContext?.authUser?.id || adminContext?.employee?.user_id || null,
+            action: "SUB_EXT_APPROVED",
+            entity_type: "subscription_extension_request",
+            entity_id: requestId,
+            details: { vendor_id: extReq.vendor_id, extension_granted_days, new_end_date: newEndDate },
+          });
+
+          return ok({
+            success: true,
+            message: `Subscription extended by ${extension_granted_days} days`,
+            new_end_date: newEndDate,
+          });
+        }
+
+        const { error: rejectUpdateError } = await supabase
+          .from("subscription_extension_requests")
+          .update({
+            status: "REJECTED",
+            current_level: "ADMIN",
+            admin_note,
+            resolved_by: adminEmail,
+            resolved_at: resolvedAt,
+            updated_at: nowIso(),
+          })
+          .eq("id", requestId);
+
+        if (rejectUpdateError) {
+          return fail("Failed to reject extension request", rejectUpdateError.message);
+        }
+
+        await writeAudit({
+          user_id: adminContext?.authUser?.id || adminContext?.employee?.user_id || null,
+          action: "SUB_EXT_REJECTED",
+          entity_type: "subscription_extension_request",
+          entity_id: requestId,
+          details: { vendor_id: extReq.vendor_id, admin_note },
+        });
+
+        return ok({ success: true, message: "Extension request rejected" });
       }
     }
 
