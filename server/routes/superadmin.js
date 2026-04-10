@@ -556,6 +556,24 @@ router.use(requireSuperAdmin);
 // -----------------------
 // Employees
 // -----------------------
+router.get('/states', async (req, res) => {
+  try {
+    const stateCatalog = await loadStateCatalog();
+    return res.json({
+      success: true,
+      states: stateCatalog.states.map((state) => ({
+        id: state.id,
+        name: state.name,
+        slug: state.slug,
+        region_code: state.region_code,
+        region_name: state.region_name,
+      })),
+    });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 router.get('/employees', async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -567,6 +585,8 @@ router.get('/employees', async (req, res) => {
       return res.status(500).json({ success: false, error: error.message });
     }
 
+    const employees = await hydrateEmployeesWithStateScope(data || []);
+
     await writeAuditLog({
       req,
       actor: req.actor,
@@ -575,7 +595,7 @@ router.get('/employees', async (req, res) => {
       details: { count: data?.length || 0 },
     });
 
-    return res.json({ success: true, employees: data || [] });
+    return res.json({ success: true, employees });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -592,12 +612,12 @@ router.post('/employees', async (req, res) => {
     const phone = String(req.body?.phone || '').trim() || null;
     const department = String(req.body?.department || '').trim() || 'Administration';
     const status = normalizeRole(req.body?.status || 'ACTIVE') || 'ACTIVE';
-
-    // states_scope: array of state names, only meaningful for ADMIN role
-    const rawScope = req.body?.states_scope;
-    const statesScope = role === 'ADMIN' && Array.isArray(rawScope)
-      ? rawScope.map((s) => String(s).trim()).filter(Boolean)
-      : [];
+    const stateCatalog = await loadStateCatalog();
+    const rawScope = Array.isArray(req.body?.state_scope_ids) ? req.body.state_scope_ids : req.body?.states_scope;
+    const { stateIds: stateScopeIds, stateNames: statesScope } =
+      role === 'ADMIN'
+        ? normalizeRequestedStateScope(rawScope, stateCatalog)
+        : { stateIds: [], stateNames: [] };
 
     if (!fullName || !email || !password) {
       return res
@@ -651,13 +671,19 @@ router.post('/employees', async (req, res) => {
       return res.status(500).json({ success: false, error: empError.message });
     }
 
+    let hydratedEmployee = employee || empPayload;
+    if (employee?.id) {
+      await syncEmployeeStateScope(employee.id, stateScopeIds, stateCatalog);
+      [hydratedEmployee] = await hydrateEmployeesWithStateScope([employee], stateCatalog);
+    }
+
     await writeAuditLog({
       req,
       actor: req.actor,
       action: 'EMPLOYEE_CREATED',
       entityType: 'employees',
       entityId: employee?.id || null,
-      details: { email, role, department, user_id: userId },
+      details: { email, role, department, user_id: userId, state_scope_ids: stateScopeIds, states_scope: statesScope },
     });
 
     if (userId) {
@@ -670,7 +696,7 @@ router.post('/employees', async (req, res) => {
       });
     }
 
-    return res.json({ success: true, employee: employee || empPayload });
+    return res.json({ success: true, employee: hydratedEmployee });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -793,13 +819,16 @@ router.put('/employees/:employeeId/password', async (req, res) => {
 router.get('/vendors', async (req, res) => {
   try {
     const limit = clampLimit(req.query?.limit, 500, 2000);
-    const { data, error } = await supabase
+    const offset = Math.max(0, Math.floor(Number(req.query?.offset) || 0));
+    const { data, error, count } = await supabase
       .from('vendors')
       .select(
-        'id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active, is_verified, city, state'
+        'id, vendor_id, company_name, owner_name, email, phone, kyc_status, created_at, is_active, is_verified, city, state',
+        { count: 'exact' }
       )
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .order('id', { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return res.status(500).json({ success: false, error: error.message });
@@ -810,10 +839,16 @@ router.get('/vendors', async (req, res) => {
       actor: req.actor,
       action: 'VENDORS_VIEWED',
       entityType: 'vendors',
-      details: { count: data?.length || 0 },
+      details: { count: data?.length || 0, total: Number(count) || 0, limit, offset },
     });
 
-    return res.json({ success: true, vendors: data || [] });
+    return res.json({
+      success: true,
+      vendors: data || [],
+      total: Number(count) || 0,
+      limit,
+      offset,
+    });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
   }
@@ -1465,54 +1500,223 @@ router.get('/audit-logs', async (req, res) => {
 // MONITORING ROUTES — SuperAdmin sees all regions
 // ===========================================================
 
-// State → Region lookup
-const STATE_REGION_MAP = {
-  // NORTH
-  'uttar pradesh': 'NORTH', 'up': 'NORTH',
-  'bihar': 'NORTH',
-  'jharkhand': 'NORTH',
-  'uttarakhand': 'NORTH',
-  'himachal pradesh': 'NORTH',
-  'punjab': 'NORTH',
-  'haryana': 'NORTH',
-  'delhi': 'NORTH',
-  'jammu and kashmir': 'NORTH',
-  'jammu & kashmir': 'NORTH',
-  'ladakh': 'NORTH',
+const KYC_REVIEW_STATUSES = new Set(['PENDING', 'SUBMITTED']);
+const MONITORING_BATCH_SIZE = 1000;
+const UNASSIGNED_REGION = { code: 'UNASSIGNED', name: 'Unassigned', sort_order: 999 };
 
-  // WEST
-  'maharashtra': 'WEST', 'mh': 'WEST',
-  'gujarat': 'WEST', 'gj': 'WEST',
-  'rajasthan': 'WEST', 'rj': 'WEST',
-  'goa': 'WEST',
+function normalizeText(value) {
+  return String(value ?? '').trim();
+}
 
-  // SOUTH
-  'karnataka': 'SOUTH', 'ka': 'SOUTH',
-  'tamil nadu': 'SOUTH', 'tn': 'SOUTH',
-  'kerala': 'SOUTH', 'kl': 'SOUTH',
-  'andhra pradesh': 'SOUTH', 'ap': 'SOUTH',
-  'telangana': 'SOUTH', 'tg': 'SOUTH',
+// Supabase REST responses are capped per request, so monitoring queries must page through large tables.
+async function fetchAllRows(buildQuery, pageSize = MONITORING_BATCH_SIZE) {
+  const rows = [];
 
-  // EAST
-  'west bengal': 'EAST', 'wb': 'EAST',
-  'odisha': 'EAST',
-  'assam': 'EAST',
-  'chhattisgarh': 'EAST',
-  'manipur': 'EAST',
-  'meghalaya': 'EAST',
-  'mizoram': 'EAST',
-  'nagaland': 'EAST',
-  'sikkim': 'EAST',
-  'tripura': 'EAST',
-  'arunachal pradesh': 'EAST',
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await buildQuery().range(offset, offset + pageSize - 1);
+    if (error) throw new Error(error.message || 'Failed to fetch paginated rows');
+    if (!Array.isArray(data) || data.length === 0) break;
 
-  // CENTRAL
-  'madhya pradesh': 'CENTRAL', 'mp': 'CENTRAL',
-};
+    rows.push(...data);
+    if (data.length < pageSize) break;
+  }
 
-function getRegion(stateName) {
-  if (!stateName) return 'OTHER';
-  return STATE_REGION_MAP[String(stateName).toLowerCase().trim()] || 'OTHER';
+  return rows;
+}
+
+async function loadStateCatalog() {
+  const [{ data: states, error: statesErr }, { data: regions, error: regionsErr }] = await Promise.all([
+    supabase
+      .from('states')
+      .select('id, name, slug, region_code')
+      .order('name', { ascending: true }),
+    supabase
+      .from('regions')
+      .select('code, name, sort_order')
+      .eq('is_active', true)
+      .order('sort_order', { ascending: true })
+      .order('name', { ascending: true }),
+  ]);
+
+  if (statesErr) throw new Error(statesErr.message || 'Failed to load states');
+  if (regionsErr) throw new Error(regionsErr.message || 'Failed to load regions');
+
+  const regionByCode = new Map(
+    [UNASSIGNED_REGION, ...(regions || [])].map((region) => {
+      const code = normalizeText(region.code).toUpperCase();
+      return [
+        code,
+        {
+          code,
+          name: normalizeText(region.name) || code,
+          sort_order: Number(region.sort_order ?? UNASSIGNED_REGION.sort_order),
+        },
+      ];
+    })
+  );
+
+  const catalogStates = (states || []).map((state) => {
+    const regionCode = normalizeText(state.region_code).toUpperCase() || UNASSIGNED_REGION.code;
+    const region = regionByCode.get(regionCode) || UNASSIGNED_REGION;
+    return {
+      id: String(state.id),
+      name: normalizeText(state.name),
+      slug: normalizeText(state.slug),
+      region_code: region.code,
+      region_name: region.name,
+      region_sort_order: Number(region.sort_order ?? UNASSIGNED_REGION.sort_order),
+    };
+  });
+
+  return {
+    states: catalogStates,
+    regions: Array.from(regionByCode.values()).sort((a, b) => (a.sort_order - b.sort_order) || a.name.localeCompare(b.name)),
+    stateById: new Map(catalogStates.map((state) => [state.id, state])),
+    stateByName: new Map(catalogStates.map((state) => [state.name.toLowerCase(), state])),
+  };
+}
+
+function resolveStateInfo(stateId, fallbackState, stateCatalog) {
+  if (stateId) {
+    const state = stateCatalog.stateById.get(String(stateId));
+    if (state) return state;
+  }
+
+  const fallback = normalizeText(fallbackState);
+  if (fallback) {
+    const state = stateCatalog.stateByName.get(fallback.toLowerCase());
+    if (state) return state;
+  }
+
+  return {
+    id: '',
+    name: fallback || 'Unknown',
+    slug: '',
+    region_code: UNASSIGNED_REGION.code,
+    region_name: UNASSIGNED_REGION.name,
+    region_sort_order: UNASSIGNED_REGION.sort_order,
+  };
+}
+
+function normalizeRequestedStateScope(rawScope, stateCatalog) {
+  const values = Array.isArray(rawScope) ? rawScope : [];
+  const seen = new Set();
+  const invalid = [];
+  const stateIds = [];
+  const stateNames = [];
+
+  values.forEach((value) => {
+    const raw = normalizeText(
+      typeof value === 'object' && value !== null
+        ? (value.id ?? value.state_id ?? value.name ?? '')
+        : value
+    );
+    if (!raw) return;
+
+    const state =
+      stateCatalog.stateById.get(raw) ||
+      stateCatalog.stateByName.get(raw.toLowerCase()) ||
+      null;
+
+    if (!state) {
+      invalid.push(raw);
+      return;
+    }
+
+    if (seen.has(state.id)) return;
+    seen.add(state.id);
+    stateIds.push(state.id);
+    stateNames.push(state.name);
+  });
+
+  if (invalid.length) {
+    const err = new Error(`Invalid states: ${invalid.join(', ')}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return { stateIds, stateNames };
+}
+
+async function loadEmployeeScopeRows(employeeIds = []) {
+  const ids = [...new Set((employeeIds || []).map((id) => normalizeText(id)).filter(Boolean))];
+  if (!ids.length) return [];
+
+  const { data, error } = await supabase
+    .from('employee_state_scope')
+    .select('employee_id, state_id')
+    .in('employee_id', ids);
+
+  if (error) throw new Error(error.message || 'Failed to load employee state scope');
+  return data || [];
+}
+
+async function hydrateEmployeesWithStateScope(employees = [], stateCatalog = null) {
+  const catalog = stateCatalog || await loadStateCatalog();
+  const employeeIds = employees.map((employee) => employee?.id).filter(Boolean);
+  const scopeRows = await loadEmployeeScopeRows(employeeIds);
+  const scopeByEmployeeId = new Map(employeeIds.map((id) => [String(id), []]));
+
+  (scopeRows || []).forEach((row) => {
+    const key = String(row.employee_id || '');
+    if (!scopeByEmployeeId.has(key)) scopeByEmployeeId.set(key, []);
+    scopeByEmployeeId.get(key).push(String(row.state_id || ''));
+  });
+
+  return employees.map((employee) => {
+    const employeeId = String(employee?.id || '');
+    let stateIds = [...new Set((scopeByEmployeeId.get(employeeId) || []).filter((id) => catalog.stateById.has(id)))];
+
+    if (!stateIds.length && Array.isArray(employee?.states_scope) && employee.states_scope.length > 0) {
+      stateIds = normalizeRequestedStateScope(employee.states_scope, catalog).stateIds;
+    }
+
+    const stateNames = stateIds
+      .map((stateId) => catalog.stateById.get(stateId)?.name || '')
+      .filter(Boolean);
+
+    return {
+      ...employee,
+      state_scope_ids: stateIds,
+      states_scope: stateNames,
+    };
+  });
+}
+
+async function syncEmployeeStateScope(employeeId, rawScope, stateCatalog = null) {
+  const catalog = stateCatalog || await loadStateCatalog();
+  const { stateIds, stateNames } = normalizeRequestedStateScope(rawScope, catalog);
+
+  const { error: deleteError } = await supabase
+    .from('employee_state_scope')
+    .delete()
+    .eq('employee_id', employeeId);
+
+  if (deleteError) throw new Error(deleteError.message || 'Failed to clear employee state scope');
+
+  if (stateIds.length > 0) {
+    const { error: insertError } = await supabase
+      .from('employee_state_scope')
+      .insert(
+        stateIds.map((stateId) => ({
+          employee_id: employeeId,
+          state_id: stateId,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        }))
+      );
+
+    if (insertError) throw new Error(insertError.message || 'Failed to save employee state scope');
+  }
+
+  const { error: employeeUpdateError } = await supabase
+    .from('employees')
+    .update({ states_scope: stateNames, updated_at: nowIso() })
+    .eq('id', employeeId);
+
+  if (employeeUpdateError) throw new Error(employeeUpdateError.message || 'Failed to mirror employee state scope');
+
+  return { stateIds, stateNames, stateCatalog: catalog };
 }
 
 // GET /monitoring/overview
@@ -1520,60 +1724,107 @@ function getRegion(stateName) {
 router.get('/monitoring/overview', requireSuperAdmin, async (req, res) => {
   try {
     const [
-      { data: adminEmployees, error: empErr },
-      { data: vendors, error: vendorErr },
-      { data: payments, error: payErr },
-      { data: tickets, error: ticketErr },
+      { data: adminEmployeesRaw, error: empErr },
+      stateCatalog,
+      vendors,
+      payments,
+      tickets,
     ] = await Promise.all([
       supabase
         .from('employees')
         .select('id, full_name, email, role, status, states_scope, last_login, created_at')
         .eq('role', 'ADMIN')
         .order('created_at', { ascending: false }),
-      supabase
-        .from('vendors')
-        .select('id, state, kyc_status, is_active, created_at'),
-      supabase
-        .from('vendor_payments')
-        .select('vendor_id, amount, net_amount, payment_date, vendors!inner(state)'),
-      supabase
-        .from('support_tickets')
-        .select('id, status, vendor_id, created_at, vendors(state)')
-        .not('status', 'eq', 'RESOLVED'),
+      loadStateCatalog(),
+      fetchAllRows(() =>
+        supabase
+          .from('vendors')
+          .select('id, state_id, state, kyc_status, is_active')
+          .order('id', { ascending: true })
+      ),
+      fetchAllRows(() =>
+        supabase
+          .from('vendor_payments')
+          .select('id, vendor_id, amount, net_amount, payment_date')
+          .order('id', { ascending: true })
+      ),
+      fetchAllRows(() =>
+        supabase
+          .from('support_tickets')
+          .select('id, status, vendor_id, created_at')
+          .not('status', 'eq', 'RESOLVED')
+          .order('id', { ascending: true })
+      ),
     ]);
 
     if (empErr) return res.status(500).json({ success: false, error: empErr.message });
-    if (vendorErr) return res.status(500).json({ success: false, error: vendorErr.message });
+    const adminEmployees = await hydrateEmployeesWithStateScope(adminEmployeesRaw || [], stateCatalog);
 
     // --- All-India totals ---
     const allVendors = vendors || [];
     const allPayments = payments || [];
     const allTickets = tickets || [];
+    const vendorStateById = new Map();
+    const regionSortOrderByName = new Map((stateCatalog.regions || []).map((region) => [region.name, Number(region.sort_order ?? UNASSIGNED_REGION.sort_order)]));
 
     const totalRevenue = allPayments.reduce((s, p) => s + Number(p.net_amount ?? p.amount ?? 0), 0);
     const totalVendors = allVendors.filter((v) => v.is_active).length;
-    const kycPending = allVendors.filter((v) => v.kyc_status === 'PENDING').length;
+    const kycPending = allVendors.filter((v) => KYC_REVIEW_STATUSES.has(normalizeText(v.kyc_status).toUpperCase())).length;
     const openTickets = allTickets.length;
 
     // --- Per-state aggregation ---
     const byState = {};
 
     allVendors.forEach((v) => {
-      const state = String(v.state || 'Unknown').trim();
-      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      const stateInfo = resolveStateInfo(v.state_id, v.state, stateCatalog);
+      const state = stateInfo.name;
+      vendorStateById.set(String(v.id), stateInfo);
+      if (!byState[state]) {
+        byState[state] = {
+          state,
+          region: stateInfo.region_name,
+          region_sort_order: Number(stateInfo.region_sort_order ?? UNASSIGNED_REGION.sort_order),
+          revenue: 0,
+          vendors: 0,
+          kycPending: 0,
+          openTickets: 0,
+        };
+      }
       if (v.is_active) byState[state].vendors += 1;
-      if (v.kyc_status === 'PENDING') byState[state].kycPending += 1;
+      if (KYC_REVIEW_STATUSES.has(normalizeText(v.kyc_status).toUpperCase())) byState[state].kycPending += 1;
     });
 
     allPayments.forEach((p) => {
-      const state = String(p.vendors?.state || 'Unknown').trim();
-      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      const stateInfo = vendorStateById.get(String(p.vendor_id)) || resolveStateInfo('', 'Unknown', stateCatalog);
+      const state = stateInfo.name;
+      if (!byState[state]) {
+        byState[state] = {
+          state,
+          region: stateInfo.region_name,
+          region_sort_order: Number(stateInfo.region_sort_order ?? UNASSIGNED_REGION.sort_order),
+          revenue: 0,
+          vendors: 0,
+          kycPending: 0,
+          openTickets: 0,
+        };
+      }
       byState[state].revenue += Number(p.net_amount ?? p.amount ?? 0);
     });
 
     allTickets.forEach((t) => {
-      const state = String(t.vendors?.state || 'Unknown').trim();
-      if (!byState[state]) byState[state] = { state, region: getRegion(state), revenue: 0, vendors: 0, kycPending: 0, openTickets: 0 };
+      const stateInfo = vendorStateById.get(String(t.vendor_id)) || resolveStateInfo('', 'Unknown', stateCatalog);
+      const state = stateInfo.name;
+      if (!byState[state]) {
+        byState[state] = {
+          state,
+          region: stateInfo.region_name,
+          region_sort_order: Number(stateInfo.region_sort_order ?? UNASSIGNED_REGION.sort_order),
+          revenue: 0,
+          vendors: 0,
+          kycPending: 0,
+          openTickets: 0,
+        };
+      }
       byState[state].openTickets += 1;
     });
 
@@ -1581,7 +1832,17 @@ router.get('/monitoring/overview', requireSuperAdmin, async (req, res) => {
     const byRegion = {};
     Object.values(byState).forEach((s) => {
       const r = s.region;
-      if (!byRegion[r]) byRegion[r] = { region: r, revenue: 0, vendors: 0, kycPending: 0, openTickets: 0, states: [] };
+      if (!byRegion[r]) {
+        byRegion[r] = {
+          region: r,
+          region_sort_order: Number(regionSortOrderByName.get(r) ?? s.region_sort_order ?? UNASSIGNED_REGION.sort_order),
+          revenue: 0,
+          vendors: 0,
+          kycPending: 0,
+          openTickets: 0,
+          states: [],
+        };
+      }
       byRegion[r].revenue += s.revenue;
       byRegion[r].vendors += s.vendors;
       byRegion[r].kycPending += s.kycPending;
@@ -1610,6 +1871,7 @@ router.get('/monitoring/overview', requireSuperAdmin, async (req, res) => {
         email: emp.email,
         status: emp.status,
         states_scope: scope,
+        state_scope_ids: Array.isArray(emp.state_scope_ids) ? emp.state_scope_ids : [],
         last_login: emp.last_login,
         revenue: scopeLower.length > 0 ? empRevenue : null,
         vendors: scopeLower.length > 0 ? empVendors : null,
@@ -1622,8 +1884,8 @@ router.get('/monitoring/overview', requireSuperAdmin, async (req, res) => {
       success: true,
       data: {
         allIndia: { totalRevenue, totalVendors, kycPending, openTickets },
-        byRegion: Object.values(byRegion).sort((a, b) => b.revenue - a.revenue),
-        byState: Object.values(byState).sort((a, b) => b.revenue - a.revenue),
+        byRegion: Object.values(byRegion).sort((a, b) => (a.region_sort_order - b.region_sort_order) || (b.revenue - a.revenue) || a.region.localeCompare(b.region)),
+        byState: Object.values(byState).sort((a, b) => (b.revenue - a.revenue) || (b.vendors - a.vendors) || a.state.localeCompare(b.state)),
         admins,
       },
     });
@@ -1639,21 +1901,24 @@ router.get('/monitoring/admin-activity', requireSuperAdmin, async (req, res) => 
     const days = Math.min(Number(req.query.days ?? 7), 90);
     const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
-    const [{ data: logs, error: logsErr }, { data: admins, error: adminsErr }] = await Promise.all([
-      supabase
-        .from('audit_logs')
-        .select('user_id, action, details, created_at')
-        .gte('created_at', cutoff)
-        .order('created_at', { ascending: false })
-        .limit(5000),
+    const [logs, { data: adminsRaw, error: adminsErr }, stateCatalog] = await Promise.all([
+      fetchAllRows(() =>
+        supabase
+          .from('audit_logs')
+          .select('id, user_id, action, details, created_at')
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+      ),
       supabase
         .from('employees')
         .select('id, full_name, email, role, states_scope, last_login, status')
         .eq('role', 'ADMIN'),
+      loadStateCatalog(),
     ]);
 
-    if (logsErr) return res.status(500).json({ success: false, error: logsErr.message });
     if (adminsErr) return res.status(500).json({ success: false, error: adminsErr.message });
+    const admins = await hydrateEmployeesWithStateScope(adminsRaw || [], stateCatalog);
 
     const adminMap = {};
     (admins || []).forEach((a) => {
@@ -1701,23 +1966,36 @@ router.get('/monitoring/admin-activity', requireSuperAdmin, async (req, res) => 
 // Revenue + payment count per state, with this-month vs last-month comparison
 router.get('/monitoring/revenue-by-state', requireSuperAdmin, async (req, res) => {
   try {
-    const { data: payments, error } = await supabase
-      .from('vendor_payments')
-      .select('amount, net_amount, payment_date, vendors!inner(state)')
-      .order('payment_date', { ascending: false })
-      .limit(10000);
-
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    const [stateCatalog, vendors, payments] = await Promise.all([
+      loadStateCatalog(),
+      fetchAllRows(() =>
+        supabase
+          .from('vendors')
+          .select('id, state_id, state')
+          .order('id', { ascending: true })
+      ),
+      fetchAllRows(() =>
+        supabase
+          .from('vendor_payments')
+          .select('id, vendor_id, amount, net_amount, payment_date')
+          .order('payment_date', { ascending: false })
+          .order('id', { ascending: false })
+      ),
+    ]);
 
     const now = new Date();
     const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-
     const byState = {};
+    const vendorStateById = new Map((vendors || []).map((vendor) => [
+      String(vendor.id),
+      resolveStateInfo(vendor.state_id, vendor.state, stateCatalog),
+    ]));
 
     (payments || []).forEach((p) => {
-      const state = String(p.vendors?.state || 'Unknown').trim();
-      const region = getRegion(state);
+      const stateInfo = vendorStateById.get(String(p.vendor_id)) || resolveStateInfo('', 'Unknown', stateCatalog);
+      const state = stateInfo.name;
+      const region = stateInfo.region_name;
       const amt = Number(p.net_amount ?? p.amount ?? 0);
       const date = p.payment_date ? new Date(p.payment_date) : null;
 
@@ -1735,7 +2013,7 @@ router.get('/monitoring/revenue-by-state', requireSuperAdmin, async (req, res) =
     });
 
     const stateList = Object.values(byState)
-      .sort((a, b) => b.totalRevenue - a.totalRevenue)
+      .sort((a, b) => (b.totalRevenue - a.totalRevenue) || (b.paymentCount - a.paymentCount) || a.state.localeCompare(b.state))
       .map((s) => ({
         ...s,
         trend: s.lastMonth > 0 ? ((s.thisMonth - s.lastMonth) / s.lastMonth) * 100 : null,
@@ -1751,13 +2029,11 @@ router.get('/monitoring/revenue-by-state', requireSuperAdmin, async (req, res) =
 router.put('/employees/:id/states-scope', requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const rawStates = req.body?.states_scope;
+    const rawStates = Array.isArray(req.body?.state_scope_ids) ? req.body.state_scope_ids : req.body?.states_scope;
 
     if (!Array.isArray(rawStates)) {
-      return res.status(400).json({ success: false, error: 'states_scope must be an array' });
+      return res.status(400).json({ success: false, error: 'state_scope_ids or states_scope must be an array' });
     }
-
-    const states = rawStates.map((s) => String(s).trim()).filter(Boolean);
 
     const { data: emp } = await supabase
       .from('employees')
@@ -1770,12 +2046,8 @@ router.put('/employees/:id/states-scope', requireSuperAdmin, async (req, res) =>
       return res.status(400).json({ success: false, error: 'states_scope can only be set on ADMIN employees' });
     }
 
-    const { error } = await supabase
-      .from('employees')
-      .update({ states_scope: states, updated_at: nowIso() })
-      .eq('id', id);
-
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    const stateCatalog = await loadStateCatalog();
+    const { stateIds, stateNames } = await syncEmployeeStateScope(id, rawStates, stateCatalog);
 
     await writeAuditLog({
       req,
@@ -1783,12 +2055,12 @@ router.put('/employees/:id/states-scope', requireSuperAdmin, async (req, res) =>
       action: 'ADMIN_STATES_SCOPE_UPDATED',
       entityType: 'employees',
       entityId: id,
-      details: { email: emp.email, states_scope: states },
+      details: { email: emp.email, state_scope_ids: stateIds, states_scope: stateNames },
     });
 
-    return res.json({ success: true });
+    return res.json({ success: true, state_scope_ids: stateIds, states_scope: stateNames });
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    return res.status(err?.statusCode || 500).json({ success: false, error: err.message });
   }
 });
 

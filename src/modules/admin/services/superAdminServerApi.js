@@ -56,8 +56,20 @@ export const superAdminServerApi = {
       }),
   },
 
+  states: {
+    list: () => request('/states'),
+  },
+
   vendors: {
-    list: (limit = 500) => request(`/vendors?limit=${encodeURIComponent(limit)}`),
+    list: (params = {}) => {
+      const normalized = typeof params === 'number' ? { limit: params } : (params || {});
+      const qs = new URLSearchParams();
+      qs.set('limit', String(normalized.limit ?? 500));
+      if (normalized.offset !== undefined && normalized.offset !== null) {
+        qs.set('offset', String(normalized.offset));
+      }
+      return request(`/vendors?${qs.toString()}`);
+    },
     delete: (vendorId) =>
       request(`/vendors/${vendorId}`, {
         method: 'DELETE',
@@ -143,10 +155,10 @@ export const superAdminServerApi = {
     overview: () => request('/monitoring/overview'),
     adminActivity: (days = 7) => request(`/monitoring/admin-activity?days=${encodeURIComponent(days)}`),
     revenueByState: () => request('/monitoring/revenue-by-state'),
-    updateStatesScope: (employeeId, states_scope) =>
+    updateStatesScope: (employeeId, state_scope_ids) =>
       request(`/employees/${employeeId}/states-scope`, {
         method: 'PUT',
-        body: JSON.stringify({ states_scope }),
+        body: JSON.stringify({ state_scope_ids }),
       }),
   },
 

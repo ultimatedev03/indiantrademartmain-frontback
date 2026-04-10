@@ -65,6 +65,7 @@ import {
 const EMPLOYEE_ROLES = ['ADMIN'];
 const NOTICE_VARIANTS = ['info', 'warning', 'critical'];
 const PLAN_BADGE_VARIANTS = ['neutral', 'green', 'blue', 'purple', 'gold', 'diamond', 'slate'];
+const VENDOR_FETCH_BATCH_SIZE = 500;
 
 const formatDateTime = (value) => {
   if (!value) return '—';
@@ -270,6 +271,7 @@ export default function SuperAdminDashboard() {
   const [employeeModalOpen, setEmployeeModalOpen] = useState(false);
   const [employeeSaving, setEmployeeSaving] = useState(false);
   const [employeeDeletingId, setEmployeeDeletingId] = useState(null);
+  const [availableStates, setAvailableStates] = useState([]);
   const [employeeForm, setEmployeeForm] = useState({
     full_name: '',
     email: '',
@@ -278,7 +280,7 @@ export default function SuperAdminDashboard() {
     role: 'ADMIN',
     department: 'Administration',
     status: 'ACTIVE',
-    states_scope: '',   // comma-separated string, only shown when role=ADMIN
+    state_scope_ids: [],
   });
 
   // Vendors
@@ -341,7 +343,7 @@ export default function SuperAdminDashboard() {
   const [monitoringActivityDays, setMonitoringActivityDays] = useState(7);
   const [statesScopeModalOpen, setStatesScopeModalOpen] = useState(false);
   const [statesScopeTarget, setStatesScopeTarget] = useState(null);
-  const [statesScopeInput, setStatesScopeInput] = useState('');
+  const [statesScopeSelection, setStatesScopeSelection] = useState([]);
   const [statesScopeSaving, setStatesScopeSaving] = useState(false);
 
   // Settings
@@ -354,6 +356,119 @@ export default function SuperAdminDashboard() {
       description: error?.message || fallback || 'Something went wrong',
       variant: 'destructive',
     });
+  };
+
+  const stateById = useMemo(
+    () => new Map((availableStates || []).map((state) => [String(state.id), state])),
+    [availableStates]
+  );
+
+  const statesByRegion = useMemo(() => {
+    const grouped = new Map();
+
+    (availableStates || []).forEach((state) => {
+      const regionKey = state.region_name || 'Unassigned';
+      if (!grouped.has(regionKey)) grouped.set(regionKey, []);
+      grouped.get(regionKey).push(state);
+    });
+
+    return Array.from(grouped.entries())
+      .map(([region, states]) => ({
+        region,
+        states: [...states].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+      }))
+      .sort((a, b) => a.region.localeCompare(b.region));
+  }, [availableStates]);
+
+  const describeSelectedStates = (ids = []) => {
+    const names = [...new Set((ids || []).map((id) => stateById.get(String(id))?.name).filter(Boolean))];
+    return names.length ? names.join(', ') : 'All India access';
+  };
+
+  const toggleStateSelection = (currentIds, stateId) => {
+    const nextId = String(stateId);
+    const normalized = (currentIds || []).map((id) => String(id));
+    return normalized.includes(nextId)
+      ? normalized.filter((id) => id !== nextId)
+      : [...normalized, nextId];
+  };
+
+  const renderStateScopeSelector = ({
+    selectedIds = [],
+    onChange,
+    helperText = 'Leave blank for All India access.',
+  }) => {
+    const normalizedIds = [...new Set((selectedIds || []).map((id) => String(id)))];
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-neutral-500 text-xs">{helperText}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-neutral-400 hover:text-white hover:bg-neutral-800"
+            onClick={() => onChange([])}
+            disabled={!normalizedIds.length}
+          >
+            Clear selection
+          </Button>
+        </div>
+        <div className="max-h-72 overflow-y-auto rounded-lg border border-neutral-800 bg-neutral-950/40 p-3 space-y-3">
+          {!statesByRegion.length ? (
+            <div className="text-neutral-500 text-sm">No states available from DB.</div>
+          ) : (
+            statesByRegion.map(({ region, states }) => (
+              <div key={region} className="space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-neutral-500">
+                  {region}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {states.map((state) => {
+                    const checked = normalizedIds.includes(String(state.id));
+                    return (
+                      <label
+                        key={state.id}
+                        className={`flex items-center gap-3 rounded-md border px-3 py-2 cursor-pointer transition-colors ${
+                          checked
+                            ? 'border-blue-600/70 bg-blue-950/30 text-white'
+                            : 'border-neutral-800 bg-neutral-900/70 text-neutral-300 hover:border-neutral-700'
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(nextChecked) => {
+                            const nextIds = nextChecked === true
+                              ? toggleStateSelection(normalizedIds.filter((id) => id !== String(state.id)), state.id)
+                              : normalizedIds.filter((id) => id !== String(state.id));
+                            onChange(nextIds);
+                          }}
+                          className="border-neutral-600 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                        />
+                        <span className="text-sm">{state.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <p className="text-neutral-500 text-xs">
+          Selected: <span className="text-neutral-300">{describeSelectedStates(normalizedIds)}</span>
+        </p>
+      </div>
+    );
+  };
+
+  const fetchStates = async () => {
+    try {
+      const response = await superAdminServerApi.states.list();
+      setAvailableStates(Array.isArray(response?.states) ? response.states : []);
+    } catch (error) {
+      handleError(error, 'Failed to load states');
+    }
   };
 
   const fetchSystemConfig = async () => {
@@ -405,8 +520,32 @@ export default function SuperAdminDashboard() {
   const fetchVendors = async () => {
     setVendorsLoading(true);
     try {
-      const { vendors: list } = await superAdminServerApi.vendors.list(800);
-      setVendors(list || []);
+      const allVendors = [];
+      let offset = 0;
+      let expectedTotal = null;
+
+      while (true) {
+        const response = await superAdminServerApi.vendors.list({
+          limit: VENDOR_FETCH_BATCH_SIZE,
+          offset,
+        });
+        const batch = Array.isArray(response?.vendors) ? response.vendors : [];
+        if (expectedTotal == null && Number.isFinite(Number(response?.total))) {
+          expectedTotal = Number(response.total);
+        }
+
+        allVendors.push(...batch);
+
+        if (batch.length < VENDOR_FETCH_BATCH_SIZE) break;
+        if (expectedTotal != null && allVendors.length >= expectedTotal) break;
+
+        offset += VENDOR_FETCH_BATCH_SIZE;
+      }
+
+      const uniqueVendors = Array.from(
+        new Map(allVendors.map((vendor) => [vendor?.id || `${vendor?.vendor_id || ''}-${vendor?.email || ''}`, vendor])).values()
+      );
+      setVendors(uniqueVendors);
     } catch (error) {
       handleError(error, 'Failed to load vendors');
     } finally {
@@ -515,16 +654,13 @@ export default function SuperAdminDashboard() {
     if (!statesScopeTarget) return;
     setStatesScopeSaving(true);
     try {
-      const states = statesScopeInput
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-      await superAdminServerApi.monitoring.updateStatesScope(statesScopeTarget.id, states);
+      await superAdminServerApi.monitoring.updateStatesScope(statesScopeTarget.id, statesScopeSelection);
       toast({ title: 'Saved', description: `States scope updated for ${statesScopeTarget.full_name}` });
       setStatesScopeModalOpen(false);
       setStatesScopeTarget(null);
-      setStatesScopeInput('');
+      setStatesScopeSelection([]);
       await fetchMonitoring();
+      await fetchEmployees();
     } catch (err) {
       handleError(err, 'Failed to update states scope');
     } finally {
@@ -534,6 +670,7 @@ export default function SuperAdminDashboard() {
 
   useEffect(() => {
     void Promise.all([
+      fetchStates(),
       fetchSystemConfig(),
       fetchPages(),
       fetchEmployees(),
@@ -1051,7 +1188,7 @@ export default function SuperAdminDashboard() {
       role: 'ADMIN',
       department: 'Administration',
       status: 'ACTIVE',
-      states_scope: '',
+      state_scope_ids: [],
     });
   };
 
@@ -1069,14 +1206,10 @@ export default function SuperAdminDashboard() {
     setEmployeeSaving(true);
     try {
       const payload = { ...employeeForm };
-      // Convert states_scope CSV string → array (only relevant for ADMIN role)
       if (payload.role === 'ADMIN') {
-        payload.states_scope = String(payload.states_scope || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
+        payload.state_scope_ids = (payload.state_scope_ids || []).map((id) => String(id));
       } else {
-        delete payload.states_scope;
+        delete payload.state_scope_ids;
       }
       await superAdminServerApi.employees.create(payload);
       toast({ title: 'Employee created', description: employeeForm.email });
@@ -2383,7 +2516,7 @@ export default function SuperAdminDashboard() {
                                   className="ml-2 text-blue-400 hover:text-blue-300 underline text-xs"
                                   onClick={() => {
                                     setStatesScopeTarget(admin);
-                                    setStatesScopeInput(Array.isArray(admin.states_scope) ? admin.states_scope.join(', ') : '');
+                                    setStatesScopeSelection(Array.isArray(admin.state_scope_ids) ? admin.state_scope_ids.map((id) => String(id)) : []);
                                     setStatesScopeModalOpen(true);
                                   }}
                                 >
@@ -2553,33 +2686,44 @@ export default function SuperAdminDashboard() {
             </Card>
 
             {/* States Scope Edit Modal */}
-            <Dialog open={statesScopeModalOpen} onOpenChange={(o) => { if (!o) { setStatesScopeModalOpen(false); setStatesScopeTarget(null); } }}>
+            <Dialog
+              open={statesScopeModalOpen}
+              onOpenChange={(o) => {
+                if (!o) {
+                  setStatesScopeModalOpen(false);
+                  setStatesScopeTarget(null);
+                  setStatesScopeSelection([]);
+                }
+              }}
+            >
               <DialogContent className="bg-neutral-900 border-neutral-700 text-white max-w-lg">
                 <DialogHeader>
                   <DialogTitle>Edit States Scope</DialogTitle>
                   <DialogDescription className="text-neutral-400">
-                    {statesScopeTarget?.full_name} — comma-separated state names.
-                    <br />
-                    Example: <span className="text-neutral-300">Maharashtra, Gujarat, Rajasthan</span>
+                    {statesScopeTarget?.full_name} ko DB-backed states assign karo. Empty selection ka matlab All India access hai.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 pt-2">
                   <div>
-                    <Label className="text-neutral-300 text-sm">States (comma-separated)</Label>
-                    <Input
-                      className="mt-1 bg-neutral-800 border-neutral-700 text-white placeholder:text-neutral-500"
-                      placeholder="e.g. Maharashtra, Gujarat, Rajasthan"
-                      value={statesScopeInput}
-                      onChange={(e) => setStatesScopeInput(e.target.value)}
-                    />
-                    <p className="text-neutral-500 text-xs mt-1">
-                      Current: {Array.isArray(statesScopeTarget?.states_scope) && statesScopeTarget.states_scope.length > 0
-                        ? statesScopeTarget.states_scope.join(', ')
-                        : 'None assigned'}
-                    </p>
+                    <Label className="text-neutral-300 text-sm">States</Label>
+                    <div className="mt-2">
+                      {renderStateScopeSelector({
+                        selectedIds: statesScopeSelection,
+                        onChange: setStatesScopeSelection,
+                        helperText: 'Select one or more states. Leave empty to keep this admin on all-India coverage.',
+                      })}
+                    </div>
                   </div>
                   <div className="flex justify-end gap-2">
-                    <Button variant="outline" className="border-neutral-700 text-neutral-300" onClick={() => setStatesScopeModalOpen(false)}>
+                    <Button
+                      variant="outline"
+                      className="border-neutral-700 text-neutral-300"
+                      onClick={() => {
+                        setStatesScopeModalOpen(false);
+                        setStatesScopeTarget(null);
+                        setStatesScopeSelection([]);
+                      }}
+                    >
                       Cancel
                     </Button>
                     <Button
@@ -3053,7 +3197,7 @@ export default function SuperAdminDashboard() {
                       ...prev,
                       role: value,
                       department: value === 'ADMIN' ? 'Administration' : prev.department,
-                      states_scope: value === 'ADMIN' ? prev.states_scope : '',
+                      state_scope_ids: value === 'ADMIN' ? prev.state_scope_ids : [],
                     }))
                   }
                 >
@@ -3087,19 +3231,12 @@ export default function SuperAdminDashboard() {
                 <Label className="text-neutral-300 flex items-center gap-1">
                   <MapPin className="h-3.5 w-3.5 text-blue-400" />
                   States Scope
-                  <span className="text-neutral-500 text-xs ml-1">(comma-separated)</span>
                 </Label>
-                <Input
-                  value={employeeForm.states_scope}
-                  onChange={(e) =>
-                    setEmployeeForm((prev) => ({ ...prev, states_scope: e.target.value }))
-                  }
-                  placeholder="e.g. Maharashtra, Gujarat, Rajasthan"
-                  className="bg-neutral-800 border-neutral-700 text-white placeholder:text-neutral-500"
-                />
-                <p className="text-neutral-500 text-xs">
-                  Which states this Admin will manage. Leave blank = All India access.
-                </p>
+                {renderStateScopeSelector({
+                  selectedIds: employeeForm.state_scope_ids,
+                  onChange: (nextIds) => setEmployeeForm((prev) => ({ ...prev, state_scope_ids: nextIds })),
+                  helperText: 'Select the states this admin will manage. Leave empty for All India access.',
+                })}
               </div>
             )}
 
