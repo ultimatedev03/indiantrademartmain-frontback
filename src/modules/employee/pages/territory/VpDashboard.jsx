@@ -359,7 +359,7 @@ const VpDashboard = () => {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Select value={selectedManager} onValueChange={setSelectedManager}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder="Select manager" />
               </SelectTrigger>
               <SelectContent>
@@ -371,7 +371,7 @@ const VpDashboard = () => {
               </SelectContent>
             </Select>
             <Select value={selectedStateId} onValueChange={setSelectedStateId} disabled={statesLoading}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder="Filter by state" />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -387,7 +387,7 @@ const VpDashboard = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Select value={selectedCityId} onValueChange={setSelectedCityId} disabled={citySelectDisabled}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder={isStateScoped ? 'Filter by city' : 'Select a state first'} />
               </SelectTrigger>
               <SelectContent className="max-h-72">

@@ -17,6 +17,18 @@ const slugify = (value) => {
     .replace(/^-|-$/g, '');
 };
 
+const buildVendorListingUrl = (stateSlug = '', citySlug = '', locationText = '') => {
+  const params = new URLSearchParams();
+  if (stateSlug) params.set('state', stateSlug);
+  if (citySlug) params.set('city', citySlug);
+  if (!stateSlug && !citySlug && locationText) {
+    params.set('cityText', locationText);
+  }
+
+  const query = params.toString();
+  return query ? `/directory/vendor?${query}` : '/directory/vendor';
+};
+
 // Extract inline location from query like:
 // "land survey in delhi" -> { cleanQuery: "land survey", inlineLocation: "delhi" }
 const extractInlineLocation = (q = '') => {
@@ -59,7 +71,7 @@ const resolveLocationSlugs = async (locationText = '') => {
   try {
     const { data: sData } = await supabase
       .from('states')
-      .select('id, slug')
+      .select('id, slug, name')
       .eq('slug', maybeSlug)
       .maybeSingle();
 
@@ -74,7 +86,7 @@ const resolveLocationSlugs = async (locationText = '') => {
   try {
     const { data: cData } = await supabase
       .from('cities')
-      .select('slug, state_id')
+      .select('slug, state_id, name')
       .eq('slug', maybeSlug)
       .maybeSingle();
 
@@ -93,8 +105,47 @@ const resolveLocationSlugs = async (locationText = '') => {
     // ignore
   }
 
-  // 3) Fallback: treat as state slug (better than showing All India)
-  return { stateSlug: maybeSlug, citySlug: '' };
+  // 3) Try state by name
+  try {
+    const { data: sData } = await supabase
+      .from('states')
+      .select('id, slug, name')
+      .ilike('name', raw)
+      .limit(1)
+      .maybeSingle();
+
+    if (sData?.slug) {
+      return { stateSlug: sData.slug, citySlug: '' };
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // 4) Try city by name and resolve its state
+  try {
+    const { data: cData } = await supabase
+      .from('cities')
+      .select('slug, state_id, name')
+      .ilike('name', raw)
+      .limit(1)
+      .maybeSingle();
+
+    if (cData?.slug && cData?.state_id) {
+      const { data: sData } = await supabase
+        .from('states')
+        .select('slug')
+        .eq('id', cData.state_id)
+        .maybeSingle();
+
+      if (sData?.slug) {
+        return { stateSlug: sData.slug, citySlug: cData.slug };
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return { stateSlug: '', citySlug: '' };
 };
 
 const HeroSection = () => {
@@ -105,7 +156,6 @@ const HeroSection = () => {
   const handleSearch = async (e) => {
     e.preventDefault();
     const q0 = (query || '').trim();
-    if (!q0) return;
 
     // If user typed "... in delhi" inside query and left location empty, extract it.
     let finalLocationText = (location || '').trim();
@@ -122,12 +172,32 @@ const HeroSection = () => {
       }
     }
 
+    if (!finalQueryText && !finalLocationText) return;
+
+    const { stateSlug, citySlug } = await resolveLocationSlugs(finalLocationText);
+
+    if (!finalQueryText) {
+      navigate(buildVendorListingUrl(stateSlug, citySlug, finalLocationText));
+      return;
+    }
+
     const serviceSlug = slugify(finalQueryText);
     if (!serviceSlug) return;
 
-    const { stateSlug, citySlug } = await resolveLocationSlugs(finalLocationText);
-    const url = urlParser.createStructuredUrl(serviceSlug, stateSlug, citySlug);
-    navigate(url);
+    if (stateSlug || citySlug) {
+      navigate(urlParser.createStructuredUrl(serviceSlug, stateSlug, citySlug));
+      return;
+    }
+
+    if (finalLocationText) {
+      const params = new URLSearchParams();
+      params.set('q', finalQueryText);
+      params.set('loc', finalLocationText);
+      navigate(`/directory/search/${serviceSlug}?${params.toString()}`);
+      return;
+    }
+
+    navigate(urlParser.createStructuredUrl(serviceSlug, '', ''));
   };
 
   return (

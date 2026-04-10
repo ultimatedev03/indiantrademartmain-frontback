@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { directoryApi } from "@/modules/directory/services/directoryApi";
 import { vendorService } from "@/modules/directory/services/vendorService";
@@ -24,6 +24,8 @@ const VendorListing = () => {
   const [selectedCityId, setSelectedCityId] = useState("");
   const [pendingStateFilter, setPendingStateFilter] = useState(() => searchParams.get("state") || "");
   const [pendingCityFilter, setPendingCityFilter] = useState(() => searchParams.get("city") || "");
+  const lastUrlStateFilterRef = useRef(searchParams.get("state") || "");
+  const lastUrlCityFilterRef = useRef(searchParams.get("city") || "");
 
   const matchesParamValue = (entry, rawValue) => {
     const normalizedValue = String(rawValue || "").trim().toLowerCase();
@@ -41,6 +43,11 @@ const VendorListing = () => {
     const nextCityText = searchParams.get("cityText") || "";
     const nextState = searchParams.get("state") || "";
     const nextCity = searchParams.get("city") || "";
+    const stateParamChanged = nextState !== lastUrlStateFilterRef.current;
+    const cityParamChanged = nextCity !== lastUrlCityFilterRef.current;
+
+    lastUrlStateFilterRef.current = nextState;
+    lastUrlCityFilterRef.current = nextCity;
 
     setQ((prev) => (prev === nextQuery ? prev : nextQuery));
     setCityText((prev) => (prev === nextCityText ? prev : nextCityText));
@@ -50,7 +57,12 @@ const VendorListing = () => {
     if (!nextState) {
       setSelectedStateId("");
       setSelectedCityId("");
+    } else if (stateParamChanged) {
+      setSelectedStateId("");
+      setSelectedCityId("");
     } else if (!nextCity) {
+      setSelectedCityId("");
+    } else if (cityParamChanged) {
       setSelectedCityId("");
     }
   }, [searchParams]);
@@ -92,7 +104,7 @@ const VendorListing = () => {
   }, []);
 
   useEffect(() => {
-    if (!pendingStateFilter || states.length === 0) return;
+    if (!pendingStateFilter || states.length === 0 || selectedStateId) return;
 
     const matchedState = states.find((state) => matchesParamValue(state, pendingStateFilter));
     if (!matchedState) return;
@@ -104,8 +116,6 @@ const VendorListing = () => {
   }, [pendingStateFilter, selectedStateId, states]);
 
   useEffect(() => {
-    setSelectedCityId("");
-
     if (!selectedStateId) {
       setCities([]);
       setCitiesLoading(false);
@@ -141,7 +151,7 @@ const VendorListing = () => {
   }, [selectedStateId]);
 
   useEffect(() => {
-    if (!pendingCityFilter || cities.length === 0) return;
+    if (!pendingCityFilter || cities.length === 0 || selectedCityId) return;
 
     const matchedCity = cities.find((city) => matchesParamValue(city, pendingCityFilter));
     if (!matchedCity) return;
@@ -352,7 +362,6 @@ const VendorListing = () => {
             {/* City dropdown */}
             <select
               value={selectedCityId}
-              key={selectedStateId || 'all-states'}
               onChange={(e) => setSelectedCityId(e.target.value)}
               disabled={citySelectDisabled}
               aria-label="Filter vendors by city"

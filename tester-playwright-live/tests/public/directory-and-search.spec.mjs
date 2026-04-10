@@ -9,6 +9,7 @@ const vendorDirectoryCityInput = (page) => page.getByLabel(/search vendors by ci
 const directoryStateSelect = (page) => page.getByLabel(/select state/i);
 const directoryCitySelect = (page) => page.getByLabel(/select city/i);
 const homeSearchInput = (page) => page.getByLabel(/search products services or companies/i);
+const homeLocationInput = (page) => page.getByLabel(/search location/i);
 
 test('BUG-195 state dropdown on vendor directory is clickable and populated', async ({ page }) => {
   await page.goto('/directory/vendor', { waitUntil: 'domcontentloaded' });
@@ -103,4 +104,37 @@ test('BUG-229 BUG-230 BUG-231 product search can navigate using a typed keyword'
   await page.getByRole('button', { name: /^search$/i }).click();
   await page.waitForLoadState('domcontentloaded');
   await expect(page).toHaveURL(/\/directory\/search\/|\/directory\/.+/i);
+});
+
+test('BUG-423 homepage search supports location-only filtering', async ({ page }) => {
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await homeLocationInput(page).fill('uttar pradesh');
+  await page.getByRole('button', { name: /^search$/i }).click();
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page).toHaveURL(/\/directory\/vendor\?state=uttar-pradesh/i);
+});
+
+test('BUG-441 vendor directory city selection replaces previously searched city', async ({ page }) => {
+  await page.goto('/directory/vendor', { waitUntil: 'domcontentloaded' });
+
+  const stateSelect = vendorDirectoryStateSelect(page);
+  const citySelect = vendorDirectoryCitySelect(page);
+
+  await expect.poll(async () => optionCount(stateSelect)).toBeGreaterThan(1);
+  await selectFirstRealOption(stateSelect);
+  await expect(citySelect).toBeEnabled();
+  await expect.poll(async () => optionCount(citySelect)).toBeGreaterThan(2);
+
+  const cityOptions = citySelect.locator('option');
+  const firstCityValue = String(await cityOptions.nth(1).getAttribute('value') || '').trim();
+  const secondCityValue = String(await cityOptions.nth(2).getAttribute('value') || '').trim();
+  test.skip(!firstCityValue || !secondCityValue, 'At least two city options are required to validate city replacement.');
+
+  await citySelect.selectOption(firstCityValue);
+  await page.getByRole('button', { name: /^search$/i }).click();
+  await page.waitForLoadState('domcontentloaded');
+  await expect(citySelect).toHaveValue(firstCityValue);
+
+  await citySelect.selectOption(secondCityValue);
+  await expect(citySelect).toHaveValue(secondCityValue);
 });

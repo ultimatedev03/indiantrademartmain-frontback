@@ -180,6 +180,7 @@ export default function Vendors() {
   const [terminationReason, setTerminationReason] = useState("");
   const [processing, setProcessing] = useState(false);
   const loadRequestIdRef = useRef(0);
+  const abortControllerRef = useRef(null);
 
   const isTerminationReasonValid = useMemo(
     () => terminationReason.trim().length > 0,
@@ -204,14 +205,14 @@ export default function Vendors() {
   );
 
   const fetchVendorPage = useCallback(
-    async ({ limit = VENDOR_PAGE_SIZE, offset = 0 } = {}) => {
+    async ({ limit = VENDOR_PAGE_SIZE, offset = 0, signal } = {}) => {
       const params = buildVendorQueryParams({ limit, offset });
       const queryString = params.toString();
       const url = queryString
         ? `${ADMIN_API_BASE}/vendors?${queryString}`
         : `${ADMIN_API_BASE}/vendors`;
 
-      const res = await fetchWithCsrf(url);
+      const res = await fetchWithCsrf(url, { signal });
       const data = await safeReadJson(res);
       if (!data?.success) throw new Error(data?.error || "Failed");
 
@@ -229,18 +230,23 @@ export default function Vendors() {
   const load = useCallback(async () => {
     const requestId = loadRequestIdRef.current + 1;
     loadRequestIdRef.current = requestId;
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     setLoading(true);
     try {
       const offset = (currentPage - 1) * VENDOR_PAGE_SIZE;
       const { vendors: nextVendors, total } = await fetchVendorPage({
         limit: VENDOR_PAGE_SIZE,
         offset,
+        signal: controller.signal,
       });
 
-      if (requestId !== loadRequestIdRef.current) return;
+      if (requestId !== loadRequestIdRef.current || controller.signal.aborted) return;
       setVendors(nextVendors);
       setServerTotal(total);
     } catch (e) {
+      if (controller.signal.aborted || e?.name === "AbortError") return;
       if (requestId !== loadRequestIdRef.current) return;
       console.error(e);
       toast({
@@ -251,11 +257,25 @@ export default function Vendors() {
       setVendors([]);
       setServerTotal(0);
     } finally {
-      if (requestId === loadRequestIdRef.current) {
+      if (abortControllerRef.current === controller) {
+        abortControllerRef.current = null;
+      }
+      if (requestId === loadRequestIdRef.current && !controller.signal.aborted) {
         setLoading(false);
       }
     }
   }, [currentPage, fetchVendorPage, toast]);
+
+  useEffect(() => {
+    loadRequestIdRef.current += 1;
+    abortControllerRef.current?.abort();
+  }, [currentPage, filterActive, filterJoined, filterKyc, searchTerm]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
