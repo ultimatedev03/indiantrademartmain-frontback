@@ -25,8 +25,6 @@ const VendorListing = () => {
   const [pendingStateFilter, setPendingStateFilter] = useState(() => searchParams.get("state") || "");
   const [pendingCityFilter, setPendingCityFilter] = useState(() => searchParams.get("city") || "");
 
-  const FETCH_LIMIT = 2000;
-
   const matchesParamValue = (entry, rawValue) => {
     const normalizedValue = String(rawValue || "").trim().toLowerCase();
     if (!normalizedValue) return false;
@@ -63,7 +61,6 @@ const VendorListing = () => {
       try {
         // NOTE: If Supabase RLS policy filters is_active=true, then inactive vendors won't come at all.
         const data = await vendorService.getFeaturedVendors({
-          limit: FETCH_LIMIT,
           onlyActive: true,
           exhaustive: true,
         });
@@ -183,6 +180,7 @@ const VendorListing = () => {
       const ownerName = String(v?.owner_name || "").toLowerCase();
       const city = String(v?.city || "").toLowerCase();
       const state = String(v?.state || "").toLowerCase();
+      const location = `${city} ${state}`.trim();
       const primary = String(v?.primary_business_type || "").toLowerCase();
       const secondary = String(v?.secondary_business || "").toLowerCase();
       const description = String(v?.description || "").toLowerCase();
@@ -211,7 +209,7 @@ const VendorListing = () => {
       }
 
       // city text input
-      if (cityQ && !city.includes(cityQ)) return false;
+      if (cityQ && !city.includes(cityQ) && !state.includes(cityQ) && !location.includes(cityQ)) return false;
 
       // main search input
       if (query) {
@@ -313,6 +311,7 @@ const VendorListing = () => {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
+                aria-label="Search vendors by company, owner, service, or location"
                 placeholder="Search products or services..."
                 className="w-full outline-none text-sm"
               />
@@ -324,6 +323,7 @@ const VendorListing = () => {
               <input
                 value={cityText}
                 onChange={(e) => setCityText(e.target.value)}
+                aria-label="Search vendors by city name"
                 placeholder="Enter city name..."
                 className="w-full outline-none text-sm"
               />
@@ -338,6 +338,7 @@ const VendorListing = () => {
             <select
               value={selectedStateId}
               onChange={(e) => setSelectedStateId(e.target.value)}
+              aria-label="Filter vendors by state"
               className="border rounded-lg px-3 h-11 bg-white text-sm"
             >
               <option value="">All States</option>
@@ -354,6 +355,7 @@ const VendorListing = () => {
               key={selectedStateId || 'all-states'}
               onChange={(e) => setSelectedCityId(e.target.value)}
               disabled={citySelectDisabled}
+              aria-label="Filter vendors by city"
               aria-disabled={citySelectDisabled}
               title={!selectedStateId ? "Select a state first" : citiesLoading ? "Loading cities..." : "Select a city"}
               className="border rounded-lg px-3 h-11 bg-white text-sm disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"

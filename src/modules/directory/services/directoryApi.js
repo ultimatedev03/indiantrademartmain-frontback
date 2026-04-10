@@ -21,6 +21,26 @@ const normalizeMetaRows = (rows = []) =>
     micro_categories: r?.micro_categories ?? r?.micro_category_id ?? null,
   }));
 
+const sanitizeSearchValue = (value = '') =>
+  String(value || '')
+    .replace(/[(),]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildProductKeywordOrFilter = (value = '') => {
+  const normalizedText = sanitizeSearchValue(value);
+  const normalizedSlug = slugify(normalizedText);
+  const clauses = [
+    normalizedText ? `name.ilike.%${normalizedText}%` : '',
+    normalizedText ? `category.ilike.%${normalizedText}%` : '',
+    normalizedText ? `description.ilike.%${normalizedText}%` : '',
+    normalizedSlug ? `slug.ilike.%${normalizedSlug}%` : '',
+    normalizedSlug ? `category_slug.ilike.%${normalizedSlug}%` : '',
+  ].filter(Boolean);
+
+  return clauses.join(',');
+};
+
 const TOP_CITIES_TTL_MS = 5 * 60 * 1000;
 const topCitiesCache = new Map();
 const topCitiesPending = new Map();
@@ -327,7 +347,10 @@ export const directoryApi = {
       `, { count: 'exact' })
       .eq('status', 'ACTIVE');
 
-    if (q) query = query.ilike('name', `%${q}%`);
+    if (q) {
+      const keywordFilter = buildProductKeywordOrFilter(q);
+      if (keywordFilter) query = query.or(keywordFilter);
+    }
     if (stateId) query = query.eq('vendors.state_id', stateId);
     if (cityId) query = query.eq('vendors.city_id', cityId);
 
@@ -369,7 +392,10 @@ export const directoryApi = {
       if (micro) query = query.eq('micro_category_id', micro.id);
     }
 
-    if (q) query = query.ilike('name', `%${q}%`);
+    if (q) {
+      const keywordFilter = buildProductKeywordOrFilter(q);
+      if (keywordFilter) query = query.or(keywordFilter);
+    }
     if (stateId) query = query.eq('vendors.state_id', stateId);
     if (cityId) query = query.eq('vendors.city_id', cityId);
 

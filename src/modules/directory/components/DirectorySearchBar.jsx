@@ -337,6 +337,7 @@ const DirectorySearchBar = ({
 
           <Input
             placeholder="Search product/service"
+            aria-label="Search product or service"
             className={`pl-10 border-0 bg-transparent focus-visible:ring-0 rounded-none ${heightCls}`}
             value={serviceText}
             onChange={(e) => {
@@ -379,6 +380,7 @@ const DirectorySearchBar = ({
           <select
             className={`w-full ${heightCls} pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none`}
             value={selectedStateSlug}
+            aria-label="Select state"
             onChange={(e) => {
               setSelectedStateSlug(e.target.value);
               setSelectedCitySlug('');
@@ -409,9 +411,9 @@ const DirectorySearchBar = ({
           <select
             className={`w-full ${heightCls} pl-10 pr-8 bg-transparent border-0 focus:ring-0 text-sm text-gray-700 outline-none cursor-pointer appearance-none`}
             value={selectedCitySlug}
+            aria-label="Select city"
             onChange={(e) => setSelectedCitySlug(e.target.value)}
             disabled={!selectedStateSlug || loadingCities}
-            aria-label={cityPlaceholder}
           >
             <option value="">{cityPlaceholder}</option>
             {cities.map((c) => (

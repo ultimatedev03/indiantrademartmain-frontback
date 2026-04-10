@@ -1520,13 +1520,15 @@ export async function handler(event) {
       const parsedJoinedTo = joinedToRaw ? new Date(joinedToRaw) : null;
       const hasJoinedFrom = parsedJoinedFrom && !Number.isNaN(parsedJoinedFrom.getTime());
       const hasJoinedTo = parsedJoinedTo && !Number.isNaN(parsedJoinedTo.getTime());
-      const MAX_VENDOR_LIMIT = 5000;
+      const MAX_VENDOR_LIMIT = 1000;
       const safeLimit = Number.isFinite(parsedLimit) && parsedLimit > 0
         ? Math.min(parsedLimit, MAX_VENDOR_LIMIT)
         : MAX_VENDOR_LIMIT;
       const safeOffset = Number.isFinite(parsedOffset) && parsedOffset >= 0
         ? parsedOffset
         : 0;
+      const adminContext = await resolveAuthenticatedAdmin(event);
+      const adminScope = getAdminScopeFromEmployee(adminContext?.employee);
 
       let vendorQuery = supabase
         .from("vendors")
@@ -1535,7 +1537,11 @@ export async function handler(event) {
           { count: "exact" }
         )
         .order("created_at", { ascending: false })
-        .range(0, MAX_VENDOR_LIMIT - 1);
+        .range(safeOffset, safeOffset + safeLimit - 1);
+
+      if (adminScope) {
+        vendorQuery = vendorQuery.in("state", adminScope);
+      }
 
       const kyc = kycRaw.toUpperCase();
       if (kyc && kyc !== "ALL") {
@@ -1714,29 +1720,9 @@ export async function handler(event) {
         };
       });
 
-      result.sort((a, b) => {
-        const aAllDocs = a?.has_all_required_documents ? 1 : 0;
-        const bAllDocs = b?.has_all_required_documents ? 1 : 0;
-        if (bAllDocs !== aAllDocs) return bAllDocs - aAllDocs;
-
-        const aSubmitted = a?.has_submitted_kyc ? 1 : 0;
-        const bSubmitted = b?.has_submitted_kyc ? 1 : 0;
-        if (bSubmitted !== aSubmitted) return bSubmitted - aSubmitted;
-
-        const aDocCount = Number(a?.document_count || 0);
-        const bDocCount = Number(b?.document_count || 0);
-        if (bDocCount !== aDocCount) return bDocCount - aDocCount;
-
-        const aCreated = a?.created_at ? new Date(a.created_at).getTime() : 0;
-        const bCreated = b?.created_at ? new Date(b.created_at).getTime() : 0;
-        return bCreated - aCreated;
-      });
-
-      const paginatedResult = result.slice(safeOffset, safeOffset + safeLimit);
-
       return ok({
         success: true,
-        vendors: paginatedResult,
+        vendors: result,
         total: Number.isFinite(count) ? count : result.length,
         limit: safeLimit,
         offset: safeOffset,

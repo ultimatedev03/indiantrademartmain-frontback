@@ -140,10 +140,19 @@ export const vendorService = {
    * NOTE: We keep the original DB columns intact by spreading the row.
    */
   getFeaturedVendors: async (options = {}) => {
-    const limit = Math.max(1, Number(options?.limit || 6));
+    const parsedLimit = Number(options?.limit);
     const onlyActive = options?.onlyActive !== false;
     const exhaustive = options?.exhaustive === true;
-    const cacheKey = JSON.stringify({ limit, onlyActive, exhaustive });
+    const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+      ? Math.max(1, parsedLimit)
+      : exhaustive
+        ? Number.POSITIVE_INFINITY
+        : 6;
+    const cacheKey = JSON.stringify({
+      limit: Number.isFinite(limit) ? limit : 'all',
+      onlyActive,
+      exhaustive,
+    });
     const cached = getFreshCache(featuredVendorCache, cacheKey);
     if (cached) return cached;
 
@@ -155,7 +164,7 @@ export const vendorService = {
       let rows = [];
 
       if (exhaustive) {
-        const pageSize = Math.min(limit, 1000);
+        const pageSize = Number.isFinite(limit) ? Math.min(limit, 1000) : 1000;
         let from = 0;
 
         while (rows.length < limit) {

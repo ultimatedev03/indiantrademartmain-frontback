@@ -165,6 +165,7 @@ const HeroSection = () => {
               <Input
                 className="border-0 bg-transparent focus-visible:ring-0 px-0 h-14 text-slate-900 placeholder:text-slate-400 font-medium"
                 placeholder="Location (e.g. Mumbai)"
+                aria-label="Search location"
                 value={location}
                 onChange={(e) => setLocation(e.target.value)}
               />
@@ -176,6 +177,7 @@ const HeroSection = () => {
               <Input
                 className="border-0 bg-transparent focus-visible:ring-0 px-0 h-14 text-slate-900 placeholder:text-slate-400 font-medium"
                 placeholder="Search products, services, or companies..."
+                aria-label="Search products services or companies"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
