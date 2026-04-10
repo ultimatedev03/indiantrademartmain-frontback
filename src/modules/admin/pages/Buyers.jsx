@@ -108,36 +108,6 @@ function normalizeBuyersPayload(json) {
   return null;
 }
 
-const normalizeIdentityEmail = (value) => String(value || "").trim().toLowerCase();
-
-async function filterRowsToBuyerRole(rows = []) {
-  if (!Array.isArray(rows) || rows.length === 0) return [];
-
-  const { data: buyerUsers, error } = await supabase
-    .from("users")
-    .select("id, email")
-    .eq("role", "BUYER");
-
-  if (error) {
-    throw new Error(error.message || "Failed to validate buyer role records");
-  }
-
-  const buyerUserIds = new Set(
-    (buyerUsers || []).map((u) => String(u?.id || "").trim()).filter(Boolean)
-  );
-  const buyerEmails = new Set(
-    (buyerUsers || []).map((u) => normalizeIdentityEmail(u?.email)).filter(Boolean)
-  );
-
-  return rows.filter((row) => {
-    const rowUserId = String(row?.user_id || "").trim();
-    const rowEmail = normalizeIdentityEmail(row?.email);
-    if (rowUserId && buyerUserIds.has(rowUserId)) return true;
-    if (rowEmail && buyerEmails.has(rowEmail)) return true;
-    return false;
-  });
-}
-
 async function safeReadJson(res) {
   const ct = res.headers.get("content-type") || "";
   if (ct.includes("application/json")) return await res.json();
@@ -209,12 +179,6 @@ export default function Buyers() {
 
         if (error) throw error;
         list = data || [];
-      }
-
-      // Role safety for fallback path:
-      // in case server route is unavailable, ensure only BUYER role identities are rendered.
-      if (!loadedFromServer) {
-        list = await filterRowsToBuyerRole(list);
       }
 
       setAllBuyers(list);

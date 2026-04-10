@@ -68,8 +68,6 @@ async function writeAudit({ user_id = null, action, entity_type, entity_id = nul
 
 const nowIso = () => new Date().toISOString();
 const normalizeEmail = (value = "") => String(value || "").trim().toLowerCase();
-const normalizeIdentityEmail = (value) => normalizeEmail(value || "");
-
 const MIN_VALID_JOIN_DATE_MS = Date.UTC(2000, 0, 1);
 
 function normalizeEpochMs(value) {
@@ -174,36 +172,6 @@ async function resolveBuyerRecordForAdmin(buyerId) {
   if (byUserId.data) return { data: byUserId.data, error: null };
 
   return { data: null, error: null };
-}
-
-async function fetchBuyerRoleIdentitySets() {
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("id, email")
-    .eq("role", "BUYER");
-
-  if (error) throw new Error(error.message || "Failed to fetch buyer role users");
-
-  const buyerUserIds = new Set();
-  const buyerEmails = new Set();
-
-  (users || []).forEach((user) => {
-    if (user?.id) buyerUserIds.add(String(user.id));
-    const normalized = normalizeIdentityEmail(user?.email);
-    if (normalized) buyerEmails.add(normalized);
-  });
-
-  return { buyerUserIds, buyerEmails };
-}
-
-function filterRowsToBuyerRole(rows = [], { buyerUserIds, buyerEmails }) {
-  return (rows || []).filter((row) => {
-    const rowUserId = String(row?.user_id || "").trim();
-    const rowEmail = normalizeIdentityEmail(row?.email);
-    if (rowUserId && buyerUserIds.has(rowUserId)) return true;
-    if (rowEmail && buyerEmails.has(rowEmail)) return true;
-    return false;
-  });
 }
 
 function buildBuyerStatusUpdates(current, { isActive, reason = "" }) {
@@ -1386,15 +1354,7 @@ export async function handler(event) {
         const { data, error } = await query;
         if (error) return fail("Failed to fetch buyers", error.message);
 
-        let roleFilteredBuyers = data || [];
-        try {
-          const roleIdentitySets = await fetchBuyerRoleIdentitySets();
-          roleFilteredBuyers = filterRowsToBuyerRole(roleFilteredBuyers, roleIdentitySets);
-        } catch (roleErr) {
-          return fail("Failed to filter buyers by role", roleErr?.message || String(roleErr));
-        }
-
-        return ok({ success: true, buyers: roleFilteredBuyers });
+        return ok({ success: true, buyers: data || [] });
       }
 
       const isBuyerUpdateRoute =

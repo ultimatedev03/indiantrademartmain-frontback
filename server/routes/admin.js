@@ -185,36 +185,6 @@ async function resolveVendorRecordForAdmin(vendorId) {
 
 const normalizeIdentityEmail = (value) => normalizeEmail(value || "");
 
-async function fetchBuyerRoleIdentitySets() {
-  const { data: users, error } = await supabase
-    .from("users")
-    .select("id, email")
-    .eq("role", "BUYER");
-
-  if (error) throw new Error(error.message || "Failed to fetch buyer role users");
-
-  const buyerUserIds = new Set();
-  const buyerEmails = new Set();
-
-  (users || []).forEach((user) => {
-    if (user?.id) buyerUserIds.add(String(user.id));
-    const normalizedEmail = normalizeIdentityEmail(user?.email);
-    if (normalizedEmail) buyerEmails.add(normalizedEmail);
-  });
-
-  return { buyerUserIds, buyerEmails };
-}
-
-function filterRowsToBuyerRole(rows = [], { buyerUserIds, buyerEmails }) {
-  return (rows || []).filter((row) => {
-    const rowUserId = String(row?.user_id || "").trim();
-    const rowEmail = normalizeIdentityEmail(row?.email);
-    if (rowUserId && buyerUserIds.has(rowUserId)) return true;
-    if (rowEmail && buyerEmails.has(rowEmail)) return true;
-    return false;
-  });
-}
-
 function buildBuyerStatusUpdates(current, { isActive, reason = "" }) {
   const updates = { updated_at: new Date().toISOString() };
 
@@ -1082,10 +1052,7 @@ router.get("/buyers", async (req, res) => {
     if (error)
       return res.status(500).json({ success: false, error: error.message });
 
-    const roleIdentitySets = await fetchBuyerRoleIdentitySets();
-    const roleFilteredBuyers = filterRowsToBuyerRole(data || [], roleIdentitySets);
-
-    return res.json({ success: true, buyers: roleFilteredBuyers });
+    return res.json({ success: true, buyers: data || [] });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }
