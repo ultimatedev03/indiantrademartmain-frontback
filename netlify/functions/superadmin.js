@@ -242,6 +242,36 @@ const updateVendorPlanWithFallback = async (supabase, planId, updates) => {
   return retry;
 };
 
+const insertSuperadminWithFallback = async (supabase, payload) => {
+  const first = await supabase
+    .from('superadmin_users')
+    .insert([payload])
+    .select('id, email, role, is_active, created_at')
+    .maybeSingle();
+
+  if (!first?.error || !hasOwn(payload, 'full_name')) {
+    return first;
+  }
+
+  const text = `${first.error?.message || ''} ${first.error?.details || ''} ${first.error?.hint || ''}`.toLowerCase();
+  const missingFullName =
+    (text.includes(`'full_name'`) || text.includes(`"full_name"`) || text.includes('column "full_name"')) &&
+    (text.includes('schema cache') || text.includes('does not exist'));
+
+  if (!missingFullName) {
+    return first;
+  }
+
+  const retryPayload = { ...payload };
+  delete retryPayload.full_name;
+
+  return supabase
+    .from('superadmin_users')
+    .insert([retryPayload])
+    .select('id, email, role, is_active, created_at')
+    .maybeSingle();
+};
+
 const syncActivePlanQuota = async (supabase, planId, limits) => {
   if (!planId) return;
 
@@ -631,6 +661,23 @@ const requireSuperAdmin = async (event, supabase) => {
   };
 };
 
+const requireGodMode = async (event, supabase) => {
+  const guard = await requireSuperAdmin(event, supabase);
+  if (guard.response) return guard;
+
+  const role = normalizeRole(guard?.superadmin?.role || guard?.actor?.role || 'SUPERADMIN');
+  if (role !== 'GODMODE') {
+    return {
+      response: json(403, {
+        success: false,
+        error: 'GOD MODE access required. This action is restricted to the platform developer.',
+      }),
+    };
+  }
+
+  return guard;
+};
+
 const handleLogin = async (event, supabase, body) => {
   await assertCaptchaForNetlifyEvent(event, body, { action: 'superadmin_login' });
 
@@ -732,6 +779,175 @@ export const handler = async (event) => {
         details: { email: superadmin.email },
       });
       return json(200, { success: true });
+    }
+
+    if (tail[0] === 'godmode') {
+      const godmodeGuard = await requireGodMode(event, supabase);
+      if (godmodeGuard.response) return godmodeGuard.response;
+      const godmodeActor = godmodeGuard.actor;
+
+      if (event.httpMethod === 'GET' && tail[1] === 'superadmins' && tail.length === 2) {
+        const { data, error } = await supabase
+          .from('superadmin_users')
+          .select('id, email, role, is_active, last_login, created_at')
+          .order('created_at', { ascending: false });
+
+        if (error) return json(500, { success: false, error: error.message });
+
+        await writeAuditLog(supabase, {
+          actor: godmodeActor,
+          action: 'GODMODE_SUPERADMINS_VIEWED',
+          entityType: 'superadmin_users',
+          details: { count: data?.length || 0 },
+        });
+
+        return json(200, { success: true, superadmins: data || [] });
+      }
+
+      if (event.httpMethod === 'POST' && tail[1] === 'superadmins' && tail.length === 2) {
+        const email = normalizeEmail(body?.email);
+        const password = String(body?.password || '').trim();
+        const fullName = String(body?.full_name || '').trim();
+
+        if (!email || !password) {
+          return json(400, { success: false, error: 'email and password are required' });
+        }
+
+        const role = 'SUPERADMIN';
+        const { data: existing, error: existingError } = await supabase
+          .from('superadmin_users')
+          .select('id')
+          .eq('email', email)
+          .maybeSingle();
+
+        if (existingError) return json(500, { success: false, error: existingError.message });
+        if (existing?.id) {
+          return json(400, { success: false, error: 'A superadmin with this email already exists' });
+        }
+
+        const { data, error } = await insertSuperadminWithFallback(supabase, {
+          email,
+          full_name: fullName || email,
+          role,
+          password_hash: await hashPassword(password),
+          is_active: true,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        });
+
+        if (error) return json(500, { success: false, error: error.message });
+
+        await writeAuditLog(supabase, {
+          actor: godmodeActor,
+          action: 'SUPERADMIN_CREATED',
+          entityType: 'superadmin_users',
+          entityId: data?.id || null,
+          details: { email, role },
+        });
+
+        return json(200, { success: true, superadmin: data });
+      }
+
+      if (event.httpMethod === 'PUT' && tail[1] === 'superadmins' && tail[2] && tail[3] === 'toggle-active') {
+        const id = tail[2];
+        const { data: target, error: fetchError } = await supabase
+          .from('superadmin_users')
+          .select('id, email, role, is_active')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (fetchError) return json(500, { success: false, error: fetchError.message });
+        if (!target) return json(404, { success: false, error: 'Superadmin not found' });
+        if (normalizeRole(target.role) === 'GODMODE') {
+          return json(403, { success: false, error: 'Cannot deactivate GOD MODE account' });
+        }
+
+        const newStatus = !target.is_active;
+        const { data, error } = await supabase
+          .from('superadmin_users')
+          .update({ is_active: newStatus, updated_at: nowIso() })
+          .eq('id', id)
+          .select('id, email, role, is_active')
+          .maybeSingle();
+
+        if (error) return json(500, { success: false, error: error.message });
+
+        await writeAuditLog(supabase, {
+          actor: godmodeActor,
+          action: newStatus ? 'SUPERADMIN_ACTIVATED' : 'SUPERADMIN_DEACTIVATED',
+          entityType: 'superadmin_users',
+          entityId: id,
+          details: { email: target.email, role: target.role, is_active: newStatus },
+        });
+
+        return json(200, { success: true, superadmin: data });
+      }
+
+      if (event.httpMethod === 'DELETE' && tail[1] === 'superadmins' && tail[2] && tail.length === 3) {
+        const id = tail[2];
+        const { data: target, error: fetchError } = await supabase
+          .from('superadmin_users')
+          .select('id, email, role')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (fetchError) return json(500, { success: false, error: fetchError.message });
+        if (!target) return json(404, { success: false, error: 'Superadmin not found' });
+        if (normalizeRole(target.role) === 'GODMODE') {
+          return json(403, { success: false, error: 'Cannot delete GOD MODE account' });
+        }
+
+        const { error } = await supabase.from('superadmin_users').delete().eq('id', id);
+        if (error) return json(500, { success: false, error: error.message });
+
+        await writeAuditLog(supabase, {
+          actor: godmodeActor,
+          action: 'SUPERADMIN_DELETED',
+          entityType: 'superadmin_users',
+          entityId: id,
+          details: { email: target.email, role: target.role },
+        });
+
+        return json(200, { success: true });
+      }
+
+      if (event.httpMethod === 'PUT' && tail[1] === 'superadmins' && tail[2] && tail[3] === 'password') {
+        const id = tail[2];
+        const newPassword = String(body?.password || '').trim();
+
+        if (!newPassword || newPassword.length < 8) {
+          return json(400, { success: false, error: 'Password must be at least 8 characters' });
+        }
+
+        const { data: target, error: fetchError } = await supabase
+          .from('superadmin_users')
+          .select('id, email, role')
+          .eq('id', id)
+          .maybeSingle();
+
+        if (fetchError) return json(500, { success: false, error: fetchError.message });
+        if (!target) return json(404, { success: false, error: 'Superadmin not found' });
+        if (normalizeRole(target.role) === 'GODMODE') {
+          return json(403, { success: false, error: 'Use /password endpoint to change your own GOD MODE password' });
+        }
+
+        const { error } = await supabase
+          .from('superadmin_users')
+          .update({ password_hash: await hashPassword(newPassword), updated_at: nowIso() })
+          .eq('id', id);
+
+        if (error) return json(500, { success: false, error: error.message });
+
+        await writeAuditLog(supabase, {
+          actor: godmodeActor,
+          action: 'SUPERADMIN_PASSWORD_RESET',
+          entityType: 'superadmin_users',
+          entityId: id,
+          details: { email: target.email },
+        });
+
+        return json(200, { success: true });
+      }
     }
 
     if (event.httpMethod === 'GET' && tail[0] === 'employees' && tail.length === 1) {

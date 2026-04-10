@@ -119,6 +119,36 @@ async function ensureEmployeeAuthUser(employee, password) {
   return { userId, created };
 }
 
+async function insertSuperadminWithFallback(payload) {
+  const first = await supabase
+    .from('superadmin_users')
+    .insert([payload])
+    .select('id, email, role, is_active, created_at')
+    .maybeSingle();
+
+  if (!first?.error || !Object.prototype.hasOwnProperty.call(payload, 'full_name')) {
+    return first;
+  }
+
+  const text = `${first.error?.message || ''} ${first.error?.details || ''} ${first.error?.hint || ''}`.toLowerCase();
+  const missingFullName =
+    (text.includes(`'full_name'`) || text.includes(`"full_name"`) || text.includes('column "full_name"')) &&
+    (text.includes('schema cache') || text.includes('does not exist'));
+
+  if (!missingFullName) {
+    return first;
+  }
+
+  const retryPayload = { ...payload };
+  delete retryPayload.full_name;
+
+  return supabase
+    .from('superadmin_users')
+    .insert([retryPayload])
+    .select('id, email, role, is_active, created_at')
+    .maybeSingle();
+}
+
 function clampLimit(limit, fallback = 200, max = 1000) {
   const n = Number(limit);
   if (!Number.isFinite(n) || n <= 0) return fallback;
@@ -1817,19 +1847,15 @@ router.post('/godmode/superadmins', requireGodMode, async (req, res) => {
     const bcrypt = await import('bcryptjs');
     const password_hash = await bcrypt.default.hash(password, 10);
 
-    const { data, error } = await supabase
-      .from('superadmin_users')
-      .insert([{
-        email,
-        full_name: fullName || email,
-        role,
-        password_hash,
-        is_active: true,
-        created_at: nowIso(),
-        updated_at: nowIso(),
-      }])
-      .select('id, email, role, is_active, created_at')
-      .maybeSingle();
+    const { data, error } = await insertSuperadminWithFallback({
+      email,
+      full_name: fullName || email,
+      role,
+      password_hash,
+      is_active: true,
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    });
 
     if (error) return res.status(500).json({ success: false, error: error.message });
 
