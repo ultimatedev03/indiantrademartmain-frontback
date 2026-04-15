@@ -1,0 +1,2171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IndianTradeMart — Full System Audit</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; }
+
+    .hero {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 40%, #1a1a2e 100%);
+      padding: 48px 32px 32px;
+      text-align: center;
+      border-bottom: 2px solid #334155;
+    }
+    .hero h1 { font-size: 2.4rem; font-weight: 800; color: #f97316; letter-spacing: -1px; }
+    .hero p { color: #94a3b8; margin-top: 8px; font-size: 1rem; }
+
+    .toc {
+      display: flex; flex-wrap: wrap; gap: 10px;
+      justify-content: center; padding: 20px 32px;
+      background: #1e293b; border-bottom: 1px solid #334155;
+    }
+    .toc a {
+      background: #0f172a; border: 1px solid #334155; color: #38bdf8;
+      padding: 6px 16px; border-radius: 20px; font-size: 0.8rem;
+      text-decoration: none; transition: all 0.2s;
+    }
+    .toc a:hover { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
+
+    .section {
+      padding: 40px 24px;
+      border-bottom: 1px solid #1e293b;
+    }
+    .section:nth-child(even) { background: #0a0f1e; }
+
+    h2 {
+      font-size: 1.5rem; font-weight: 700; color: #f97316;
+      margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+    }
+    h2 .badge {
+      font-size: 0.65rem; font-weight: 600; background: #1e3a5f;
+      color: #60a5fa; padding: 3px 10px; border-radius: 12px;
+      border: 1px solid #2563eb;
+    }
+    .sub-desc { color: #94a3b8; font-size: 0.875rem; margin-bottom: 24px; }
+
+    /* ── diagram wrapper with scroll hint ── */
+    .diagram-outer {
+      position: relative;
+    }
+    .diagram-wrap {
+      background: #fff; border-radius: 12px;
+      padding: 24px; overflow-x: auto;
+      box-shadow: 0 0 40px rgba(0,0,0,0.4);
+      scroll-behavior: smooth;
+      cursor: grab;
+    }
+    .diagram-wrap:active { cursor: grabbing; }
+    .diagram-wrap .mermaid { min-width: 900px; }
+
+    /* fade edges when scrollable */
+    .diagram-outer::before,
+    .diagram-outer::after {
+      content: '';
+      position: absolute; top: 0; bottom: 0; width: 60px;
+      pointer-events: none; z-index: 2;
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .diagram-outer::before {
+      left: 0; border-radius: 12px 0 0 12px;
+      background: linear-gradient(to right, rgba(15,23,42,0.7), transparent);
+    }
+    .diagram-outer::after {
+      right: 0; border-radius: 0 12px 12px 0;
+      background: linear-gradient(to left, rgba(15,23,42,0.7), transparent);
+    }
+    .diagram-outer.can-scroll-left::before  { opacity: 1; }
+    .diagram-outer.can-scroll-right::after  { opacity: 1; }
+
+    /* scroll arrow buttons */
+    .scroll-btn {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      z-index: 10; width: 36px; height: 36px; border-radius: 50%;
+      background: #f97316; border: none; color: #fff;
+      font-size: 1rem; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      transition: all 0.2s; user-select: none;
+      opacity: 0; pointer-events: none;
+    }
+    .scroll-btn:hover { background: #ea580c; transform: translateY(-50%) scale(1.1); }
+    .diagram-outer.can-scroll-left  .scroll-btn.sl  { opacity: 1; pointer-events: auto; }
+    .diagram-outer.can-scroll-right .scroll-btn.sr  { opacity: 1; pointer-events: auto; }
+    .scroll-btn.sl { left:  -14px; }
+    .scroll-btn.sr { right: -14px; }
+
+    /* swipe hint badge — shows once, fades out */
+    .swipe-hint {
+      position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+      background: rgba(249,115,22,0.9); color: #fff;
+      font-size: 0.7rem; padding: 4px 14px; border-radius: 20px;
+      white-space: nowrap; pointer-events: none; z-index: 10;
+      animation: swipeHintAnim 2.8s ease forwards;
+    }
+    @keyframes swipeHintAnim {
+      0%   { opacity: 0; transform: translateX(-50%) translateY(6px); }
+      20%  { opacity: 1; transform: translateX(-50%) translateY(0); }
+      70%  { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media(max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+
+    .info-card {
+      background: #1e293b; border: 1px solid #334155;
+      border-radius: 10px; padding: 20px;
+    }
+    .info-card h3 { color: #38bdf8; font-size: 1rem; margin-bottom: 12px; }
+    .info-card ul { list-style: none; }
+    .info-card ul li {
+      padding: 5px 0; border-bottom: 1px solid #0f172a;
+      font-size: 0.82rem; color: #cbd5e1;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .info-card ul li:last-child { border: none; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green { background: #22c55e; }
+    .dot.blue { background: #3b82f6; }
+    .dot.orange { background: #f97316; }
+    .dot.purple { background: #a855f7; }
+    .dot.red { background: #ef4444; }
+    .dot.yellow { background: #eab308; }
+
+    .tech-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px;
+    }
+    .tech-item {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 12px; text-align: center;
+    }
+    .tech-item .icon { font-size: 1.5rem; }
+    .tech-item .name { font-size: 0.75rem; color: #38bdf8; font-weight: 600; margin-top: 4px; }
+    .tech-item .desc { font-size: 0.65rem; color: #64748b; margin-top: 2px; }
+
+    .route-table {
+      width: 100%; border-collapse: collapse; font-size: 0.8rem;
+    }
+    .route-table th {
+      background: #1e3a5f; color: #60a5fa; padding: 10px 12px;
+      text-align: left; font-weight: 600;
+    }
+    .route-table td {
+      padding: 8px 12px; border-bottom: 1px solid #1e293b; color: #cbd5e1;
+    }
+    .route-table tr:hover td { background: #1e293b; }
+    .method {
+      display: inline-block; padding: 2px 8px; border-radius: 4px;
+      font-size: 0.7rem; font-weight: 700;
+    }
+    .get { background: #166534; color: #86efac; }
+    .post { background: #1e3a5f; color: #93c5fd; }
+    .put { background: #713f12; color: #fde68a; }
+    .delete { background: #7f1d1d; color: #fca5a5; }
+    .patch { background: #4c1d95; color: #d8b4fe; }
+
+    footer {
+      text-align: center; padding: 32px;
+      color: #475569; font-size: 0.8rem;
+      background: #020617;
+    }
+    code {
+      background: #0f172a; border: 1px solid #334155;
+      color: #34d399; font-family: 'Consolas', monospace;
+      font-size: 0.75rem; padding: 1px 6px; border-radius: 4px;
+    }
+    h3 { font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>🇮🇳 IndianTradeMart — Full System Audit</h1>
+  <p>Complete architecture, flows, routes, and components — Buyer + Vendor + Admin</p>
+  <p style="color:#475569;font-size:0.75rem;margin-top:6px;">Generated: April 2026 | Stack: React + Node.js + Supabase + Razorpay</p>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<div class="toc">
+  <a href="#s1">1. Full System Map</a>
+  <a href="#s2">2. Buyer Flow</a>
+  <a href="#s3">3. Vendor Flow</a>
+  <a href="#s4">4. Auth Flow</a>
+  <a href="#s5">5. Payment Flow</a>
+  <a href="#s6">6. Admin Flow</a>
+  <a href="#s7">7. Database Schema</a>
+  <a href="#s8">8. API Routes</a>
+  <a href="#s9">9. Tech Stack</a>
+  <a href="#s10">10. Subdomain Map</a>
+  <a href="#s11">11. Context Providers</a>
+  <a href="#s12">12. Backend Services</a>
+  <a href="#s13">13. Middleware Chain</a>
+  <a href="#s14">14. Lead Lifecycle</a>
+  <a href="#s15">15. Category Tree</a>
+  <a href="#s16">16. Notifications</a>
+  <a href="#s17">17. File Uploads</a>
+  <a href="#s18">18. Referral Program</a>
+  <a href="#s19">19. ENV Variables</a>
+  <a href="#s20">20. Route Guards</a>
+  <a href="#s21">21. Search Ranking</a>
+  <a href="#s22">22. AI Chatbot</a>
+  <a href="#s23">23. File Tree</a>
+</div>
+
+
+<!-- =====================================================
+     SECTION 1: FULL SYSTEM MAP (BIG DIAGRAM)
+===================================================== -->
+<div class="section" id="s1">
+  <h2>1. <span>Full Platform Architecture — Big Picture</span> <span class="badge">COMPLETE HIERARCHY</span></h2>
+  <p class="sub-desc">Poora system ek jagah — Buyer, Vendor, Admin, Employee, Database, APIs, Third-party services sab kuch</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph TD
+    %% === USERS ===
+    subgraph USERS["👥 Platform Users"]
+        B["🛒 BUYER\n(B2B Purchaser)"]
+        V["🏭 VENDOR\n(Seller/Manufacturer)"]
+        EMP["👔 EMPLOYEE\n(Admin/Support/Sales/HR/Finance)"]
+        SA["🔑 SUPER ADMIN\n(God Mode)"]
+    end
+
+    %% === ENTRY POINTS ===
+    subgraph ENTRY["🌐 Entry Points (Subdomains)"]
+        DIR["indiantrademart.com\n(Public Directory)"]
+        BSUB["buyer.indiantrademart.com\n(Buyer Portal)"]
+        VSUB["vendor.indiantrademart.com\n(Vendor Portal)"]
+        ASUB["admin.indiantrademart.com\n(Admin Portal)"]
+    end
+
+    %% === FRONTEND ===
+    subgraph FRONTEND["⚛️ React Frontend (Vite SPA)"]
+        subgraph DIRMOD["📂 Directory Module"]
+            DH["Home Page"]
+            DPROD["Product Pages"]
+            DVEN["Vendor Profiles"]
+            DSEARCH["Search & Filter"]
+            DSTATIC["Static Pages\nAbout/Pricing/Contact"]
+        end
+        subgraph BUYMOD["📂 Buyer Module"]
+            BL["Login/Register"]
+            BDASH["Dashboard"]
+            BPROP["Create RFQ/Proposal"]
+            BPROPLIST["View Proposals"]
+            BMSG["Messages"]
+            BFAV["Favorites"]
+            BTIX["Support Tickets"]
+        end
+        subgraph VENDMOD["📂 Vendor Module"]
+            VL["Login/Register"]
+            VDASH["Dashboard"]
+            VPROD["Product Management"]
+            VLEADS["Leads (RFQ Inbox)"]
+            VQUOTE["Send Quotation"]
+            VPROFILE["Profile & KYC"]
+            VPLAN["Subscription Plans"]
+            VANALYTICS["Analytics"]
+            VREFERRAL["Referral Program"]
+            VSUPPORT["Support Tickets"]
+        end
+        subgraph ADMINMOD["📂 Admin/Employee Module"]
+            ADASH["Admin Dashboard"]
+            AVENDORS["Manage Vendors"]
+            ABUYERS["Manage Buyers"]
+            AKYC["KYC Approval"]
+            ASTAFF["Staff Management"]
+            AFIN["Finance Reports"]
+            ASUBS["Subscription Requests"]
+            AAUDIT["Audit Logs"]
+            ACAT["Category Management"]
+        end
+    end
+
+    %% === BACKEND ===
+    subgraph BACKEND["🖥️ Express.js Backend (Node.js :3001)"]
+        subgraph MIDDLEWARE["🔒 Middleware Layer"]
+            MW1["requireAuth (JWT)"]
+            MW2["requireEmployeeRoles"]
+            MW3["Rate Limiter"]
+            MW4["Input Sanitizer"]
+            MW5["CORS Handler"]
+        end
+        subgraph ROUTES["📡 API Routes (203 endpoints)"]
+            RAUTH["/api/auth"]
+            ROTP["/api/otp"]
+            RVENDOR["/api/vendors"]
+            RBUYER["/api/buyers"]
+            RPAYMENT["/api/payment"]
+            RQUOTE["/api/quotation"]
+            RDIR["/api/dir"]
+            RADMIN["/api/admin"]
+            RFIN["/api/finance"]
+            RSUPPORT["/api/support"]
+            RKYC["/api/kyc"]
+            REMP["/api/employee"]
+            RREF["/api/referrals"]
+            RTERRITORY["/api/territory"]
+            RSA["/api/superadmin"]
+            RCHAT["/api/chat"]
+        end
+        subgraph SERVICES["⚙️ Backend Services"]
+            SVC1["Auth Service\n(JWT + bcrypt)"]
+            SVC2["Payment Service\n(Razorpay)"]
+            SVC3["Email Service\n(SMTP/Gmail)"]
+            SVC4["Invoice Generator\n(jsPDF)"]
+            SVC5["Notification Service"]
+            SVC6["Lead Consumption\nTracking"]
+            SVC7["Referral Program"]
+            SVC8["Subscription Cron Jobs"]
+            SVC9["Audit Logger"]
+        end
+    end
+
+    %% === DATABASE ===
+    subgraph DATABASE["🗄️ Supabase (PostgreSQL)"]
+        subgraph TABLES["Core Tables"]
+            T1["users / vendors / buyers\n/ employees"]
+            T2["products / product_images\n/ categories (3 levels)"]
+            T3["leads / proposals / quotations"]
+            T4["vendor_plan_subscriptions\n/ vendor_payments"]
+            T5["support_tickets\n/ ticket_messages"]
+            T6["notifications\n/ chatbot_history"]
+            T7["states / cities / regions\n/ geo_divisions"]
+            T8["audit_logs / system_config\n/ page_status"]
+            T9["vendor_referral_wallets\n/ referral_ledger"]
+        end
+        STORAGE["📦 Supabase Storage\n(avatars/products/documents)"]
+        REALTIME["⚡ Supabase Realtime\n(live notifications)"]
+        SBAUTH["🔐 Supabase Auth\n(User management)"]
+    end
+
+    %% === THIRD PARTY ===
+    subgraph THIRDPARTY["🔌 Third-Party Services"]
+        RAZORPAY["💳 Razorpay\n(Payments)"]
+        OPENAI["🤖 OpenAI / Groq\n(AI Chatbot)"]
+        GMAIL["📧 Gmail SMTP\n(Transactional Emails)"]
+        NETLIFY["☁️ Netlify\n(Frontend Deploy)"]
+    end
+
+    %% === CONNECTIONS ===
+    B --> DIR & BSUB
+    V --> VSUB
+    EMP --> ASUB
+    SA --> ASUB
+
+    DIR --> DIRMOD
+    BSUB --> BUYMOD
+    VSUB --> VENDMOD
+    ASUB --> ADMINMOD
+
+    DIRMOD & BUYMOD & VENDMOD & ADMINMOD --> BACKEND
+
+    BACKEND --> DATABASE
+    BACKEND --> THIRDPARTY
+
+    SVC2 --> RAZORPAY
+    SVC3 --> GMAIL
+    RCHAT --> OPENAI
+    SBAUTH --> RAUTH
+
+    REALTIME --> BUYMOD
+    REALTIME --> VENDMOD
+
+    classDef user fill:#1e3a5f,stroke:#3b82f6,color:#93c5fd
+    classDef entry fill:#14532d,stroke:#22c55e,color:#86efac
+    classDef module fill:#1c1917,stroke:#78716c,color:#d6d3d1
+    classDef route fill:#1e1b4b,stroke:#6366f1,color:#a5b4fc
+    classDef svc fill:#2d1657,stroke:#9333ea,color:#d8b4fe
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#7dd3fc
+    classDef tp fill:#450a0a,stroke:#ef4444,color:#fca5a5
+
+    class B,V,EMP,SA user
+    class DIR,BSUB,VSUB,ASUB entry
+    class DIRMOD,BUYMOD,VENDMOD,ADMINMOD module
+    class RAUTH,ROTP,RVENDOR,RBUYER,RPAYMENT,RQUOTE,RDIR,RADMIN,RFIN,RSUPPORT,RKYC,REMP,RREF,RTERRITORY,RSA,RCHAT route
+    class SVC1,SVC2,SVC3,SVC4,SVC5,SVC6,SVC7,SVC8,SVC9 svc
+    class T1,T2,T3,T4,T5,T6,T7,T8,T9,STORAGE,REALTIME,SBAUTH db
+    class RAZORPAY,OPENAI,GMAIL,NETLIFY tp
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 2: BUYER FLOW
+===================================================== -->
+<div class="section" id="s2">
+  <h2>2. <span>Buyer — Complete Journey</span> <span class="badge">BUYER FLOW</span></h2>
+  <p class="sub-desc">Registration se lekar RFQ bhejne tak, quotation milne tak — poora buyer ka safar</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+    START([🌐 Buyer visits indiantrademart.com]) --> HOME[Home Page\n/]
+
+    HOME --> BROWSE{Browse\nProducts?}
+    BROWSE -->|Yes| SEARCH[Search / Directory\n/search or /directory]
+    BROWSE -->|No| REG[Register as Buyer\n/buyer/register]
+
+    SEARCH --> PRODPAGE[Product Detail Page\n/products/:slug]
+    PRODPAGE --> VENDPAGE[View Vendor Profile\n/vendors/:vendorSlug]
+    VENDPAGE --> INTREST{Interested?}
+
+    INTREST -->|Not logged in| REG
+    INTREST -->|Logged in| CREATEPROP[Create RFQ / Proposal\n/buyer/create-proposal]
+
+    REG --> REGFORM["Fill Form:\n• Email & Password\n• Full Name\n• Company Name\n• Phone, City, State"]
+    REGFORM --> REGAPI[POST /api/auth/register]
+    REGAPI --> REGDB[(buyers table\ncreated)]
+    REGDB --> LOGIN_PAGE[Redirect to Login\n/buyer/login]
+
+    LOGIN_PAGE --> LOGIN["Enter Email + Password"]
+    LOGIN --> LOGINAPI[POST /api/auth/login]
+    LOGINAPI --> JWT["JWT Token Issued\n(stored in cookie)"]
+    JWT --> BDASH[Buyer Dashboard\n/buyer/dashboard]
+
+    BDASH --> ACTIONS{Buyer Actions}
+    ACTIONS --> CREATEPROP
+    ACTIONS --> FAVORITES[Manage Favorites\n/buyer/favorites]
+    ACTIONS --> MSGS[Messages\n/buyer/messages]
+    ACTIONS --> TICKETS[Support Tickets\n/buyer/tickets]
+    ACTIONS --> PROFILE[Edit Profile\n/buyer/profile]
+
+    CREATEPROP --> PROPFORM["Fill RFQ:\n• Category (Head/Sub/Micro)\n• Product details\n• Quantity & Budget\n• Delivery timeline\n• Location/State"]
+    PROPFORM --> PROPAPI[POST /buyer/proposals]
+    PROPAPI --> PROPDB[(proposals table\ncreated)]
+    PROPDB --> NOTIF[📧 Notification sent\nto matched Vendors]
+
+    NOTIF --> VENDOR_RESPOND[Vendors respond with Quotations]
+    VENDOR_RESPOND --> PROPLIST[View Proposals\n/buyer/proposals]
+    PROPLIST --> PROPDETAIL[Proposal Detail\n/buyer/proposals/:id]
+    PROPDETAIL --> COMPARE[Compare Vendor Quotes]
+    COMPARE --> ACCEPT{Accept Offer?}
+    ACCEPT -->|Yes| DOWNLOAD[Download Quotation PDF]
+    ACCEPT -->|No| REJECT[Reject / Counter]
+
+    MSGS --> CHAT["Real-time chat\nwith Vendor\n(Supabase Realtime)"]
+    CHAT --> SHAREPDF[Share files, PDFs]
+
+    FAVORITES --> SAVEVEND[Save Vendors for later]
+    TICKETS --> CREATETIX["Create Support Ticket\n• Subject + Description\n• Attach Documents"]
+    CREATETIX --> ADMINALERT[Admin/Support team notified]
+
+    classDef start fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef action fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef api fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+    classDef decision fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef email fill:#450a0a,stroke:#ef4444,color:#fee2e2
+
+    class START start
+    class REGAPI,LOGINAPI,PROPAPI api
+    class REGDB,PROPDB db
+    class BROWSE,INTREST,ACTIONS,ACCEPT decision
+    class NOTIF,ADMINALERT email
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:20px;">
+    <div class="info-card">
+      <h3>Buyer Key Pages</h3>
+      <ul>
+        <li><span class="dot green"></span>/buyer/dashboard — Overview stats</li>
+        <li><span class="dot blue"></span>/buyer/create-proposal — New RFQ</li>
+        <li><span class="dot blue"></span>/buyer/proposals — All RFQs sent</li>
+        <li><span class="dot blue"></span>/buyer/proposals/:id — Quote detail</li>
+        <li><span class="dot orange"></span>/buyer/messages — Chat with vendors</li>
+        <li><span class="dot orange"></span>/buyer/favorites — Saved vendors</li>
+        <li><span class="dot purple"></span>/buyer/tickets — Support tickets</li>
+        <li><span class="dot purple"></span>/buyer/profile — Edit profile</li>
+        <li><span class="dot red"></span>/buyer/account-suspended — If suspended</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Buyer API Endpoints</h3>
+      <ul>
+        <li><span class="dot blue"></span>POST /api/auth/register</li>
+        <li><span class="dot blue"></span>POST /api/auth/login</li>
+        <li><span class="dot green"></span>GET /api/auth/me</li>
+        <li><span class="dot orange"></span>PATCH /api/auth/buyer/profile</li>
+        <li><span class="dot blue"></span>POST /api/otp/request</li>
+        <li><span class="dot blue"></span>POST /api/otp/verify</li>
+        <li><span class="dot green"></span>GET /api/dir/search</li>
+        <li><span class="dot blue"></span>POST /api/support/tickets</li>
+        <li><span class="dot green"></span>GET /api/support/tickets</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 3: VENDOR FLOW
+===================================================== -->
+<div class="section" id="s3">
+  <h2>3. <span>Vendor — Complete Journey</span> <span class="badge">VENDOR FLOW</span></h2>
+  <p class="sub-desc">Registration se subscription, KYC approval, product listing, lead management, quotation bhejne tak</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+    A([Vendor Portal Entry]) --> B[Register /vendor/register]
+    B --> C["Fill Form: Email, Password\nCompany Name, GST, Phone"]
+    C --> D[POST /api/auth/register]
+    D --> E[(vendors table created)]
+    E --> F[Email Verification /vendor/verify]
+    F --> G[Login /vendor/login]
+    G --> H[JWT Token Issued]
+    H --> I[Vendor Dashboard /vendor/dashboard]
+
+    I --> J{Choose Action}
+    J --> K[Complete KYC]
+    J --> L[Subscribe to Plan]
+    J --> M[Add Products]
+    J --> N[View Leads]
+    J --> O[Other Features]
+
+    K --> K1["Upload KYC Docs\nGST, PAN, Aadhaar, Bank Statement"]
+    K1 --> K2[POST /api/vendors/documents]
+    K2 --> K3[(vendor_documents table)]
+    K3 --> K4[Pending Admin Review]
+    K4 --> K5{Admin Decision}
+    K5 -->|Approved| K6[KYC Approved - Active]
+    K5 -->|Rejected| K7[Resubmit Documents]
+
+    L --> L1["Select Plan\nTRIAL / STARTUP / CERTIFIED\nBOOSTER / SILVER / GOLD / DIAMOND"]
+    L1 --> L2{Have Coupon?}
+    L2 -->|Yes| L3[POST /api/payment/coupons/validate]
+    L2 -->|No| L4[POST /api/payment/initiate]
+    L3 --> L4
+    L4 --> L5["Razorpay Checkout\nUser completes payment"]
+    L5 --> L6["POST /api/payment/verify\nHMAC-SHA256 check"]
+    L6 --> L7[(vendor_plan_subscriptions)]
+    L7 --> L8["Invoice PDF Generated\nEmailed to Vendor"]
+
+    M --> M1["Product Form\nName, Category, Price, MOQ"]
+    M1 --> M2["Upload Images and Videos\nSupabase Storage"]
+    M2 --> M3[POST /api/vendors/products]
+    M3 --> M4[(products table)]
+    M4 --> M5[Product Live on Directory]
+
+    N --> N1[(leads table - based on plan quota)]
+    N1 --> N2[Lead Detail /vendor/leads/:id]
+    N2 --> N3[Send Quotation]
+    N3 --> N4["Quotation Form\nPrice, Delivery Terms, Validity"]
+    N4 --> N5[POST /api/quotation]
+    N5 --> N6[PDF Generated and Emailed to Buyer]
+    N6 --> N7[(quotations table)]
+
+    O --> O1[Analytics /vendor/analytics]
+    O --> O2[Messages /vendor/messages]
+    O --> O3[Referrals /vendor/referrals]
+    O --> O4[Coverage Settings]
+    O3 --> O5[Generate Referral Code]
+    O5 --> O6[(Referral Wallet - Credit earned)]
+    O6 --> O7[Request Cashout via Finance]
+
+    classDef start fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef api fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+    classDef decision fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef success fill:#14532d,stroke:#22c55e,color:#dcfce7
+    classDef email fill:#7f1d1d,stroke:#ef4444,color:#fee2e2
+
+    class A start
+    class D,H,K2,L3,L4,L6,M3,N5 api
+    class E,K3,L7,M4,N1,N7,O6 db
+    class J,L2,K5 decision
+    class K6,M5 success
+    class L8,N6 email
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:20px;">
+    <div class="info-card">
+      <h3>Vendor Subscription Plans</h3>
+      <ul>
+        <li><span class="dot green"></span>TRIAL — Free (limited)</li>
+        <li><span class="dot blue"></span>STARTUP — ₹5,000/month</li>
+        <li><span class="dot blue"></span>CERTIFIED — ₹15,000/month</li>
+        <li><span class="dot orange"></span>BOOSTER — ₹25,000/month</li>
+        <li><span class="dot orange"></span>SILVER — ₹40,000/month</li>
+        <li><span class="dot yellow"></span>GOLD — ₹75,000/month</li>
+        <li><span class="dot red"></span>DIAMOND — ₹1,50,000/month</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Vendor Key Features</h3>
+      <ul>
+        <li><span class="dot green"></span>Product listing + images/videos</li>
+        <li><span class="dot blue"></span>Lead inbox (RFQ from buyers)</li>
+        <li><span class="dot blue"></span>Quotation PDF via email</li>
+        <li><span class="dot orange"></span>KYC document upload</li>
+        <li><span class="dot purple"></span>Referral program + wallet</li>
+        <li><span class="dot yellow"></span>Geographic coverage settings</li>
+        <li><span class="dot red"></span>Analytics dashboard</li>
+        <li><span class="dot green"></span>Real-time messaging</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 4: AUTHENTICATION FLOW
+===================================================== -->
+<div class="section" id="s4">
+  <h2>4. <span>Authentication System</span> <span class="badge">AUTH FLOW</span></h2>
+  <p class="sub-desc">Sabke liye alag auth — Buyer, Vendor, Employee, SuperAdmin — JWT + Supabase Auth + OTP</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as 👤 User (Browser)
+    participant FE as ⚛️ React Frontend
+    participant BE as 🖥️ Express Backend
+    participant DB as 🗄️ Supabase DB
+    participant EMAIL as 📧 SMTP/Gmail
+
+    Note over U,EMAIL: === OTP Based Login ===
+    U->>FE: Enter Email for OTP
+    FE->>BE: POST /api/otp/request {email}
+    BE->>DB: Check user exists
+    BE->>EMAIL: Send 6-digit OTP (2 min TTL)
+    EMAIL-->>U: OTP received in inbox
+    U->>FE: Enter OTP code
+    FE->>BE: POST /api/otp/verify {email, otp}
+    BE->>DB: Verify OTP (not expired, not used)
+    BE-->>FE: 200 OK + JWT Token
+    FE->>FE: Store JWT in cookie (httpOnly)
+
+    Note over U,EMAIL: === Email + Password Login ===
+    U->>FE: Enter email + password
+    FE->>BE: POST /api/auth/login {email, password}
+    BE->>DB: Fetch user by email
+    BE->>BE: bcrypt.compare(password, hash)
+    alt Password correct
+        BE->>BE: Generate JWT {sub, email, role, exp}
+        BE-->>FE: 200 OK + Set-Cookie: token=JWT
+        FE->>FE: Decode role from JWT
+        FE-->>U: Redirect to correct dashboard
+    else Wrong password
+        BE-->>FE: 401 Unauthorized
+        FE-->>U: Show error message
+    end
+
+    Note over U,EMAIL: === Protected Route Access ===
+    U->>FE: Navigate to /vendor/leads
+    FE->>FE: Check AuthContext (JWT in cookie)
+    FE->>BE: GET /api/vendors/leads\nAuthorization: Bearer JWT
+    BE->>BE: requireAuth() middleware\nVerify JWT signature + expiry
+    alt Valid Token
+        BE->>DB: Fetch leads for vendor
+        DB-->>BE: Leads data
+        BE-->>FE: 200 OK + leads
+        FE-->>U: Render leads page
+    else Expired/Invalid
+        BE-->>FE: 401 Unauthorized
+        FE->>FE: Clear auth context
+        FE-->>U: Redirect to /vendor/login
+    end
+
+    Note over U,EMAIL: === Employee/Admin Login ===
+    U->>FE: POST /api/employee/login
+    BE->>DB: SELECT from employees table
+    BE->>BE: Check role + state_scope
+    BE->>BE: Generate JWT with role claims
+    BE-->>FE: Token + role metadata
+    FE->>FE: Load correct module\n(ADMIN/FINANCE/SUPPORT/HR/SALES)
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:20px;">
+    <div class="info-card">
+      <h3>User Roles in System</h3>
+      <ul>
+        <li><span class="dot green"></span>VENDOR — Seller accounts</li>
+        <li><span class="dot blue"></span>BUYER — Purchase accounts</li>
+        <li><span class="dot red"></span>SUPERADMIN — Full platform access</li>
+        <li><span class="dot orange"></span>ADMIN — Platform management</li>
+        <li><span class="dot purple"></span>HR — Human resources</li>
+        <li><span class="dot yellow"></span>FINANCE — Financial reports</li>
+        <li><span class="dot blue"></span>SUPPORT — Customer support</li>
+        <li><span class="dot green"></span>SALES — Sales operations</li>
+        <li><span class="dot orange"></span>MANAGER — Sales manager</li>
+        <li><span class="dot purple"></span>VP — Vice president</li>
+        <li><span class="dot blue"></span>DATA_ENTRY — Data operators</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Security Layers</h3>
+      <ul>
+        <li><span class="dot red"></span>bcryptjs password hashing</li>
+        <li><span class="dot orange"></span>JWT tokens (httpOnly cookies)</li>
+        <li><span class="dot orange"></span>CSRF token protection</li>
+        <li><span class="dot yellow"></span>OTP: 5 requests / 15 minutes</li>
+        <li><span class="dot blue"></span>Auth: 200 requests / minute</li>
+        <li><span class="dot blue"></span>API: 300 requests / minute</li>
+        <li><span class="dot purple"></span>Input sanitization (XSS)</li>
+        <li><span class="dot green"></span>NoSQL injection prevention</li>
+        <li><span class="dot green"></span>State-scoped admin access</li>
+        <li><span class="dot red"></span>Supabase Row Level Security (RLS)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 5: PAYMENT FLOW
+===================================================== -->
+<div class="section" id="s5">
+  <h2>5. <span>Payment & Subscription System</span> <span class="badge">PAYMENT FLOW</span></h2>
+  <p class="sub-desc">Razorpay integration — plan selection, payment, verification, invoice generation</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+    participant V as 🏭 Vendor
+    participant FE as ⚛️ Frontend
+    participant BE as 🖥️ Express API
+    participant RP as 💳 Razorpay
+    participant DB as 🗄️ Supabase
+    participant EMAIL as 📧 Gmail SMTP
+
+    V->>FE: Select subscription plan\n(SILVER ₹40,000/month)
+    FE->>FE: Optional: Enter coupon code
+    FE->>BE: POST /api/payment/coupons/:code/validate
+    BE->>DB: Check coupon validity\n(scope, expiry, usage limit)
+    DB-->>BE: Coupon valid (20% discount)
+    BE-->>FE: Discounted price = ₹32,000
+
+    FE->>BE: POST /api/payment/initiate\n{amount: 32000, plan: SILVER, vendorId}
+    BE->>RP: razorpay.orders.create({amount, currency: INR})
+    RP-->>BE: order_id: order_abc123
+    BE-->>FE: {order_id, key_id, amount}
+
+    FE->>FE: Load Razorpay Checkout SDK
+    FE->>V: Show payment modal
+    V->>RP: Complete payment\n(Card/UPI/NetBanking)
+    RP-->>V: Payment success
+    RP-->>FE: {razorpay_payment_id,\nrazorpay_order_id,\nrazorpay_signature}
+
+    FE->>BE: POST /api/payment/verify\n{payment_id, order_id, signature}
+    BE->>BE: HMAC-SHA256 verify\n(order_id + "|" + payment_id)
+    alt Signature Valid
+        BE->>DB: INSERT vendor_plan_subscriptions\n{vendorId, plan, start_date, end_date}
+        BE->>DB: INSERT vendor_payments\n{amount, coupon_used, invoice_no}
+        BE->>DB: UPDATE coupon_usages (if coupon used)
+        BE->>BE: Generate invoice PDF (jsPDF)
+        BE->>EMAIL: Send invoice to vendor email
+        BE-->>FE: 200 OK {subscription_active: true}
+        FE-->>V: ✅ Subscription Activated!
+    else Invalid Signature
+        BE-->>FE: 400 Payment verification failed
+        FE-->>V: ❌ Payment failed, try again
+    end
+
+    Note over V,EMAIL: === Subscription Expiry (Cron Job) ===
+    BE->>BE: subscriptionCronJobs.js runs daily
+    BE->>DB: Check expiring subscriptions (7 days)
+    DB-->>BE: List of expiring vendors
+    BE->>EMAIL: Send expiry warning emails
+    BE->>DB: Mark expired subscriptions
+    BE->>DB: Downgrade to TRIAL plan
+    </div>
+  </div>
+
+  <div class="info-card" style="margin-top:20px;">
+    <h3>Coupon System</h3>
+    <ul>
+      <li><span class="dot blue"></span>Admin creates coupons — POST /api/payment/coupons</li>
+      <li><span class="dot green"></span>Scope: specific vendor or all vendors</li>
+      <li><span class="dot orange"></span>Valid for: specific plan or all plans</li>
+      <li><span class="dot purple"></span>Type: percentage discount or fixed amount</li>
+      <li><span class="dot red"></span>Expiry date + usage limit enforced</li>
+      <li><span class="dot yellow"></span>All uses tracked in coupon_usages table</li>
+    </ul>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 6: ADMIN/EMPLOYEE FLOW
+===================================================== -->
+<div class="section" id="s6">
+  <h2>6. <span>Admin & Employee System</span> <span class="badge">ADMIN FLOW</span></h2>
+  <p class="sub-desc">Multi-role employee system — Admin, Finance, HR, Sales, Support — state-scoped access</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart LR
+    SA["🔑 SuperAdmin\nGlobal Access"] --> SADASH["SuperAdmin Portal\nFull platform control"]
+
+    subgraph EMPLOYEE_LOGIN["Employee Login Flow"]
+        EL["POST /api/employee/login"] --> ROLE_CHECK{"Check Role\n& Scope"}
+        ROLE_CHECK --> ADMIN_ROLE["ADMIN\nAll vendor/buyer management"]
+        ROLE_CHECK --> FIN_ROLE["FINANCE\nPayments & Reports"]
+        ROLE_CHECK --> HR_ROLE["HR\nEmployee management"]
+        ROLE_CHECK --> SUPPORT_ROLE["SUPPORT\nTicket handling"]
+        ROLE_CHECK --> SALES_ROLE["SALES\nVendor acquisition"]
+        ROLE_CHECK --> MGR_ROLE["MANAGER\nSales team oversight"]
+        ROLE_CHECK --> VP_ROLE["VP\nRegional oversight"]
+    end
+
+    subgraph ADMIN_CAPABILITIES["Admin Capabilities"]
+        VENDOR_MGT["Vendor Management\n/admin/vendors\n• Activate/Suspend vendors\n• View products & docs\n• Manage subscription"]
+        BUYER_MGT["Buyer Management\n/admin/buyers\n• View all buyers\n• Suspend/Activate\n• Activity tracking"]
+        KYC_MGT["KYC Approval\n/admin/kyc-approval\n• Review documents\n• Approve/Reject\n• GST, PAN, Aadhaar"]
+        CAT_MGT["Category Management\n/admin/categories\n• Head/Sub/Micro\n• Images + SEO"]
+        STAFF_MGT["Staff Management\n/admin/staff\n• Create employee\n• Assign role + scope\n• Reset password"]
+        AUDIT_LOG["Audit Logs\n/admin/audit-logs\n• All platform actions\n• Filter by date/user"]
+        SETTINGS["Platform Settings\n/admin/settings\n• System config\n• Email templates\n• Maintenance mode"]
+        SUB_REQS["Subscription Requests\n/admin/subscription-requests\n• Extension requests\n• Approve/Reject"]
+    end
+
+    subgraph FINANCE_CAPABILITIES["Finance Capabilities"]
+        FIN_PAY["Payment Reports\nGET /api/finance/payments"]
+        FIN_STATS["Sales Statistics\nGET /api/finance/sales/stats"]
+        FIN_PRICING["Pricing Rules\n/api/finance/sales/pricing-rules"]
+        FIN_REF["Referral Cashouts\n/api/referrals/cashouts\n• Approve/Reject"]
+        COUPON_MGT["Coupon Management\n/api/payment/coupons\n• Create/Edit coupons\n• Approve pending"]
+    end
+
+    subgraph SUPPORT_CAPABILITIES["Support Capabilities"]
+        TIX_LIST["View All Tickets\nGET /api/support/tickets\n(vendor + buyer)"]
+        TIX_ASSIGN["Assign Tickets\nPATCH /api/support/tickets/:id"]
+        TIX_MSG["Add Notes/Messages\nPOST /api/support/tickets/:id/messages"]
+        TIX_RESOLVE["Resolve/Close Tickets"]
+    end
+
+    ADMIN_ROLE --> ADMIN_CAPABILITIES
+    FIN_ROLE --> FINANCE_CAPABILITIES
+    SUPPORT_ROLE --> SUPPORT_CAPABILITIES
+
+    subgraph STATE_SCOPE["Geographic Scope Control"]
+        SS_CHECK["employee_state_scope table\nDefines which states employee can see"]
+        SS_API["API queries filtered:\nWHERE vendor.state IN employee_scope"]
+        SS_GLOBAL["ADMIN/SUPERADMIN: all states\nSALES/SUPPORT: assigned states only"]
+    end
+
+    ADMIN_ROLE & SALES_ROLE --> STATE_SCOPE
+
+    classDef super fill:#450a0a,stroke:#ef4444,color:#fca5a5
+    classDef role fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef cap fill:#1c1917,stroke:#78716c,color:#d6d3d1
+    classDef scope fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+
+    class SA super
+    class ADMIN_ROLE,FIN_ROLE,HR_ROLE,SUPPORT_ROLE,SALES_ROLE,MGR_ROLE,VP_ROLE role
+    class VENDOR_MGT,BUYER_MGT,KYC_MGT,CAT_MGT,STAFF_MGT,AUDIT_LOG,SETTINGS,SUB_REQS cap
+    class SS_CHECK,SS_API,SS_GLOBAL scope
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 7: DATABASE SCHEMA
+===================================================== -->
+<div class="section" id="s7">
+  <h2>7. <span>Database Schema — Key Tables</span> <span class="badge">DATABASE</span></h2>
+  <p class="sub-desc">Supabase PostgreSQL — 40+ tables, 27 migration files, Row Level Security enabled</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+erDiagram
+    USERS {
+        uuid id PK
+        string email
+        string role
+        string full_name
+        timestamp created_at
+    }
+    VENDORS {
+        uuid id PK
+        uuid user_id FK
+        string company_name
+        string gst_number
+        string phone
+        string city
+        string state
+        string status
+        string plan_tier
+        timestamp created_at
+    }
+    BUYERS {
+        uuid id PK
+        uuid user_id FK
+        string full_name
+        string company_name
+        string phone
+        string city
+        string state
+        string status
+    }
+    PRODUCTS {
+        uuid id PK
+        uuid vendor_id FK
+        string name
+        string slug
+        text description
+        decimal price
+        string micro_category_id FK
+        string status
+        int view_count
+    }
+    HEAD_CATEGORIES {
+        uuid id PK
+        string name
+        string slug
+        string image_url
+    }
+    SUB_CATEGORIES {
+        uuid id PK
+        uuid head_category_id FK
+        string name
+        string slug
+    }
+    MICRO_CATEGORIES {
+        uuid id PK
+        uuid sub_category_id FK
+        string name
+        string slug
+    }
+    LEADS {
+        uuid id PK
+        uuid vendor_id FK
+        uuid buyer_id FK
+        uuid proposal_id FK
+        string status
+        timestamp created_at
+    }
+    PROPOSALS {
+        uuid id PK
+        uuid buyer_id FK
+        string category
+        text requirements
+        decimal budget
+        string location
+        string status
+    }
+    QUOTATIONS {
+        uuid id PK
+        uuid vendor_id FK
+        uuid lead_id FK
+        decimal price
+        string delivery_terms
+        string payment_terms
+        date validity_date
+        string pdf_url
+    }
+    VENDOR_PLAN_SUBSCRIPTIONS {
+        uuid id PK
+        uuid vendor_id FK
+        string plan_tier
+        date start_date
+        date end_date
+        decimal amount_paid
+        string status
+    }
+    VENDOR_PAYMENTS {
+        uuid id PK
+        uuid vendor_id FK
+        string razorpay_order_id
+        string razorpay_payment_id
+        decimal amount
+        string coupon_code
+        string invoice_number
+    }
+    SUPPORT_TICKETS {
+        uuid id PK
+        uuid user_id FK
+        string user_role
+        string subject
+        text description
+        string status
+        uuid assigned_to FK
+    }
+    EMPLOYEES {
+        uuid id PK
+        string email
+        string role
+        string[] state_scope
+        string password_hash
+        boolean is_active
+    }
+    VENDOR_REFERRAL_WALLETS {
+        uuid id PK
+        uuid vendor_id FK
+        decimal balance
+        decimal total_earned
+        decimal total_withdrawn
+    }
+    AUDIT_LOGS {
+        uuid id PK
+        uuid user_id FK
+        string action
+        string entity_type
+        string entity_id
+        jsonb metadata
+        timestamp created_at
+    }
+
+    USERS ||--o{ VENDORS : "has"
+    USERS ||--o{ BUYERS : "has"
+    VENDORS ||--o{ PRODUCTS : "lists"
+    VENDORS ||--o{ LEADS : "receives"
+    VENDORS ||--o{ VENDOR_PLAN_SUBSCRIPTIONS : "subscribes"
+    VENDORS ||--o{ VENDOR_REFERRAL_WALLETS : "owns"
+    BUYERS ||--o{ PROPOSALS : "creates"
+    PROPOSALS ||--o{ LEADS : "generates"
+    LEADS ||--o{ QUOTATIONS : "gets"
+    PRODUCTS }o--|| MICRO_CATEGORIES : "belongs to"
+    MICRO_CATEGORIES }o--|| SUB_CATEGORIES : "belongs to"
+    SUB_CATEGORIES }o--|| HEAD_CATEGORIES : "belongs to"
+    VENDOR_PLAN_SUBSCRIPTIONS ||--o{ VENDOR_PAYMENTS : "paid via"
+    EMPLOYEES ||--o{ SUPPORT_TICKETS : "assigned"
+    USERS ||--o{ AUDIT_LOGS : "creates"
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 8: API ROUTES TABLE
+===================================================== -->
+<div class="section" id="s8">
+  <h2>8. <span>All API Endpoints</span> <span class="badge">203 ENDPOINTS</span></h2>
+  <p class="sub-desc">Express.js backend — saare important API routes with methods</p>
+
+  <h3 style="color:#38bdf8;margin:16px 0 8px;font-size:0.9rem;">AUTH ROUTES — /api/auth</h3>
+  <table class="route-table">
+    <tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/auth/login</td><td>Login with email + password → JWT</td><td>Public</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/auth/register</td><td>Register new buyer/vendor</td><td>Public</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/auth/me</td><td>Current user profile</td><td>JWT</td></tr>
+    <tr><td><span class="method patch">PATCH</span></td><td>/api/auth/password</td><td>Change password</td><td>JWT</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/auth/logout</td><td>Clear session</td><td>JWT</td></tr>
+    <tr><td><span class="method patch">PATCH</span></td><td>/api/auth/buyer/profile</td><td>Update buyer profile</td><td>BUYER</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/otp/request</td><td>Send OTP to email (rate: 5/15min)</td><td>Public</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/otp/verify</td><td>Verify OTP code</td><td>Public</td></tr>
+  </table>
+
+  <h3 style="color:#38bdf8;margin:16px 0 8px;font-size:0.9rem;">VENDOR ROUTES — /api/vendors</h3>
+  <table class="route-table">
+    <tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/vendors/me</td><td>Current vendor profile</td><td>VENDOR</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/vendors/me/upload-avatar</td><td>Upload vendor logo</td><td>VENDOR</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/vendors/:id</td><td>Public vendor profile</td><td>Public</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/vendors/:id/documents</td><td>Upload KYC documents</td><td>VENDOR</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/vendors/:id/documents</td><td>List KYC documents</td><td>VENDOR</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/vendors/products</td><td>Add new product</td><td>VENDOR</td></tr>
+    <tr><td><span class="method put">PUT</span></td><td>/api/vendors/products/:id</td><td>Edit product</td><td>VENDOR</td></tr>
+    <tr><td><span class="method delete">DELETE</span></td><td>/api/vendors/products/:id</td><td>Delete product</td><td>VENDOR</td></tr>
+  </table>
+
+  <h3 style="color:#38bdf8;margin:16px 0 8px;font-size:0.9rem;">PAYMENT ROUTES — /api/payment</h3>
+  <table class="route-table">
+    <tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/payment/initiate</td><td>Create Razorpay order</td><td>VENDOR</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/payment/verify</td><td>Verify payment signature</td><td>VENDOR</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/payment/payments</td><td>Payment history</td><td>VENDOR</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/payment/coupons</td><td>Create coupon</td><td>ADMIN</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/payment/coupons</td><td>List coupons</td><td>ADMIN</td></tr>
+    <tr><td><span class="method put">PUT</span></td><td>/api/payment/coupons/:id</td><td>Update coupon</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/payment/coupons/:id/decision</td><td>Approve/reject coupon</td><td>ADMIN</td></tr>
+  </table>
+
+  <h3 style="color:#38bdf8;margin:16px 0 8px;font-size:0.9rem;">ADMIN ROUTES — /api/admin</h3>
+  <table class="route-table">
+    <tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/admin/vendors</td><td>List all vendors</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/admin/vendors/:id/terminate</td><td>Suspend vendor</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/admin/vendors/:id/activate</td><td>Reactivate vendor</td><td>ADMIN</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/admin/buyers</td><td>List all buyers</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/admin/buyers/:id/terminate</td><td>Suspend buyer</td><td>ADMIN</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/admin/staff</td><td>List employees</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/admin/staff</td><td>Create employee</td><td>ADMIN</td></tr>
+    <tr><td><span class="method delete">DELETE</span></td><td>/api/admin/staff/:id</td><td>Delete employee</td><td>ADMIN</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/admin/dashboard/overview</td><td>Platform stats</td><td>ADMIN</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/admin/audit-logs</td><td>Audit log viewer</td><td>ADMIN</td></tr>
+  </table>
+
+  <h3 style="color:#38bdf8;margin:16px 0 8px;font-size:0.9rem;">OTHER KEY ROUTES</h3>
+  <table class="route-table">
+    <tr><th>Method</th><th>Endpoint</th><th>Description</th><th>Auth</th></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/quotation</td><td>Create + email quotation PDF</td><td>VENDOR</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/dir/search</td><td>Ranked product/vendor search</td><td>Public</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/kyc/pending</td><td>KYC documents pending review</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/kyc/:id/approve</td><td>Approve KYC document</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/kyc/:id/reject</td><td>Reject KYC with reason</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/chat/message</td><td>AI chatbot (OpenAI/Groq)</td><td>Public</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/employee/login</td><td>Employee login</td><td>Public</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/finance/payments</td><td>Finance payment data</td><td>FINANCE</td></tr>
+    <tr><td><span class="method get">GET</span></td><td>/api/referrals/settings</td><td>Referral program config</td><td>ADMIN</td></tr>
+    <tr><td><span class="method post">POST</span></td><td>/api/referrals/cashouts/:id/approve</td><td>Approve cashout</td><td>FINANCE</td></tr>
+  </table>
+</div>
+
+
+<!-- =====================================================
+     SECTION 9: TECH STACK
+===================================================== -->
+<div class="section" id="s9">
+  <h2>9. <span>Technology Stack</span> <span class="badge">TECH</span></h2>
+  <p class="sub-desc">Har layer mein kya technologies use hain</p>
+  <div class="tech-grid">
+    <div class="tech-item"><div class="icon">⚛️</div><div class="name">React 18.3</div><div class="desc">Frontend SPA</div></div>
+    <div class="tech-item"><div class="icon">⚡</div><div class="name">Vite 4.4</div><div class="desc">Build tool + HMR</div></div>
+    <div class="tech-item"><div class="icon">🎨</div><div class="name">Tailwind CSS 3.4</div><div class="desc">Utility styling</div></div>
+    <div class="tech-item"><div class="icon">🧩</div><div class="name">Radix UI</div><div class="desc">Headless components</div></div>
+    <div class="tech-item"><div class="icon">🔀</div><div class="name">React Router 6</div><div class="desc">Client routing</div></div>
+    <div class="tech-item"><div class="icon">🖥️</div><div class="name">Express 4.18</div><div class="desc">Backend framework</div></div>
+    <div class="tech-item"><div class="icon">🗄️</div><div class="name">Supabase</div><div class="desc">PostgreSQL + Auth</div></div>
+    <div class="tech-item"><div class="icon">💳</div><div class="name">Razorpay</div><div class="desc">Indian payments</div></div>
+    <div class="tech-item"><div class="icon">📧</div><div class="name">Nodemailer</div><div class="desc">SMTP email</div></div>
+    <div class="tech-item"><div class="icon">📄</div><div class="name">jsPDF</div><div class="desc">PDF generation</div></div>
+    <div class="tech-item"><div class="icon">🤖</div><div class="name">OpenAI / Groq</div><div class="desc">AI Chatbot</div></div>
+    <div class="tech-item"><div class="icon">🔒</div><div class="name">bcryptjs + JWT</div><div class="desc">Auth security</div></div>
+    <div class="tech-item"><div class="icon">⚡</div><div class="name">Supabase Realtime</div><div class="desc">Live notifications</div></div>
+    <div class="tech-item"><div class="icon">📦</div><div class="name">Supabase Storage</div><div class="desc">File uploads (S3)</div></div>
+    <div class="tech-item"><div class="icon">☁️</div><div class="name">Netlify</div><div class="desc">Frontend deploy</div></div>
+    <div class="tech-item"><div class="icon">🛡️</div><div class="name">express-rate-limit</div><div class="desc">DDoS protection</div></div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 10: SUBDOMAIN MAP
+===================================================== -->
+<div class="section" id="s10">
+  <h2>10. <span>Subdomain Routing Map</span> <span class="badge">ROUTING</span></h2>
+  <p class="sub-desc">Har subdomain alag module load karta hai — React App.jsx mein SubdomainContext se detect hota hai</p>
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph LR
+    DNS["🌐 DNS Request"] --> NETLIFY_EDGE["Netlify Edge\n(netlify.toml)"]
+    NETLIFY_EDGE --> REWRITES["Rewrite Rules\n/* → /index.html"]
+    REWRITES --> REACT["React App.jsx"]
+    REACT --> SUBDOMAIN_CTX["SubdomainContext\ndetects hostname"]
+
+    SUBDOMAIN_CTX --> D1{"hostname check"}
+
+    D1 -->|"indiantrademart.com\nor www.*"| DIR_APP["Directory App\n📂 src/modules/directory\n\n• Home / Search\n• Product pages\n• Vendor profiles\n• Static pages\n• Become Vendor\n• Pricing"]
+
+    D1 -->|"buyer.*"| BUYER_APP["Buyer Portal\n📂 src/modules/buyer\n\n• Login / Register\n• Dashboard\n• Create RFQ\n• View Proposals\n• Messages\n• Favorites\n• Tickets"]
+
+    D1 -->|"vendor.*"| VENDOR_APP["Vendor Portal\n📂 src/modules/vendor\n\n• Login / Register\n• Dashboard\n• Products\n• Leads\n• Quotations\n• Profile + KYC\n• Analytics\n• Referrals"]
+
+    D1 -->|"admin.*\nor employee.*"| ADMIN_APP["Admin/Employee Portal\n📂 src/modules/admin\n\n• Admin Dashboard\n• Vendor/Buyer Mgmt\n• KYC Approval\n• Finance\n• Staff Mgmt\n• Audit Logs"]
+
+    D1 -->|"career.*"| CAREER_APP["Career Portal\n📂 src/modules/career\n\nJob listings\nApplications"]
+
+    DIR_APP & BUYER_APP & VENDOR_APP & ADMIN_APP & CAREER_APP --> BE_SERVER["🖥️ Express Backend\n:3001\n/api/*"]
+
+    BE_SERVER --> SUPABASE_DB["🗄️ Supabase\nPostgreSQL"]
+
+    classDef dns fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef portal fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef backend fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+
+    class DNS dns
+    class DIR_APP,BUYER_APP,VENDOR_APP,ADMIN_APP,CAREER_APP portal
+    class BE_SERVER backend
+    class SUPABASE_DB db
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 11: CONTEXT PROVIDERS
+===================================================== -->
+<div class="section" id="s11">
+  <h2>11. <span>Frontend Context Providers</span> <span class="badge">STATE MANAGEMENT</span></h2>
+  <p class="sub-desc">React Context API se global state manage hoti hai — har portal ka apna AuthContext + shared contexts</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph TD
+    subgraph ROOT["App.jsx — Root Context Tree"]
+        SP["SubdomainProvider\nsrc/contexts/SubdomainContext.jsx\n\nDetects: vendor.* / buyer.* / admin.*\nExposes: currentSubdomain, isVendor, isBuyer"]
+        PSP["PageStatusProvider\nsrc/contexts/PageStatusContext.jsx\n\nSupabase Realtime subscribe\npage_status table → blank pages on maintenance"]
+    end
+
+    subgraph VENDOR_CTX["Vendor Portal Contexts"]
+        VAP["VendorAuthProvider\nsrc/modules/vendor/context/VendorAuthContext.jsx\n\nHolds: vendor profile, JWT, plan info\nMethods: login(), logout(), refreshProfile()\nAuto-refresh on /api/auth/me"]
+    end
+
+    subgraph BUYER_CTX["Buyer Portal Contexts"]
+        BAP["BuyerAuthProvider\nsrc/modules/buyer/context/BuyerAuthContext.jsx\n\nHolds: buyer profile, JWT\nMethods: login(), logout()\nRedirects suspended buyers"]
+    end
+
+    subgraph ADMIN_CTX["Admin / Employee Contexts"]
+        IAP["InternalAuthProvider\nsrc/modules/admin/context/InternalAuthContext.jsx\n\nHolds: employee profile, role, state_scope\nMethods: login(), logout()\nRoute guard: requireEmployeeRoles()"]
+        SAP["SuperAdminProvider\nsrc/modules/admin/context/SuperAdminContext.jsx\n\nSeparate context for SUPERADMIN role\nBypass state_scope restrictions"]
+        EAP["EmployeeAuthProvider\nsrc/modules/employee/context/EmployeeAuthContext.jsx\n\nFor non-admin employee portals\n(Finance, HR, Sales, Support)"]
+    end
+
+    subgraph SHARED_CTX["Shared / Public Context"]
+        SBAC["AuthProvider (Supabase)\nsrc/contexts/SupabaseAuthContext.jsx\n\nWraps Supabase auth.onAuthStateChange()\nUsed for directory public pages"]
+    end
+
+    SP --> VAP & BAP & IAP & SAP & EAP & SBAC
+
+    classDef root fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef vendor fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef buyer fill:#1e40af,stroke:#60a5fa,color:#dbeafe
+    classDef admin fill:#450a0a,stroke:#ef4444,color:#fee2e2
+    classDef shared fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+
+    class SP,PSP root
+    class VAP vendor
+    class BAP buyer
+    class IAP,SAP,EAP admin
+    class SBAC shared
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:20px;">
+    <div class="info-card">
+      <h3>Context Files — Exact Paths</h3>
+      <ul>
+        <li><span class="dot blue"></span><code>src/contexts/SubdomainContext.jsx</code></li>
+        <li><span class="dot blue"></span><code>src/contexts/SupabaseAuthContext.jsx</code></li>
+        <li><span class="dot blue"></span><code>src/contexts/PageStatusContext.jsx</code></li>
+        <li><span class="dot green"></span><code>src/modules/vendor/context/VendorAuthContext.jsx</code></li>
+        <li><span class="dot orange"></span><code>src/modules/buyer/context/BuyerAuthContext.jsx</code></li>
+        <li><span class="dot red"></span><code>src/modules/admin/context/InternalAuthContext.jsx</code></li>
+        <li><span class="dot red"></span><code>src/modules/admin/context/SuperAdminContext.jsx</code></li>
+        <li><span class="dot purple"></span><code>src/modules/employee/context/EmployeeAuthContext.jsx</code></li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Context — Kya kya store hota hai</h3>
+      <ul>
+        <li><span class="dot green"></span>JWT token (decoded payload)</li>
+        <li><span class="dot green"></span>User profile (name, email, avatar)</li>
+        <li><span class="dot blue"></span>Role (VENDOR / BUYER / ADMIN...)</li>
+        <li><span class="dot blue"></span>Plan tier (SILVER / GOLD...)</li>
+        <li><span class="dot orange"></span>State scope (geographic restrictions)</li>
+        <li><span class="dot orange"></span>isAuthenticated boolean</li>
+        <li><span class="dot purple"></span>Subscription status (active/expired)</li>
+        <li><span class="dot red"></span>Account status (suspended/active)</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 12: BACKEND SERVICES DEEP DIVE
+===================================================== -->
+<div class="section" id="s12">
+  <h2>12. <span>Backend Services — Deep Dive</span> <span class="badge">SERVER/LIB</span></h2>
+  <p class="sub-desc">server/lib/ folder mein 9 core services hain — har ek ka kaam, file path, aur connection samjho</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph LR
+    subgraph LIB["server/lib/ — Core Services"]
+
+        AUTH["auth.js\n───────────────\n• hashPassword(pwd) → bcrypt\n• verifyPassword(pwd, hash)\n• generateJWT(payload) → token\n• verifyJWT(token) → decoded\n• createCSRFToken()\n• normalizeRole(role)"]
+
+        SUPABASE["supabaseClient.js\n───────────────\n• supabase (anon client)\n• supabaseAdmin (service role)\nUsed in all routes for DB ops"]
+
+        RAZORPAY["razorpayClient.js\n───────────────\n• razorpay instance\n  (key_id + key_secret)\n• orders.create()\n• payments.fetch()\n• HMAC-SHA256 verify"]
+
+        INVOICE["invoiceGenerator.js\n───────────────\n• generateInvoice(data) → PDF\n• jsPDF + html2canvas\n• Invoice number sequence\n• Tax computation (GST)\n• Email-ready Buffer"]
+
+        NOTIFY["notificationService.js\n───────────────\n• createNotification(userId, msg)\n• sendEmailNotification(email)\n• broadcastToRole(role, msg)\n• INSERT notifications table"]
+
+        LEADS["leadConsumptionCompat.js\n───────────────\n• consumeLead(vendorId, leadId)\n• checkLeadBudget(vendorId)\n• getMonthlyConsumption()\n• leads_consumed tracking"]
+
+        REFERRAL["referralProgram.js\n───────────────\n• generateReferralCode(vendorId)\n• processReferralSignup(code)\n• creditReferralWallet(amount)\n• requestCashout(vendorId)\n• calculateReward(plan, rules)"]
+
+        CRON["subscriptionCronJobs.js\n───────────────\n• checkExpiringSubscriptions()\n• sendExpiryWarnings(7 days)\n• deactivateExpiredPlans()\n• downgradeToTrialPlan()\n• runs: daily via node-cron"]
+
+        AUDIT["audit.js\n───────────────\n• logAction(userId, action, entity)\n• INSERT audit_logs table\n• entity_type: vendor/buyer/product\n• Called after every write op"]
+
+        CAPTCHA["captcha.js\n───────────────\n• verifyCaptcha(token)\n• Google reCAPTCHA v2/v3\n• Used on registration forms"]
+
+        PWD["passwordPolicy.js\n───────────────\n• validatePassword(pwd)\n• Min 8 chars, 1 uppercase\n• 1 number, 1 special char\n• Returns {valid, errors[]}"]
+    end
+
+    EXPRESS["Express Routes\nserver/routes/*"] --> AUTH & SUPABASE & RAZORPAY & INVOICE & NOTIFY & LEADS & REFERRAL & AUDIT
+    CRON --> SUPABASE & NOTIFY
+    LEADS --> SUPABASE
+    REFERRAL --> SUPABASE & NOTIFY
+    AUDIT --> SUPABASE
+
+    classDef svc fill:#1e293b,stroke:#475569,color:#cbd5e1
+    classDef entry fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    class AUTH,SUPABASE,RAZORPAY,INVOICE,NOTIFY,LEADS,REFERRAL,CRON,AUDIT,CAPTCHA,PWD svc
+    class EXPRESS entry
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 13: MIDDLEWARE CHAIN
+===================================================== -->
+<div class="section" id="s13">
+  <h2>13. <span>Express Middleware Chain</span> <span class="badge">MIDDLEWARE</span></h2>
+  <p class="sub-desc">Har request is chain se guzarti hai — server/server.js mein globally register, routes mein selectively use</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart LR
+    REQ["📥 Incoming\nHTTP Request"] --> CORS
+
+    CORS["CORS Handler\nserver/server.js\n\nAllowed origins:\n• indiantrademart.com\n• *.indiantrademart.com\nMethods: GET,POST,PUT,PATCH,DELETE\nCredentials: true"]
+
+    CORS --> RATELIMIT
+
+    RATELIMIT["Rate Limiter\nexpress-rate-limit\n\nOTP: 5 req / 15 min\nAuth: 200 req / min\nAPI: 300 req / min\nReturn: 429 Too Many Requests"]
+
+    RATELIMIT --> SANITIZE
+
+    SANITIZE["Input Sanitizer\nserver/server.js\n\nmongosanitize() → NoSQL inject\nCustom: strip HTML tags\nStrip SQL special chars\nBody + Query + Params"]
+
+    SANITIZE --> SUBDOMAIN
+
+    SUBDOMAIN["Subdomain Middleware\nserver/middleware/subdomainMiddleware.js\n\nParses Host header\nSets req.subdomain\nUsed for context-aware responses"]
+
+    SUBDOMAIN --> ROUTES["Route Handlers\n/api/*"]
+
+    ROUTES --> REQAUTH
+
+    REQAUTH["requireAuth()\nserver/middleware/requireAuth.js\n\nExtract JWT from:\n• Cookie: token\n• Header: Authorization Bearer\nverifyJWT() → decoded\nSets req.user = decoded\nReturn 401 if invalid"]
+
+    REQAUTH --> EMPROLES
+
+    EMPROLES["requireEmployeeRoles(...roles)\nserver/middleware/requireEmployeeRoles.js\n\nChecks req.user.role\nagainst allowed roles[]\nChecks state_scope for\ngeographic filtering\nReturn 403 if unauthorized"]
+
+    EMPROLES --> HANDLER["✅ Route Handler\n(Business Logic)"]
+
+    HANDLER --> AUDITLOG["Audit Logger\nserver/lib/audit.js\n\nlogAction() called after\nwrite operations\nINSERT audit_logs"]
+
+    AUDITLOG --> RES["📤 HTTP Response\n(JSON)"]
+
+    classDef mid fill:#1e293b,stroke:#334155,color:#94a3b8
+    classDef req fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef res fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef auth fill:#450a0a,stroke:#ef4444,color:#fee2e2
+
+    class CORS,RATELIMIT,SANITIZE,SUBDOMAIN mid
+    class REQ req
+    class RES res
+    class REQAUTH,EMPROLES auth
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 14: LEAD / RFQ LIFECYCLE
+===================================================== -->
+<div class="section" id="s14">
+  <h2>14. <span>Lead / RFQ Complete Lifecycle</span> <span class="badge">CORE BUSINESS LOGIC</span></h2>
+  <p class="sub-desc">Platform ka core business flow — buyer RFQ banata hai → vendors ko lead milti hai → quotation → deal</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+    A([Buyer Creates RFQ]) --> B["Fill Proposal Form\nCategory, Quantity, Budget\nTimeline, Delivery Location"]
+    B --> C[POST /api/buyer/proposals]
+    C --> D[(proposals table - status: active)]
+
+    D --> E["System Matches Vendors\nby Category and Geography"]
+    E --> F[(leads table - status: new)]
+    F --> G[Vendor Notified via email and app]
+
+    G --> H{Vendor Quota OK?}
+    H -->|Quota available| I["Vendor Views Lead\n/vendor/leads/:id\nstatus: viewed"]
+    H -->|Quota exceeded| J[Paywall Shown - Upgrade Plan]
+    H -->|No action in 7 days| K[Lead Expires - status: expired]
+
+    I --> L[(leads_consumed table)]
+    I --> M{Vendor Decision}
+
+    M -->|Send Quotation| N["Fill Quotation Form\nPrice, Delivery Terms, Validity"]
+    M -->|Skip Lead| O[status: ignored - closes in 7 days]
+
+    N --> P[POST /api/quotation]
+    P --> Q[PDF Generated and Emailed to Buyer]
+    Q --> R[(quotations table - status: quoted)]
+
+    R --> S{Buyer Reviews Quotation}
+    S -->|Accept| T[Deal Accepted - status: won]
+    S -->|Counter offer| U["Negotiate via Messages\n/vendor/messages - status: negotiating"]
+    S -->|Reject| V[Deal Rejected - status: lost]
+
+    U --> W{Agreement Reached?}
+    W -->|Yes| T
+    W -->|No deal| X[status: lost]
+
+    T --> Z[(audit_logs - Revenue tracked)]
+    V --> Z
+    X --> Z
+    O --> Z
+    K --> Z
+
+    classDef buyer fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef vendor fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef api fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+    classDef decision fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef danger fill:#7f1d1d,stroke:#ef4444,color:#fca5a5
+    classDef success fill:#14532d,stroke:#22c55e,color:#dcfce7
+
+    class A,B buyer
+    class I,N vendor
+    class C,P api
+    class D,F,L,R,Z db
+    class H,M,S,W decision
+    class J,K danger
+    class T success
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:20px;">
+    <div class="info-card">
+      <h3>Lead Status Values (DB)</h3>
+      <ul>
+        <li><span class="dot blue"></span><code>new</code> — Just created, vendor not seen</li>
+        <li><span class="dot orange"></span><code>viewed</code> — Vendor opened lead detail</li>
+        <li><span class="dot yellow"></span><code>quoted</code> — Quotation sent to buyer</li>
+        <li><span class="dot purple"></span><code>negotiating</code> — Messages exchanged</li>
+        <li><span class="dot green"></span><code>won</code> — Deal accepted</li>
+        <li><span class="dot red"></span><code>lost</code> — No deal reached</li>
+        <li><span class="dot red"></span><code>ignored</code> — No vendor action</li>
+        <li><span class="dot blue"></span><code>expired</code> — Crossed deadline</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Lead Consumption Rules</h3>
+      <ul>
+        <li><span class="dot green"></span>Each plan has monthly lead quota</li>
+        <li><span class="dot blue"></span>Viewing a lead = consuming it</li>
+        <li><span class="dot orange"></span>leadConsumptionCompat.js tracks count</li>
+        <li><span class="dot orange"></span>leads_consumed table stores history</li>
+        <li><span class="dot red"></span>Quota exceeded → vendor sees paywall</li>
+        <li><span class="dot purple"></span>TRIAL plan: very limited leads</li>
+        <li><span class="dot yellow"></span>DIAMOND: unlimited leads</li>
+        <li><span class="dot blue"></span>Monthly reset on subscription renewal</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 15: CATEGORY HIERARCHY
+===================================================== -->
+<div class="section" id="s15">
+  <h2>15. <span>Category Hierarchy System</span> <span class="badge">3-LEVEL TREE</span></h2>
+  <p class="sub-desc">3-level category tree — Head → Sub → Micro — Products aur RFQs dono isko use karte hain</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph TD
+    subgraph LEVEL1["Level 1 — Head Categories (head_categories table)"]
+        HC1["Industrial Machinery"]
+        HC2["Chemicals & Dyes"]
+        HC3["Textiles & Fabrics"]
+        HC4["Electronics"]
+        HC5["Food & Beverages"]
+        HCMORE["... many more"]
+    end
+
+    subgraph LEVEL2["Level 2 — Sub Categories (sub_categories table)"]
+        SC1["Pumps & Valves"]
+        SC2["Compressors"]
+        SC3["Industrial Dyes"]
+        SC4["Specialty Chemicals"]
+        SC5["Cotton Fabrics"]
+        SC6["Synthetic Fabrics"]
+    end
+
+    subgraph LEVEL3["Level 3 — Micro Categories (micro_categories table)"]
+        MC1["Centrifugal Pumps"]
+        MC2["Submersible Pumps"]
+        MC3["Air Compressors"]
+        MC4["Reactive Dyes"]
+        MC5["Disperse Dyes"]
+        MC6["Grey Cotton Fabric"]
+        MC7["Processed Cotton"]
+    end
+
+    subgraph PRODUCTS["Products + RFQs"]
+        P["products.micro_category_id\n→ directly linked to micro category"]
+        R["proposals/leads category selection\n→ Head + Sub + Micro selected"]
+    end
+
+    HC1 --> SC1 & SC2
+    HC2 --> SC3 & SC4
+    HC3 --> SC5 & SC6
+    SC1 --> MC1 & MC2
+    SC2 --> MC3
+    SC3 --> MC4 & MC5
+    SC5 --> MC6 & MC7
+
+    MC1 & MC2 & MC3 --> P
+    HC1 & SC1 & MC1 --> R
+
+    subgraph DB_SCHEMA["DB: 3 Tables"]
+        T_HC["head_categories\n• id, name, slug\n• image_url\n• description"]
+        T_SC["sub_categories\n• id, name, slug\n• head_category_id FK"]
+        T_MC["micro_categories\n• id, name, slug\n• sub_category_id FK"]
+    end
+
+    T_HC --> T_SC --> T_MC
+
+    subgraph ADMIN_MGMT["Admin Management"]
+        ACAT["/admin/categories\nAdd/Edit/Delete any level\nManage SEO metadata\nUpload category images"]
+    end
+
+    classDef l1 fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef l2 fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef l3 fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef prod fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef db fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+
+    class HC1,HC2,HC3,HC4,HC5,HCMORE l1
+    class SC1,SC2,SC3,SC4,SC5,SC6 l2
+    class MC1,MC2,MC3,MC4,MC5,MC6,MC7 l3
+    class P,R prod
+    class T_HC,T_SC,T_MC db
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 16: NOTIFICATION SYSTEM
+===================================================== -->
+<div class="section" id="s16">
+  <h2>16. <span>Notification System</span> <span class="badge">REALTIME + EMAIL</span></h2>
+  <p class="sub-desc">2 channels — In-App (Supabase Realtime) + Email (SMTP Gmail) — kab kaunsa trigger hota hai</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+    TRIGGER["🔔 Event Trigger\n(e.g., new lead, payment, KYC approval)"]
+
+    TRIGGER --> NS["notificationService.js\nserver/lib/notificationService.js"]
+
+    NS --> INAPP["In-App Notification\nINSERT INTO notifications table\n{user_id, message, type, read: false}"]
+    NS --> EMAIL_NOTIFY["Email Notification\nNodemailer via SMTP/Gmail\nHTML template rendered"]
+
+    INAPP --> REALTIME["Supabase Realtime\nPostgres Changes → WebSocket\nFrontend subscribed to:\nsupabase.channel('notifications')\n.on('postgres_changes', ...)"]
+
+    REALTIME --> VENDOR_BELL["🔔 Vendor sees\nnew notification bell\nin /vendor/dashboard"]
+    REALTIME --> BUYER_BELL["🔔 Buyer sees\nnew notification bell\nin /buyer/dashboard"]
+
+    subgraph TRIGGERS["Events that create notifications"]
+        E1["New lead received\n(from buyer RFQ)"]
+        E2["KYC approved/rejected\nby admin"]
+        E3["Subscription expiring\n(7 days warning)"]
+        E4["Subscription expired\n(downgraded to TRIAL)"]
+        E5["Quotation received\n(buyer gets email)"]
+        E6["Support ticket\nupdated/resolved"]
+        E7["Payment successful\n(invoice email)"]
+        E8["Referral signup\n(referrer notified)"]
+    end
+
+    E1 & E2 & E3 & E4 & E5 & E6 & E7 & E8 --> NS
+
+    subgraph DB_TABLES["DB Tables"]
+        NT["notifications\n• id, user_id, message\n• type, read, created_at"]
+        BN["buyer_notifications\n(view: filtered for buyers)"]
+        QE["quotation_emails\n(tracks email delivery)"]
+    end
+
+    INAPP --> NT
+    NT --> BN
+
+    classDef trigger fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef svc fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef realtime fill:#0c2337,stroke:#0ea5e9,color:#bae6fd
+    classDef event fill:#1e293b,stroke:#334155,color:#94a3b8
+
+    class TRIGGER trigger
+    class NS svc
+    class REALTIME,INAPP realtime
+    class E1,E2,E3,E4,E5,E6,E7,E8 event
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 17: FILE UPLOAD SYSTEM
+===================================================== -->
+<div class="section" id="s17">
+  <h2>17. <span>File Upload System</span> <span class="badge">SUPABASE STORAGE</span></h2>
+  <p class="sub-desc">Supabase Storage (S3-compatible) — 4 buckets, different access rules, RLS policies</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+graph LR
+    subgraph UPLOADS["File Upload Sources"]
+        U1["Vendor Logo/Banner\n/vendor/profile"]
+        U2["Product Images\n/vendor/products/add"]
+        U3["Product Videos\n/vendor/products/add"]
+        U4["KYC Documents\n/vendor/profile tab=kyc\nGST, PAN, Aadhaar, Bank"]
+        U5["Buyer Avatar\nPOST /api/auth/buyer/profile/avatar"]
+        U6["Quotation PDF\n(auto-generated, stored)"]
+        U7["Support Ticket Attachments\n/vendor/support"]
+    end
+
+    subgraph BUCKETS["Supabase Storage Buckets"]
+        B1["avatars bucket\n────────────────\nVendor logos\nBuyer profile pics\nPublic read access\nOwner-only write"]
+        B2["product-images bucket\n────────────────\nProduct photos (multiple)\nMin 800x600px recommended\nPublic read access\nVendor-only write"]
+        B3["product-media bucket\n────────────────\nProduct videos\nPDF catalogs\nPublic read access\nVendor-only write"]
+        B4["documents bucket\n────────────────\nKYC documents\nInvoice PDFs\nPrivate — RLS protected\nAdmin + owner read only"]
+    end
+
+    U1 --> B1
+    U2 --> B2
+    U3 --> B3
+    U5 --> B1
+    U4 --> B4
+    U6 --> B4
+    U7 --> B4
+
+    subgraph PROCESS["Upload Process"]
+        FRONT["Frontend:\nFormData with File\nmultipart/form-data"]
+        BACK["Backend:\nreceives buffer\nsupabaseAdmin.storage\n.from(bucket)\n.upload(path, buffer)"]
+        URL["Returns:\npublic URL or\nsigned URL (private)"]
+    end
+
+    FRONT --> BACK --> URL
+
+    subgraph RLS["Row Level Security"]
+        RLS1["avatars: SELECT for all\nINSERT/UPDATE: auth.uid() = owner"]
+        RLS2["product-images: SELECT for all\nINSERT: vendor role only"]
+        RLS3["documents: SELECT: admin OR owner\nINSERT: authenticated users"]
+    end
+
+    B1 --> RLS1
+    B2 --> RLS2
+    B4 --> RLS3
+
+    classDef upload fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef bucket fill:#166534,stroke:#22c55e,color:#dcfce7
+    classDef rls fill:#450a0a,stroke:#ef4444,color:#fee2e2
+
+    class U1,U2,U3,U4,U5,U6,U7 upload
+    class B1,B2,B3,B4 bucket
+    class RLS1,RLS2,RLS3 rls
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 18: REFERRAL PROGRAM
+===================================================== -->
+<div class="section" id="s18">
+  <h2>18. <span>Referral Program System</span> <span class="badge">VENDOR REFERRALS</span></h2>
+  <p class="sub-desc">Vendor ek doosre ko refer karte hain — wallet mein credit milta hai, Finance team cashout approve karti hai</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+    participant V1 as 🏭 Vendor A (Referrer)
+    participant FE as ⚛️ Frontend
+    participant BE as 🖥️ Backend
+    participant DB as 🗄️ Supabase
+    participant V2 as 🆕 Vendor B (Referred)
+    participant FIN as 💼 Finance Team
+
+    V1->>FE: Go to /vendor/referrals
+    FE->>BE: GET /api/referrals/settings
+    BE->>DB: SELECT vendor_referral_profiles\nWHERE vendor_id = V1
+    DB-->>BE: referral_code: "ITM-V1-ABC"
+    BE-->>FE: Referral code + share link
+    FE-->>V1: Show referral code + stats
+
+    V1->>V2: Share referral code\n"Use code ITM-V1-ABC at registration"
+
+    V2->>FE: /vendor/register?ref=ITM-V1-ABC
+    FE->>BE: POST /api/auth/register\n{...details, referral_code: "ITM-V1-ABC"}
+    BE->>BE: referralProgram.processReferralSignup()
+    BE->>DB: Verify code exists in\nvendor_referral_profiles
+    BE->>DB: INSERT vendors (V2 created)
+    BE->>DB: Link V2 to V1 referral
+
+    V2->>FE: Subscribe to paid plan (e.g., SILVER)
+    FE->>BE: POST /api/payment/verify
+    BE->>BE: Payment verified successfully
+    BE->>BE: referralProgram.calculateReward(plan, rules)
+    BE->>DB: SELECT referral_plan_rules\nWHERE plan = 'SILVER'
+    DB-->>BE: reward_amount = ₹2,000
+    BE->>DB: UPDATE vendor_referral_wallets\nSET balance = balance + 2000
+    BE->>DB: INSERT vendor_referral_wallet_ledger\n{type: 'credit', amount: 2000, reason: 'referral'}
+    BE->>DB: UPDATE referral_program_settings\n(track total payouts)
+
+    V1->>FE: /vendor/referrals (view wallet = ₹2,000)
+    V1->>FE: Click "Request Cashout"
+    FE->>BE: POST /api/referrals/cashouts\n{amount: 2000, bank_details}
+    BE->>DB: INSERT vendor_referral_cashout_requests\n{status: 'pending'}
+
+    FIN->>FE: /finance-portal/referrals
+    FE->>BE: GET /api/finance/referrals/cashouts
+    BE->>DB: SELECT pending cashout requests
+    DB-->>FIN: Show V1's cashout request
+    FIN->>BE: POST /api/referrals/cashouts/:id/approve
+    BE->>DB: UPDATE cashout status = 'approved'
+    BE->>DB: UPDATE wallet balance (deduct)
+    BE->>DB: INSERT ledger entry (debit)
+    BE-->>V1: 📧 Email: "Your cashout of ₹2,000 is approved!"
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 19: ENVIRONMENT VARIABLES
+===================================================== -->
+<div class="section" id="s19">
+  <h2>19. <span>Environment Variables</span> <span class="badge">.ENV CONFIG</span></h2>
+  <p class="sub-desc">Frontend (.env / Vite) aur Backend (.env.local) ke liye required variables — production mein set karna zaroori hai</p>
+
+  <div class="grid2">
+    <div class="info-card">
+      <h3>Frontend ENV (Vite — VITE_ prefix required)</h3>
+      <ul>
+        <li><span class="dot blue"></span><code>VITE_SUPABASE_URL</code> — Supabase project URL</li>
+        <li><span class="dot blue"></span><code>VITE_SUPABASE_ANON_KEY</code> — Public anon key</li>
+        <li><span class="dot orange"></span><code>VITE_API_BASE_URL</code> — Express backend URL</li>
+        <li><span class="dot orange"></span><code>VITE_RAZORPAY_KEY_ID</code> — Razorpay public key</li>
+        <li><span class="dot green"></span><code>VITE_SITE_URL</code> — Base site URL</li>
+        <li><span class="dot purple"></span><code>VITE_RECAPTCHA_SITE_KEY</code> — reCAPTCHA key</li>
+        <li><span class="dot yellow"></span><code>ENABLE_SUPABASE_AUTH_MIGRATION</code> — Feature flag</li>
+        <li><span class="dot yellow"></span><code>ENABLE_SUPABASE_AUTH_SIGNUP</code> — Feature flag</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Backend ENV (Node.js — .env.local)</h3>
+      <ul>
+        <li><span class="dot blue"></span><code>SUPABASE_URL</code> — Supabase project URL</li>
+        <li><span class="dot blue"></span><code>SUPABASE_SERVICE_ROLE_KEY</code> — Admin DB access</li>
+        <li><span class="dot red"></span><code>JWT_SECRET</code> — JWT signing secret</li>
+        <li><span class="dot red"></span><code>RAZORPAY_KEY_ID</code> + <code>SECRET</code></li>
+        <li><span class="dot orange"></span><code>SMTP_HOST / PORT / USER / PASS</code></li>
+        <li><span class="dot orange"></span><code>GMAIL_EMAIL / GMAIL_APP_PASSWORD</code></li>
+        <li><span class="dot green"></span><code>PORT</code> — Express port (default: 3001)</li>
+        <li><span class="dot green"></span><code>NODE_ENV</code> — production / development</li>
+        <li><span class="dot purple"></span><code>OPENAI_API_KEY</code> — AI chatbot</li>
+        <li><span class="dot purple"></span><code>GROQ_API_KEY</code> — AI fallback</li>
+        <li><span class="dot yellow"></span><code>OTP_DEV_FALLBACK</code> — Skip OTP in dev</li>
+        <li><span class="dot yellow"></span><code>API_RATE_MAX</code> — Rate limit config</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 20: PROTECTED ROUTE GUARDS
+===================================================== -->
+<div class="section" id="s20">
+  <h2>20. <span>Protected Route Guards</span> <span class="badge">FRONTEND AUTH</span></h2>
+  <p class="sub-desc">Frontend mein unauthorized access block karte hain — ProtectedRoute.jsx role check karta hai</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+    NAV["User navigates to\nprotected route\ne.g. /vendor/leads"] --> PR["ProtectedRoute.jsx\nsrc/utils/ProtectedRoute.jsx\n\nor module-specific guard"]
+
+    PR --> CHECK1{"JWT in\nAuthContext?"}
+    CHECK1 -->|No token| LOGIN["Redirect to\n/vendor/login\n?redirect=/vendor/leads"]
+
+    CHECK1 -->|Token exists| CHECK2{"Token\nexpired?"}
+    CHECK2 -->|Expired| REFRESH["Call GET /api/auth/me\nto refresh session"]
+    REFRESH -->|Server returns 401| LOGIN
+    REFRESH -->|Server returns 200| CHECK3
+
+    CHECK2 -->|Valid| CHECK3{"Role\nmatches?"}
+    CHECK3 -->|Wrong role\ne.g. BUYER on vendor page| REDIRECT["Redirect to correct\nportal or /"]
+    CHECK3 -->|Correct role| CHECK4{"Account\nsuspended?"}
+
+    CHECK4 -->|Suspended| SUSPENDED["/buyer/account-suspended\nor /vendor/suspended\nshow reason message"]
+    CHECK4 -->|Active| CHECK5{"KYC required\nfor this page?"}
+
+    CHECK5 -->|KYC not approved\nfor leads/quotation| KYC_WALL["Show KYC incomplete\nwallpaper/prompt\nRedirect to profile#kyc"]
+    CHECK5 -->|KYC ok OR\nnot required| RENDER["✅ Render the Page\nComponent"]
+
+    subgraph GUARDS["Guard Files"]
+        G1["src/utils/ProtectedRoute.jsx\n(generic role check)"]
+        G2["src/modules/vendor/middleware/\nVendorProtectedRoute.jsx"]
+        G3["src/modules/buyer/middleware/\nBuyerProtectedRoute.jsx"]
+        G4["src/modules/admin/middleware/\nAdminProtectedRoute.jsx"]
+    end
+
+    classDef check fill:#713f12,stroke:#f97316,color:#fed7aa
+    classDef block fill:#450a0a,stroke:#ef4444,color:#fee2e2
+    classDef ok fill:#166534,stroke:#22c55e,color:#dcfce7
+
+    class CHECK1,CHECK2,CHECK3,CHECK4,CHECK5 check
+    class LOGIN,REDIRECT,SUSPENDED,KYC_WALL block
+    class RENDER ok
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 21: DIRECTORY / PUBLIC SEARCH
+===================================================== -->
+<div class="section" id="s21">
+  <h2>21. <span>Directory Search & Ranking</span> <span class="badge">PUBLIC FACING</span></h2>
+  <p class="sub-desc">Public directory mein search ranking — vendor ka plan tier affect karta hai visibility ko</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart LR
+    VISITOR["🌐 Visitor searches\n'Centrifugal Pumps Mumbai'"] --> SEARCH_PAGE["/search?q=centrifugal+pumps\n&city=mumbai"]
+
+    SEARCH_PAGE --> API["GET /api/dir/search\n?q=centrifugal pumps\n&microSlug=centrifugal-pumps\n&city=mumbai"]
+
+    API --> QUERY["Supabase PostgreSQL Query\nJOIN products + vendors\n+ micro_categories\n+ vendor_plan_subscriptions"]
+
+    QUERY --> RANK["Ranking Algorithm\nserver/routes/dir.js\n\nRanking Score =\n• Plan tier weight:\n  DIAMOND=100, GOLD=80\n  SILVER=60, BOOSTER=40\n  CERTIFIED=20, STARTUP=10\n  TRIAL=1\n• Location match bonus\n• KYC verified bonus\n• Profile completion %\n• Product image count"]
+
+    RANK --> RESULTS["Sorted Results\nTop ranked vendors first\n(paid plans always above free)"]
+
+    RESULTS --> CACHE["Response cached\n(short TTL for fresh data)"]
+
+    CACHE --> DISPLAY["Product cards displayed\nwith vendor badge tiers\n💎 Diamond / 🥇 Gold / etc."]
+
+    subgraph FILTERS["Available Filters"]
+        F1["Category filter\n(head/sub/micro slug)"]
+        F2["Location filter\n(state/city)"]
+        F3["Price range filter"]
+        F4["Verified vendors only"]
+        F5["Sort: relevance/price/newest"]
+    end
+
+    DISPLAY --> FILTERS
+
+    subgraph SEO["SEO Features"]
+        SEO1["Sitemap generated:\npublic/sitemap.xml\npublic/sitemap-vendors.xml\npublic/sitemap-categories.xml"]
+        SEO2["Each product page:\nreact-helmet meta tags\nOG tags for social sharing"]
+        SEO3["Vendor profile:\n/vendors/:vendorSlug\nStructured data markup"]
+    end
+
+    classDef public fill:#1e3a5f,stroke:#3b82f6,color:#bfdbfe
+    classDef rank fill:#2d1657,stroke:#9333ea,color:#e9d5ff
+    classDef seo fill:#166534,stroke:#22c55e,color:#dcfce7
+
+    class VISITOR,SEARCH_PAGE,DISPLAY public
+    class QUERY,RANK,RESULTS rank
+    class SEO1,SEO2,SEO3 seo
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 22: AI CHATBOT SYSTEM
+===================================================== -->
+<div class="section" id="s22">
+  <h2>22. <span>AI Chatbot Integration</span> <span class="badge">OpenAI + Groq</span></h2>
+  <p class="sub-desc">Deep-Chat widget, OpenAI primary + Groq fallback — history Supabase mein store hoti hai</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as 👤 User (Browser)
+    participant DC as 💬 Deep-Chat Widget
+    participant BE as 🖥️ Express /api/chat
+    participant OAI as 🤖 OpenAI API
+    participant GROQ as ⚡ Groq API
+    participant DB as 🗄️ Supabase
+
+    U->>DC: Types message:\n"Find me centrifugal pump suppliers"
+    DC->>BE: POST /api/chat/message\n{message, session_id, user_id?}
+
+    BE->>DB: SELECT chatbot_history\nWHERE session_id = X\nLast 10 messages (context)
+    DB-->>BE: Previous conversation context
+
+    BE->>BE: Build prompt:\n• System: "You are IndianTradeMart assistant"\n• Context: previous messages\n• User: new message
+
+    alt OpenAI available
+        BE->>OAI: openai.chat.completions.create()\nmodel: gpt-3.5-turbo / gpt-4
+        OAI-->>BE: AI response text
+    else OpenAI fails / rate limit
+        BE->>GROQ: groq.chat.completions.create()\nmodel: llama3-70b-8192
+        GROQ-->>BE: AI response text
+    end
+
+    BE->>DB: INSERT chatbot_history\n{session_id, role:'user', content}\n{session_id, role:'assistant', content}
+    BE-->>DC: {reply: "Here are top pump suppliers..."}
+    DC-->>U: Displays AI response\nwith product suggestions
+    </div>
+  </div>
+
+  <div class="info-card" style="margin-top:16px;">
+    <h3>Chatbot Details</h3>
+    <ul>
+      <li><span class="dot blue"></span>Widget: Deep-Chat (open source chat UI component)</li>
+      <li><span class="dot green"></span>Primary LLM: OpenAI GPT (gpt-3.5-turbo)</li>
+      <li><span class="dot orange"></span>Fallback LLM: Groq (llama3-70b — much faster, free tier)</li>
+      <li><span class="dot purple"></span>History stored: chatbot_history table (session-based)</li>
+      <li><span class="dot yellow"></span>Use cases: product search, vendor recommendations, FAQ</li>
+      <li><span class="dot red"></span>Route: POST /api/chat/message (server/routes/chat.js)</li>
+    </ul>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     SECTION 23: FULL FILE TREE
+===================================================== -->
+<div class="section" id="s23">
+  <h2>23. <span>Complete File Tree Reference</span> <span class="badge">ALL FILES</span></h2>
+  <p class="sub-desc">Important files — exact paths with purpose — quick navigation guide</p>
+
+  <div class="grid2">
+    <div class="info-card">
+      <h3>Frontend — src/</h3>
+      <ul>
+        <li><span class="dot blue"></span><code>src/App.jsx</code> — Root router, subdomain detection</li>
+        <li><span class="dot blue"></span><code>src/main.jsx</code> — React entry, Provider wrapping</li>
+        <li><span class="dot blue"></span><code>src/contexts/SubdomainContext.jsx</code></li>
+        <li><span class="dot blue"></span><code>src/contexts/SupabaseAuthContext.jsx</code></li>
+        <li><span class="dot green"></span><code>src/modules/vendor/routes.jsx</code> — Vendor routes</li>
+        <li><span class="dot green"></span><code>src/modules/vendor/context/</code></li>
+        <li><span class="dot green"></span><code>src/modules/vendor/pages/</code></li>
+        <li><span class="dot green"></span><code>src/modules/vendor/components/</code></li>
+        <li><span class="dot orange"></span><code>src/modules/buyer/routes.jsx</code></li>
+        <li><span class="dot orange"></span><code>src/modules/buyer/pages/</code></li>
+        <li><span class="dot red"></span><code>src/modules/admin/routes.jsx</code></li>
+        <li><span class="dot red"></span><code>src/modules/admin/pages/</code></li>
+        <li><span class="dot purple"></span><code>src/modules/directory/routes.jsx</code></li>
+        <li><span class="dot purple"></span><code>src/modules/directory/pages/</code></li>
+        <li><span class="dot yellow"></span><code>src/shared/components/</code> — Reused UI</li>
+        <li><span class="dot yellow"></span><code>src/shared/layouts/</code> — Page layouts</li>
+        <li><span class="dot yellow"></span><code>src/shared/services/</code> — API clients</li>
+        <li><span class="dot blue"></span><code>src/utils/ProtectedRoute.jsx</code></li>
+        <li><span class="dot blue"></span><code>src/lib/apiClient.js</code> — Base HTTP client</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Backend — server/</h3>
+      <ul>
+        <li><span class="dot red"></span><code>server/server.js</code> — Express app entry</li>
+        <li><span class="dot blue"></span><code>server/lib/auth.js</code> — JWT + bcrypt</li>
+        <li><span class="dot blue"></span><code>server/lib/supabaseClient.js</code></li>
+        <li><span class="dot orange"></span><code>server/lib/razorpayClient.js</code></li>
+        <li><span class="dot orange"></span><code>server/lib/invoiceGenerator.js</code></li>
+        <li><span class="dot green"></span><code>server/lib/notificationService.js</code></li>
+        <li><span class="dot green"></span><code>server/lib/leadConsumptionCompat.js</code></li>
+        <li><span class="dot purple"></span><code>server/lib/referralProgram.js</code></li>
+        <li><span class="dot purple"></span><code>server/lib/subscriptionCronJobs.js</code></li>
+        <li><span class="dot yellow"></span><code>server/lib/audit.js</code></li>
+        <li><span class="dot yellow"></span><code>server/lib/captcha.js</code></li>
+        <li><span class="dot yellow"></span><code>server/lib/passwordPolicy.js</code></li>
+        <li><span class="dot red"></span><code>server/middleware/requireAuth.js</code></li>
+        <li><span class="dot red"></span><code>server/middleware/requireEmployeeRoles.js</code></li>
+        <li><span class="dot red"></span><code>server/middleware/subdomainMiddleware.js</code></li>
+        <li><span class="dot blue"></span><code>server/routes/auth.js</code></li>
+        <li><span class="dot blue"></span><code>server/routes/vendors.js</code></li>
+        <li><span class="dot blue"></span><code>server/routes/payment.js</code></li>
+        <li><span class="dot blue"></span><code>server/routes/admin.js</code></li>
+        <li><span class="dot blue"></span><code>server/routes/dir.js</code> — Search + ranking</li>
+        <li><span class="dot green"></span><code>supabase/migrations/</code> — 27 SQL migrations</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<!-- =====================================================
+     QUICK REFERENCE SUMMARY
+===================================================== -->
+<div class="section">
+  <h2>Quick Reference Summary</h2>
+  <p class="sub-desc">Important numbers and facts at a glance</p>
+  <div class="grid2">
+    <div class="info-card">
+      <h3>Platform Numbers</h3>
+      <ul>
+        <li><span class="dot green"></span>19 API route files</li>
+        <li><span class="dot green"></span>203+ API endpoints</li>
+        <li><span class="dot blue"></span>27 database migration files</li>
+        <li><span class="dot blue"></span>40+ database tables</li>
+        <li><span class="dot orange"></span>7 subscription plan tiers</li>
+        <li><span class="dot orange"></span>11 employee role types</li>
+        <li><span class="dot purple"></span>5 frontend modules (portals)</li>
+        <li><span class="dot purple"></span>6 context providers</li>
+        <li><span class="dot yellow"></span>9 backend services</li>
+        <li><span class="dot red"></span>3-level category hierarchy</li>
+      </ul>
+    </div>
+    <div class="info-card">
+      <h3>Key File Locations</h3>
+      <ul>
+        <li><span class="dot blue"></span>src/App.jsx — Main router</li>
+        <li><span class="dot blue"></span>src/modules/vendor/routes.jsx — Vendor routes</li>
+        <li><span class="dot blue"></span>src/modules/buyer/routes.jsx — Buyer routes</li>
+        <li><span class="dot blue"></span>src/modules/admin/routes.jsx — Admin routes</li>
+        <li><span class="dot orange"></span>server/server.js — Express entry</li>
+        <li><span class="dot orange"></span>server/lib/auth.js — JWT + bcrypt</li>
+        <li><span class="dot orange"></span>server/lib/razorpayClient.js — Payments</li>
+        <li><span class="dot purple"></span>server/lib/subscriptionCronJobs.js — Cron</li>
+        <li><span class="dot green"></span>supabase/migrations/ — DB schema</li>
+        <li><span class="dot yellow"></span>netlify.toml — Deploy config</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+
+<footer>
+  IndianTradeMart — B2B Marketplace Platform | Full System Audit | React + Node.js + Supabase + Razorpay
+  <br/>Generated for development reference — April 2026
+</footer>
+
+<script>
+  /* ── Scroll gesture system ── */
+  (function() {
+    let hintShown = false;
+
+    function initWrap(wrap) {
+      /* already wrapped */
+      if (wrap.parentElement.classList.contains('diagram-outer')) return;
+
+      /* create outer */
+      const outer = document.createElement('div');
+      outer.className = 'diagram-outer';
+      wrap.parentNode.insertBefore(outer, wrap);
+      outer.appendChild(wrap);
+
+      /* left button */
+      const btnL = document.createElement('button');
+      btnL.className = 'scroll-btn sl';
+      btnL.innerHTML = '&#8592;';
+      btnL.title = 'Scroll left';
+      outer.appendChild(btnL);
+
+      /* right button */
+      const btnR = document.createElement('button');
+      btnR.className = 'scroll-btn sr';
+      btnR.innerHTML = '&#8594;';
+      btnR.title = 'Scroll right';
+      outer.appendChild(btnR);
+
+      /* swipe hint — only first time */
+      if (!hintShown) {
+        hintShown = true;
+        const hint = document.createElement('div');
+        hint.className = 'swipe-hint';
+        hint.innerHTML = '&#9001; Scroll / drag to explore &#9002;';
+        outer.appendChild(hint);
+        setTimeout(() => hint.remove(), 3000);
+      }
+
+      function updateArrows() {
+        const sl = wrap.scrollLeft;
+        const max = wrap.scrollWidth - wrap.clientWidth;
+        outer.classList.toggle('can-scroll-left',  sl > 2);
+        outer.classList.toggle('can-scroll-right', sl < max - 2);
+      }
+
+      /* button click scroll */
+      btnL.addEventListener('click', () => {
+        wrap.scrollBy({ left: -320, behavior: 'smooth' });
+      });
+      btnR.addEventListener('click', () => {
+        wrap.scrollBy({ left: 320, behavior: 'smooth' });
+      });
+
+      wrap.addEventListener('scroll', updateArrows);
+
+      /* mouse drag to scroll */
+      let isDown = false, startX, scrollLeft;
+      wrap.addEventListener('mousedown', e => {
+        isDown = true;
+        startX = e.pageX - wrap.offsetLeft;
+        scrollLeft = wrap.scrollLeft;
+        wrap.style.userSelect = 'none';
+      });
+      document.addEventListener('mouseup', () => {
+        isDown = false;
+        wrap.style.userSelect = '';
+      });
+      wrap.addEventListener('mousemove', e => {
+        if (!isDown) return;
+        e.preventDefault();
+        const x = e.pageX - wrap.offsetLeft;
+        wrap.scrollLeft = scrollLeft - (x - startX);
+      });
+
+      /* touch swipe */
+      let tx = null;
+      wrap.addEventListener('touchstart', e => { tx = e.touches[0].clientX; }, { passive: true });
+      wrap.addEventListener('touchmove',  e => {
+        if (tx === null) return;
+        const diff = tx - e.touches[0].clientX;
+        wrap.scrollLeft += diff * 0.6;
+        tx = e.touches[0].clientX;
+      }, { passive: true });
+      wrap.addEventListener('touchend', () => { tx = null; });
+
+      /* initial state after mermaid renders */
+      setTimeout(updateArrows, 1200);
+      setTimeout(updateArrows, 2500);
+    }
+
+    /* init all existing diagram-wraps */
+    function initAll() {
+      document.querySelectorAll('.diagram-wrap').forEach(initWrap);
+    }
+
+    /* also watch for mermaid render changes */
+    document.addEventListener('DOMContentLoaded', initAll);
+    window.addEventListener('load', () => {
+      initAll();
+      /* re-check arrows after mermaid finishes */
+      setTimeout(() => {
+        document.querySelectorAll('.diagram-wrap').forEach(w => {
+          const max = w.scrollWidth - w.clientWidth;
+          const outer = w.parentElement;
+          if (outer && outer.classList.contains('diagram-outer')) {
+            outer.classList.toggle('can-scroll-right', max > 2);
+          }
+        });
+      }, 2000);
+    });
+  })();
+
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    flowchart: { useMaxWidth: false, htmlLabels: true },
+    sequence: { useMaxWidth: false },
+    er: { useMaxWidth: false },
+    themeVariables: {
+      primaryColor: '#1e3a5f',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#3b82f6',
+      lineColor: '#64748b',
+      secondaryColor: '#0f172a',
+      tertiaryColor: '#1c1917',
+      background: '#fff',
+      mainBkg: '#f8fafc',
+      nodeBorder: '#64748b',
+      clusterBkg: '#f1f5f9',
+      titleColor: '#0f172a',
+      edgeLabelBackground: '#fff',
+      fontFamily: 'Segoe UI, sans-serif'
+    }
+  });
+</script>
+</body>
+</html>

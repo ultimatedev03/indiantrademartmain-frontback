@@ -99,6 +99,12 @@ const normalizeText = (value) =>
 
 const dedupe = (arr = []) => Array.from(new Set(arr.filter(Boolean)));
 const normalizeEmailValue = (value) => String(value || '').trim().toLowerCase();
+const isTruthyRegistrationFlag = (value) => {
+  if (value === true) return true;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
 
 const pickFirstTextValue = (...values) => {
   for (const value of values) {
@@ -122,20 +128,39 @@ const mapBuyerMeta = (buyer = {}) => ({
 const hasBuyerMeta = (buyer = null) =>
   Boolean(
     buyer &&
-      Object.values(buyer).some((value) => {
-        if (typeof value === 'boolean') return true;
-        return String(value || '').trim().length > 0;
-      })
+      (
+        pickFirstTextValue(
+          buyer?.id,
+          buyer?.user_id,
+          buyer?.full_name,
+          buyer?.company_name,
+          buyer?.email,
+          buyer?.phone,
+          buyer?.avatar_url
+        ) ||
+        buyer?.is_active === true
+      )
   );
 
 const enrichLeadBuyerMeta = async (lead = {}) => {
   if (!lead || typeof lead !== 'object') return lead;
 
+  const existingRegisteredFlag =
+    isTruthyRegistrationFlag(lead?.buyer_registered) ||
+    isTruthyRegistrationFlag(lead?.is_registered_buyer);
   let buyerMeta = mapBuyerMeta(lead?.buyers || {});
   if (!hasBuyerMeta(buyerMeta)) buyerMeta = null;
 
   const leadBuyerId = String(lead?.buyer_id || '').trim();
   const leadBuyerEmail = normalizeEmailValue(lead?.buyer_email);
+  let isRegisteredBuyer =
+    existingRegisteredFlag ||
+    Boolean(
+      leadBuyerId ||
+      String(lead?.buyer_user_id || '').trim() ||
+      String(lead?.buyers?.id || '').trim() ||
+      String(lead?.buyers?.user_id || '').trim()
+    );
 
   if (!buyerMeta && leadBuyerId) {
     const { data: buyerById, error: buyerByIdError } = await supabase
@@ -146,6 +171,7 @@ const enrichLeadBuyerMeta = async (lead = {}) => {
 
     if (!buyerByIdError && buyerById) {
       buyerMeta = mapBuyerMeta(buyerById);
+      isRegisteredBuyer = true;
     }
   }
 
@@ -153,11 +179,12 @@ const enrichLeadBuyerMeta = async (lead = {}) => {
     const { data: buyerByEmail, error: buyerByEmailError } = await supabase
       .from('buyers')
       .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
-      .eq('email', leadBuyerEmail)
+      .ilike('email', leadBuyerEmail)
       .maybeSingle();
 
     if (!buyerByEmailError && buyerByEmail) {
       buyerMeta = mapBuyerMeta(buyerByEmail);
+      isRegisteredBuyer = true;
     }
   }
 
@@ -181,6 +208,8 @@ const enrichLeadBuyerMeta = async (lead = {}) => {
       lead?.phone
     ),
     company_name: pickFirstTextValue(buyerMeta?.company_name, lead?.company_name),
+    buyer_registered: isRegisteredBuyer,
+    is_registered_buyer: isRegisteredBuyer,
     buyers: buyerMeta || lead?.buyers || null,
   };
 };

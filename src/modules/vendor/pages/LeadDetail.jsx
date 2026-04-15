@@ -53,6 +53,13 @@ const formatINR = (v) => {
   return n.toLocaleString('en-IN');
 };
 
+const isTruthyRegistrationFlag = (value) => {
+  if (value === true) return true;
+  if (typeof value === 'number') return value === 1;
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'true' || normalized === '1' || normalized === 'yes';
+};
+
 const LEAD_STATUS_OPTIONS = ['ACTIVE', 'VIEWED', 'CLOSED'];
 const LEAD_STATUS_LABEL_MAP = {
   ACTIVE: 'Active',
@@ -465,13 +472,12 @@ const LeadDetail = () => {
   const purchasedAtLabel = purchasedAt ? formatDateTime(purchasedAt) : null;
   const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
   const isRegisteredBuyer = Boolean(
-    hasExistingChatThread ||
-    lead?.buyer_id ||
-    lead?.buyer_user_id ||
-    lead?.buyers?.id ||
-    lead?.buyers?.user_id ||
-    String(lead?.buyers?.email || '').trim() ||
-    typeof lead?.buyers?.is_active === 'boolean'
+    isTruthyRegistrationFlag(lead?.buyer_registered) ||
+    isTruthyRegistrationFlag(lead?.is_registered_buyer) ||
+    String(lead?.buyer_id || '').trim() ||
+    String(lead?.buyer_user_id || '').trim() ||
+    String(lead?.buyers?.id || '').trim() ||
+    String(lead?.buyers?.user_id || '').trim()
   );
 
   const logContactSafe = async (type) => {

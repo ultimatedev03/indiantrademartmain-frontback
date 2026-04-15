@@ -2573,7 +2573,7 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
       const { data: buyerByEmail, error: buyerByEmailError } = await supabase
         .from('buyers')
         .select('id, user_id, full_name, company_name, email, phone, avatar_url, is_active')
-        .eq('email', leadBuyerEmail)
+        .ilike('email', leadBuyerEmail)
         .maybeSingle();
 
       if (!buyerByEmailError && buyerByEmail) {
@@ -2589,6 +2589,18 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
       buyer_email: buyerMeta?.email || leadBuyerEmail || null,
       buyer_phone: pickLeadBuyerText(buyerMeta?.phone, lead?.buyer_phone),
       company_name: pickLeadBuyerText(buyerMeta?.company_name, lead?.company_name),
+      buyer_registered: Boolean(
+        buyerMeta?.id ||
+        buyerMeta?.user_id ||
+        String(lead?.buyer_id || '').trim() ||
+        String(lead?.buyer_user_id || '').trim()
+      ),
+      is_registered_buyer: Boolean(
+        buyerMeta?.id ||
+        buyerMeta?.user_id ||
+        String(lead?.buyer_id || '').trim() ||
+        String(lead?.buyer_user_id || '').trim()
+      ),
       buyers: buyerMeta,
       source,
       purchase_date: normalizedPurchaseDatetime,

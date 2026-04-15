@@ -30,9 +30,9 @@ const Footer = () => {
       <footer className="bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
         <div className="container mx-auto px-4">
           {/* Main Footer Content */}
-          <div className="grid grid-cols-1 gap-12 py-16 border-b border-gray-700 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-x-10 gap-y-8 py-12 border-b border-gray-700 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(280px,1.2fr)_repeat(4,minmax(0,1fr))]">
             {/* Brand Column */}
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* ✅ Logo + Brand name side-by-side + ONE LINE heading */}
               <Link to="/" className="inline-flex max-w-full items-center gap-3" aria-label="Indian Trade Mart">
                 <img
@@ -67,15 +67,15 @@ const Footer = () => {
                 Connecting businesses with trusted technology providers across India.
               </p>
 
-              <div className="flex flex-wrap gap-4 pt-2">
+              <div className="flex flex-wrap gap-3 pt-1">
                 <a
                   href="https://www.facebook.com/IndianTradeMart/"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Facebook"
-                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-600 hover:text-white transition-all duration-300"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-600 hover:text-white"
                 >
-                  <Facebook className="w-5 h-5" />
+                  <Facebook className="h-[18px] w-[18px]" />
                 </a>
 
                 <a
@@ -83,9 +83,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Twitter / X"
-                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-500 hover:text-white transition-all duration-300"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-500 hover:text-white"
                 >
-                  <Twitter className="w-5 h-5" />
+                  <Twitter className="h-[18px] w-[18px]" />
                 </a>
 
                 <a
@@ -93,9 +93,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="LinkedIn"
-                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-blue-700 hover:text-white transition-all duration-300"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-700 hover:text-white"
                 >
-                  <Linkedin className="w-5 h-5" />
+                  <Linkedin className="h-[18px] w-[18px]" />
                 </a>
 
                 <a
@@ -103,9 +103,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Instagram"
-                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-pink-600 hover:text-white transition-all duration-300"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-pink-600 hover:text-white"
                 >
-                  <Instagram className="w-5 h-5" />
+                  <Instagram className="h-[18px] w-[18px]" />
                 </a>
 
                 <a
@@ -113,17 +113,17 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="YouTube"
-                  className="w-10 h-10 rounded-full bg-gray-700 flex items-center justify-center text-gray-300 hover:bg-red-600 hover:text-white transition-all duration-300"
+                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-red-600 hover:text-white"
                 >
-                  <Youtube className="w-5 h-5" />
+                  <Youtube className="h-[18px] w-[18px]" />
                 </a>
               </div>
             </div>
 
             {/* Information */}
             <div>
-              <h4 className="text-lg font-bold mb-6 text-white">Information</h4>
-              <ul className="space-y-3 text-sm">
+              <h4 className="mb-5 text-lg font-bold text-white">Information</h4>
+              <ul className="space-y-2.5 text-sm">
                 <li>
                   <Link to="/about-us" className="text-gray-300 hover:text-blue-400 transition-colors">
                     About Us
@@ -159,8 +159,8 @@ const Footer = () => {
 
             {/* Support */}
             <div>
-              <h4 className="text-lg font-bold mb-6 text-white">Support</h4>
-              <ul className="space-y-3 text-sm">
+              <h4 className="mb-5 text-lg font-bold text-white">Support</h4>
+              <ul className="space-y-2.5 text-sm">
                 <li>
                   <Link to="/help" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Help
@@ -191,8 +191,8 @@ const Footer = () => {
 
             {/* Suppliers Tool Kit */}
             <div>
-              <h4 className="text-lg font-bold mb-6 text-white">Suppliers Tool Kit</h4>
-              <ul className="space-y-3 text-sm">
+              <h4 className="mb-5 text-lg font-bold text-white">Suppliers Tool Kit</h4>
+              <ul className="space-y-2.5 text-sm">
                 <li>
                   <Link to="/vendor/register" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Sell on Trade Mart
@@ -218,8 +218,8 @@ const Footer = () => {
 
             {/* Buyers Tool Kit */}
             <div>
-              <h4 className="text-lg font-bold mb-6 text-white">Buyers Tool Kit</h4>
-              <ul className="space-y-3 text-sm">
+              <h4 className="mb-5 text-lg font-bold text-white">Buyers Tool Kit</h4>
+              <ul className="space-y-2.5 text-sm">
                 <li>
                   <button
                     onClick={() => setShowPostRequirement(true)}
@@ -243,8 +243,8 @@ const Footer = () => {
           </div>
 
           {/* Contact Information */}
-          <div className="py-12 border-b border-gray-700">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <div className="border-b border-gray-700 py-8">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
               <div className="flex items-start gap-3">
                 <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
                 <div className="min-w-0">
@@ -287,7 +287,7 @@ const Footer = () => {
           </div>
 
           {/* Footer Bar */}
-          <div className="py-8 flex flex-col items-center gap-3 text-center text-xs text-gray-400 md:flex-row md:items-center md:justify-between md:text-left">
+          <div className="flex flex-col items-center gap-3 py-6 text-center text-xs text-gray-400 md:flex-row md:items-center md:justify-between md:text-left">
             <p>&copy; {new Date().getFullYear()} Indian Trade Mart. All rights reserved.</p>
             <div className="flex flex-wrap items-center justify-center gap-4 md:justify-end">
               <Link to="/terms" className="hover:text-gray-200 transition-colors">
