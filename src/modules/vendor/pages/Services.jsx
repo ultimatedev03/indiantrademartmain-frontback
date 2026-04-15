@@ -437,8 +437,11 @@ const Services = () => {
         .limit(1);
 
       if (subsErr) throw subsErr;
-      // Get the first (most recent) active subscription
-      let currentActive = subs && subs.length > 0 ? subs[0] : null;
+      const nowIso = new Date().toISOString();
+      const activeRows = Array.isArray(subs) ? subs : [];
+      // Get the most recent non-expired active subscription
+      let currentActive =
+        activeRows.find((row) => !row?.end_date || String(row.end_date) > nowIso) || null;
       if (!currentActive) {
         currentActive = await ensureTrialActive();
       }
@@ -492,6 +495,34 @@ const Services = () => {
           auto_renewal_enabled: false,
           renewal_notification_sent: false
         });
+
+        const quotaPayload = {
+          vendor_id: vendorId,
+          plan_id: plan.id,
+          daily_used: 0,
+          daily_limit: Math.max(0, Number(plan?.daily_limit || 0)),
+          weekly_used: 0,
+          weekly_limit: Math.max(0, Number(plan?.weekly_limit || 0)),
+          yearly_used: 0,
+          yearly_limit: 0,
+          last_reset_date: startDate.toISOString(),
+          updated_at: startDate.toISOString(),
+        };
+
+        const { data: existingQuota } = await supabase
+          .from('vendor_lead_quota')
+          .select('id')
+          .eq('vendor_id', vendorId)
+          .maybeSingle();
+
+        if (existingQuota?.id) {
+          await supabase
+            .from('vendor_lead_quota')
+            .update(quotaPayload)
+            .eq('vendor_id', vendorId);
+        } else {
+          await supabase.from('vendor_lead_quota').insert(quotaPayload);
+        }
 
         toast({ title: 'Success!', description: 'Plan activated.' });
         setDetailsOpen(false);

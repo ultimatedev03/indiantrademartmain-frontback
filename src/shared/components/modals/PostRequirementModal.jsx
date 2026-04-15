@@ -50,6 +50,55 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
   }, []);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    let cancelled = false;
+    const loadBuyerProfile = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user || cancelled) return;
+
+        let buyerProfile = null;
+        const { data: buyerByUserId } = await supabase
+          .from('buyers')
+          .select('full_name, company_name, email, phone, whatsapp')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        buyerProfile = buyerByUserId || null;
+
+        if (!buyerProfile && user.email) {
+          const { data: buyerByEmail } = await supabase
+            .from('buyers')
+            .select('full_name, company_name, email, phone, whatsapp')
+            .ilike('email', String(user.email).trim())
+            .limit(1);
+          buyerProfile = Array.isArray(buyerByEmail) ? buyerByEmail[0] || null : null;
+        }
+
+        if (cancelled) return;
+
+        setFormData((prev) => ({
+          ...prev,
+          buyerName:
+            prev.buyerName ||
+            safe(buyerProfile?.full_name) ||
+            (user.email ? String(user.email).split('@')[0] : ''),
+          companyName: prev.companyName || safe(buyerProfile?.company_name),
+          email: prev.email || safe(buyerProfile?.email) || safe(user.email),
+          phone: prev.phone || normalizeIndianPhone(buyerProfile?.phone || buyerProfile?.whatsapp || ''),
+        }));
+      } catch (error) {
+        console.warn('Failed to prefill post requirement form:', error);
+      }
+    };
+
+    loadBuyerProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
     const q = safe(categoryQuery);
     if (q.length < 2) {
       setCatSuggestions([]);
@@ -282,6 +331,8 @@ const PostRequirementModal = ({ isOpen, onClose }) => {
         buyer_name: safe(formData.buyerName),
         buyer_email: safe(formData.email),
         buyer_phone: normalizeIndianPhone(formData.phone),
+        state: safe(formData.state_name) || null,
+        city: safe(formData.city_name) || null,
         product_interest: safe(formData.category_text) || categoryValue || safe(formData.title),
         message: safe(formData.description),
         category_slug: safe(formData.category_slug) || null,

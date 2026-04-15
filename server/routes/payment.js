@@ -101,7 +101,7 @@ const isCouponPlanApplicable = (couponPlanScope, plan) => {
   return candidates.some((candidate) => equalsIgnoreCase(scope, candidate));
 };
 
-const parseCurrencyAmount = (value, fallback = 50) => {
+const parseCurrencyAmount = (value, fallback = 0) => {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, n);
@@ -129,7 +129,7 @@ const getPlanExtraLeadPrice = (plan) => {
 const resolvePaidLeadPrice = (lead, plan) => {
   const configuredPrice = getPlanExtraLeadPrice(plan);
   if (configuredPrice > 0) return configuredPrice;
-  return parseCurrencyAmount(lead?.price, 50);
+  return parseCurrencyAmount(lead?.price, 0);
 };
 
 const isMissingPlanFeaturesColumn = (error) => {
@@ -542,8 +542,15 @@ router.post('/verify', async (req, res) => {
     const invoiceNumber = generateInvoiceNumber();
 
     // Create subscription
-    const endDate = new Date();
+    const startDate = new Date();
+    const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + (plan.duration_days || 365));
+
+    await supabase
+      .from('vendor_plan_subscriptions')
+      .update({ status: 'INACTIVE' })
+      .eq('vendor_id', vendor_id)
+      .eq('status', 'ACTIVE');
 
     const { data: subscription, error: subscriptionError } = await supabase
       .from('vendor_plan_subscriptions')
@@ -551,8 +558,8 @@ router.post('/verify', async (req, res) => {
         {
           vendor_id,
           plan_id,
-          start_date: new Date(),
-          end_date: endDate,
+          start_date: startDate.toISOString(),
+          end_date: endDate.toISOString(),
           status: 'ACTIVE',
           plan_duration_days: plan.duration_days || 365,
         },
@@ -563,6 +570,36 @@ router.post('/verify', async (req, res) => {
     if (subscriptionError) {
       logger.error('Subscription creation error:', subscriptionError);
       return res.status(500).json({ error: 'Failed to create subscription' });
+    }
+
+    const quotaPayload = {
+      vendor_id,
+      plan_id,
+      daily_used: 0,
+      daily_limit: Math.max(0, Number(plan?.daily_limit || 0)),
+      weekly_used: 0,
+      weekly_limit: Math.max(0, Number(plan?.weekly_limit || 0)),
+      yearly_used: 0,
+      yearly_limit: 0,
+      last_reset_date: startDate.toISOString(),
+      updated_at: startDate.toISOString(),
+    };
+
+    const { data: existingQuota } = await supabase
+      .from('vendor_lead_quota')
+      .select('id')
+      .eq('vendor_id', vendor_id)
+      .maybeSingle();
+
+    if (existingQuota?.id) {
+      await supabase
+        .from('vendor_lead_quota')
+        .update(quotaPayload)
+        .eq('vendor_id', vendor_id);
+    } else {
+      await supabase
+        .from('vendor_lead_quota')
+        .insert([quotaPayload]);
     }
 
     // Record payment

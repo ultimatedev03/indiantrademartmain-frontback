@@ -823,7 +823,9 @@ const Leads = () => {
   const choiceLeadId = String(purchaseChoiceDialog?.lead?.id || "");
   const choiceBusy = Boolean(choiceLeadId && purchasing?.[choiceLeadId]);
   const configuredExtraLeadPrice = Number(stats?.extraLeadPrice || 0);
-  const dialogLeadBasePrice = Number(purchaseChoiceDialog?.lead?.price || 50);
+  const dialogLeadBasePrice = Number.isFinite(Number(purchaseChoiceDialog?.lead?.price))
+    ? Math.max(0, Number(purchaseChoiceDialog?.lead?.price))
+    : 0;
   const dialogExtraLeadPrice =
     Number.isFinite(configuredExtraLeadPrice) && configuredExtraLeadPrice > 0
       ? configuredExtraLeadPrice

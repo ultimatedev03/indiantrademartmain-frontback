@@ -26,7 +26,7 @@ const raiseHttpError = async (response, fallbackMessage) => {
 const normalizeLeadPrice = (lead) => {
   const n = Number(lead?.price);
   if (Number.isFinite(n)) return Math.max(0, n);
-  return 50;
+  return 0;
 };
 
 const normalizePurchaseMode = (value) => {
@@ -164,8 +164,6 @@ export const leadPaymentApi = {
         // Explicit weekly mode should never auto-switch to paid.
         if (!allowPaidFallback) throw error;
 
-        // If API asks for paid but lead has no payable amount, bubble the error.
-        if (leadPrice <= 0) throw error;
       }
     }
 

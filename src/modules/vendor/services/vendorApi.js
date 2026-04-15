@@ -2628,11 +2628,14 @@ export const vendorApi = {
         .select('*, plan:vendor_plans(*)')
         .eq('vendor_id', vendorId)
         .eq('status', 'ACTIVE')
-        .order('start_date', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+        .order('end_date', { ascending: false, nullsFirst: false })
+        .order('start_date', { ascending: false, nullsFirst: false })
+        .limit(10);
       if (error) throw error;
-      return data;
+
+      const nowIso = new Date().toISOString();
+      const rows = Array.isArray(data) ? data : data ? [data] : [];
+      return rows.find((row) => !row?.end_date || String(row.end_date) > nowIso) || null;
     },
 
     getHistory: async () => {

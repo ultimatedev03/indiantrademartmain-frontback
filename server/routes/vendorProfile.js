@@ -504,6 +504,34 @@ async function resolveBuyerProfileForUser(user = {}) {
   return null;
 }
 
+async function resolveLocationNames({ stateId = '', cityId = '' } = {}) {
+  const normalizedStateId = String(stateId || '').trim();
+  const normalizedCityId = String(cityId || '').trim();
+
+  let stateName = null;
+  let cityName = null;
+
+  if (normalizedStateId) {
+    const { data: stateRow } = await supabase
+      .from('states')
+      .select('name')
+      .eq('id', normalizedStateId)
+      .maybeSingle();
+    stateName = nonEmptyText(stateRow?.name, 120);
+  }
+
+  if (normalizedCityId) {
+    const { data: cityRow } = await supabase
+      .from('cities')
+      .select('name')
+      .eq('id', normalizedCityId)
+      .maybeSingle();
+    cityName = nonEmptyText(cityRow?.name, 120);
+  }
+
+  return { stateName, cityName };
+}
+
 async function fetchVendorByPublicSlug(slug) {
   const normalizedSlug = String(slug || '').trim().toLowerCase();
   if (!normalizedSlug) return { vendor: null, error: null };
@@ -2350,7 +2378,7 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
       return res.status(404).json({ success: false, error: 'Lead not found' });
     }
     const mode = normalizeLeadConsumptionMode(req.body?.mode);
-    const fallbackAmount = parseLeadPriceNumber(lead?.price, 50);
+    const fallbackAmount = parseLeadPriceNumber(lead?.price, 0);
     const requestedAmount = parseLeadPriceNumber(req.body?.amount, fallbackAmount);
 
     if (mode === 'BUY_EXTRA' || mode === 'PAID') {
@@ -2604,6 +2632,8 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
       lead_status: purchase?.lead_status || null,
       subscription_plan_name: purchase?.subscription_plan_name || null,
       plan_name: purchase?.subscription_plan_name || null,
+      is_contact_unlocked: Boolean(isDirect || purchase),
+      details_unlocked: Boolean(isDirect || purchase),
     };
 
     return res.json({ success: true, lead: responseLead });
@@ -3375,8 +3405,13 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
     const headCategoryId = nonEmptyText(payload.head_category_id, 80);
     const stateId = nonEmptyText(payload.state_id, 80);
     const cityId = nonEmptyText(payload.city_id, 80);
-    const stateName = nonEmptyText(payload.state, 120);
-    const cityName = nonEmptyText(payload.city, 120);
+    let stateName = nonEmptyText(payload.state || payload.state_name, 120);
+    let cityName = nonEmptyText(payload.city || payload.city_name, 120);
+    if ((!stateName && stateId) || (!cityName && cityId)) {
+      const resolvedLocation = await resolveLocationNames({ stateId, cityId });
+      stateName = stateName || resolvedLocation.stateName;
+      cityName = cityName || resolvedLocation.cityName;
+    }
     const location =
       nonEmptyText(payload.location, 200) ||
       [cityName, stateName].filter(Boolean).join(', ') ||
@@ -3389,7 +3424,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
       vendor_id: vendor?.id || null,
       vendor_email: vendorEmail,
       buyer_id: buyerProfile?.id || null,
-      buyer_email: null,
+      buyer_email: buyerEmail ? String(buyerEmail).toLowerCase().trim() : null,
       title,
       product_name: productName,
       category,
@@ -3446,10 +3481,16 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
         created_at: proposalBasePayload?.created_at || null,
       };
     } catch (proposalInsertError) {
-      return res.status(500).json({
-        success: false,
-        error: proposalInsertError?.message || 'Failed to create proposal',
-      });
+      if (vendor?.id) {
+        return res.status(500).json({
+          success: false,
+          error: proposalInsertError?.message || 'Failed to create proposal',
+        });
+      }
+      logger.warn(
+        'Marketplace proposal insert failed; continuing with lead creation:',
+        proposalInsertError?.message || proposalInsertError
+      );
     }
 
     const baseLeadPayload = {

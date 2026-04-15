@@ -321,23 +321,33 @@ const LeadDetail = () => {
         return;
       }
 
-      // Determine source based on vendor_id and purchase status
-      let isPurchasedFlag = false;
-      let source = 'Marketplace';
-      let purchaseDate = null;
+      // Determine source based on server-enriched lead response first.
+      let source = String(leadData?.source || '').trim() || 'Marketplace';
+      let purchaseDate =
+        leadData?.purchase_datetime ||
+        leadData?.purchase_date ||
+        null;
+      let isPurchasedFlag = Boolean(
+        leadData?.lead_purchase_id ||
+        leadData?.details_unlocked ||
+        leadData?.is_contact_unlocked ||
+        String(source).toLowerCase() === 'purchased'
+      );
 
-      // If current vendor is the creator, it's Direct
-      if (leadData.vendor_id === vendorId) {
+      // Fallback for older payloads that may not carry purchase metadata yet.
+      if (!isPurchasedFlag && String(leadData?.vendor_id || '') === String(vendorId || '')) {
         source = 'Direct';
-        purchaseDate = leadData.created_at;
-      } else {
-        // Check if vendor purchased this lead
+        purchaseDate = purchaseDate || leadData.created_at;
+      } else if (!isPurchasedFlag) {
         const purchased = await leadApi.purchases.list(vendorId);
-        const purchasedLead = purchased.find(p => p.lead_id === id);
+        const purchasedLead = purchased.find(p => String(p?.lead_id || '') === String(id));
         if (purchasedLead) {
           source = 'Purchased';
           isPurchasedFlag = true;
-          purchaseDate = purchasedLead.purchase_date;
+          purchaseDate =
+            purchasedLead.purchase_datetime ||
+            purchasedLead.purchase_date ||
+            purchaseDate;
         }
       }
 
@@ -466,8 +476,15 @@ const LeadDetail = () => {
   if (!lead) return null;
 
   const leadPriceValue = Number(lead?.price);
-  const price = Number.isFinite(leadPriceValue) && leadPriceValue > 0 ? leadPriceValue : 50;
+  const price = Number.isFinite(leadPriceValue) ? Math.max(0, leadPriceValue) : 0;
   const isDirect = String(lead?.__source || '').toLowerCase() === 'direct';
+  const isContactUnlocked = Boolean(
+    isDirect ||
+    isPurchased ||
+    lead?.details_unlocked ||
+    lead?.is_contact_unlocked ||
+    lead?.lead_purchase_id
+  );
   const purchasedAt = isPurchased ? safeDate(lead?.__purchaseDate) : null;
   const purchasedAtLabel = purchasedAt ? formatDateTime(purchasedAt) : null;
   const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
@@ -687,10 +704,12 @@ const LeadDetail = () => {
               <div className="text-xs text-gray-500">Lead ID</div>
               <div className="font-mono font-semibold text-gray-900">#{String(lead.id || '').slice(0, 8)}</div>
 
-              {!isPurchased && !isDirect && (
+              {!isContactUnlocked && (
                 <div className="mt-3">
                   <div className="text-xs text-gray-500">Price</div>
-                  <div className="text-2xl font-bold text-gray-900">₹{price.toLocaleString('en-IN')}</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {price > 0 ? `₹${price.toLocaleString('en-IN')}` : 'Free'}
+                  </div>
 
                   <Button
                     className="mt-2 bg-[#00A699] hover:bg-[#00857A]"
@@ -759,7 +778,7 @@ const LeadDetail = () => {
         </CardContent>
       </Card>
 
-      {(isPurchased || isDirect) ? (
+      {isContactUnlocked ? (
         <Card className="border bg-white">
           <CardHeader className="pb-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -837,7 +856,7 @@ const LeadDetail = () => {
           <CardTitle className="text-lg">Buyer Information</CardTitle>
         </CardHeader>
         <CardContent>
-          {isPurchased || lead?.__source === 'Direct' ? (
+          {isContactUnlocked ? (
             <div className="bg-green-50 border border-green-200 rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <User className="h-5 w-5 text-green-700" />
@@ -928,7 +947,9 @@ const LeadDetail = () => {
               <div className="flex items-center justify-center gap-4">
                 <div className="text-left">
                   <p className="text-xs text-gray-500">Price</p>
-                  <p className="text-2xl font-bold text-[#003D82]">₹{price.toLocaleString('en-IN')}</p>
+                  <p className="text-2xl font-bold text-[#003D82]">
+                    {price > 0 ? `₹${price.toLocaleString('en-IN')}` : 'Free'}
+                  </p>
                 </div>
                 <Button
                   size="lg"
