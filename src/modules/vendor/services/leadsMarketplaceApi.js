@@ -388,76 +388,70 @@ export const leadsMarketplaceApi = {
 
   // Log a contact attempt
   logContact: async (leadId, contactType, notes = '') => {
-    const vendor = await vendorApi.auth.me();
-    if (!vendor?.id) throw new Error('Vendor not found');
+    const normalizedLeadId = String(leadId || '').trim();
+    if (!normalizedLeadId) throw new Error('Lead not found');
 
-    // Allow contact if vendor owns the lead OR has purchased it
-    const { data: leadRow } = await supabase
-      .from('leads')
-      .select('vendor_id')
-      .eq('id', leadId)
-      .maybeSingle();
+    let data = null;
+    try {
+      const response = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/contacts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_type: String(contactType || '').trim().toUpperCase(),
+          notes: String(notes || ''),
+        }),
+      });
+      data = response?.contact || null;
+    } catch (backendError) {
+      const vendor = await vendorApi.auth.me();
+      if (!vendor?.id) throw new Error('Vendor not found');
 
-    const isOwner = leadRow?.vendor_id === vendor.id;
+      const { data: leadRow } = await supabase
+        .from('leads')
+        .select('vendor_id')
+        .eq('id', normalizedLeadId)
+        .maybeSingle();
 
-    const { data: purchase } = await supabase
-      .from('lead_purchases')
-      .select('id')
-      .eq('vendor_id', vendor.id)
-      .eq('lead_id', leadId)
-      .maybeSingle();
+      const isOwner = String(leadRow?.vendor_id || '').trim() === String(vendor.id || '').trim();
 
-    if (!isOwner && !purchase) throw new Error('You have not purchased this lead');
+      let purchase = null;
+      if (!isOwner) {
+        const { data: purchaseRow, error: purchaseError } = await supabase
+          .from('lead_purchases')
+          .select('id')
+          .eq('vendor_id', vendor.id)
+          .eq('lead_id', normalizedLeadId)
+          .maybeSingle();
+        if (purchaseError) throw backendError;
+        purchase = purchaseRow;
+      }
 
-    // Reset and load quota
-    let { data: quota } = await supabase
-      .from('vendor_lead_quota')
-      .select('*')
-      .eq('vendor_id', vendor.id)
-      .maybeSingle();
+      if (!isOwner && !purchase) {
+        throw new Error('You have not purchased this lead');
+      }
 
-    if (quota) {
-      quota = await resetQuota(vendor.id, quota);
-      const limits = {
-        daily: quota.daily_limit || 0,
-        weekly: quota.weekly_limit || 0,
-        yearly: quota.yearly_limit || 0,
-      };
+      const { data: fallbackContact, error } = await supabase
+        .from('lead_contacts')
+        .insert([{
+          vendor_id: vendor.id,
+          lead_id: normalizedLeadId,
+          contact_type: String(contactType || '').trim().toUpperCase(),
+          status: 'PENDING',
+          notes: String(notes || ''),
+          contact_date: new Date().toISOString(),
+          created_at: new Date().toISOString()
+        }])
+        .select()
+        .single();
 
-      // Even if limits are hit, allow logging (paid extra contacts) but don't block
-      const { error: quotaErr } = await supabase
-        .from('vendor_lead_quota')
-        .update({
-          daily_used: (quota.daily_used || 0) + 1,
-          weekly_used: (quota.weekly_used || 0) + 1,
-          yearly_used: (quota.yearly_used || 0) + 1,
-          updated_at: new Date().toISOString()
-        })
-        .eq('vendor_id', vendor.id);
-      if (quotaErr) throw quotaErr;
+      if (error) throw backendError;
+      data = fallbackContact;
     }
-
-    // Create contact record
-    const { data, error } = await supabase
-      .from('lead_contacts')
-      .insert([{
-        vendor_id: vendor.id,
-        lead_id: leadId,
-        contact_type: contactType, // CALL, WHATSAPP, EMAIL
-        status: 'PENDING',
-        notes,
-        contact_date: new Date().toISOString(),
-        created_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
 
     // Notify UI to increment contacted counters
     try {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('itm:lead_contacted', { detail: { leadId, contactType } }));
+        window.dispatchEvent(new CustomEvent('itm:lead_contacted', { detail: { leadId: normalizedLeadId, contactType } }));
       }
     } catch (e) {
       console.error('contact event dispatch failed', e);
@@ -485,14 +479,22 @@ export const leadsMarketplaceApi = {
 
   // Get contact history for a lead
   getContactHistory: async (leadId) => {
-    const { data, error } = await supabase
-      .from('lead_contacts')
-      .select('*')
-      .eq('lead_id', leadId)
-      .order('contact_date', { ascending: false });
+    const normalizedLeadId = String(leadId || '').trim();
+    if (!normalizedLeadId) return [];
 
-    if (error) throw error;
-    return data || [];
+    try {
+      const response = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/contacts`);
+      return response?.contacts || [];
+    } catch (backendError) {
+      const { data, error } = await supabase
+        .from('lead_contacts')
+        .select('*')
+        .eq('lead_id', normalizedLeadId)
+        .order('contact_date', { ascending: false });
+
+      if (error) throw backendError;
+      return data || [];
+    }
   },
 
   // ============ LEAD HISTORY ============

@@ -2758,20 +2758,38 @@ export const vendorApi = {
         .eq('vendor_id', vendorId)
         .maybeSingle();
       if (error) throw error;
-
-      if (!data) {
-        return {
-          vendor_id: vendorId,
-          daily_used: 0,
-          daily_limit: 0,
-          weekly_used: 0,
-          weekly_limit: 0,
-          yearly_used: 0,
-          yearly_limit: 0,
-          last_reset_date: new Date().toISOString()
-        };
+      let planLimits = { daily_limit: 0, weekly_limit: 0 };
+      try {
+        const currentSubscription = await vendorApi.subscriptions.getCurrent();
+        if (currentSubscription?.plan) {
+          planLimits = {
+            daily_limit: Number(currentSubscription.plan.daily_limit) || 0,
+            weekly_limit: Number(currentSubscription.plan.weekly_limit) || 0,
+          };
+        }
+      } catch (planError) {
+        console.warn('[vendorApi.leadQuota.get] active plan lookup failed:', planError?.message || planError);
       }
-      return data;
+
+      const quotaRow = data || {
+        vendor_id: vendorId,
+        daily_used: 0,
+        daily_limit: 0,
+        weekly_used: 0,
+        weekly_limit: 0,
+        yearly_used: 0,
+        yearly_limit: 0,
+        last_reset_date: new Date().toISOString()
+      };
+
+      const safeDailyLimit = Number(quotaRow?.daily_limit);
+      const safeWeeklyLimit = Number(quotaRow?.weekly_limit);
+
+      return {
+        ...quotaRow,
+        daily_limit: safeDailyLimit > 0 ? safeDailyLimit : planLimits.daily_limit,
+        weekly_limit: safeWeeklyLimit > 0 ? safeWeeklyLimit : planLimits.weekly_limit,
+      };
     },
 
     initialize: async (planId) => {

@@ -180,6 +180,16 @@ const getPlanExtraLeadPrice = (plan) => {
   return value;
 };
 
+const resolveQuotaLimit = (quotaValue, planValue) => {
+  const quotaLimit = Number(quotaValue);
+  if (Number.isFinite(quotaLimit) && quotaLimit > 0) return quotaLimit;
+
+  const planLimit = Number(planValue);
+  if (Number.isFinite(planLimit) && planLimit > 0) return planLimit;
+
+  return Number.isFinite(quotaLimit) ? quotaLimit : 0;
+};
+
 const topNFromCountMap = (map, n = 8) =>
   [...map.entries()]
     .sort((a, b) => b[1] - a[1])
@@ -449,15 +459,17 @@ const Leads = () => {
 
       const quotaDailyUsed = Number(quota?.daily_used);
       const quotaWeeklyUsed = Number(quota?.weekly_used);
+      const dailyLimit = resolveQuotaLimit(quota?.daily_limit, planLimits.daily_limit);
+      const weeklyLimit = resolveQuotaLimit(quota?.weekly_limit, planLimits.weekly_limit);
 
       setStats({
         direct: directCount,
         totalPurchased: purchasedCount,
         totalContacted,
-        dailyUsed: Number.isFinite(quotaDailyUsed) ? quotaDailyUsed : daily,
-        dailyLimit: quota?.daily_limit ?? planLimits.daily_limit ?? 0,
-        weeklyUsed: Number.isFinite(quotaWeeklyUsed) ? quotaWeeklyUsed : weekly,
-        weeklyLimit: quota?.weekly_limit ?? planLimits.weekly_limit ?? 0,
+        dailyUsed: Math.max(Number.isFinite(quotaDailyUsed) ? quotaDailyUsed : 0, daily),
+        dailyLimit,
+        weeklyUsed: Math.max(Number.isFinite(quotaWeeklyUsed) ? quotaWeeklyUsed : 0, weekly),
+        weeklyLimit,
         extraLeadPrice: planExtraLeadPrice,
       });
     } catch (error) {

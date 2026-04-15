@@ -2642,6 +2642,105 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
   }
 });
 
+router.get('/me/leads/:leadId/contacts', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params?.leadId || '').trim();
+    if (!leadId) {
+      return res.status(400).json({ success: false, error: 'Invalid lead id' });
+    }
+
+    const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+      vendorId: vendor.id,
+      leadId,
+    });
+
+    if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+
+    if (!isDirect && !purchase) {
+      return res.status(403).json({ success: false, error: 'You have not purchased this lead' });
+    }
+
+    const { data: contacts, error: contactsError } = await supabase
+      .from('lead_contacts')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .eq('lead_id', leadId)
+      .order('contact_date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (contactsError) {
+      return res.status(500).json({ success: false, error: contactsError.message || 'Failed to load lead contacts' });
+    }
+
+    return res.json({ success: true, contacts: contacts || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to load lead contacts' });
+  }
+});
+
+router.post('/me/leads/:leadId/contacts', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params?.leadId || '').trim();
+    if (!leadId) {
+      return res.status(400).json({ success: false, error: 'Invalid lead id' });
+    }
+
+    const contactType = String(req.body?.contact_type || req.body?.contactType || '')
+      .trim()
+      .toUpperCase();
+    const allowedTypes = new Set(['CALL', 'WHATSAPP', 'EMAIL']);
+    if (!allowedTypes.has(contactType)) {
+      return res.status(400).json({ success: false, error: 'Invalid contact type' });
+    }
+
+    const { lead, purchase, isDirect, isVisibleMarketplaceLead } = await resolveVendorLeadAccess({
+      vendorId: vendor.id,
+      leadId,
+    });
+
+    if (!lead || (!isDirect && !purchase && !isVisibleMarketplaceLead)) {
+      return res.status(404).json({ success: false, error: 'Lead not found' });
+    }
+
+    if (!isDirect && !purchase) {
+      return res.status(403).json({ success: false, error: 'You have not purchased this lead' });
+    }
+
+    const nowIso = new Date().toISOString();
+    const contactPayload = {
+      vendor_id: vendor.id,
+      lead_id: leadId,
+      contact_type: contactType,
+      status: 'PENDING',
+      notes: String(req.body?.notes || '').trim(),
+      contact_date: nowIso,
+      created_at: nowIso,
+    };
+
+    const { data: contact, error: contactError } = await supabase
+      .from('lead_contacts')
+      .insert([contactPayload])
+      .select('*')
+      .maybeSingle();
+
+    if (contactError) {
+      return res.status(500).json({ success: false, error: contactError.message || 'Failed to log lead contact' });
+    }
+
+    return res.json({ success: true, contact: contact || contactPayload });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to log lead contact' });
+  }
+});
+
 router.get('/me/leads/:leadId/status-history', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
     const vendor = await resolveVendorForUser(req.user);
