@@ -10,6 +10,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
 import { territoryApi } from '@/modules/employee/services/territoryApi';
 import { useEmployeeAuth } from '@/modules/employee/context/EmployeeAuthContext';
+import { locationService } from '@/shared/services/locationService';
 
 const ALL_STATES_VALUE = 'all';
 const ALL_CITIES_VALUE = 'all';
@@ -25,6 +26,8 @@ const ManagerDashboard = () => {
   const [salesUsers, setSalesUsers] = useState([]);
   const [divisions, setDivisions] = useState([]);
   const [allocations, setAllocations] = useState([]);
+  const [states, setStates] = useState([]);
+  const [statesLoading, setStatesLoading] = useState(false);
 
   const [selectedSalesUser, setSelectedSalesUser] = useState('');
   const [selectedDivisionIds, setSelectedDivisionIds] = useState([]);
@@ -34,22 +37,21 @@ const ManagerDashboard = () => {
   const stateLookup = useMemo(() => {
     const idByName = new Map();
     const nameById = new Map();
-    const options = [];
-
-    (divisions || []).forEach((division) => {
-      const id = normalizeId(division?.state_id || division?.state?.id);
-      const name = String(division?.state?.name || 'State N/A').trim() || 'State N/A';
-      if (!id || nameById.has(id)) return;
-      nameById.set(id, name);
-      const normalizedName = normalizeName(name);
-      if (normalizedName) idByName.set(normalizedName, id);
-      options.push({ id, name });
-    });
-
-    options.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const options = (states || [])
+      .map((state) => {
+        const id = normalizeId(state?.id);
+        if (!id) return null;
+        const name = String(state?.name || 'State N/A').trim() || 'State N/A';
+        nameById.set(id, name);
+        const normalizedName = normalizeName(name);
+        if (normalizedName) idByName.set(normalizedName, id);
+        return { id, name };
+      })
+      .filter(Boolean)
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
     return { options, idByName, nameById };
-  }, [divisions]);
+  }, [states]);
 
   const cityLookup = useMemo(() => {
     const idByName = new Map();
@@ -91,7 +93,22 @@ const ManagerDashboard = () => {
     });
   }, [cityLookup.idByName, divisions, search, selectedCityId, selectedStateId, stateLookup.idByName]);
 
-  const stateOptions = useMemo(() => stateLookup.options, [stateLookup.options]);
+  const stateOptions = useMemo(() => {
+    const optionsById = new Map(stateLookup.options.map((state) => [state.id, state]));
+
+    (divisions || []).forEach((division) => {
+      const stateId = normalizeId(
+        division?.state_id || division?.state?.id || stateLookup.idByName.get(normalizeName(division?.state?.name))
+      );
+      if (!stateId || optionsById.has(stateId)) return;
+
+      const stateName =
+        String(division?.state?.name || stateLookup.nameById.get(stateId) || 'State N/A').trim() || 'State N/A';
+      optionsById.set(stateId, { id: stateId, name: stateName });
+    });
+
+    return Array.from(optionsById.values()).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [divisions, stateLookup.idByName, stateLookup.nameById, stateLookup.options]);
 
   const cityOptions = useMemo(() => {
     if (selectedStateId === ALL_STATES_VALUE) return [];
@@ -123,6 +140,37 @@ const ManagerDashboard = () => {
 
   useEffect(() => {
     loadBase();
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadStates = async () => {
+      try {
+        setStatesLoading(true);
+        const rows = await locationService.getStates();
+        if (mounted) {
+          setStates(rows || []);
+        }
+      } catch (error) {
+        if (mounted) {
+          toast({
+            title: 'Failed to load states',
+            description: error?.message || 'Unable to load available states',
+            variant: 'destructive',
+          });
+        }
+      } finally {
+        if (mounted) {
+          setStatesLoading(false);
+        }
+      }
+    };
+
+    loadStates();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -251,7 +299,7 @@ const ManagerDashboard = () => {
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Select value={selectedSalesUser} onValueChange={setSelectedSalesUser}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder="Select salesperson" />
               </SelectTrigger>
               <SelectContent>
@@ -262,8 +310,8 @@ const ManagerDashboard = () => {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={selectedStateId} onValueChange={setSelectedStateId}>
-              <SelectTrigger>
+            <Select value={selectedStateId} onValueChange={setSelectedStateId} disabled={statesLoading}>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder="Filter by state" />
               </SelectTrigger>
               <SelectContent className="max-h-72">
@@ -279,7 +327,7 @@ const ManagerDashboard = () => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <Select value={selectedCityId} onValueChange={setSelectedCityId} disabled={citySelectDisabled}>
-              <SelectTrigger>
+              <SelectTrigger className="h-10 pr-10">
                 <SelectValue placeholder={isStateScoped ? (cityOptions.length ? 'Filter by city' : 'No cities available') : 'Select a state first'} />
               </SelectTrigger>
               <SelectContent className="max-h-72">

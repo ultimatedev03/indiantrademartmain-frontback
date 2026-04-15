@@ -16,23 +16,22 @@ const hasStartedForm = (data = {}) =>
   Object.values(data || {}).some((value) => String(value || '').trim().length > 0);
 const QUOTE_POPUP_SHOW_DELAY_MS = 35000;
 const QUOTE_POPUP_AUTO_CLOSE_MS = 35000;
-const QUOTE_POPUP_SESSION_KEY = 'itm_quote_popup_state_v3';
+const QUOTE_POPUP_SESSION_KEY = 'itm_quote_popup_state_v4';
 
 const readPopupSessionState = () => {
   if (typeof window === 'undefined') {
-    return { shown: false, dismissed: false };
+    return { dismissed: false };
   }
 
   try {
     const raw = window.sessionStorage.getItem(QUOTE_POPUP_SESSION_KEY);
-    if (!raw) return { shown: false, dismissed: false };
+    if (!raw) return { dismissed: false };
     const parsed = JSON.parse(raw);
     return {
-      shown: Boolean(parsed?.shown),
       dismissed: Boolean(parsed?.dismissed),
     };
   } catch {
-    return { shown: false, dismissed: false };
+    return { dismissed: false };
   }
 };
 
@@ -127,10 +126,10 @@ const QuotePopup = () => {
     if (user) return; // User is logged in
     if (!isAllowedPage()) return; // Not on allowed page
     const popupState = readPopupSessionState();
-    if (popupState.shown || popupState.dismissed) return;
+    if (popupState.dismissed) return;
 
-    // 3. Start a fresh timer for each eligible visit so the popup never appears
-    // instantly on refresh because of an older hidden session timestamp.
+    // 3. Start a fresh timer for each eligible visit.
+    // The popup should behave consistently on each visit until the user explicitly dismisses it.
     showTimerRef.current = setTimeout(() => {
       showPopup();
     }, QUOTE_POPUP_SHOW_DELAY_MS);
@@ -145,14 +144,14 @@ const QuotePopup = () => {
 
   const showPopup = () => {
     setIsVisible(true);
-    writePopupSessionState({ shown: true });
 
     // 4. Auto-close logic for untouched sessions only.
+    // This should not count as a manual dismissal, otherwise the popup appears "randomly"
+    // across refreshes because one prior auto-show suppresses future visits.
     closeTimerRef.current = setTimeout(() => {
       setFormData(currentData => {
         if (!hasStartedForm(currentData)) {
           setIsVisible(false);
-          writePopupSessionState({ dismissed: true });
         }
         return currentData;
       });

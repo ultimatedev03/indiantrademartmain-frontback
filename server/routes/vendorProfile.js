@@ -1435,7 +1435,6 @@ const buildQuotaExhaustedAlerts = ({ remaining, consumptionType }) => {
   const type = normalizeConsumptionType(consumptionType);
   const daily = Math.max(0, Number(remaining?.daily || 0));
   const weekly = Math.max(0, Number(remaining?.weekly || 0));
-  const yearly = Math.max(0, Number(remaining?.yearly || 0));
   const included = type === 'DAILY_INCLUDED' || type === 'WEEKLY_INCLUDED';
   const alerts = [];
 
@@ -1451,13 +1450,6 @@ const buildQuotaExhaustedAlerts = ({ remaining, consumptionType }) => {
       type: 'LEAD_WEEKLY_EXHAUSTED',
       title: 'Weekly Lead Quota Exhausted',
       message: 'Weekly included leads are exhausted. Buy extra leads to continue.',
-    });
-  }
-  if (included && yearly <= 0) {
-    alerts.push({
-      type: 'LEAD_YEARLY_EXHAUSTED',
-      title: 'Yearly Lead Quota Exhausted',
-      message: 'Yearly included leads are exhausted for this plan period. Buy extra leads to continue.',
     });
   }
 
@@ -2399,7 +2391,7 @@ router.post('/me/leads/:leadId/purchase', requireAuth({ roles: ['VENDOR'] }), as
       payload?.consumption_type ||
       purchaseRow?.consumption_type ||
       'PAID_EXTRA';
-    const remaining = payload?.remaining || { daily: 0, weekly: 0, yearly: 0 };
+    const remaining = payload?.remaining || { daily: 0, weekly: 0 };
 
     try {
       const vendorUserId = vendor?.user_id || null;

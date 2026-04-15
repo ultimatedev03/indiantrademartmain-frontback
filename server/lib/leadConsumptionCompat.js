@@ -46,13 +46,6 @@ const toIsoUtcWeekStart = (baseDate = new Date()) => {
   return date.toISOString();
 };
 
-const toIsoUtcYearStart = (baseDate = new Date()) => {
-  const date = new Date(baseDate);
-  date.setUTCMonth(0, 1);
-  date.setUTCHours(0, 0, 0, 0);
-  return date.toISOString();
-};
-
 const toDateSafe = (value) => {
   if (!value) return null;
   const parsed = new Date(value);
@@ -146,7 +139,7 @@ const readActiveSubscription = async (supabase, vendorId) => {
   const limits = {
     daily: toPositiveCount(plan?.daily_limit),
     weekly: toPositiveCount(plan?.weekly_limit),
-    yearly: toPositiveCount(plan?.yearly_limit),
+    yearly: 0,
   };
 
   return {
@@ -160,7 +153,6 @@ const readActiveSubscription = async (supabase, vendorId) => {
 const readIncludedUsage = async (supabase, vendorId, now = new Date()) => {
   const dayStart = new Date(toIsoUtcDayStart(now));
   const weekStart = new Date(toIsoUtcWeekStart(now));
-  const yearStart = new Date(toIsoUtcYearStart(now));
 
   const { data: rows, error } = await supabase
     .from("lead_purchases")
@@ -184,7 +176,6 @@ const readIncludedUsage = async (supabase, vendorId, now = new Date()) => {
     const timestamp = toDateSafe(getPurchaseTimestamp(row));
     if (!timestamp) return;
 
-    if (timestamp >= yearStart) usage.yearly += 1;
     if (timestamp >= weekStart) usage.weekly += 1;
     if (type === "DAILY_INCLUDED" && timestamp >= dayStart) usage.daily += 1;
   });
@@ -289,10 +280,10 @@ const syncQuotaSnapshot = async ({
       plan_id: planId || null,
       daily_limit: limits.daily,
       weekly_limit: limits.weekly,
-      yearly_limit: limits.yearly,
+      yearly_limit: 0,
       daily_used: usage.daily,
       weekly_used: usage.weekly,
-      yearly_used: usage.yearly,
+      yearly_used: 0,
       updated_at: nowIso,
     };
 
@@ -387,7 +378,6 @@ const consumeLeadForVendorLegacy = async ({
   const usage = await readIncludedUsage(supabase, vendorId, now);
   let dailyRemaining = Math.max(0, limits.daily - usage.daily);
   let weeklyRemaining = Math.max(0, limits.weekly - usage.weekly);
-  let yearlyRemaining = Math.max(0, limits.yearly - usage.yearly);
 
   const existingPurchase = await readExistingPurchase(supabase, vendorId, leadId);
   if (existingPurchase) {
@@ -398,7 +388,7 @@ const consumeLeadForVendorLegacy = async ({
       remaining: {
         daily: dailyRemaining,
         weekly: weeklyRemaining,
-        yearly: yearlyRemaining,
+        yearly: 0,
       },
       moved_to_my_leads: true,
       purchase_datetime:
@@ -438,23 +428,7 @@ const consumeLeadForVendorLegacy = async ({
   const wantsPaid = PAID_CONSUMPTION_MODES.has(normalizedMode);
   let consumptionType = null;
 
-  if (yearlyRemaining <= 0) {
-    if (!wantsPaid) {
-      return {
-        success: false,
-        code: "PAID_REQUIRED",
-        error: "Yearly included quota exhausted. Paid consumption required.",
-        remaining: {
-          daily: dailyRemaining,
-          weekly: weeklyRemaining,
-          yearly: yearlyRemaining,
-        },
-        subscription_plan_name: planName || "",
-        moved_to_my_leads: false,
-      };
-    }
-    consumptionType = "PAID_EXTRA";
-  } else if (dailyRemaining > 0) {
+  if (dailyRemaining > 0) {
     consumptionType = wantsPaid ? "PAID_EXTRA" : "DAILY_INCLUDED";
   } else if (weeklyRemaining > 0) {
     consumptionType = wantsPaid ? "PAID_EXTRA" : "WEEKLY_INCLUDED";
@@ -467,7 +441,7 @@ const consumeLeadForVendorLegacy = async ({
         remaining: {
           daily: dailyRemaining,
           weekly: weeklyRemaining,
-          yearly: yearlyRemaining,
+          yearly: 0,
         },
         subscription_plan_name: planName || "",
         moved_to_my_leads: false,
@@ -493,15 +467,12 @@ const consumeLeadForVendorLegacy = async ({
   if (consumptionType === "DAILY_INCLUDED") {
     usage.daily += 1;
     usage.weekly += 1;
-    usage.yearly += 1;
   } else if (consumptionType === "WEEKLY_INCLUDED") {
     usage.weekly += 1;
-    usage.yearly += 1;
   }
 
   dailyRemaining = Math.max(0, limits.daily - usage.daily);
   weeklyRemaining = Math.max(0, limits.weekly - usage.weekly);
-  yearlyRemaining = Math.max(0, limits.yearly - usage.yearly);
 
   await syncQuotaSnapshot({
     supabase,
@@ -524,7 +495,7 @@ const consumeLeadForVendorLegacy = async ({
     remaining: {
       daily: dailyRemaining,
       weekly: weeklyRemaining,
-      yearly: yearlyRemaining,
+      yearly: 0,
     },
     moved_to_my_leads: true,
     purchase_datetime:
@@ -548,29 +519,16 @@ export async function consumeLeadForVendorWithCompat({
   const normalizedMode = normalizeLeadConsumptionMode(mode);
   const safePrice = toPositiveAmount(purchasePrice);
 
-  const { data, error } = await supabase.rpc("consume_vendor_lead", {
-    p_vendor_id: vendorId,
-    p_lead_id: leadId,
-    p_mode: normalizedMode,
-    p_purchase_price: safePrice,
+  // Lead flow now uses daily + weekly quota only.
+  // Prefer the JS compatibility path so behavior stays consistent
+  // even if an older database RPC still enforces yearly limits.
+  const fallbackResult = await consumeLeadForVendorLegacy({
+    supabase,
+    vendorId,
+    leadId,
+    mode: normalizedMode,
+    purchasePrice: safePrice,
   });
 
-  if (error) {
-    if (!isSchemaCompatibilityError(error)) {
-      throw new Error(error.message || "Lead consumption failed");
-    }
-
-    const fallbackResult = await consumeLeadForVendorLegacy({
-      supabase,
-      vendorId,
-      leadId,
-      mode: normalizedMode,
-      purchasePrice: safePrice,
-    });
-
-    return buildResultEnvelope(fallbackResult);
-  }
-
-  const result = data && typeof data === "object" ? data : {};
-  return buildResultEnvelope(result);
+  return buildResultEnvelope(fallbackResult);
 }

@@ -186,6 +186,8 @@ const topNFromCountMap = (map, n = 8) =>
     .slice(0, n)
     .map(([label, count]) => ({ label, count }));
 
+const INCLUDED_CONSUMPTION_TYPES = new Set(["DAILY_INCLUDED", "WEEKLY_INCLUDED"]);
+
 const anySelected = (obj) => Object.values(obj || {}).some(Boolean);
 const selectedKeys = (obj) => Object.keys(obj || {}).filter((k) => obj[k]);
 
@@ -219,13 +221,6 @@ const startOfWeekMonday = () => {
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  return d;
-};
-
-const startOfYear = () => {
-  const d = new Date();
-  d.setMonth(0, 1);
-  d.setHours(0, 0, 0, 0);
   return d;
 };
 
@@ -374,21 +369,22 @@ const Leads = () => {
 
       const todayStart = startOfToday();
       const weekStart = startOfWeekMonday();
-      const yearStart = startOfYear();
-
       let purchasedCount = 0;
       let directCount = 0;
       const directLeadIds = new Set();
 
       let daily = 0;
       let weekly = 0;
-      let yearly = 0;
 
       rows.forEach((row) => {
         const leadObj = row?.leads || row;
         const source = (row?.source || "").toString().toLowerCase();
         const isDirect = source === "direct";
         const isPurchased = source === "purchased" || !row?.source;
+        const consumptionType = String(row?.consumption_type || leadObj?.consumption_type || "")
+          .trim()
+          .toUpperCase();
+        const countsAgainstIncludedQuota = INCLUDED_CONSUMPTION_TYPES.has(consumptionType);
 
         if (isDirect) {
           directCount += 1;
@@ -407,9 +403,10 @@ const Leads = () => {
         const d = safeDate(purchaseDate);
         if (!d) return;
 
-        if (d >= todayStart) daily += 1;
+        if (!countsAgainstIncludedQuota) return;
+
+        if (consumptionType === "DAILY_INCLUDED" && d >= todayStart) daily += 1;
         if (d >= weekStart) weekly += 1;
-        if (d >= yearStart) yearly += 1;
       });
 
       let totalContacted = 0;
@@ -434,7 +431,7 @@ const Leads = () => {
 
       // fetch quota (limits + used)
       let quota = null;
-      let planLimits = { daily_limit: 0, weekly_limit: 0, yearly_limit: 0 };
+      let planLimits = { daily_limit: 0, weekly_limit: 0 };
       let planExtraLeadPrice = 0;
       try {
         const sub = await vendorApi.subscriptions.getCurrent();
@@ -442,7 +439,6 @@ const Leads = () => {
           planLimits = {
             daily_limit: sub.plan.daily_limit || 0,
             weekly_limit: sub.plan.weekly_limit || 0,
-            yearly_limit: sub.plan.yearly_limit || 0,
           };
           planExtraLeadPrice = getPlanExtraLeadPrice(sub.plan);
         }
@@ -453,18 +449,15 @@ const Leads = () => {
 
       const quotaDailyUsed = Number(quota?.daily_used);
       const quotaWeeklyUsed = Number(quota?.weekly_used);
-      const quotaYearlyUsed = Number(quota?.yearly_used);
 
       setStats({
         direct: directCount,
         totalPurchased: purchasedCount,
         totalContacted,
-        dailyUsed: Number.isFinite(quotaDailyUsed) ? Math.max(quotaDailyUsed, daily) : daily,
+        dailyUsed: Number.isFinite(quotaDailyUsed) ? quotaDailyUsed : daily,
         dailyLimit: quota?.daily_limit ?? planLimits.daily_limit ?? 0,
-        weeklyUsed: Number.isFinite(quotaWeeklyUsed) ? Math.max(quotaWeeklyUsed, weekly) : weekly,
+        weeklyUsed: Number.isFinite(quotaWeeklyUsed) ? quotaWeeklyUsed : weekly,
         weeklyLimit: quota?.weekly_limit ?? planLimits.weekly_limit ?? 0,
-        yearlyUsed: Number.isFinite(quotaYearlyUsed) ? Math.max(quotaYearlyUsed, yearly) : yearly,
-        yearlyLimit: quota?.yearly_limit ?? planLimits.yearly_limit ?? 0,
         extraLeadPrice: planExtraLeadPrice,
       });
     } catch (error) {
@@ -534,12 +527,11 @@ const Leads = () => {
       const remaining = payload?.remaining || {};
       const remainingSummary =
         Number.isFinite(Number(remaining?.daily)) ||
-        Number.isFinite(Number(remaining?.weekly)) ||
-        Number.isFinite(Number(remaining?.yearly))
+        Number.isFinite(Number(remaining?.weekly))
           ? `Remaining - Daily ${Math.max(0, Number(remaining?.daily || 0))}, Weekly ${Math.max(
               0,
               Number(remaining?.weekly || 0)
-            )}, Yearly ${Math.max(0, Number(remaining?.yearly || 0))}`
+            )}`
           : "";
 
       toast({
@@ -575,9 +567,9 @@ const Leads = () => {
       return;
     }
 
-    const shouldAskPurchaseMode = quotaRemaining.daily <= 0;
+    const hasIncludedQuota = quotaRemaining.daily > 0 || quotaRemaining.weekly > 0;
 
-    if (shouldAskPurchaseMode) {
+    if (!hasIncludedQuota) {
       setPurchaseChoiceDialog({ open: true, lead });
       return;
     }
@@ -810,18 +802,14 @@ const Leads = () => {
   const quotaRemaining = useMemo(() => {
     const dailyLimit = Number(stats?.dailyLimit || 0);
     const weeklyLimit = Number(stats?.weeklyLimit || 0);
-    const yearlyLimit = Number(stats?.yearlyLimit || 0);
     const dailyUsed = Number(stats?.dailyUsed || 0);
     const weeklyUsed = Number(stats?.weeklyUsed || 0);
-    const yearlyUsed = Number(stats?.yearlyUsed || 0);
 
     return {
       daily: Math.max(0, dailyLimit - dailyUsed),
       weekly: Math.max(0, weeklyLimit - weeklyUsed),
-      yearly: Math.max(0, yearlyLimit - yearlyUsed),
       dailyLimit: Math.max(0, dailyLimit),
       weeklyLimit: Math.max(0, weeklyLimit),
-      yearlyLimit: Math.max(0, yearlyLimit),
     };
   }, [stats]);
 
@@ -834,29 +822,12 @@ const Leads = () => {
 
   const choiceLeadId = String(purchaseChoiceDialog?.lead?.id || "");
   const choiceBusy = Boolean(choiceLeadId && purchasing?.[choiceLeadId]);
-  const canUseWeeklyIncluded = quotaRemaining.weekly > 0 && quotaRemaining.yearly > 0;
   const configuredExtraLeadPrice = Number(stats?.extraLeadPrice || 0);
   const dialogLeadBasePrice = Number(purchaseChoiceDialog?.lead?.price || 50);
   const dialogExtraLeadPrice =
     Number.isFinite(configuredExtraLeadPrice) && configuredExtraLeadPrice > 0
       ? configuredExtraLeadPrice
       : dialogLeadBasePrice;
-
-  const handleUseWeeklyIncluded = async () => {
-    if (!purchaseChoiceDialog?.lead) return;
-    if (!canUseWeeklyIncluded) {
-      toast({
-        title: "Weekly quota unavailable",
-        description: "Weekly included leads are exhausted. Please buy extra lead.",
-        variant: "destructive",
-      });
-      return;
-    }
-    await executeLeadPurchase(purchaseChoiceDialog.lead, {
-      mode: "USE_WEEKLY",
-      allowPaidFallback: false,
-    });
-  };
 
   const handleBuyExtraLead = async () => {
     if (!purchaseChoiceDialog?.lead) return;
@@ -1280,7 +1251,6 @@ const Leads = () => {
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline">Daily Left: {quotaRemaining.daily}</Badge>
                 <Badge variant="outline">Weekly Left: {quotaRemaining.weekly}</Badge>
-                <Badge variant="outline">Yearly Left: {quotaRemaining.yearly}</Badge>
                 {configuredExtraLeadPrice > 0 ? (
                   <Badge variant="outline">
                     Extra Lead Price: ₹{configuredExtraLeadPrice.toLocaleString("en-IN")}
@@ -1288,7 +1258,7 @@ const Leads = () => {
                 ) : null}
                 {quotaRemaining.daily <= 0 && quotaRemaining.weekly > 0 ? (
                   <Badge className="bg-amber-50 text-amber-700 border border-amber-200">
-                    Daily exhausted: choose Weekly Included or Buy Extra
+                    Daily exhausted: weekly included quota will be used automatically
                   </Badge>
                 ) : null}
               </div>
@@ -1394,11 +1364,9 @@ const Leads = () => {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Choose Lead Purchase Mode</DialogTitle>
+            <DialogTitle>Included Quota Exhausted</DialogTitle>
             <DialogDescription>
-              {canUseWeeklyIncluded
-                ? "Daily included leads are exhausted. You can use weekly included quota or buy this lead as paid extra."
-                : "Included daily/weekly quota is exhausted. Buy this lead as paid extra."}
+              Your plan's included daily and weekly quota is finished. Continue with a paid extra purchase to unlock this lead.
             </DialogDescription>
           </DialogHeader>
 
@@ -1412,17 +1380,17 @@ const Leads = () => {
               Buy Extra Price: ₹{Number(dialogExtraLeadPrice || 0).toLocaleString("en-IN")}
             </div>
             <div className="text-xs text-gray-600">
-              Remaining - Daily {quotaRemaining.daily}, Weekly {quotaRemaining.weekly}, Yearly {quotaRemaining.yearly}
+              Remaining - Daily {quotaRemaining.daily}, Weekly {quotaRemaining.weekly}
             </div>
           </div>
 
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={handleUseWeeklyIncluded}
-              disabled={choiceBusy || !canUseWeeklyIncluded}
+              onClick={() => setPurchaseChoiceDialog({ open: false, lead: null })}
+              disabled={choiceBusy}
             >
-              {choiceBusy ? "Processing..." : "Use Weekly Included"}
+              Cancel
             </Button>
             <Button
               className="bg-[#00A699] hover:bg-[#00857A]"

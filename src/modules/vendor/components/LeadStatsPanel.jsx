@@ -52,7 +52,6 @@ const LeadStatsPanel = ({ stats }) => {
         <CardContent className="p-4 pt-0 space-y-2">
           <StatRow label="Today" used={stats.dailyUsed || 0} limit={stats.dailyLimit || 0} />
           <StatRow label="This Week" used={stats.weeklyUsed || 0} limit={stats.weeklyLimit || 0} />
-          <StatRow label="This Year" used={stats.yearlyUsed || 0} limit={stats.yearlyLimit || 0} />
         </CardContent>
       </Card>
     </div>
