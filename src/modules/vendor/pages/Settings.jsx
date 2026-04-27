@@ -10,8 +10,11 @@ import { Label } from '@/components/ui/label';
 import { toast } from '@/components/ui/use-toast';
 import { Loader2, Copy, Check } from 'lucide-react';
 import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from '@/lib/passwordPolicy';
+import TurnstileField from '@/shared/components/TurnstileField';
+import { useCaptchaGate } from '@/shared/hooks/useCaptchaGate';
 
 const VendorSettings = () => {
+  const otpCaptcha = useCaptchaGate();
   const [passwords, setPasswords] = useState({
     newPassword: '',
     confirmPassword: ''
@@ -59,13 +62,35 @@ const VendorSettings = () => {
       return;
     }
 
+    const captchaError = otpCaptcha.getCaptchaError();
+    if (captchaError) {
+      toast({
+        title: otpCaptcha.getCaptchaErrorTitle(),
+        description: captchaError,
+        variant: 'destructive'
+      });
+      return;
+    }
+
     setSendingOtp(true);
     try {
-      await otpService.requestOtp(userEmail);
+      await otpService.requestOtp(userEmail, {
+        captcha_token: otpCaptcha.captchaToken,
+        captcha_action: 'otp_request',
+      });
       setOtpSent(true);
+      otpCaptcha.resetCaptcha();
       toast({ title: "OTP sent", description: `Code sent to ${userEmail}` });
     } catch (e) {
-      toast({ title: "Failed to send OTP", description: e?.message || "Try again", variant: "destructive" });
+      otpCaptcha.resetCaptcha();
+      toast({
+        title: "Failed to send OTP",
+        description:
+          e?.status === 503
+            ? (e?.message || "Captcha verification is not available on the server right now.")
+            : (e?.message || "Try again"),
+        variant: "destructive"
+      });
     } finally {
       setSendingOtp(false);
     }
@@ -166,6 +191,12 @@ const VendorSettings = () => {
                 onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
               />
               <p className="text-xs text-slate-500">OTP will be sent to your registered email: {userEmail || '—'}</p>
+              <TurnstileField
+                action="otp_request"
+                onStatusChange={otpCaptcha.setCaptchaStatus}
+                resetKey={otpCaptcha.captchaResetKey}
+                onTokenChange={otpCaptcha.setCaptchaToken}
+              />
             </div>
             <div className="space-y-2">
               <Label>New Password</Label>

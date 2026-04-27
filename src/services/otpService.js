@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/customSupabaseClient';
 import { apiUrl } from '@/lib/apiBase';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 
 const OTP_LENGTH = 6;
 const OTP_API_BASE = '/api/otp';
@@ -19,15 +20,16 @@ const parseJsonSafe = async (response) => {
 };
 
 const postOtp = async (action, payload, fallbackMessage) => {
-  const response = await fetch(apiUrl(`${OTP_API_BASE}/${action}`), {
+  const response = await fetchWithCsrf(apiUrl(`${OTP_API_BASE}/${action}`), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 
   const data = await parseJsonSafe(response);
   if (!response.ok) {
-    throw new Error(data?.error || fallbackMessage);
+    const error = new Error(data?.error || fallbackMessage);
+    error.status = response.status;
+    throw error;
   }
 
   if (import.meta.env.DEV && data?.debug_otp) {
