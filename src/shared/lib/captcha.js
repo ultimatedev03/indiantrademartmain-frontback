@@ -1,4 +1,7 @@
-const PROD_TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+const DEFAULT_PROD_TURNSTILE_SITE_KEY = '0x4AAAAAACsERFzkkI1_zH5C';
+const PROD_TURNSTILE_SITE_KEY = String(
+  import.meta.env.VITE_TURNSTILE_SITE_KEY || DEFAULT_PROD_TURNSTILE_SITE_KEY
+).trim();
 const DEV_TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_DEV_SITE_KEY || '').trim();
 
 export const TURNSTILE_SITE_KEY = import.meta.env.DEV
@@ -89,7 +92,7 @@ export const getCaptchaStatusMessage = (status) => {
   }
 
   if (normalizedStatus === CAPTCHA_STATUS.UNAVAILABLE) {
-    return 'Captcha is unavailable right now. Use Reload CAPTCHA to try again.';
+    return 'Captcha is not configured for this build yet. Use Reload CAPTCHA to try again.';
   }
 
   return '';
@@ -112,7 +115,7 @@ export const getCaptchaValidationError = (token, status) => {
   if (normalizedToken) return '';
   if (isCaptchaBypassed()) return '';
   if (!isCaptchaConfigured() || normalizedStatus === CAPTCHA_STATUS.UNAVAILABLE) {
-    return 'Captcha failed to load. Use Reload CAPTCHA to try again.';
+    return 'Captcha is not configured for this build yet. Use Reload CAPTCHA to try again.';
   }
   if (normalizedStatus === CAPTCHA_STATUS.ERROR) {
     return 'Captcha failed to load. Use Reload CAPTCHA to try again.';
