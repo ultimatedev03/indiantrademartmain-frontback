@@ -18,5 +18,10 @@ Thumbs.db
 # IDE files
 .vscode
 .idea
+# AI agent / local tooling folders
+.agent/
+.claude/
+.zencoder/
+.zenflow/
 # Optional npm cache directory
 .npm
