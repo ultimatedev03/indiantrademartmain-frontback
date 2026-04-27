@@ -2,6 +2,7 @@ import { logger } from '../utils/logger.js';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase, supabaseAnon } from '../lib/supabaseClient.js';
+import { isCloudinaryConfigured, uploadBufferToCloudinary } from '../lib/cloudinaryUpload.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import {
   buildAuthUserPayload,
@@ -1089,6 +1090,40 @@ router.post('/buyer/profile/avatar', requireAuth({ roles: ['BUYER'] }), async (r
     const baseName = rawName.includes('.') ? rawName.replace(/\.[^/.]+$/, '') : rawName;
     const fileName = `${baseName || 'avatar'}.${ext}`;
     const objectPath = `buyer-avatars/${buyer.id}/${Date.now()}-${randomUUID()}-${fileName}`;
+
+    if (isCloudinaryConfigured()) {
+      const uploaded = await uploadBufferToCloudinary({
+        buffer,
+        contentType: mime,
+        folder: `buyer-avatars/${buyer.id}`,
+        publicId: objectPath,
+        fileName,
+        tags: ['buyer-avatar'],
+      });
+
+      if (!uploaded?.publicUrl) {
+        return res.status(500).json({ success: false, error: 'Failed to build public url' });
+      }
+
+      const { error: updateError } = await supabase
+        .from('buyers')
+        .update({
+          avatar_url: uploaded.publicUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', buyer.id);
+
+      if (updateError) {
+        return res.status(500).json({ success: false, error: updateError.message || 'Failed to save avatar' });
+      }
+
+      return res.json({
+        success: true,
+        publicUrl: uploaded.publicUrl,
+        storage: uploaded.storageProvider,
+        path: uploaded.path,
+      });
+    }
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')

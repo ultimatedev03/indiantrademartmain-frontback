@@ -9,6 +9,7 @@
     "test:public": "playwright test tests/public tests/navigation tests/security",
     "test:auth": "playwright test tests/authenticated",
     "test:mutation": "playwright test tests/mutation",
+    "test:parity": "playwright test tests/parity",
     "report": "playwright show-report",
     "auth:record": "node scripts/record-auth.mjs",
     "auth:buyer": "node scripts/record-auth.mjs buyer",

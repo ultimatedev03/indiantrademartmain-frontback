@@ -1,6 +1,7 @@
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
+import { inferCloudinaryResourceType, isCloudinaryConfigured, uploadBufferToCloudinary } from '../lib/cloudinaryUpload.js';
 import { writeAuditLog } from '../lib/audit.js';
 import { hashPassword, normalizeEmail, normalizeRole, upsertPublicUser } from '../lib/auth.js';
 import { validateStrongPassword } from '../lib/passwordPolicy.js';
@@ -716,6 +717,47 @@ router.get('/me', requireAuth(), async (req, res) => {
   }
 });
 
+// PUT /api/employee/me — update own employee profile
+router.put('/me', requireAuth(), async (req, res) => {
+  try {
+    const authUser = req.user;
+    const employee = await resolveEmployeeProfile(authUser);
+    if (!employee) {
+      return res.status(404).json({ success: false, error: 'Employee profile not found' });
+    }
+
+    const ALLOWED_UPDATES = new Set([
+      'full_name', 'phone', 'bio', 'avatar_url', 'address',
+      'city', 'state', 'state_id', 'city_id',
+    ]);
+
+    const updates = {};
+    for (const [key, value] of Object.entries(req.body || {})) {
+      if (ALLOWED_UPDATES.has(key)) {
+        updates[key] = value !== undefined ? value : null;
+      }
+    }
+
+    if (!Object.keys(updates).length) {
+      return res.json({ success: true, employee });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const { data: updated, error } = await supabase
+      .from('employees')
+      .update(updates)
+      .eq('id', employee.id)
+      .select('*')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, employee: updated || { ...employee, ...updates } });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to update employee profile' });
+  }
+});
+
 router.post('/category-image-upload', requireAuth(), async (req, res) => {
   try {
     const employee = await resolveEmployeeProfile(req.user);
@@ -768,6 +810,25 @@ router.post('/category-image-upload', requireAuth(), async (req, res) => {
     const hasExt = originalName.includes('.');
     const ext = hasExt ? originalName.split('.').pop() : extFromMime;
     const objectPath = `category-images/${level}/${slug}-${Date.now()}-${randomUUID()}.${ext}`;
+
+    if (isCloudinaryConfigured()) {
+      const uploaded = await uploadBufferToCloudinary({
+        buffer,
+        contentType,
+        folder: `category-images/${level}`,
+        publicId: objectPath,
+        fileName: objectPath.split('/').pop(),
+        tags: ['category-image', level],
+      });
+
+      return res.json({
+        success: true,
+        bucket: uploaded.bucket,
+        path: uploaded.path,
+        publicUrl: uploaded.publicUrl,
+        storage: uploaded.storageProvider,
+      });
+    }
 
     const { error: uploadError } = await supabase.storage
       .from(CATEGORY_IMAGE_BUCKET)
@@ -846,6 +907,26 @@ router.post('/product-media-upload', requireAuth(), async (req, res) => {
       originalName,
       contentType,
     });
+
+    if (isCloudinaryConfigured()) {
+      const uploaded = await uploadBufferToCloudinary({
+        buffer,
+        contentType,
+        folder: `product-media/${finalType}`,
+        publicId: objectPath,
+        fileName: objectPath.split('/').pop(),
+        resourceType: inferCloudinaryResourceType(contentType),
+        tags: ['employee-product-media', finalType],
+      });
+
+      return res.json({
+        success: true,
+        bucket: uploaded.bucket,
+        path: uploaded.path,
+        publicUrl: uploaded.publicUrl,
+        storage: uploaded.storageProvider,
+      });
+    }
 
     let uploadedBucket = null;
     let lastUploadError = null;
@@ -1691,6 +1772,154 @@ router.post('/subscription-requests/:id/vp-forward', requireAuth(), async (req, 
     return res.json({ success: true, request: updated });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to forward request to admin' });
+  }
+});
+
+// ✅ GET /api/employee/dashboard/stats — employee's own dashboard stats
+router.get('/dashboard/stats', requireAuth(), async (req, res) => {
+  try {
+    const authUser = req.user;
+    const employee = await resolveEmployeeProfile(authUser);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+
+    const employeeId = employee.id;
+    const userId = authUser?.id;
+
+    const [vendorsRes, ticketsRes, leadsRes] = await Promise.allSettled([
+      supabase.from('vendors').select('*', { count: 'exact', head: true }).or(`assigned_to.eq.${employeeId}${userId ? `,created_by.eq.${userId}` : ''}`),
+      supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('assigned_to', employeeId),
+      supabase.from('leads').select('*', { count: 'exact', head: true }).eq('assigned_to', employeeId),
+    ]);
+
+    return res.json({
+      success: true,
+      stats: {
+        vendorsAssigned: vendorsRes.status === 'fulfilled' ? vendorsRes.value?.count || 0 : 0,
+        ticketsAssigned: ticketsRes.status === 'fulfilled' ? ticketsRes.value?.count || 0 : 0,
+        leadsAssigned: leadsRes.status === 'fulfilled' ? leadsRes.value?.count || 0 : 0,
+        role: employee.role,
+        department: employee.department,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /api/employee/requirements — list requirements/leads assigned to employee
+router.get('/requirements', requireAuth(), async (req, res) => {
+  try {
+    const authUser = req.user;
+    const employee = await resolveEmployeeProfile(authUser);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+
+    const { status, search, limit = 50, page = 1 } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let query = supabase
+      .from('leads')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + Number(limit) - 1);
+
+    if (status && status !== 'ALL') query = query.eq('status', status.toUpperCase());
+    if (search) query = query.ilike('title', `%${search}%`);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, requirements: data || [], leads: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ PATCH /api/employee/requirements/:id/status — update requirement status
+router.patch('/requirements/:id/status', requireAuth(), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body || {};
+    if (!status) return res.status(400).json({ success: false, error: 'status is required' });
+
+    const { data, error } = await supabase
+      .from('leads')
+      .update({ status: String(status).toUpperCase(), updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, requirement: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /api/employee/suggestions — AI/system suggestions
+router.get('/suggestions', requireAuth(), async (req, res) => {
+  try {
+    const authUser = req.user;
+    const employee = await resolveEmployeeProfile(authUser);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+
+    // Return suggestions from the suggestions table or empty array if not set up
+    const { data, error } = await supabase
+      .from('employee_suggestions')
+      .select('*')
+      .eq('employee_id', employee.id)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    // Gracefully handle if table doesn't exist
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+      return res.json({ success: true, suggestions: [] });
+    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, suggestions: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ POST /api/employee/sales/leads — create a sales lead record
+router.post('/sales/leads', requireAuth(), async (req, res) => {
+  try {
+    const authUser = req.user;
+    const employee = await resolveEmployeeProfile(authUser);
+    if (!employee) return res.status(404).json({ success: false, error: 'Employee profile not found' });
+
+    const allowed = new Set(['SALES', 'MANAGER', 'VP', 'ADMIN', 'SUPERADMIN']);
+    if (!allowed.has(String(employee.role || '').toUpperCase())) {
+      return res.status(403).json({ success: false, error: 'Insufficient role' });
+    }
+
+    const payload = req.body || {};
+    const { data, error } = await supabase
+      .from('leads')
+      .insert([{
+        title: payload.title || payload.product_name || 'Sales Lead',
+        product_name: payload.product_name || payload.title || null,
+        buyer_name: payload.buyer_name || null,
+        buyer_email: payload.buyer_email || null,
+        buyer_phone: payload.buyer_phone || null,
+        company_name: payload.company_name || null,
+        description: payload.description || null,
+        category: payload.category || null,
+        budget: payload.budget || null,
+        location: payload.location || null,
+        status: payload.status || 'AVAILABLE',
+        source: 'SALES',
+        assigned_to: employee.id,
+        created_at: new Date().toISOString(),
+      }])
+      .select('*')
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.status(201).json({ success: true, lead: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
   }
 });
 

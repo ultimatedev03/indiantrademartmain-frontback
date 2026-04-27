@@ -118,18 +118,6 @@ const SearchFilters = ({ filters, setFilters, priceBounds }) => {
                 Verified Suppliers Only
               </label>
             </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox
-                id="inStock"
-                checked={filters.inStock}
-                onCheckedChange={(checked) =>
-                  setFilters((prev) => ({ ...prev, inStock: checked === true }))
-                }
-              />
-              <label htmlFor="inStock" className="text-sm cursor-pointer">
-                In Stock Only
-              </label>
-            </div>
           </div>
         </div>
       </Card.Content>
@@ -138,4 +126,3 @@ const SearchFilters = ({ filters, setFilters, priceBounds }) => {
 };
 
 export default SearchFilters;
-

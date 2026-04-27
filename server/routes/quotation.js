@@ -1867,4 +1867,27 @@ router.post('/send', validateQuotationRequest, async (req, res) => {
   }
 });
 
+// ✅ GET /api/quotation/admin/quotes — admin view of all quotations/proposals
+router.get('/admin/quotes', requireAuth(), async (req, res) => {
+  try {
+    const { limit = 50, page = 1, status } = req.query;
+    const offset = (Number(page) - 1) * Number(limit);
+
+    let query = supabase
+      .from('proposals')
+      .select('id, title, product_name, status, buyer_email, vendor_id, created_at, budget, quantity')
+      .order('created_at', { ascending: false })
+      .range(offset, offset + Number(limit) - 1);
+
+    if (status && status !== 'ALL') query = query.eq('status', status.toUpperCase());
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, quotations: data || [], quotes: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 export default router;

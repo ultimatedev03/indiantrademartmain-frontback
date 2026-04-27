@@ -71,7 +71,7 @@ const Header = () => {
     </Link>
 
     <Link 
-      to="/directory/search" 
+      to="/products" 
       onClick={onClick}
       className={`${mobile ? 'flex items-center p-3 hover:bg-slate-100 rounded-md text-slate-800' : 'text-gray-300 hover:text-white hover:bg-slate-800 px-3 py-2 rounded-md text-sm font-medium transition-colors'}`}
     >
@@ -180,7 +180,7 @@ const Header = () => {
           {/* Desktop Actions */}
           <div className="flex items-center gap-2 sm:gap-4">
              <Link
-               to="/directory/search"
+               to="/products"
                className="text-gray-400 hover:text-white transition-colors p-2"
                aria-label="Search products and suppliers"
                title="Search"

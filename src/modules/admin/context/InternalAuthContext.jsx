@@ -206,63 +206,63 @@ export const InternalAuthProvider = ({ children }) => {
   }, []);
 
   /**
-   * 🔐 FIXED LOGIN
+   * 🔐 Backend-first login — uses Express /api/auth/login
+   * instead of direct supabase.auth.signInWithPassword.
+   * This ensures consistent cookie/CSRF session behavior.
    */
   const login = async (email, password, expectedRole, captcha = {}) => {
     try {
       setIsLoading(true);
       const expectedNormalizedRole = normalizeRoleValue(expectedRole, undefined);
 
-      // 🚨 IMPORTANT: kill any cached session
+      // 🚨 Kill any cached session first
       await supabase.auth.signOut();
 
-      // ✅ 1. STRICT PASSWORD VALIDATION
-      const { data: authData, error: authError } =
-        await supabase.auth.signInWithPassword({
+      // ✅ Backend-first: use Express auth endpoint
+      const loginRes = await fetchWithCsrf(apiUrl('/api/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           email,
           password,
+          role_hint: expectedNormalizedRole || undefined,
           ...(captcha?.captcha_token ? { captcha_token: captcha.captcha_token } : {}),
           ...(captcha?.captcha_action ? { captcha_action: captcha.captcha_action } : {}),
-        });
+        }),
+      });
 
-      if (authError || !authData?.user) {
-        throw new Error('Invalid credentials');
+      const loginData = await loginRes.json().catch(() => ({}));
+
+      if (!loginRes.ok || !loginData?.success) {
+        throw new Error(loginData?.error || 'Invalid credentials');
       }
 
-      // ✅ 2. RPC (ROLE / ACCESS CHECK) - treat as advisory if missing
-      let rpcData = null;
-      let rpcError = null;
-      try {
-        const { data, error } = await supabase.rpc('login_admin', {
-          p_email: email,
-          p_password: password,
-        });
-        if (error || !data) {
-          rpcError = error || new Error('login_admin RPC unavailable');
-        } else {
-          rpcData = data;
-        }
-      } catch (err) {
-        rpcError = err;
+      // Backend login sets httpOnly cookie, now sync local supabase session
+      // via /api/auth/me to get the session user
+      const sessionUser = loginData?.user;
+      if (!sessionUser?.id) {
+        throw new Error('Unauthorized');
       }
 
-      // Prefer employees profile as source-of-truth for internal portal access
+      // Resolve employee profile from server
       let normalized = null;
 
-      // ✅ Resolve via server (ensures employee.user_id sync)
       const resolved = await resolveEmployeeFromApi();
       if (resolved && isInternalRole(resolved.role)) {
         normalized = normalizeInternalUser(resolved, email);
       }
 
-      const { data: empById } = await supabase
-        .from('employees')
-        .select('*')
-        .eq('user_id', authData.user.id)
-        .maybeSingle();
+      // Fallback: try direct employees table lookup
+      if (!normalized) {
+        const { data: empById } = await supabase
+          .from('employees')
+          .select('*')
+          .eq('user_id', sessionUser.id)
+          .maybeSingle();
 
-      if (empById && isInternalRole(empById.role)) {
-        normalized = normalizeInternalUser(empById, email);
+        if (empById && isInternalRole(empById.role)) {
+          normalized = normalizeInternalUser(empById, email);
+        }
       }
 
       if (!normalized) {
@@ -277,26 +277,11 @@ export const InternalAuthProvider = ({ children }) => {
         }
       }
 
-      if (!normalized && rpcData) {
-        const rpcNormalized = normalizeInternalUser(rpcData, email);
-        if (rpcNormalized?.role && isInternalRole(rpcNormalized.role)) {
-          normalized = rpcNormalized;
-        }
-      }
-
-      if (!normalized && rpcError) {
-        // If RPC is missing or returns nothing, fall back to employee-based auth only.
-        console.warn('[InternalAuth] login_admin RPC failed, using employee fallback:', rpcError);
-      }
-
       if (!normalized) {
-        // rollback auth session
-        await supabase.auth.signOut();
         throw new Error('Unauthorized');
       }
 
       if (!isInternalRole(normalized.role)) {
-        await supabase.auth.signOut();
         throw new Error('Unauthorized');
       }
 
@@ -304,7 +289,6 @@ export const InternalAuthProvider = ({ children }) => {
         expectedNormalizedRole &&
         normalizeRoleValue(normalized.role, undefined) !== expectedNormalizedRole
       ) {
-        await supabase.auth.signOut();
         throw new Error('Unauthorized');
       }
 

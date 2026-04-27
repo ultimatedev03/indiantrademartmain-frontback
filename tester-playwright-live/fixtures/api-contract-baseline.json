@@ -1,0 +1,137 @@
+{
+  "version": "1.0.0",
+  "generatedAt": "2026-04-16",
+  "purpose": "Baseline manifest for backend separation migration. Lists critical API-backed flows that must survive the Express migration without behavioral regression.",
+
+  "criticalEndpoints": {
+    "health": {
+      "method": "GET",
+      "path": "/health",
+      "expectedStatus": [200],
+      "expectedBody": { "containsKey": "status" },
+      "category": "infrastructure"
+    },
+    "authMe": {
+      "method": "GET",
+      "path": "/api/auth/me",
+      "expectedStatus": [200, 401],
+      "category": "auth",
+      "notes": "Returns current user if session valid, 401 if not"
+    },
+    "vendorsPublicSearch": {
+      "method": "GET",
+      "path": "/api/vendors/public/search?q=test",
+      "expectedStatus": [200],
+      "category": "public-catalog",
+      "notes": "Public vendor search must remain available"
+    },
+    "dirSearch": {
+      "method": "GET",
+      "path": "/api/dir/search?q=test",
+      "expectedStatus": [200],
+      "category": "public-catalog",
+      "notes": "Directory search must remain available"
+    },
+    "supportStats": {
+      "method": "GET",
+      "path": "/api/support/stats",
+      "expectedStatus": [200, 401],
+      "category": "internal-portal",
+      "notes": "Support ticket stats — requires auth in production"
+    },
+    "kycStatus": {
+      "method": "GET",
+      "path": "/api/kyc/status",
+      "expectedStatus": [200, 401, 404],
+      "category": "vendor",
+      "notes": "KYC status safely probes vendor state boundaries"
+    },
+    "paymentInit": {
+      "method": "POST",
+      "path": "/api/payment/initiate",
+      "expectedStatus": [400, 401, 403],
+      "category": "payments",
+      "notes": "Payments boundary should reject invalid init requests gracefully with correct status codes"
+    }
+  },
+
+  "publicFlows": [
+    {
+      "name": "Homepage loads",
+      "url": "/",
+      "assertions": [
+        { "type": "title", "contains": "Indian" },
+        { "type": "status", "expected": 200 }
+      ]
+    },
+    {
+      "name": "Directory page loads",
+      "url": "/directory",
+      "assertions": [
+        { "type": "status", "expected": 200 },
+        { "type": "visible", "selector": "body" }
+      ]
+    },
+    {
+      "name": "Vendor login page loads",
+      "url": "/vendor/login",
+      "assertions": [
+        { "type": "status", "expected": 200 },
+        { "type": "visible", "selector": "input" }
+      ]
+    },
+    {
+      "name": "Buyer login page loads",
+      "url": "/buyer/login",
+      "assertions": [
+        { "type": "status", "expected": 200 },
+        { "type": "visible", "selector": "input" }
+      ]
+    }
+  ],
+
+  "authenticatedFlows": [
+    {
+      "name": "Vendor dashboard loads after login",
+      "portal": "vendor",
+      "url": "/vendor/dashboard",
+      "requiresAuth": true,
+      "assertions": [
+        { "type": "status", "expected": 200 },
+        { "type": "noError", "description": "No JS console errors on dashboard" }
+      ]
+    },
+    {
+      "name": "Admin dashboard loads after login",
+      "portal": "admin",
+      "url": "/admin",
+      "requiresAuth": true,
+      "assertions": [
+        { "type": "status", "expected": 200 }
+      ]
+    }
+  ],
+
+  "parityRules": [
+    {
+      "rule": "AUTH_COOKIE_CONTRACT",
+      "description": "Auth cookies (itm_access, itm_csrf) must use same names, SameSite, and domain scope after migration",
+      "verifyBy": "Check Set-Cookie headers on /api/auth/login response"
+    },
+    {
+      "rule": "API_PREFIX_STABILITY",
+      "description": "All /api/* prefixes must remain stable — no path changes during migration",
+      "verifyBy": "Run this manifest's critical endpoints check"
+    },
+    {
+      "rule": "CSRF_ENFORCEMENT",
+      "description": "POST/PUT/PATCH/DELETE requests must include X-CSRF-Token header",
+      "verifyBy": "Test mutation endpoint without CSRF token — should get 403"
+    },
+    {
+      "rule": "RATE_LIMITING",
+      "description": "Rate limits must remain active on /api/, /api/auth, /api/otp",
+      "verifyBy": "Rapid-fire requests and verify 429 response"
+    }
+  ]
+}

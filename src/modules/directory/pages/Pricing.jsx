@@ -6,7 +6,20 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-import { BadgeCheck, Check, Crown, Gem, ShieldCheck, Sparkles, Star, Zap } from 'lucide-react';
+import {
+  BadgeCheck,
+  BarChart3,
+  Check,
+  Crown,
+  Gem,
+  Headphones,
+  MapPin,
+  Rocket,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Zap,
+} from 'lucide-react';
 
 const cx = (...arr) => arr.filter(Boolean).join(' ');
 
@@ -74,18 +87,19 @@ const getPlanDisplayPricing = (plan) => {
   };
 };
 
-const getBillingPricing = (plan, billing) => {
-  const yearly = getPlanDisplayPricing(plan);
-
-  if (billing === 'yearly') {
-    return yearly;
-  }
-
+const getMonthlyPricing = (plan) => {
+  const annual = getPlanDisplayPricing(plan);
   return {
-    ...yearly,
-    nowPrice: Number((yearly.nowPrice / 12).toFixed(2)),
-    originalPrice: Number((yearly.originalPrice / 12).toFixed(2)),
+    ...annual,
+    nowPrice: Number((annual.nowPrice / 12).toFixed(2)),
+    originalPrice: Number((annual.originalPrice / 12).toFixed(2)),
   };
+};
+
+const getBillingPricing = (plan, billing) => {
+  const annual = getPlanDisplayPricing(plan);
+  if (billing === 'yearly') return annual;
+  return getMonthlyPricing(plan);
 };
 
 const getDiscountTag = (pricing) => {
@@ -110,6 +124,79 @@ const getCoverage = (plan) => {
     states: Number.isFinite(states) && states >= 0 ? Math.floor(states) : 0,
     cities: Number.isFinite(cities) && cities >= 0 ? Math.floor(cities) : 0,
   };
+};
+
+const parsePlanMeta = (plan) => {
+  if (Array.isArray(plan?.features)) {
+    const items = plan.features.map((item) => String(item || '').trim()).filter(Boolean);
+    return {
+      badge: { label: plan?.name || 'Plan', variant: 'neutral' },
+      highlights: [],
+      groups: items.length > 0 ? [{ title: 'Features', Icon: Sparkles, items }] : [],
+    };
+  }
+
+  const features = asObject(plan?.features);
+  const badge = asObject(features?.badge);
+  const listing = asObject(features?.listing);
+  const verification = asObject(features?.verification);
+  const leadsConfig = asObject(features?.leads);
+  const supportConfig = asObject(features?.support);
+  const analyticsConfig = asObject(features?.analytics);
+  const coverage = getCoverage(plan);
+  const visibility = [];
+  const leads = [];
+  const support = [];
+  const analytics = [];
+  const coverageItems = [];
+  const highlights = [];
+
+  if (badge?.label) highlights.push(`Badge: ${badge.label}`);
+  if (verification?.kyc_required) highlights.push('KYC required');
+
+  if (listing?.highlight) visibility.push('Highlighted listing');
+  if (listing?.featured) visibility.push('Featured listing');
+  if (listing?.homepage_featured) visibility.push('Homepage featured');
+  if (listing?.category_top_ranking) visibility.push('Category top ranking');
+  if (listing?.home_category_boost) visibility.push('Category boost');
+  if (Number(listing?.top_slots) > 0) visibility.push(`${Math.floor(Number(listing.top_slots))} top slots`);
+  if (verification?.trust_seal) visibility.push('Trust seal');
+  if (listing?.profile_verified_tick) visibility.push('Verified tick on profile');
+
+  if (leadsConfig?.priority_leads) leads.push('Priority leads');
+  if (leadsConfig?.exclusive_leads) leads.push('Exclusive leads');
+  if (leadsConfig?.early_access_leads) leads.push('Early access leads');
+  if (leadsConfig?.rfq_access) leads.push('RFQ access');
+  if (leadsConfig?.direct_call_whatsapp) leads.push('Direct call/WhatsApp');
+
+  if (supportConfig?.level) support.push(`${String(supportConfig.level).toUpperCase()} support`);
+  if (supportConfig?.response_sla_hours) support.push(`SLA ${supportConfig.response_sla_hours} hrs`);
+  if (supportConfig?.account_manager) support.push('Dedicated account manager');
+
+  if (analyticsConfig?.enabled) analytics.push('Analytics dashboard');
+  if (analyticsConfig?.export_csv) analytics.push('Export reports (CSV)');
+  if (analyticsConfig?.campaign_insights) analytics.push('Campaign insights');
+  if (analyticsConfig?.competitor_insights) analytics.push('Competitor insights');
+
+  if (coverage.states > 0) coverageItems.push(`Up to ${coverage.states} states`);
+  if (coverage.cities > 0) coverageItems.push(`Up to ${coverage.cities} cities`);
+
+  return {
+    badge: { label: badge?.label || plan?.name || 'Plan', variant: badge?.variant || 'neutral' },
+    highlights,
+    groups: [
+      { title: 'Visibility', Icon: Star, items: visibility },
+      { title: 'Leads', Icon: Rocket, items: leads },
+      { title: 'Support', Icon: Headphones, items: support },
+      { title: 'Analytics', Icon: BarChart3, items: analytics },
+      { title: 'Coverage', Icon: MapPin, items: coverageItems },
+    ].filter((group) => group.items.length > 0),
+  };
+};
+
+const getPlanFeatureSummary = (plan) => {
+  const meta = parsePlanMeta(plan);
+  return meta.groups.flatMap((group) => group.items.map((text) => ({ group: group.title, text })));
 };
 
 const getTopSlots = (plan) => {
@@ -241,6 +328,11 @@ const Pricing = () => {
     return getTopSlots(selectedPlan);
   }, [selectedPlan]);
 
+  const selectedPlanMeta = useMemo(() => {
+    if (!selectedPlan) return { groups: [], highlights: [] };
+    return parsePlanMeta(selectedPlan);
+  }, [selectedPlan]);
+
   return (
     <>
       <Helmet>
@@ -258,10 +350,6 @@ const Pricing = () => {
             <h1 className="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900">
               Choose your growth plan
             </h1>
-            <p className="mt-3 text-slate-600">
-              Same plan pricing as Vendor Dashboard. Monthly is auto-calculated from yearly pricing.
-            </p>
-
             <div className="mt-6 flex items-center justify-center gap-3">
               <Link to="/vendor/register">
                 <Button className="h-10 px-5">Register as Vendor</Button>
@@ -294,9 +382,6 @@ const Pricing = () => {
               </button>
             </div>
 
-            <div className="mt-3 text-xs text-slate-500">
-              Live superadmin pricing. Monthly values are computed as yearly price / 12.
-            </div>
           </div>
 
           {loading ? (
@@ -326,18 +411,14 @@ const Pricing = () => {
                 const coverage = getCoverage(plan);
                 const topSlots = getTopSlots(plan);
                 const ranking = getRankingText(plan);
+                const featureSummary = getPlanFeatureSummary(plan);
                 const discountTag = getDiscountTag(pricing);
                 const isFree = toNonNegativeNumber(pricing?.nowPrice, 0) === 0;
                 const hasOldPrice =
                   toNonNegativeNumber(pricing?.originalPrice, 0) > toNonNegativeNumber(pricing?.nowPrice, 0);
                 const isPopular = plan?.id === mostPopularPlanId || isPlanPopularFromBadge(plan);
-                const yearlyLimit = Math.max(
-                  0,
-                  Math.floor(
-                    toNonNegativeNumber(plan?.yearly_limit, 0) ||
-                      toNonNegativeNumber(plan?.weekly_limit, 0) * 52
-                  )
-                );
+                const compactFeatures = featureSummary.slice(0, 5);
+                const hiddenFeatures = Math.max(0, featureSummary.length - compactFeatures.length);
 
                 return (
                   <motion.button
@@ -425,7 +506,7 @@ const Pricing = () => {
 
                         <div className="mt-4 rounded-xl border bg-slate-50 p-3">
                           <div className="text-xs font-semibold text-slate-700 mb-2">Lead Limits</div>
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-2 gap-2">
                             <div className="rounded-lg border bg-white p-2 text-center">
                               <div className="text-[11px] text-slate-500">Daily Bonus</div>
                               <div className="text-sm font-bold text-slate-900">{Math.floor(toNonNegativeNumber(plan?.daily_limit, 0))}</div>
@@ -433,10 +514,6 @@ const Pricing = () => {
                             <div className="rounded-lg border bg-white p-2 text-center">
                               <div className="text-[11px] text-slate-500">Weekly</div>
                               <div className="text-sm font-bold text-slate-900">{Math.floor(toNonNegativeNumber(plan?.weekly_limit, 0))}</div>
-                            </div>
-                            <div className="rounded-lg border bg-white p-2 text-center">
-                              <div className="text-[11px] text-slate-500">Yearly</div>
-                              <div className="text-sm font-bold text-slate-900">{yearlyLimit}</div>
                             </div>
                           </div>
                         </div>
@@ -457,6 +534,27 @@ const Pricing = () => {
                             </div>
                           ) : null}
                         </div>
+
+                        <div className="mt-4 rounded-xl border bg-white p-3">
+                          <div className="text-xs font-semibold text-slate-700 mb-2">Plan Features</div>
+                          <div className="space-y-1.5">
+                            {compactFeatures.length > 0 ? (
+                              compactFeatures.map((feature, index) => (
+                                <div key={`${feature.group}-${index}`} className="flex items-start gap-2 text-xs text-slate-700">
+                                  <Check className="w-3.5 h-3.5 shrink-0 text-emerald-600 mt-0.5" />
+                                  <span>{feature.text}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="text-xs text-slate-500">Tap card to view plan details.</div>
+                            )}
+                            {hiddenFeatures > 0 ? (
+                              <div className="pl-5 text-xs font-medium text-slate-500">
+                                +{hiddenFeatures} more features
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </motion.button>
@@ -468,7 +566,7 @@ const Pricing = () => {
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           {selectedPlan && selectedPricing ? (
             <>
               <DialogHeader>
@@ -558,31 +656,54 @@ const Pricing = () => {
                         <span>Top Level (City/Services): {selectedTopSlots}</span>
                       </div>
                     ) : null}
-
-                    <div className="flex items-center gap-2">
-                      <Check className="w-4 h-4 text-emerald-600" />
-                      <span>
-                        Yearly Leads:{' '}
-                        {Math.floor(
-                          Math.max(
-                            0,
-                            toNonNegativeNumber(selectedPlan?.yearly_limit, 0) ||
-                              toNonNegativeNumber(selectedPlan?.weekly_limit, 0) * 52
-                          )
-                        )}
-                      </span>
-                    </div>
                   </div>
 
-                  <div className="mt-5 rounded-xl border bg-slate-50 p-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                      <Sparkles className="w-4 h-4 text-emerald-600" />
-                      Premium look and better visibility
+                  {selectedPlanMeta.highlights.length > 0 ? (
+                    <div className="mt-5 rounded-xl border bg-amber-50 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Sparkles className="w-4 h-4 text-amber-600" />
+                        Highlights
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {selectedPlanMeta.highlights.map((item, index) => (
+                          <span key={index} className="rounded-full border border-amber-100 bg-white px-2.5 py-1 text-xs font-medium text-amber-800">
+                            {item}
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-slate-600">
-                      Higher plans get better placement and stronger profile trust to improve conversions.
-                    </p>
-                  </div>
+                  ) : null}
+
+                  {selectedPlanMeta.groups.length > 0 ? (
+                    <div className="mt-5 space-y-3">
+                      {selectedPlanMeta.groups.map(({ title, Icon, items }) => (
+                        <div key={title} className="rounded-xl border bg-slate-50 p-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                            <Icon className="w-4 h-4 text-[#003D82]" />
+                            {title}
+                          </div>
+                          <div className="mt-3 space-y-2">
+                            {items.map((item, index) => (
+                              <div key={index} className="flex items-start gap-2 text-sm text-slate-700">
+                                <Check className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" />
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="mt-5 rounded-xl border bg-slate-50 p-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Sparkles className="w-4 h-4 text-emerald-600" />
+                        Plan visibility
+                      </div>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Higher plans get better placement and stronger profile trust to improve conversions.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             </>

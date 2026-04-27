@@ -2,6 +2,7 @@ import { logger } from '../utils/logger.js';
 import express from 'express';
 import { randomUUID } from 'crypto';
 import { supabase } from '../lib/supabaseClient.js';
+import { inferCloudinaryResourceType, isCloudinaryConfigured, uploadBufferToCloudinary } from '../lib/cloudinaryUpload.js';
 import { normalizeEmail } from '../lib/auth.js';
 import { optionalAuth, requireAuth } from '../middleware/requireAuth.js';
 import { notifyRole, notifyUser } from '../lib/notify.js';
@@ -1874,7 +1875,7 @@ router.delete('/me/banks/:bankId', requireAuth({ roles: ['VENDOR'] }), async (re
   }
 });
 
-// ✅ Upload image/media to Supabase Storage (auth-required, bypasses RLS)
+// ✅ Upload image/media to Cloudinary when configured (auth-required, keeps Supabase fallback for dev)
 router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
   try {
     const vendor = await resolveVendorForUser(req.user);
@@ -1903,13 +1904,20 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
     const isImage = contentType.startsWith('image/');
     const isVideo = bucket === 'product-media' && contentType.startsWith('video/');
     const isPdf = contentType === 'application/pdf';
+    const isGeneralDocument =
+      uploadPurpose === 'GENERAL_DOCUMENT' &&
+      (
+        isPdf ||
+        contentType === 'application/msword' ||
+        contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+      );
     if (uploadPurpose === 'KYC_DOCUMENT' && kycDocumentsAreLocked(vendor)) {
       return sendLockedKycResponse(res);
     }
     const isAllowed =
       bucket === 'product-images'
         ? isImage
-        : (isImage || isPdf || isVideo);
+        : (isImage || isPdf || isVideo || isGeneralDocument);
 
     if (!isAllowed) {
       return res.status(400).json({ success: false, error: 'Unsupported file type' });
@@ -1959,6 +1967,39 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
       originalName,
       contentType,
     });
+
+    if (isCloudinaryConfigured()) {
+      const uploadFolder =
+        uploadPurpose === 'KYC_DOCUMENT'
+          ? `vendor-kyc/${vendor.id}`
+          : bucket === 'product-images'
+            ? `product-images/${vendor.id}`
+            : bucket === 'product-media'
+              ? `product-media/${vendor.id}`
+              : `vendor-uploads/${vendor.id}`;
+      const uploaded = await uploadBufferToCloudinary({
+        buffer,
+        contentType,
+        folder: uploadFolder,
+        publicId: objectPath,
+        fileName: objectPath.split('/').pop(),
+        resourceType: inferCloudinaryResourceType(contentType),
+        tags: [
+          'vendor-upload',
+          bucket,
+          uploadPurpose ? uploadPurpose.toLowerCase() : '',
+          req.body?.document_type || req.body?.documentType || '',
+        ],
+      });
+
+      return res.json({
+        success: true,
+        bucket: uploaded.bucket,
+        path: uploaded.path,
+        publicUrl: uploaded.publicUrl,
+        storage: uploaded.storageProvider,
+      });
+    }
 
     const bucketCandidates = getUploadBucketCandidates(bucket);
     let uploadedBucket = null;
@@ -3769,6 +3810,373 @@ router.get('/:vendorId/leads', requireAuth(), async (req, res) => {
     if (error) return res.status(500).json({ success: false, error: error.message });
 
     return res.json({ success: true, leads: leads || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Phase 2 additions: backend-first routes for operations that were direct Supabase ──
+
+// ✅ Dashboard stats (products, leads, proposals, messages count)
+router.get('/me/dashboard-stats', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const [products, leads, proposals, messages] = await Promise.all([
+      supabase.from('products').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
+      supabase.from('leads').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'AVAILABLE'),
+      supabase.from('proposals').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).eq('status', 'SENT'),
+      supabase.from('vendor_messages').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
+    ]);
+
+    return res.json({
+      success: true,
+      stats: {
+        totalProducts: products.count || 0,
+        totalLeads: (leads.count || 0) + (proposals.count || 0),
+        totalMessages: messages.count || 0,
+        profileCompletion: vendor.profile_completion || 0,
+        kycStatus: vendor.kyc_status || 'PENDING',
+        trustScore: 0,
+        rating: 0,
+        vendorId: vendor.vendor_id,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Recent products for vendor dashboard
+router.get('/me/recent-products', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, products: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Recent leads for vendor dashboard
+router.get('/me/recent-leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const { data, error } = await supabase
+      .from('leads')
+      .select('*')
+      .eq('vendor_id', vendor.id)
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, leads: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Support ticket stats for vendor dashboard
+router.get('/me/support-stats', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const [total, open] = await Promise.all([
+      supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id),
+      supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).neq('status', 'CLOSED'),
+    ]);
+
+    return res.json({
+      success: true,
+      stats: { total: total.count || 0, open: open.count || 0 },
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a product (ownership-scoped)
+router.delete('/me/products/:productId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const productId = String(req.params.productId || '').trim();
+    if (!productId) return res.status(400).json({ success: false, error: 'Product ID required' });
+
+    // Verify ownership
+    const { data: product } = await supabase
+      .from('products')
+      .select('id, vendor_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (product.vendor_id !== vendor.id) return res.status(403).json({ success: false, error: 'Not your product' });
+
+    const { error } = await supabase.from('products').delete().eq('id', productId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Update product status (ownership-scoped)
+router.patch('/me/products/:productId/status', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const productId = String(req.params.productId || '').trim();
+    const status = String(req.body?.status || '').trim().toUpperCase();
+    const validStatuses = ['ACTIVE', 'DRAFT', 'ARCHIVED'];
+
+    if (!productId) return res.status(400).json({ success: false, error: 'Product ID required' });
+    if (!validStatuses.includes(status)) return res.status(400).json({ success: false, error: `Invalid status: ${status}` });
+
+    const { data: product } = await supabase
+      .from('products')
+      .select('id, vendor_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (!product) return res.status(404).json({ success: false, error: 'Product not found' });
+    if (product.vendor_id !== vendor.id) return res.status(403).json({ success: false, error: 'Not your product' });
+
+    const { data, error } = await supabase
+      .from('products')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', productId)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, product: data });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a contact person (ownership-scoped)
+router.delete('/me/contact-persons/:contactId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const contactId = String(req.params.contactId || '').trim();
+    if (!contactId) return res.status(400).json({ success: false, error: 'Contact ID required' });
+
+    const { data: contact } = await supabase
+      .from('vendor_contact_persons')
+      .select('id, vendor_id')
+      .eq('id', contactId)
+      .maybeSingle();
+
+    if (!contact) return res.status(404).json({ success: false, error: 'Contact not found' });
+    if (contact.vendor_id !== vendor.id) return res.status(403).json({ success: false, error: 'Not your contact' });
+
+    const { error } = await supabase.from('vendor_contact_persons').delete().eq('id', contactId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Vendor creates a lead (vendor-initiated direct lead)
+router.post('/me/leads-create', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const payload = req.body || {};
+    const title = nonEmptyText(payload.title || payload.product_name || 'Lead', 200);
+    const productName = nonEmptyText(payload.product_name || title, 200);
+    const buyerName = nonEmptyText(payload.buyer_name, 160);
+    const buyerEmail = nonEmptyText(payload.buyer_email, 320);
+    const buyerPhone = nonEmptyText(payload.buyer_phone, 60);
+    const description = nonEmptyText(payload.description || payload.message, 5000);
+
+    if (!buyerName) return res.status(400).json({ success: false, error: 'buyer_name is required' });
+    if (!buyerEmail) return res.status(400).json({ success: false, error: 'buyer_email is required' });
+
+    const createdAt = new Date().toISOString();
+    const leadPayload = {
+      vendor_id: vendor.id,
+      vendor_email: vendor.email || null,
+      title,
+      product_name: productName,
+      buyer_name: buyerName,
+      buyer_email: String(buyerEmail).toLowerCase().trim(),
+      buyer_phone: buyerPhone || null,
+      company_name: nonEmptyText(payload.company_name, 200) || null,
+      description: description || null,
+      message: description || null,
+      category: nonEmptyText(payload.category, 320) || null,
+      category_slug: nonEmptyText(payload.category_slug, 160) || null,
+      micro_category_id: nonEmptyText(payload.micro_category_id, 80) || null,
+      sub_category_id: nonEmptyText(payload.sub_category_id, 80) || null,
+      head_category_id: nonEmptyText(payload.head_category_id, 80) || null,
+      quantity: nonEmptyText(payload.quantity, 80) || null,
+      budget: parseBudget(payload.budget),
+      location: nonEmptyText(payload.location, 200) || null,
+      state: nonEmptyText(payload.state, 120) || null,
+      city: nonEmptyText(payload.city, 120) || null,
+      state_id: nonEmptyText(payload.state_id, 80) || null,
+      city_id: nonEmptyText(payload.city_id, 80) || null,
+      source: 'VENDOR_CREATED',
+      status: 'AVAILABLE',
+      created_at: createdAt,
+    };
+
+    const { data: lead, error } = await supabase.from('leads').insert([leadPayload]).select('*').maybeSingle();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.status(201).json({ success: true, lead });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Update a lead (vendor-owned)
+router.patch('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params.leadId || '').trim();
+    if (!leadId) return res.status(400).json({ success: false, error: 'leadId required' });
+
+    const { data: existing } = await supabase.from('leads').select('id, vendor_id').eq('id', leadId).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!vendorIds.includes(existing.vendor_id)) return res.status(403).json({ success: false, error: 'Not your lead' });
+
+    const payload = req.body || {};
+    const ALLOWED = ['title', 'product_name', 'description', 'message', 'buyer_name', 'buyer_phone', 'company_name', 'category', 'quantity', 'budget', 'location', 'status', 'sales_note'];
+    const updates = {};
+    for (const key of ALLOWED) {
+      if (payload[key] !== undefined) updates[key] = payload[key];
+    }
+    updates.updated_at = new Date().toISOString();
+
+    const { data: lead, error } = await supabase.from('leads').update(updates).eq('id', leadId).select('*').maybeSingle();
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, lead });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a lead (vendor-owned direct lead only)
+router.delete('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const leadId = String(req.params.leadId || '').trim();
+    if (!leadId) return res.status(400).json({ success: false, error: 'leadId required' });
+
+    const { data: existing } = await supabase.from('leads').select('id, vendor_id').eq('id', leadId).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, error: 'Lead not found' });
+    if (!vendorIds.includes(existing.vendor_id)) return res.status(403).json({ success: false, error: 'Not your lead' });
+
+    const { error } = await supabase.from('leads').delete().eq('id', leadId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a lead purchase record (vendor-owned)
+router.delete('/me/purchases/:purchaseId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const purchaseId = String(req.params.purchaseId || '').trim();
+    if (!purchaseId) return res.status(400).json({ success: false, error: 'purchaseId required' });
+
+    const { data: existing } = await supabase.from('lead_purchases').select('id, vendor_id').eq('id', purchaseId).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, error: 'Purchase not found' });
+    if (!vendorIds.includes(existing.vendor_id)) return res.status(403).json({ success: false, error: 'Not your purchase' });
+
+    const { error } = await supabase.from('lead_purchases').delete().eq('id', purchaseId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a contact (alias: /me/contacts/:id → contact_persons table)
+router.delete('/me/contacts/:contactId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const contactId = String(req.params.contactId || '').trim();
+    if (!contactId) return res.status(400).json({ success: false, error: 'contactId required' });
+
+    const { data: contact } = await supabase
+      .from('vendor_contact_persons')
+      .select('id, vendor_id')
+      .eq('id', contactId)
+      .maybeSingle();
+
+    if (!contact) return res.status(404).json({ success: false, error: 'Contact not found' });
+    if (contact.vendor_id !== vendor.id) return res.status(403).json({ success: false, error: 'Not your contact' });
+
+    const { error } = await supabase.from('vendor_contact_persons').delete().eq('id', contactId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ Delete a message (ownership-scoped)
+router.delete('/me/messages/:messageId', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendor = await resolveVendorForUser(req.user);
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+
+    const messageId = String(req.params.messageId || '').trim();
+    if (!messageId) return res.status(400).json({ success: false, error: 'Message ID required' });
+
+    const { data: message } = await supabase
+      .from('vendor_messages')
+      .select('id, vendor_id')
+      .eq('id', messageId)
+      .maybeSingle();
+
+    if (!message) return res.status(404).json({ success: false, error: 'Message not found' });
+    if (message.vendor_id !== vendor.id) return res.status(403).json({ success: false, error: 'Not your message' });
+
+    const { error } = await supabase.from('vendor_messages').delete().eq('id', messageId);
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

@@ -25,11 +25,11 @@ const CategorySkeleton = () => (
 );
 
 const VendorGridSkeleton = () => (
-  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-hidden="true">
+  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4" aria-hidden="true">
     {Array.from({ length: 4 }).map((_, index) => (
-      <div key={index} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="mb-3 h-32 rounded-lg bg-slate-100 animate-pulse" />
-        <div className="mb-2 h-4 w-2/3 rounded bg-slate-100 animate-pulse" />
+      <div key={index} className="rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+        <div className="mb-3 h-24 rounded-xl bg-slate-100 animate-pulse" />
+        <div className="mb-2 h-4 w-3/4 rounded bg-slate-100 animate-pulse" />
         <div className="mb-4 h-3 w-1/2 rounded bg-slate-100 animate-pulse" />
         <div className="h-8 rounded bg-slate-100 animate-pulse" />
       </div>
@@ -44,8 +44,11 @@ const VendorImage = ({ src, name }) => {
 
   if (!optimizedSrc || failed) {
     return (
-      <div className="w-full h-full flex items-center justify-center bg-slate-100 text-5xl font-extrabold text-slate-300">
-        {letter}
+      <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-sky-50 to-cyan-50">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_26%_18%,rgba(14,165,233,0.18),transparent_30%),radial-gradient(circle_at_78%_72%,rgba(0,61,130,0.12),transparent_28%)]" />
+        <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl border border-white/80 bg-white/80 text-2xl font-extrabold text-[#0b4c8c] shadow-[0_12px_28px_rgba(15,23,42,0.12)]">
+          {letter}
+        </div>
       </div>
     );
   }
@@ -196,8 +199,8 @@ const HomeDeferredSections = () => {
       <TopCitiesSection />
       <PremiumBrandsSection />
 
-      <section className="py-20 bg-slate-50 container mx-auto px-4">
-        <div className="flex justify-between items-end mb-10">
+      <section className="bg-slate-50 container mx-auto px-4 py-16">
+        <div className="flex justify-between items-end mb-8">
           <div>
             <h2 className="text-3xl font-bold text-slate-900 mb-2">Featured Suppliers</h2>
             <p className="text-slate-500">Trusted partners for your business needs</p>
@@ -215,11 +218,11 @@ const HomeDeferredSections = () => {
         {loadingVendors ? (
           <VendorGridSkeleton />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
             {visibleFeaturedVendors.map((vendor) => (
               <article
                 key={vendor.id}
-                className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-lg transition-all cursor-pointer group hover:-translate-y-1"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-2.5 shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition-all hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_42px_rgba(15,23,42,0.11)] cursor-pointer"
                 role="link"
                 tabIndex={0}
                 aria-label={`Open ${vendor.name} supplier profile`}
@@ -231,26 +234,35 @@ const HomeDeferredSections = () => {
                   }
                 }}
               >
-                <div className="relative h-32 mb-3 rounded-lg bg-slate-100 overflow-hidden">
+                <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-blue-50/80 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+
+                <div className="relative h-24 mb-3 overflow-hidden rounded-xl border border-slate-100 bg-slate-100">
                   <VendorImage src={vendor.image} name={vendor.name} />
                   {vendor.verified && (
-                    <span className="absolute top-2 right-2 bg-white/95 backdrop-blur-sm px-2 py-0.5 rounded-full text-[10px] font-semibold text-blue-700 flex items-center gap-1 shadow-sm">
-                      <CheckCircle className="w-3 h-3 fill-blue-100" /> Verified
+                    <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-emerald-100 bg-white/95 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 shadow-sm backdrop-blur-sm">
+                      <CheckCircle className="w-3 h-3 fill-emerald-100" /> Verified
                     </span>
                   )}
                 </div>
 
-                <h3 className="font-semibold text-slate-900 text-base line-clamp-1 mb-1 group-hover:text-blue-700 transition-colors">
-                  {vendor.name}
-                </h3>
+                <div className="relative space-y-2 px-0.5">
+                  <div>
+                    <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-blue-500/80">
+                      Supplier Partner
+                    </p>
+                    <h3 className="min-h-[20px] text-sm font-bold leading-5 text-slate-950 line-clamp-1 transition-colors group-hover:text-[#003D82]">
+                      {vendor.name}
+                    </h3>
+                  </div>
 
-                <div className="flex items-center text-xs text-slate-500 mb-3">
-                  <MapPin className="w-3 h-3 mr-1.5" /> {vendor.city}, {vendor.state}
+                  <div className="flex min-h-[18px] items-center text-xs text-slate-500">
+                    <MapPin className="w-3.5 h-3.5 mr-1.5 text-blue-500/70" /> {vendor.city}, {vendor.state}
+                  </div>
+
+                  <Button className="mt-1 h-8 w-full rounded-lg border border-[#003D82]/15 bg-[#003D82] text-xs font-semibold text-white shadow-[0_8px_18px_rgba(0,61,130,0.18)] transition-all hover:bg-[#002B5C] hover:shadow-[0_10px_22px_rgba(0,61,130,0.24)]">
+                    Contact Supplier
+                  </Button>
                 </div>
-
-                <Button className="w-full bg-white border border-blue-600 text-blue-600 hover:bg-blue-600 hover:text-white transition-all font-medium h-8 text-xs">
-                  Contact Supplier
-                </Button>
               </article>
             ))}
 

@@ -106,6 +106,33 @@ This package currently covers live-safe checks for:
 - manager and VP dashboard filter behaviour
 - vendor dashboard, products, notifications, and subscriptions smoke checks
 
+## API contract parity checks
+
+Parity tests verify that critical API-backed behaviour survives backend migration.
+They are driven by the manifest at `fixtures/api-contract-baseline.json` and **never mutate data**.
+
+Run parity checks:
+
+```bash
+npm run test:parity
+```
+
+Or from the root repo:
+
+```bash
+npm run test:parity
+```
+
+**When to run:**
+
+- Before and after any major migration step in Phase 2 or Phase 3
+- After changing Express route registrations, auth middleware, or Netlify function wiring
+- As part of cutover verification in Phase 3
+
+The baseline manifest lists critical endpoints, public page flows, and authenticated portal
+smoke checks. It also documents parity rules (cookie contract, API prefix stability, CSRF
+enforcement, rate limiting) that must hold throughout the migration.
+
 ## Mutation tests
 
 Mutation tests are intentionally separated because they can create or change production data.

@@ -677,4 +677,25 @@ router.post(
   }
 );
 
+// GET /api/kyc/vendors/:vendorId/remarks — reviewer remarks for a vendor's KYC
+router.get('/vendors/:vendorId/remarks', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { data, error } = await supabase
+      .from('kyc_remarks')
+      .select('*, created_by_user:users(full_name)')
+      .eq('vendor_id', vendorId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      // Table may not exist in all DB versions — return empty gracefully
+      if (error.code === '42P01') return res.json({ success: true, remarks: [] });
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    return res.json({ success: true, remarks: data || [] });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 export default router;

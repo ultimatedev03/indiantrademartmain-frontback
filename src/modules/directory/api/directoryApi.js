@@ -345,7 +345,7 @@ export const directoryApi = {
       .select(`
         *,
         vendors!inner (
-          id, company_name, city, state, state_id, city_id,
+          id, company_name, slug, city, state, state_id, city_id,
           seller_rating, kyc_status, verification_badge, trust_score,
           is_active
         )
@@ -369,7 +369,34 @@ export const directoryApi = {
     const { data, count, error } = await query;
     if (error) throw error;
 
-    return { data: data || [], count };
+    const products = data || [];
+    const microIds = Array.from(new Set(products.map((item) => item?.micro_category_id).filter(Boolean)));
+
+    if (microIds.length > 0) {
+      try {
+        const { data: categoryRows, error: categoryError } = await supabase
+          .from('micro_categories')
+          .select(`
+            id, name, slug,
+            sub_categories (
+              id, name, slug,
+              head_categories (id, name, slug)
+            )
+          `)
+          .in('id', microIds);
+
+        if (!categoryError) {
+          const categoryMap = new Map((categoryRows || []).map((item) => [item.id, item]));
+          products.forEach((item) => {
+            item.micro_categories = categoryMap.get(item?.micro_category_id) || null;
+          });
+        }
+      } catch (categoryFetchError) {
+        console.warn('Unable to attach micro category details:', categoryFetchError);
+      }
+    }
+
+    return { data: products, count };
   },
 
   // ✅ UPDATED: exclude suspended vendors

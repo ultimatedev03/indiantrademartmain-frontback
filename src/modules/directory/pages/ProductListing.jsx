@@ -299,13 +299,6 @@ const ProductListing = () => {
 
     if (filters.verified) out = out.filter((p) => !!p?.vendorVerified);
 
-    if (filters.inStock) {
-      out = out.filter((p) => {
-        const stock = numOrNull(p?.stock) ?? numOrNull(p?.available_quantity);
-        return stock === null ? true : stock > 0;
-      });
-    }
-
     return out;
   }, [results, filters, priceBounds.min, priceBounds.max]);
 
@@ -385,4 +378,3 @@ const ProductListing = () => {
 };
 
 export default ProductListing;
-

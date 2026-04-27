@@ -30,17 +30,17 @@ const Footer = () => {
       <footer className="bg-gradient-to-b from-gray-900 via-gray-800 to-gray-900 text-gray-100">
         <div className="container mx-auto px-4">
           {/* Main Footer Content */}
-          <div className="grid grid-cols-1 gap-x-10 gap-y-8 py-12 border-b border-gray-700 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(280px,1.2fr)_repeat(4,minmax(0,1fr))]">
+          <div className="grid grid-cols-1 gap-x-8 gap-y-6 border-b border-gray-700 py-8 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[minmax(250px,1.1fr)_repeat(4,minmax(0,1fr))]">
             {/* Brand Column */}
-            <div className="space-y-5">
+            <div className="space-y-3.5">
               {/* ✅ Logo + Brand name side-by-side + ONE LINE heading */}
-              <Link to="/" className="inline-flex max-w-full items-center gap-3" aria-label="Indian Trade Mart">
+              <Link to="/" className="inline-flex max-w-full items-center gap-2.5" aria-label="Indian Trade Mart">
                 <img
                   src="/itm-logo.png"
                   alt="IndianTradeMART Logo"
                   width="64"
                   height="64"
-                  className="h-16 w-16 sm:h-10 sm:w-10 object-contain flex-shrink-0"
+                  className="h-10 w-10 object-contain flex-shrink-0"
                   loading="lazy"
                   decoding="async"
                 />
@@ -51,31 +51,31 @@ const Footer = () => {
                     className="
                       text-white font-bold tracking-tight
                       whitespace-nowrap
-                      text-[clamp(18px,1.8vw,26px)]
+                      text-[clamp(17px,1.5vw,23px)]
                     "
                   >
                     IndianTradeMart
                   </h3>
                   
-                  <p className="text-xs text-gray-400 font-semibold tracking-wider mt-1">
+                  <p className="mt-0.5 text-[11px] font-semibold tracking-wider text-gray-400">
                     B2B MARKETPLACE
                   </p>
                 </div>
               </Link>
 
-              <p className="text-sm text-gray-300 leading-relaxed">
+              <p className="max-w-xs text-sm leading-6 text-gray-300">
                 Connecting businesses with trusted technology providers across India.
               </p>
 
-              <div className="flex flex-wrap gap-3 pt-1">
+              <div className="flex flex-wrap gap-2 pt-0.5">
                 <a
                   href="https://www.facebook.com/IndianTradeMart/"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Facebook"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-600 hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-600 hover:text-white"
                 >
-                  <Facebook className="h-[18px] w-[18px]" />
+                  <Facebook className="h-4 w-4" />
                 </a>
 
                 <a
@@ -83,9 +83,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Twitter / X"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-500 hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-500 hover:text-white"
                 >
-                  <Twitter className="h-[18px] w-[18px]" />
+                  <Twitter className="h-4 w-4" />
                 </a>
 
                 <a
@@ -93,9 +93,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="LinkedIn"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-700 hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-blue-700 hover:text-white"
                 >
-                  <Linkedin className="h-[18px] w-[18px]" />
+                  <Linkedin className="h-4 w-4" />
                 </a>
 
                 <a
@@ -103,9 +103,9 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Instagram"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-pink-600 hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-pink-600 hover:text-white"
                 >
-                  <Instagram className="h-[18px] w-[18px]" />
+                  <Instagram className="h-4 w-4" />
                 </a>
 
                 <a
@@ -113,17 +113,17 @@ const Footer = () => {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="YouTube"
-                  className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-red-600 hover:text-white"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-700 text-gray-300 transition-all duration-300 hover:bg-red-600 hover:text-white"
                 >
-                  <Youtube className="h-[18px] w-[18px]" />
+                  <Youtube className="h-4 w-4" />
                 </a>
               </div>
             </div>
 
             {/* Information */}
             <div>
-              <h4 className="mb-5 text-lg font-bold text-white">Information</h4>
-              <ul className="space-y-2.5 text-sm">
+              <h4 className="mb-3 text-base font-bold text-white">Information</h4>
+              <ul className="space-y-1.5 text-sm">
                 <li>
                   <Link to="/about-us" className="text-gray-300 hover:text-blue-400 transition-colors">
                     About Us
@@ -159,8 +159,8 @@ const Footer = () => {
 
             {/* Support */}
             <div>
-              <h4 className="mb-5 text-lg font-bold text-white">Support</h4>
-              <ul className="space-y-2.5 text-sm">
+              <h4 className="mb-3 text-base font-bold text-white">Support</h4>
+              <ul className="space-y-1.5 text-sm">
                 <li>
                   <Link to="/help" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Help
@@ -191,8 +191,8 @@ const Footer = () => {
 
             {/* Suppliers Tool Kit */}
             <div>
-              <h4 className="mb-5 text-lg font-bold text-white">Suppliers Tool Kit</h4>
-              <ul className="space-y-2.5 text-sm">
+              <h4 className="mb-3 text-base font-bold text-white">Suppliers Tool Kit</h4>
+              <ul className="space-y-1.5 text-sm">
                 <li>
                   <Link to="/vendor/register" className="text-gray-300 hover:text-blue-400 transition-colors">
                     Sell on Trade Mart
@@ -218,8 +218,8 @@ const Footer = () => {
 
             {/* Buyers Tool Kit */}
             <div>
-              <h4 className="mb-5 text-lg font-bold text-white">Buyers Tool Kit</h4>
-              <ul className="space-y-2.5 text-sm">
+              <h4 className="mb-3 text-base font-bold text-white">Buyers Tool Kit</h4>
+              <ul className="space-y-1.5 text-sm">
                 <li>
                   <button
                     onClick={() => setShowPostRequirement(true)}
@@ -243,41 +243,41 @@ const Footer = () => {
           </div>
 
           {/* Contact Information */}
-          <div className="border-b border-gray-700 py-8">
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
-              <div className="flex items-start gap-3">
-                <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+          <div className="border-b border-gray-700 py-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="flex items-start gap-2.5">
+                <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-400" />
                 <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Customer Care</p>
                   <a
                     href="mailto:customercare@indiantrademart.com"
-                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
+                    className="block break-all text-xs leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     customercare@indiantrademart.com
                   </a>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2.5">
+                <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-400" />
                 <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Support</p>
                   <a
                     href="mailto:support@indiantrademart.com"
-                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
+                    className="block break-all text-xs leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     support@indiantrademart.com
                   </a>
                 </div>
               </div>
 
-              <div className="flex items-start gap-3">
-                <Mail className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+              <div className="flex items-start gap-2.5">
+                <Mail className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-400" />
                 <div className="min-w-0">
                   <p className="text-xs text-gray-400 font-semibold">Business</p>
                   <a
                     href="mailto:business@indiantrademart.com"
-                    className="block break-all text-sm leading-5 text-gray-300 transition-colors hover:text-blue-400"
+                    className="block break-all text-xs leading-5 text-gray-300 transition-colors hover:text-blue-400"
                   >
                     business@indiantrademart.com
                   </a>
@@ -287,7 +287,7 @@ const Footer = () => {
           </div>
 
           {/* Footer Bar */}
-          <div className="flex flex-col items-center gap-3 py-6 text-center text-xs text-gray-400 md:flex-row md:items-center md:justify-between md:text-left">
+          <div className="flex flex-col items-center gap-2 py-4 text-center text-xs text-gray-400 md:flex-row md:items-center md:justify-between md:text-left">
             <p>&copy; {new Date().getFullYear()} Indian Trade Mart. All rights reserved.</p>
             <div className="flex flex-wrap items-center justify-center gap-4 md:justify-end">
               <Link to="/terms" className="hover:text-gray-200 transition-colors">

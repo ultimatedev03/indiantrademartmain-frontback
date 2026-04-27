@@ -1,0 +1,157 @@
+
+> web-app@0.0.0 dev:client
+> vite --host :: --port 3000 --host 127.0.0.1 --port 3004
+
+
+  [32m[1mVITE[22m v4.5.14[39m  [2mready in [0m[1m966[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://127.0.0.1:[1m3004[22m/[39m
+[2m[32m  ➜[39m[22m[2m  press [22m[1mh[22m[2m to show help[22m
+[2m9:22:49 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/shared/components/Footer.jsx, /src/index.css[22m
+[2m9:23:21 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m9:23:26 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:23:26 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:23:26 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:23:26 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:23:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m9:23:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m9:28:33 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:29:36 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:30:32 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:30:32 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m9:30:33 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:30:34 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:30:34 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:30:36 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m9:40:35 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:41:25 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:41:54 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:42:56 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:44:06 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:44:33 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:44:46 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:45:04 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:46:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:46:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:46:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:46:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:46:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:46:25 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m9:46:25 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m9:49:06 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:51:47 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:52:05 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:53:52 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m9:55:02 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m9:55:03 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m9:55:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:55:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:55:09 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m9:55:10 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m10:00:39 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:09:13 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:15:09 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:20:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:21:16 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:21:35 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:22:03 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:22:29 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:22:48 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:30:20 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/modules/directory/pages/FooterPages.jsx, /src/index.css[22m
+[2m10:44:22 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:44:33 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:46:22 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:46:45 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:46:52 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:47:07 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:47:33 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:47:36 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:47:36 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:47:37 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:47:37 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:47:37 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:47:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:47:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m10:47:45 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:48:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:48:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/engineering-services/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/electronics-and-electrical/index.html[22m
+[2m10:48:11 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:48:12 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:52:03 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:53:52 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:54:22 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:22 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:22 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:22 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:54:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:54:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m10:54:37 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:54:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:55:03 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:55:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/automobile-parts-and-spares/index.html[22m
+[2m10:55:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:55:09 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m10:56:41 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m10:57:17 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m10:57:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:57:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:57:23 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m10:57:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m10:57:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:04:36 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:05:01 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:05:07 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:05:07 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:05:07 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:05:08 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:05:09 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m11:05:09 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:07:00 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:07:24 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:07:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:07:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:07:29 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:07:29 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:09:16 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:09:38 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:09:43 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:09:44 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:09:44 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:09:44 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:09:44 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:09:45 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m11:16:49 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:17:23 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:17:54 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:17:54 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:17:54 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:17:55 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:17:56 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:20:55 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:21:20 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:21:26 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:21:27 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:21:27 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:21:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/product-rental-and-leasing/index.html[22m
+[2m11:21:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m11:21:28 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:31:00 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:31:20 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:31:47 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:31:48 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:31:49 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:31:49 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:31:49 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/index.html[22m
+[2m11:31:50 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/chemicals-dyes-and-solvents/index.html[22m
+[2m11:31:50 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m
+[2m11:33:48 pm[22m [36m[1m[vite][22m[39m [32mhmr update [39m[2m/src/index.css, /src/modules/directory/routes.jsx[22m
+[2m11:34:16 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/index.html[22m
+[2m11:34:20 pm[22m [36m[1m[vite][22m[39m [32mpage reload [39m[2mdist/directory/construction-materials-and-machines/index.html[22m

@@ -7,7 +7,11 @@ const preloadVendorProfilePage = () => import('@/modules/directory/pages/VendorP
 
 const PremiumBrandsSection = () => {
   const navigate = useNavigate();
-  const items = useMemo(() => [...PREMIUM_BRANDS, ...PREMIUM_BRANDS], []);
+  const visibleBrands = useMemo(
+    () => PREMIUM_BRANDS.filter((brand) => brand.id !== 'itm'),
+    []
+  );
+  const items = useMemo(() => [...visibleBrands, ...visibleBrands], [visibleBrands]);
   const [pendingBrandSlug, setPendingBrandSlug] = useState('');
 
   useEffect(() => {
@@ -60,12 +64,12 @@ const PremiumBrandsSection = () => {
         </div>
 
         <div className="marquee-wrap">
-          <div className="marquee-track gap-2 items-center py-1">
+          <div className="marquee-track items-center gap-4 py-1 md:gap-5 lg:gap-6">
             {items.map((brand, idx) => (
               <button
                 type="button"
                 key={`${brand.id}-${idx}`}
-                className={`relative flex-none w-44 md:w-48 lg:w-52 h-24 md:h-28 lg:h-32 flex items-center justify-center cursor-pointer hover:scale-105 transition-transform duration-300 border-0 bg-transparent p-0 ${pendingBrandSlug === brand.slug ? 'pointer-events-none' : ''}`}
+                className={`relative flex h-20 min-w-[88px] flex-none cursor-pointer items-center justify-center border-0 bg-transparent px-3 py-1 transition-transform duration-300 hover:scale-105 md:min-w-[96px] md:px-4 ${pendingBrandSlug === brand.slug ? 'pointer-events-none' : ''}`}
                 title={brand.name}
                 aria-label={`Open ${brand.name} brand page`}
                 aria-busy={pendingBrandSlug === brand.slug}
@@ -80,10 +84,10 @@ const PremiumBrandsSection = () => {
                 <img
                   src={brand.logo_url}
                   alt={brand.name}
-                  width="208"
-                  height="112"
-                  sizes="(min-width: 1024px) 208px, (min-width: 768px) 192px, 176px"
-                  className={`max-h-20 md:max-h-24 lg:max-h-28 w-auto object-contain ${pendingBrandSlug === brand.slug ? 'opacity-35' : ''}`}
+                  width="160"
+                  height="64"
+                  sizes="(min-width: 1024px) 176px, (min-width: 768px) 160px, 144px"
+                  className={`max-h-12 w-auto max-w-[136px] object-contain md:max-h-14 md:max-w-[152px] lg:max-h-16 lg:max-w-[168px] ${pendingBrandSlug === brand.slug ? 'opacity-35' : ''}`}
                   loading="lazy"
                   decoding="async"
                   onError={(event) => {

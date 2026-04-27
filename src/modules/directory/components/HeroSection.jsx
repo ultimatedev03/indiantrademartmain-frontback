@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Search, MapPin } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -203,37 +204,66 @@ const HeroSection = () => {
   return (
     <div className="relative bg-slate-900 pt-20 pb-24 lg:pt-32 lg:pb-40 overflow-hidden">
       {/* Professional Background Gradient */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 opacity-90 z-0"></div>
+      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-[#003D82] to-slate-900 opacity-90 z-0"></div>
 
-      {/* Decorative Abstract Shapes */}
-      <div className="absolute top-0 right-0 -mr-20 -mt-20 w-96 h-96 rounded-full bg-blue-500 opacity-10 blur-3xl"></div>
-      <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 rounded-full bg-indigo-500 opacity-10 blur-3xl"></div>
+      {/* Decorative Abstract Shapes with Framer Motion */}
+      <motion.div 
+        animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.2, 0.1] }}
+        transition={{ duration: 8, repeat: Infinity }}
+        className="absolute top-0 right-0 -mr-20 -mt-20 w-96 h-96 rounded-full bg-[#00F0FF] opacity-10 blur-[100px]"
+      />
+      <motion.div 
+        animate={{ scale: [1, 1.3, 1], opacity: [0.1, 0.3, 0.1] }}
+        transition={{ duration: 10, repeat: Infinity, delay: 2 }}
+        className="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 rounded-full bg-[#8A2BE2] opacity-10 blur-[100px]"
+      />
 
       <div className="container mx-auto px-4 relative z-10 text-center">
-        <div className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium text-blue-200 ring-1 ring-inset ring-blue-700/30 bg-blue-900/30 mb-6">
-          <span className="flex h-2 w-2 rounded-full bg-blue-400 mr-2"></span>
+        <motion.div 
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.6 }}
+          className="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium text-blue-200 ring-1 ring-inset ring-white/20 bg-white/5 backdrop-blur-md mb-6 shadow-[0_0_15px_rgba(0,240,255,0.2)]"
+        >
+          <span className="flex h-2 w-2 rounded-full bg-[#00F0FF] mr-2 shadow-[0_0_8px_#00F0FF]"></span>
           India's Leading B2B Marketplace
-        </div>
+        </motion.div>
 
-        <h1 className="text-4xl md:text-6xl font-extrabold text-white mb-6 tracking-tight">
+        <motion.h1 
+          initial={{ y: 20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.2 }}
+          className="text-4xl md:text-6xl font-extrabold text-white mb-6 tracking-tight"
+        >
           Connect with Trusted <br className="hidden md:block" />
-          <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-blue-400">
+          <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00F0FF] to-blue-400 drop-shadow-[0_0_15px_rgba(0,61,130,0.5)]">
             Manufacturers & Suppliers
           </span>
-        </h1>
+        </motion.h1>
 
-        <p className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed">
+        <motion.p 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.6, delay: 0.4 }}
+          className="text-lg md:text-xl text-slate-300 mb-10 max-w-2xl mx-auto leading-relaxed"
+        >
           Discover verified business partners, source quality products, and grow your network with confidence on our
           secure platform.
-        </p>
+        </motion.p>
 
-        <div className="max-w-4xl mx-auto">
-          <form onSubmit={handleSearch} className="bg-white p-2 rounded-xl shadow-2xl flex flex-col md:flex-row gap-2">
+        <motion.div 
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.6 }}
+          className="max-w-4xl mx-auto"
+        >
+          {/* Glassmorphism search form */}
+          <form onSubmit={handleSearch} className="bg-[#082a59]/80 backdrop-blur-xl border border-cyan-200/20 p-2 rounded-2xl shadow-[0_18px_45px_rgba(0,18,48,0.35)] flex flex-col md:flex-row gap-2">
             {/* Location Input */}
-            <div className="flex items-center md:w-1/3 px-4 bg-slate-50 rounded-lg border border-transparent focus-within:border-blue-500 focus-within:bg-white transition-all duration-200">
-              <MapPin className="h-5 w-5 text-slate-400 mr-3 flex-shrink-0" />
+            <div className="flex items-center md:w-1/3 px-4 bg-[#123d70]/70 rounded-xl border border-cyan-100/10 focus-within:border-cyan-300/60 focus-within:bg-[#174b82]/85 focus-within:shadow-[0_0_0_1px_rgba(103,232,249,0.18)] transition-all duration-300">
+              <MapPin className="h-5 w-5 text-blue-200 mr-3 flex-shrink-0" />
               <Input
-                className="border-0 bg-transparent focus-visible:ring-0 px-0 h-14 text-slate-900 placeholder:text-slate-400 font-medium"
+                className="!border-0 !bg-transparent !px-0 h-14 text-white caret-cyan-200 placeholder:text-blue-100/55 font-medium shadow-none outline-none focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0 focus-visible:!shadow-none"
                 placeholder="Location (e.g. Mumbai)"
                 aria-label="Search location"
                 value={location}
@@ -242,10 +272,10 @@ const HeroSection = () => {
             </div>
 
             {/* Keyword Input */}
-            <div className="flex items-center flex-1 px-4 bg-slate-50 rounded-lg border border-transparent focus-within:border-blue-500 focus-within:bg-white transition-all duration-200">
-              <Search className="h-5 w-5 text-slate-400 mr-3 flex-shrink-0" />
+            <div className="flex items-center flex-1 px-4 bg-[#123d70]/70 rounded-xl border border-cyan-100/10 focus-within:border-cyan-300/60 focus-within:bg-[#174b82]/85 focus-within:shadow-[0_0_0_1px_rgba(103,232,249,0.18)] transition-all duration-300">
+              <Search className="h-5 w-5 text-blue-200 mr-3 flex-shrink-0" />
               <Input
-                className="border-0 bg-transparent focus-visible:ring-0 px-0 h-14 text-slate-900 placeholder:text-slate-400 font-medium"
+                className="!border-0 !bg-transparent !px-0 h-14 text-white caret-cyan-200 placeholder:text-blue-100/55 font-medium shadow-none outline-none focus-visible:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0 focus-visible:!shadow-none"
                 placeholder="Search products, services, or companies..."
                 aria-label="Search products services or companies"
                 value={query}
@@ -256,40 +286,30 @@ const HeroSection = () => {
             {/* Search Button */}
             <Button
               type="submit"
-              className="h-14 px-8 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg rounded-lg shadow-lg md:w-auto w-full transition-all duration-200"
+              className="h-14 px-8 bg-gradient-to-r from-[#00A699] to-[#003D82] hover:opacity-90 text-white font-bold text-lg rounded-xl shadow-[0_0_15px_rgba(0,166,153,0.4)] md:w-auto w-full transition-all duration-300 border border-white/10"
             >
               Search
             </Button>
           </form>
-        </div>
+        </motion.div>
 
-        <div className="mt-8 flex flex-wrap justify-center items-center gap-4 text-sm text-slate-400">
-          <span className="font-semibold text-slate-300">Trending:</span>
-          <button
-            onClick={() => setQuery('Industrial Machinery')}
-            className="hover:text-blue-300 transition-colors px-3 py-1 bg-white/5 rounded-full border border-white/10"
-          >
-            Industrial Machinery
-          </button>
-          <button
-            onClick={() => setQuery('Textiles')}
-            className="hover:text-blue-300 transition-colors px-3 py-1 bg-white/5 rounded-full border border-white/10"
-          >
-            Textiles
-          </button>
-          <button
-            onClick={() => setQuery('Chemicals')}
-            className="hover:text-blue-300 transition-colors px-3 py-1 bg-white/5 rounded-full border border-white/10"
-          >
-            Chemicals
-          </button>
-          <button
-            onClick={() => setQuery('Electronics')}
-            className="hover:text-blue-300 transition-colors px-3 py-1 bg-white/5 rounded-full border border-white/10"
-          >
-            Electronics
-          </button>
-        </div>
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.8, delay: 0.8 }}
+          className="mt-8 flex flex-wrap justify-center items-center gap-4 text-sm text-slate-400"
+        >
+          <span className="font-semibold text-blue-200/80">Trending:</span>
+          {['Industrial Machinery', 'Textiles', 'Chemicals', 'Electronics'].map((trend) => (
+            <button
+              key={trend}
+              onClick={() => setQuery(trend)}
+              className="px-4 py-2 rounded-full border border-cyan-100/15 bg-[#123d70]/45 text-blue-100/70 shadow-sm backdrop-blur-sm transition-all hover:border-cyan-300/50 hover:bg-[#145087]/70 hover:text-[#00F0FF]"
+            >
+              {trend}
+            </button>
+          ))}
+        </motion.div>
       </div>
     </div>
   );

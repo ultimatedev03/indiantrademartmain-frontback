@@ -35,21 +35,17 @@ const uploadGeneralDocument = async (file) => {
     });
   }
 
-  const fileExt = file.name.split('.').pop();
-  const fileName = `vendor-documents/${vendorId}/general_${Date.now()}.${fileExt}`;
-  const { error: uploadError } = await supabase.storage
-    .from('objects')
-    .upload(fileName, file);
-  if (uploadError) throw uploadError;
-
-  const { data: urlData } = supabase.storage.from('objects').getPublicUrl(fileName);
+  const documentUrl = await vendorApi.auth.uploadImage(file, 'product-media', {
+    uploadPurpose: 'GENERAL_DOCUMENT',
+    documentType: 'GENERAL',
+  });
 
   const { data, error } = await supabase
     .from('vendor_documents')
     .insert([{
       vendor_id: vendorId,
       document_type: 'GENERAL',
-      document_url: urlData.publicUrl,
+      document_url: documentUrl,
       original_name: file.name,
       verification_status: 'PENDING'
     }])

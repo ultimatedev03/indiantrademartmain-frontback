@@ -11,7 +11,8 @@
     "generate:sitemaps": "node tools/generateSitemap.js",
     "build": "npm run generate:sitemaps && node tools/generate-llms.js && vite build && node tools/prerender-seo.js",
     "preview": "vite preview --host :: --port 3000",
-    "repair:employees-auth": "node server/scripts/repairEmployeesAuth.js"
+    "repair:employees-auth": "node server/scripts/repairEmployeesAuth.js",
+    "test:parity": "cd tester-playwright-live && npx playwright test tests/parity"
   },
   "dependencies": {
     "@emotion/is-prop-valid": "^1.3.1",
@@ -56,6 +57,7 @@
     "react-helmet": "^6.1.0",
     "react-router-dom": "^6.16.0",
     "recharts": "^2.10.3",
+    "serverless-http": "^4.0.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7"

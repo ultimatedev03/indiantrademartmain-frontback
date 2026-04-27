@@ -3,6 +3,8 @@ import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
 import { assertCaptchaForNetlifyEvent } from "../../server/lib/captcha.js";
 import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
+import { cacheDelete, cacheGetJson, cacheSetJson, isRedisConfigured } from "../../server/lib/redisCache.js";
+import { isResendConfigured, sendResendEmail } from "../../server/lib/resendMailer.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -75,12 +77,28 @@ const GMAIL_CONFIG = Object.freeze({
 
 const OTP_FROM_NAME = readEnv("OTP_FROM_NAME") || "IndianTradeMart";
 const OTP_FROM_EMAIL = readEnv("OTP_FROM_EMAIL");
+const OTP_TTL_SECONDS = 120;
+const OTP_REDIS_KEY_PREFIX = "auth_otp:";
 
 let cachedMailers = null;
 const getMailers = () => {
   if (cachedMailers) return cachedMailers;
 
   const mailers = [];
+
+  if (isResendConfigured()) {
+    mailers.push({
+      provider: "RESEND",
+      send: ({ to, subject, html }) =>
+        sendResendEmail({
+          to,
+          subject,
+          html,
+          fromName: OTP_FROM_NAME,
+          fromEmail: OTP_FROM_EMAIL
+        })
+    });
+  }
 
   if (SMTP_CONFIG.host && SMTP_CONFIG.user && SMTP_CONFIG.pass) {
     mailers.push({
@@ -114,7 +132,7 @@ const getMailers = () => {
 
   if (!mailers.length) {
     throw new Error(
-      "Email transporter is not configured. Set SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD in Netlify environment variables."
+      "Email transporter is not configured. Set RESEND_API_KEY/RESEND_FROM_EMAIL, SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD in Netlify environment variables."
     );
   }
 
@@ -222,35 +240,41 @@ function isValidEmail(email) {
 async function sendOtpEmail(email, otp) {
   const mailers = getMailers();
   const failures = [];
+  const subject = `Your OTP Code: ${otp}`;
+  const html = `
+    <html>
+      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <div style="text-align: center;">
+          <h2 style="color: #003D82;">Email Verification</h2>
+          <p style="font-size: 16px; color: #333;">Your OTP verification code is:</p>
+          <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h1 style="color: #003D82; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
+          </div>
+          <p style="color: #666; font-size: 14px;">This code will expire in 2 minutes.</p>
+          <p style="color: #999; font-size: 12px; margin-top: 20px;">If you didn't request this code, please ignore this email.</p>
+        </div>
+        <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
+        <p style="text-align: center; color: #999; font-size: 11px;">
+          &copy; ${new Date().getFullYear()} IndianTradeMart. All rights reserved.
+        </p>
+      </body>
+    </html>
+  `;
 
   for (const mailer of mailers) {
     const mailOptions = {
       from: mailer.fromEmail ? `${OTP_FROM_NAME} <${mailer.fromEmail}>` : OTP_FROM_NAME,
       to: email,
-      subject: `Your OTP Code: ${otp}`,
-      html: `
-        <html>
-          <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="text-align: center;">
-              <h2 style="color: #003D82;">Email Verification</h2>
-              <p style="font-size: 16px; color: #333;">Your OTP verification code is:</p>
-              <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h1 style="color: #003D82; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
-              </div>
-              <p style="color: #666; font-size: 14px;">This code will expire in 2 minutes.</p>
-              <p style="color: #999; font-size: 12px; margin-top: 20px;">If you didn't request this code, please ignore this email.</p>
-            </div>
-            <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-            <p style="text-align: center; color: #999; font-size: 11px;">
-              &copy; 2025 IndianTradeMart. All rights reserved.
-            </p>
-          </body>
-        </html>
-      `
+      subject,
+      html
     };
 
     try {
-      await mailer.transporter.sendMail(mailOptions);
+      if (mailer.send) {
+        await mailer.send({ to: email, subject, html });
+      } else {
+        await mailer.transporter.sendMail(mailOptions);
+      }
       return;
     } catch (error) {
       const responseCode = Number(error?.responseCode);
@@ -270,6 +294,77 @@ async function sendOtpEmail(email, otp) {
   console.error("[otp function] Failed to send OTP email with all configured providers.", { failures });
   throw new Error("Failed to send OTP email");
 }
+
+const getOtpCacheKey = (email) => `${OTP_REDIS_KEY_PREFIX}${normalizeEmail(email)}`;
+
+const upsertOtpForEmail = async (email) => {
+  const otp = generateOtp();
+  const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000).toISOString();
+
+  if (isRedisConfigured()) {
+    try {
+      await cacheSetJson(
+        getOtpCacheKey(email),
+        {
+          email,
+          otp_code: otp,
+          expires_at: expiresAt
+        },
+        OTP_TTL_SECONDS
+      );
+      await supabase.from("auth_otps").delete().eq("email", email).eq("used", false);
+      return { otp, expiresAt, store: "redis" };
+    } catch (error) {
+      console.warn("[otp function] Redis write failed. Falling back to Supabase OTP store.", {
+        reason: error?.message || "Unknown Redis error"
+      });
+    }
+  }
+
+  await supabase.from("auth_otps").delete().eq("email", email).eq("used", false);
+
+  const { error: dbError } = await supabase.from("auth_otps").insert([
+    {
+      email,
+      otp_code: otp,
+      expires_at: expiresAt,
+      used: false
+    }
+  ]);
+
+  if (dbError) {
+    console.error("[otp function] Failed to insert OTP:", dbError);
+    throw new Error("Failed to generate OTP");
+  }
+
+  return { otp, expiresAt, store: "supabase" };
+};
+
+const verifyOtpFromRedis = async (email, otpCode) => {
+  if (!isRedisConfigured()) return null;
+
+  try {
+    const record = await cacheGetJson(getOtpCacheKey(email));
+    if (!record) return { matched: false };
+
+    const expiresAtMs = new Date(record.expires_at || record.expiresAt || "").getTime();
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      await cacheDelete(getOtpCacheKey(email)).catch(() => null);
+      return { matched: false };
+    }
+
+    const expected = String(record.otp_code || record.otp || "").trim();
+    if (!expected || expected !== otpCode) return { matched: false };
+
+    await cacheDelete(getOtpCacheKey(email));
+    return { matched: true };
+  } catch (error) {
+    console.warn("[otp function] Redis verify failed. Falling back to Supabase OTP store.", {
+      reason: error?.message || "Unknown Redis error"
+    });
+    return null;
+  }
+};
 
 export const handler = async (event) => {
   try {
@@ -306,31 +401,14 @@ export const handler = async (event) => {
         });
       }
 
-      const otp = generateOtp();
-      const expiresAt = new Date(Date.now() + 2 * 60 * 1000).toISOString();
-
-      await supabase.from("auth_otps").delete().eq("email", email).eq("used", false);
-
-      const { error: dbError } = await supabase.from("auth_otps").insert([
-        {
-          email,
-          otp_code: otp,
-          expires_at: expiresAt,
-          used: false
-        }
-      ]);
-
-      if (dbError) {
-        console.error("[otp function] Failed to insert OTP:", dbError);
-        return json(500, { error: "Failed to generate OTP" });
-      }
+      const { otp } = await upsertOtpForEmail(email);
 
       await sendOtpEmail(email, otp);
 
       return json(200, {
         success: true,
         message: action === "resend" ? "New OTP sent to your email" : "OTP sent successfully to your email",
-        expiresIn: 120,
+        expiresIn: OTP_TTL_SECONDS,
       });
     }
 
@@ -340,6 +418,14 @@ export const handler = async (event) => {
 
       if (!email || !otpCode) {
         return json(400, { error: "Email and OTP code are required" });
+      }
+
+      const redisVerification = await verifyOtpFromRedis(email, otpCode);
+      if (redisVerification?.matched) {
+        return json(200, { success: true, message: "OTP verified successfully", email });
+      }
+      if (redisVerification && !redisVerification.matched) {
+        return json(401, { error: "Invalid or expired OTP code" });
       }
 
       const { data, error } = await supabase

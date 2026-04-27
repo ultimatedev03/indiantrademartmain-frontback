@@ -1,215 +1,174 @@
+/**
+ * categoryHierarchyApi.js — Category hierarchy service (backend-first)
+ *
+ * MIGRATION: All direct Supabase calls removed.
+ * Routes through /api/data-entry/categories/* on the Express backend.
+ */
 
-import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
-// Ensure we handle authentication implicitly via the client
-// The client handles tokens automatically.
+const safeJson = async (res) => { try { return await res.json(); } catch { return {}; } };
+
+const cat = (path) => apiUrl(`/api/data-entry/categories${path}`);
 
 export const categoryHierarchyApi = {
-  // --- HEAD CATEGORIES ---
+
+  // ── HEAD CATEGORIES ───────────────────────────────────────────────────────
+
   getHeadCategories: async () => {
-    const { data, error } = await supabase
-      .from('head_categories')
-      .select('*, sub_categories(count)')
-      .order('name');
-    if (error) {
-      console.error("Fetch Head Cat Error:", error);
-      throw error;
-    }
-    return data || [];
+    const res = await fetchWithCsrf(cat('/head?withSubs=true'));
+    if (!res.ok) throw new Error('Failed to fetch head categories');
+    const json = await res.json();
+    return json?.categories || [];
   },
 
   createHeadCategory: async (payload) => {
-    const { data, error } = await supabase.from('head_categories').insert([payload]).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat('/head'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to create head category');
+    return json?.category;
   },
 
   updateHeadCategory: async (id, payload) => {
-    const { data, error } = await supabase.from('head_categories').update(payload).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat(`/head/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to update head category');
+    return json?.category;
   },
 
   deleteHeadCategory: async (id) => {
-    // Check for subs
-    const { count } = await supabase.from('sub_categories').select('*', { count: 'exact', head: true }).eq('head_category_id', id);
-    if (count > 0) throw new Error("Cannot delete: Category has sub-categories");
-    
-    const { error } = await supabase.from('head_categories').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetchWithCsrf(cat(`/head/${id}`), { method: 'DELETE' });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Cannot delete: check for sub-categories');
   },
 
-  // --- SUB CATEGORIES ---
+  // ── SUB CATEGORIES ────────────────────────────────────────────────────────
+
   getSubCategories: async (headId) => {
-    const { data, error } = await supabase
-      .from('sub_categories')
-      .select('*, micro_categories(count)')
-      .eq('head_category_id', headId)
-      .order('name');
-    if (error) throw error;
-    return data || [];
+    const res = await fetchWithCsrf(cat(`/sub?headId=${headId}`));
+    if (!res.ok) throw new Error('Failed to fetch sub-categories');
+    const json = await res.json();
+    return json?.categories || [];
   },
 
   createSubCategory: async (payload) => {
-    const { data, error } = await supabase.from('sub_categories').insert([payload]).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat('/sub'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to create sub-category');
+    return json?.category;
   },
 
   updateSubCategory: async (id, payload) => {
-    const { data, error } = await supabase.from('sub_categories').update(payload).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat(`/sub/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to update sub-category');
+    return json?.category;
   },
 
   deleteSubCategory: async (id) => {
-    const { count } = await supabase.from('micro_categories').select('*', { count: 'exact', head: true }).eq('sub_category_id', id);
-    if (count > 0) throw new Error("Cannot delete: Category has micro-categories");
-    
-    const { error } = await supabase.from('sub_categories').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetchWithCsrf(cat(`/sub/${id}`), { method: 'DELETE' });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Cannot delete: check for micro-categories');
   },
 
-  // --- MICRO CATEGORIES ---
+  // ── MICRO CATEGORIES ──────────────────────────────────────────────────────
+
   getMicroCategories: async (subId) => {
-    const { data, error } = await supabase
-      .from('micro_categories')
-      .select('*')
-      .eq('sub_category_id', subId)
-      .order('name');
-    if (error) throw error;
-    return data || [];
+    const res = await fetchWithCsrf(cat(`/micro?subId=${subId}`));
+    if (!res.ok) throw new Error('Failed to fetch micro-categories');
+    const json = await res.json();
+    return json?.categories || [];
   },
 
   createMicroCategory: async (payload) => {
-    const { data, error } = await supabase.from('micro_categories').insert([payload]).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat('/micro'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to create micro-category');
+    return json?.category;
   },
 
   updateMicroCategory: async (id, payload) => {
-    const { data, error } = await supabase.from('micro_categories').update(payload).eq('id', id).select().single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(cat(`/micro/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to update micro-category');
+    return json?.category;
   },
 
   deleteMicroCategory: async (id) => {
-    const { error } = await supabase.from('micro_categories').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetchWithCsrf(cat(`/micro/${id}`), { method: 'DELETE' });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to delete micro-category');
   },
 
-  // --- META TAGS ---
+  // ── META TAGS ─────────────────────────────────────────────────────────────
+  // micro_category_meta is admin-only; route through admin endpoint
+
   getMicroCategoryMeta: async (microId) => {
-    let res = await supabase
-      .from('micro_category_meta')
-      .select('*, states(name), cities(name)')
-      .eq('micro_category_id', microId);
-    if (res.error && (res.error.code === '42703' || /column .* does not exist/i.test(res.error.message || ''))) {
-      res = await supabase
-        .from('micro_category_meta')
-        .select('*, states(name), cities(name)')
-        .eq('micro_categories', microId);
-    }
-    if (res.error) throw res.error;
-    return res.data || [];
+    try {
+      const res = await fetchWithCsrf(apiUrl(`/api/admin/categories/micro/${microId}/meta`));
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json?.meta || [];
+    } catch { return []; }
   },
 
   createMicroCategoryMeta: async (payload) => {
-    // Handle optional foreign keys (if 'none' or empty, set to null)
-    const cleanPayload = {
-      ...payload,
-      state_id: payload.state_id === 'none' || !payload.state_id ? null : payload.state_id,
-      city_id: payload.city_id === 'none' || !payload.city_id ? null : payload.city_id,
-    };
-    const basePayload = {
-      ...cleanPayload,
-    };
-    delete basePayload.micro_category_id;
-    delete basePayload.micro_categories;
-
-    const microId = payload.micro_category_id || payload.micro_categories || null;
-    let res = await supabase
-      .from('micro_category_meta')
-      .insert([{ ...basePayload, micro_category_id: microId }])
-      .select()
-      .single();
-    if (res.error && (res.error.code === '42703' || /column .* does not exist/i.test(res.error.message || ''))) {
-      res = await supabase
-        .from('micro_category_meta')
-        .insert([{ ...basePayload, micro_categories: microId }])
-        .select()
-        .single();
-    }
-    if (res.error) throw res.error;
-    return res.data;
+    const res = await fetchWithCsrf(apiUrl('/api/admin/categories/micro/meta'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to create meta');
+    return json?.meta;
   },
 
   deleteMicroCategoryMeta: async (id) => {
-    const { error } = await supabase.from('micro_category_meta').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetchWithCsrf(apiUrl(`/api/admin/categories/micro/meta/${id}`), { method: 'DELETE' });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'Failed to delete meta');
   },
 
-  // --- IMPORT ---
+  // ── IMPORT ────────────────────────────────────────────────────────────────
+
   importCategories: async (rows) => {
-     let success = 0;
-     let failed = 0;
-     let errors = [];
-     
-     // Cache lookups to speed up
-     // Ideally fetches all current cats, but for safety we might just upsert or check individually 
-     // For this impl, we'll check individually to be safe on hierarchy
-     
-     for (const row of rows) {
-       try {
-         const headName = row.head_category?.trim();
-         const subName = row.sub_category?.trim();
-         const microName = row.micro_category?.trim();
-         
-         if (!headName || !subName || !microName) {
-           failed++;
-           errors.push(`Row missing data: ${JSON.stringify(row)}`);
-           continue;
-         }
-         
-         // 1. Head
-         let headId;
-         const { data: head } = await supabase.from('head_categories').select('id').eq('name', headName).maybeSingle();
-         if (head) {
-           headId = head.id;
-         } else {
-           const slug = headName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-           const { data: newHead, error: hErr } = await supabase.from('head_categories').insert([{ name: headName, slug, is_active: true }]).select().single();
-           if (hErr) throw hErr;
-           headId = newHead.id;
-         }
-
-         // 2. Sub
-         let subId;
-         const { data: sub } = await supabase.from('sub_categories').select('id').eq('name', subName).eq('head_category_id', headId).maybeSingle();
-         if (sub) {
-           subId = sub.id;
-         } else {
-           const slug = subName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-           const { data: newSub, error: sErr } = await supabase.from('sub_categories').insert([{ name: subName, slug, head_category_id: headId, is_active: true }]).select().single();
-           if (sErr) throw sErr;
-           subId = newSub.id;
-         }
-
-         // 3. Micro
-         const { data: micro } = await supabase.from('micro_categories').select('id').eq('name', microName).eq('sub_category_id', subId).maybeSingle();
-         if (!micro) {
-           const slug = microName.toLowerCase().replace(/[^a-z0-9]/g, '-');
-           const { error: mErr } = await supabase.from('micro_categories').insert([{ name: microName, slug, sub_category_id: subId, is_active: true }]);
-           if (mErr) throw mErr;
-         }
-         
-         success++;
-       } catch (e) {
-         failed++;
-         errors.push(e.message);
-       }
-     }
-     
-     return { success, failed, total: rows.length, errors };
-  }
+    const res = await fetchWithCsrf(cat('/import-csv'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows }),
+    });
+    const json = await safeJson(res);
+    if (!res.ok) throw new Error(json?.error || 'CSV import failed');
+    return {
+      success: json?.imported || 0,
+      failed: json?.failed || 0,
+      total: rows.length,
+      errors: json?.errors || [],
+    };
+  },
 };

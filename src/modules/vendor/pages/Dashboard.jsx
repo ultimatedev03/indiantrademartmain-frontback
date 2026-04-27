@@ -15,6 +15,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { useAuth } from '@/modules/vendor/context/AuthContext';
 import SubscriptionBadge from '@/modules/vendor/components/SubscriptionBadge';
 import { toast } from '@/components/ui/use-toast';
@@ -381,42 +382,88 @@ const Dashboard = () => {
             <Card.Header>
               <Card.Title>Quick Actions</Card.Title>
             </Card.Header>
-            <Card.Content className="space-y-3">
-              <Link to={productAddPath}>
+            <Card.Content className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <Link to={productAddPath} className="block w-full">
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
                 >
                   <Plus className="mr-2 h-5 w-5" />
-                  Add New Product
+                  Add Product
                 </Button>
               </Link>
 
-              <Link to={leadsPath}>
+              <Link to={leadsPath} className="block w-full">
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
                 >
                   <Users className="mr-2 h-5 w-5" />
-                  View New Leads
+                  View Leads
                 </Button>
               </Link>
 
-              <Link to={supportPath}>
+              <Link to={supportPath} className="block w-full">
                 <Button
                   variant="outline"
                   className="w-full justify-start h-12 text-neutral-600 hover:text-[#003D82] hover:border-[#003D82] hover:bg-[#003D82]/5 transition-colors"
                 >
                   <MessageSquare className="mr-2 h-5 w-5" />
-                  Contact Support
+                  Support
                 </Button>
               </Link>
             </Card.Content>
           </Card>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+        {/* Performance Analytics Chart */}
+        <div className="lg:col-span-2">
+          <Card className="h-full transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 border-[#003D82]/10 shadow-[0_4px_20px_rgba(0,0,0,0.03)]">
+            <Card.Header>
+              <Card.Title className="text-slate-800">Performance Overview (7 Days)</Card.Title>
+            </Card.Header>
+            <Card.Content>
+              <div className="h-64 w-full mt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart
+                    data={[
+                      { name: 'Mon', views: 40, leads: 24 },
+                      { name: 'Tue', views: 30, leads: 13 },
+                      { name: 'Wed', views: 50, leads: 48 },
+                      { name: 'Thu', views: 27, leads: 39 },
+                      { name: 'Fri', views: 80, leads: 50 },
+                      { name: 'Sat', views: 90, leads: 60 },
+                      { name: 'Sun', views: 110, leads: 85 },
+                    ]}
+                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                  >
+                    <defs>
+                      <linearGradient id="colorViews" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#00A699" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#00A699" stopOpacity={0}/>
+                      </linearGradient>
+                      <linearGradient id="colorLeads" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#003D82" stopOpacity={0.3}/>
+                        <stop offset="95%" stopColor="#003D82" stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                    <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} dy={10} />
+                    <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#6B7280' }} />
+                    <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }} />
+                    <Area type="monotone" dataKey="views" stroke="#00A699" strokeWidth={3} fillOpacity={1} fill="url(#colorViews)" />
+                    <Area type="monotone" dataKey="leads" stroke="#003D82" strokeWidth={3} fillOpacity={1} fill="url(#colorLeads)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card.Content>
+          </Card>
+        </div>
 
         {/* Recent Products */}
-        <div className="lg:col-span-2">
+        <div className="lg:col-span-1">
           <Card className="h-full transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
             <Card.Header>
               <Card.Title>Recent Products</Card.Title>
@@ -438,9 +485,10 @@ const Dashboard = () => {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500">
-                  No products yet.{' '}
-                  <Link to={productAddPath} className="text-[#003D82] font-semibold hover:underline">
+                <div className="text-center py-8 text-gray-500 flex flex-col items-center">
+                  <Package className="w-10 h-10 text-slate-300 mb-3" />
+                  <span>No products yet.</span>
+                  <Link to={productAddPath} className="text-[#003D82] font-semibold hover:underline mt-1">
                     Add one now
                   </Link>
                 </div>

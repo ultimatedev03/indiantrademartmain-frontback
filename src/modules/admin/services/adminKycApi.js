@@ -1,109 +1,74 @@
-
-import { supabase } from '@/lib/customSupabaseClient';
+/**
+ * adminKycApi.js — KYC management service (backend-first)
+ *
+ * MIGRATION NOTE (Phase 3): All KYC mutations now route through the
+ * Express backend (/api/kyc/*) which enforces role guards, audit logging,
+ * and sanitization. Direct Supabase writes are removed.
+ */
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
 
 export const adminKycApi = {
+  /**
+   * List vendors with KYC filtering, search, and pagination.
+   * Maps to GET /api/admin/vendors
+   */
   getAllVendors: async ({ status, search, page = 1, limit = 10 }) => {
-    let query = supabase
-      .from('vendors')
-      .select('*, kyc_docs:kyc_documents(*)', { count: 'exact' });
+    const params = new URLSearchParams({ page, limit });
+    if (status && status !== 'all') params.set('kyc', status);
+    if (search) params.set('search', search);
 
-    if (status && status !== 'all') {
-      // Map UI status to DB status
-      const statusMap = { 
-        'pending': 'PENDING', 
-        'approved': 'VERIFIED', 
-        'rejected': 'REJECTED' 
-      };
-      query = query.eq('kyc_status', statusMap[status] || status);
-    }
-
-    if (search) {
-      query = query.or(`company_name.ilike.%${search}%,email.ilike.%${search}%,vendor_id.ilike.%${search}%`);
-    }
-
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    const { data, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range(from, to);
-
-    if (error) throw error;
-    return { data, count };
+    const res = await fetchWithCsrf(apiUrl(`/api/admin/vendors?${params.toString()}`));
+    if (!res.ok) throw new Error('Failed to fetch vendors for KYC');
+    const json = await res.json();
+    return {
+      data: json?.vendors || [],
+      count: json?.total ?? json?.count ?? 0,
+    };
   },
 
+  /**
+   * Approve a vendor's KYC — routes through Express which handles
+   * the DB update, badge assignment, and notification dispatch.
+   */
   approveVendor: async (vendorId) => {
-    // 1. Update Vendor Status
-    const { error } = await supabase
-      .from('vendors')
-      .update({ 
-        kyc_status: 'VERIFIED',
-        verification_badge: true,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', vendorId);
-
-    if (error) throw error;
-
-    // 2. Create Notification (Simulated)
-    // In a real app, this would be a trigger or a separate insert
-    await supabase.from('notifications').insert([{
-        user_id: (await supabase.from('vendors').select('user_id').eq('id', vendorId).single()).data.user_id,
-        type: 'kyc_approved',
-        title: 'KYC Approved',
-        message: 'Your KYC documents have been verified. You can now list products.',
-        is_read: false
-    }]);
-
+    const res = await fetchWithCsrf(apiUrl(`/api/kyc/vendors/${vendorId}/approve`), {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json?.error || json?.message || 'KYC approval failed');
+    }
     return true;
   },
 
+  /**
+   * Reject a vendor's KYC with a reason — routes through Express.
+   */
   rejectVendor: async (vendorId, remarks) => {
-    const { data: { user } } = await supabase.auth.getUser();
-
-    // 1. Update Vendor Status
-    const { error } = await supabase
-      .from('vendors')
-      .update({ 
-        kyc_status: 'REJECTED',
-        verification_badge: false,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', vendorId);
-
-    if (error) throw error;
-
-    // 2. Add Remarks
-    const { error: remarkError } = await supabase
-      .from('kyc_remarks')
-      .insert([{
-        vendor_id: vendorId,
-        remarks: remarks,
-        created_by: user.id
-      }]);
-
-    if (remarkError) throw remarkError;
-
-    // 3. Notification
-    await supabase.from('notifications').insert([{
-        user_id: (await supabase.from('vendors').select('user_id').eq('id', vendorId).single()).data.user_id,
-        type: 'kyc_rejected',
-        title: 'KYC Rejected',
-        message: `Your KYC was rejected. Reason: ${remarks}`,
-        is_read: false
-    }]);
-
+    const res = await fetchWithCsrf(apiUrl(`/api/kyc/vendors/${vendorId}/reject`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: remarks }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json?.error || json?.message || 'KYC rejection failed');
+    }
     return true;
   },
 
+  /**
+   * Get reviewer remarks for a vendor's KYC.
+   * Maps to GET /api/kyc/vendors/:vendorId/remarks
+   */
   getVendorRemarks: async (vendorId) => {
-    const { data, error } = await supabase
-      .from('kyc_remarks')
-      .select('*, created_by_user:users(full_name)') // Assuming users table has full_name
-      .eq('vendor_id', vendorId)
-      .order('created_at', { ascending: false });
-      
-    if (error) throw error;
-    return data;
-  }
+    const res = await fetchWithCsrf(apiUrl(`/api/kyc/vendors/${vendorId}/remarks`));
+    if (!res.ok) {
+      console.warn('[adminKycApi.getVendorRemarks] Failed:', res.status);
+      return [];
+    }
+    const json = await res.json();
+    return json?.remarks || [];
+  },
 };

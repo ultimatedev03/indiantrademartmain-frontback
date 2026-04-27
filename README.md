@@ -142,16 +142,17 @@ sequenceDiagram
 ## Missing/Extra DB Objects (from code references)
 Details: `docs/missing-migrations.md`
 
-## Scripts (from package.json)
-- `npm run dev` - run frontend + backend together
-- `npm run dev:client` - Vite frontend only
-- `npm run dev:server` - Express API only
-- `npm run dev:all` - run both
-- `npm run build` - generate sitemaps + build
+## Scripts & Local Startup
+With the Phase 2 separation complete, the frontend and backend operate as distinct cooperating runtimes:
+- `npm run dev:server` - Starts the central Express API (`server/server.js`) on port 3001. Only processes backend environment variables.
+- `npm run dev:client` - Starts the Vite SPA on port 3000. Proxies all `/api/*` calls transparently to the backend port.
+- `npm run dev` (or `npm run dev:all`) - Safely boots both sequentially. It waits for the `dev:server` health check to pass before starting the Vite client, ensuring the Express backend is ready.
+- `npm run build` - Generates sitemaps, LLM hints, executes the final Vite production build, and SEO prerendering.
 
 ## Netlify Deployment
+- **API Runtime Model**: During migration Phase 3, production deploys still utilize Netlify functions as proxies. The `netlify/functions/_shared/expressProxy.js` adapter catches serverless calls and executes the identical Express application routing matrix safely.
 - Production checklist: `docs/netlify-production.md`
-- Env template for Netlify variables: `.env.netlify.example`
+- Env template for Netlify variables: `.env.netlify.example` (details the hard separation between Vite public vars and Node secret vars)
 
 ## Notes
 - Subdomain-aware routing is supported (vendor., buyer., dir., admin.).

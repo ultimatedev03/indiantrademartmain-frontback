@@ -7,8 +7,6 @@ import { apiUrl } from '@/lib/apiBase';
 
 // Get current vendor ID
 const getVendorId = async () => {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
 
   // Prefer backend (auth cookie/session based).
   try {
@@ -528,47 +526,43 @@ export const leadApi = {
   },
 
   create: async (leadData) => {
-    const { data, error } = await supabase
-      .from('leads')
-      .insert([{
-        ...leadData,
-        status: leadData.status || 'AVAILABLE',
-        created_at: new Date().toISOString()
-      }])
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(apiUrl('/api/vendors/me/leads-create'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(leadData),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || 'Failed to create lead');
+    return json?.lead || json?.data;
   },
 
   update: async (id, updates) => {
-    const { data, error } = await supabase
-      .from('leads')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/leads/${encodeURIComponent(id)}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || 'Failed to update lead');
+    return json?.lead || json?.data;
   },
 
   updateStatus: async (id, status) => {
     const validStatuses = ['AVAILABLE', 'PENDING', 'CONVERTED', 'CLOSED'];
     if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-
-    const { data, error } = await supabase
-      .from('leads')
-      .update({ status })
-      .eq('id', id)
-      .select()
-      .single();
-    if (error) throw error;
-    return data;
+    const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/leads/${encodeURIComponent(id)}/status`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json?.error || 'Failed to update lead status');
+    return json?.lead || json?.data;
   },
 
   delete: async (id) => {
-    const { error } = await supabase.from('leads').delete().eq('id', id);
-    if (error) throw error;
+    const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/leads/${encodeURIComponent(id)}`), { method: 'DELETE' });
+    if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || 'Failed to delete lead'); }
   },
 
   // --- LEAD CONTACTS API ---
@@ -638,8 +632,8 @@ export const leadApi = {
     },
 
     delete: async (id) => {
-      const { error } = await supabase.from('lead_contacts').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/contacts/${encodeURIComponent(id)}`), { method: 'DELETE' });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || 'Failed to delete contact'); }
     },
 
     getStats: async (leadId) => {
@@ -740,8 +734,8 @@ export const leadApi = {
     },
 
     delete: async (id) => {
-      const { error } = await supabase.from('lead_purchases').delete().eq('id', id);
-      if (error) throw error;
+      const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/purchases/${encodeURIComponent(id)}`), { method: 'DELETE' });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || 'Failed to delete purchase'); }
     },
 
     getStats: async (vendorId) => {

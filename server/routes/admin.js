@@ -761,6 +761,35 @@ router.get("/vendors", async (req, res) => {
   }
 });
 
+// GET /api/admin/vendors/:vendorId — fetch a single vendor by UUID
+router.get("/vendors/:vendorId", async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!vendorId) {
+      return res.status(400).json({ success: false, error: "vendorId is required" });
+    }
+
+    // Guard against sub-path collisions (e.g. "products", "terminate")
+    const SUBPATH_RESERVED = new Set(["products", "terminate", "activate"]);
+    if (SUBPATH_RESERVED.has(vendorId)) {
+      return res.status(400).json({ success: false, error: "Invalid vendorId" });
+    }
+
+    const { data: vendor, error } = await supabase
+      .from("vendors")
+      .select("*")
+      .eq("id", vendorId)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (!vendor) return res.status(404).json({ success: false, error: "Vendor not found" });
+
+    return res.json({ success: true, vendor });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message });
+  }
+});
+
 router.get("/vendors/:vendorId/products", async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -2017,6 +2046,300 @@ router.post('/subscription-requests/:id/resolve', async (req, res) => {
     }
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to resolve extension request' });
+  }
+});
+// --- GEOGRAPHY MANAGEMENT (States & Cities) ---
+
+router.get('/states', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('states').select('*').order('name');
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/states', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ success: false, error: 'Name is required' });
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const { data, error } = await supabase.from('states').insert([{ name, slug, is_active: true }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.put('/states/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, is_active } = req.body;
+    let updates = { is_active };
+    if (name) {
+      updates.name = name;
+      updates.slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    }
+    const { data, error } = await supabase.from('states').update(updates).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.delete('/states/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('states').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.get('/cities', async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('cities').select('*, states(name)').order('name');
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.post('/cities', async (req, res) => {
+  try {
+    const { state_id, name } = req.body;
+    if (!name || !state_id) return res.status(400).json({ success: false, error: 'State ID and Name are required' });
+    const slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    const { data, error } = await supabase.from('cities').insert([{ state_id, name, slug, is_active: true }]).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.put('/cities/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, is_active } = req.body;
+    let updates = { is_active };
+    if (name) {
+      updates.name = name;
+      updates.slug = name.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+    }
+    const { data, error } = await supabase.from('cities').update(updates).eq('id', id).select().single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+router.delete('/cities/:id', async (req, res) => {
+  try {
+    const { error } = await supabase.from('cities').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /users — list all platform users (admin-scoped)
+router.get('/users', async (req, res) => {
+  try {
+    const { role, search, limit = 100, offset = 0 } = req.query;
+    let query = supabase
+      .from('users')
+      .select('id, email, full_name, phone, role, created_at, is_active')
+      .order('created_at', { ascending: false })
+      .range(Number(offset) || 0, (Number(offset) || 0) + Math.min(Number(limit) || 100, 500) - 1);
+
+    if (role) query = query.eq('role', String(role).toUpperCase());
+    if (search) {
+      const s = String(search).trim();
+      query = query.or(`email.ilike.%${s}%,full_name.ilike.%${s}%`);
+    }
+
+    const { data: users, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, users: users || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /users/:id — get single user
+router.get('/users/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: user, error } = await supabase
+      .from('users')
+      .select('id, email, full_name, phone, role, created_at, is_active')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+
+    return res.json({ success: true, user });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /products — list products (optionally by vendor)
+router.get('/products', async (req, res) => {
+  try {
+    const { vendorId, limit = 100, offset = 0 } = req.query;
+    let query = supabase
+      .from('products')
+      .select('id, name, vendor_id, status, created_at, price, images, micro_category_id')
+      .order('created_at', { ascending: false })
+      .range(Number(offset) || 0, (Number(offset) || 0) + Math.min(Number(limit) || 100, 500) - 1);
+
+    if (vendorId) query = query.eq('vendor_id', vendorId);
+
+    const { data: products, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, products: products || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ POST /vendors/:vendorId/assign — assign employee to vendor
+router.post('/vendors/:vendorId/assign', async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { employee_id } = req.body || {};
+
+    if (!employee_id) return res.status(400).json({ success: false, error: 'employee_id is required' });
+
+    const { data: vendor, error: vendorErr } = await supabase
+      .from('vendors')
+      .select('id, company_name, assigned_to')
+      .eq('id', vendorId)
+      .maybeSingle();
+
+    if (vendorErr) return res.status(500).json({ success: false, error: vendorErr.message });
+    if (!vendor) return res.status(404).json({ success: false, error: 'Vendor not found' });
+
+    const { data: updated, error: updateErr } = await supabase
+      .from('vendors')
+      .update({ assigned_to: employee_id, updated_at: new Date().toISOString() })
+      .eq('id', vendorId)
+      .select('id, company_name, assigned_to')
+      .maybeSingle();
+
+    if (updateErr) return res.status(500).json({ success: false, error: updateErr.message });
+
+    await writeAuditLog({
+      actor_id: req.employee?.id || null,
+      actor_role: req.employee?.role || 'ADMIN',
+      action: 'VENDOR_ASSIGNED',
+      entity_type: 'vendors',
+      entity_id: vendorId,
+      details: { employee_id, company_name: vendor.company_name },
+    }).catch(() => {});
+
+    return res.json({ success: true, vendor: updated });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ GET /categories/micro/:microId/meta — get micro-category metadata
+router.get('/categories/micro/:microId/meta', async (req, res) => {
+  try {
+    const { microId } = req.params;
+    const { data, error } = await supabase
+      .from('micro_category_meta')
+      .select('*')
+      .eq('micro_category_id', microId)
+      .maybeSingle();
+
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+      return res.json({ success: true, meta: null });
+    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, meta: data || null });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ POST /categories/micro/meta — create micro-category metadata
+router.post('/categories/micro/meta', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    if (!payload.micro_category_id) {
+      return res.status(400).json({ success: false, error: 'micro_category_id is required' });
+    }
+
+    const { data, error } = await supabase
+      .from('micro_category_meta')
+      .insert([{ ...payload, created_at: new Date().toISOString() }])
+      .select('*')
+      .maybeSingle();
+
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+      return res.json({ success: true, meta: payload });
+    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.status(201).json({ success: true, meta: data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ POST /categories/micro/meta/:id — update micro-category metadata
+router.post('/categories/micro/meta/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const payload = req.body || {};
+
+    const { data, error } = await supabase
+      .from('micro_category_meta')
+      .update({ ...payload, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select('*')
+      .maybeSingle();
+
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+      return res.json({ success: true, meta: payload });
+    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true, meta: data });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ✅ DELETE /categories/micro/meta/:id — delete micro-category metadata
+router.delete('/categories/micro/meta/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase.from('micro_category_meta').delete().eq('id', id);
+
+    if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+      return res.json({ success: true });
+    }
+    if (error) return res.status(500).json({ success: false, error: error.message });
+
+    return res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 

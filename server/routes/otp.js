@@ -4,10 +4,13 @@ import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
 import { getAuthCookieNames, getCookie, normalizeEmail as normalizeAuthEmail, verifyAuthToken } from '../lib/auth.js';
+import { cacheDelete, cacheGetJson, cacheSetJson, isRedisConfigured } from '../lib/redisCache.js';
+import { isResendConfigured, sendResendEmail } from '../lib/resendMailer.js';
 
 const router = express.Router();
 const OTP_TTL_SECONDS = 120;
 const IS_PRODUCTION = String(process.env.NODE_ENV || '').trim().toLowerCase() === 'production';
+const OTP_REDIS_KEY_PREFIX = 'auth_otp:';
 
 const sanitizeEnvValue = (value) => {
   if (typeof value !== 'string') return '';
@@ -101,6 +104,20 @@ const getMailers = () => {
 
   const mailers = [];
 
+  if (isResendConfigured()) {
+    mailers.push({
+      provider: 'RESEND',
+      send: ({ to, subject, html }) =>
+        sendResendEmail({
+          to,
+          subject,
+          html,
+          fromName: OTP_FROM_NAME,
+          fromEmail: OTP_FROM_EMAIL,
+        }),
+    });
+  }
+
   if (SMTP_CONFIG.host && SMTP_CONFIG.user && SMTP_CONFIG.pass) {
     mailers.push({
       provider: 'SMTP',
@@ -133,7 +150,7 @@ const getMailers = () => {
 
   if (!mailers.length) {
     throw new Error(
-      'Email transporter is not configured. Set SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD.'
+      'Email transporter is not configured. Set RESEND_API_KEY/RESEND_FROM_EMAIL, SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD.'
     );
   }
 
@@ -167,12 +184,18 @@ async function sendOtpEmail(email, otp) {
 
   for (const mailer of mailers) {
     try {
-      await mailer.transporter.sendMail({
-        from: mailer.fromEmail ? `${OTP_FROM_NAME} <${mailer.fromEmail}>` : OTP_FROM_NAME,
-        to: email,
-        subject: `Your OTP Code: ${otp}`,
-        html: buildOtpHtml(otp),
-      });
+      const subject = `Your OTP Code: ${otp}`;
+      const html = buildOtpHtml(otp);
+      if (mailer.send) {
+        await mailer.send({ to: email, subject, html });
+      } else {
+        await mailer.transporter.sendMail({
+          from: mailer.fromEmail ? `${OTP_FROM_NAME} <${mailer.fromEmail}>` : OTP_FROM_NAME,
+          to: email,
+          subject,
+          html,
+        });
+      }
       return;
     } catch (error) {
       const responseCode = Number(error?.responseCode);
@@ -224,6 +247,8 @@ const getRemainingSeconds = (expiresAt) => {
   return Math.max(0, Math.ceil(remainingMs / 1000));
 };
 
+const getOtpCacheKey = (email) => `${OTP_REDIS_KEY_PREFIX}${normalizeEmail(email)}`;
+
 const buildSuccessResponse = ({ otp, expiresAt, delivery, message }) => {
   const payload = {
     success: true,
@@ -247,6 +272,30 @@ const upsertOtpForEmail = async (email) => {
   const otp = generateOtp();
   const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000).toISOString();
 
+  if (isRedisConfigured()) {
+    try {
+      await cacheSetJson(
+        getOtpCacheKey(email),
+        {
+          email,
+          otp_code: otp,
+          expires_at: expiresAt,
+        },
+        OTP_TTL_SECONDS
+      );
+      await supabase
+        .from('auth_otps')
+        .delete()
+        .eq('email', email)
+        .eq('used', false);
+      return { otp, expiresAt, store: 'redis' };
+    } catch (error) {
+      logger.warn('[OTP] Redis write failed. Falling back to Supabase OTP store.', {
+        reason: error?.message || 'Unknown Redis error',
+      });
+    }
+  }
+
   await supabase
     .from('auth_otps')
     .delete()
@@ -269,7 +318,33 @@ const upsertOtpForEmail = async (email) => {
     throw new Error('Failed to generate OTP');
   }
 
-  return { otp, expiresAt };
+  return { otp, expiresAt, store: 'supabase' };
+};
+
+const verifyOtpFromRedis = async (email, otpCode) => {
+  if (!isRedisConfigured()) return null;
+
+  try {
+    const record = await cacheGetJson(getOtpCacheKey(email));
+    if (!record) return { matched: false };
+
+    const expiresAtMs = new Date(record.expires_at || record.expiresAt || '').getTime();
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      await cacheDelete(getOtpCacheKey(email)).catch(() => null);
+      return { matched: false };
+    }
+
+    const expected = String(record.otp_code || record.otp || '').trim();
+    if (!expected || expected !== otpCode) return { matched: false };
+
+    await cacheDelete(getOtpCacheKey(email));
+    return { matched: true };
+  } catch (error) {
+    logger.warn('[OTP] Redis verify failed. Falling back to Supabase OTP store.', {
+      reason: error?.message || 'Unknown Redis error',
+    });
+    return null;
+  }
 };
 
 // POST /api/otp/request - Request OTP
@@ -309,6 +384,18 @@ router.post('/verify', async (req, res) => {
 
     if (!email || !otpCode) {
       return res.status(400).json({ error: 'Email and OTP code are required' });
+    }
+
+    const redisVerification = await verifyOtpFromRedis(email, otpCode);
+    if (redisVerification?.matched) {
+      return res.json({
+        success: true,
+        message: 'OTP verified successfully',
+        email,
+      });
+    }
+    if (redisVerification && !redisVerification.matched) {
+      return res.status(401).json({ error: 'Invalid or expired OTP code' });
     }
 
     const { data, error } = await supabase

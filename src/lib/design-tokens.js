@@ -1,4 +1,3 @@
-
 export const colors = {
   primary: {
     DEFAULT: '#003D82',
@@ -30,6 +29,8 @@ export const colors = {
     brown: '#8B6F47',
     tan: '#C9A876',
     gold: '#D4AF37',
+    neonBlue: '#00F0FF',
+    electricPurple: '#8A2BE2'
   },
   neutral: {
     50: '#F9FAFB',
@@ -42,7 +43,19 @@ export const colors = {
     700: '#374151',
     800: '#1F2937',
     900: '#111827',
+  },
+  glass: {
+    light: 'rgba(255, 255, 255, 0.7)',
+    dark: 'rgba(17, 24, 39, 0.7)',
+    border: 'rgba(255, 255, 255, 0.2)'
   }
+};
+
+export const shadows = {
+  soft: '0 4px 20px rgba(0, 0, 0, 0.05)',
+  glowPrimary: '0 0 15px rgba(0, 61, 130, 0.3)',
+  glowSecondary: '0 0 15px rgba(0, 166, 153, 0.3)',
+  glass: '0 8px 32px 0 rgba(31, 38, 135, 0.07)'
 };
 
 export const spacing = {

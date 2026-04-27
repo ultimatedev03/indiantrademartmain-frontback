@@ -12,6 +12,10 @@ import {
   BadgeCheck,
   BookOpen,
   BriefcaseBusiness,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Eye,
   FileText,
@@ -31,8 +35,9 @@ import {
   TrendingUp,
   Users,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Helmet } from 'react-helmet';
 import { getProductDetailPath as buildProductDetailPath } from '@/shared/utils/productRoutes';
 import { getVendorProfilePath } from '@/shared/utils/vendorRoutes';
 
@@ -987,11 +992,204 @@ export const LearningCentre = () => (
   </FooterPageShell>
 );
 
+const FilterSelect = ({
+  id,
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+  openKey,
+  setOpenKey,
+  menuPlacement = 'bottom',
+}) => {
+  const rootRef = useRef(null);
+  const [menuMaxHeight, setMenuMaxHeight] = useState(256);
+  const selectedOption = options.find((option) => option.value === value) || options[0];
+  const isOpen = openKey === id;
+  const menuPositionClass = menuPlacement === 'top' ? 'bottom-full mb-1' : 'top-full mt-1';
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+
+    const updateMenuHeight = () => {
+      const root = rootRef.current;
+      if (!root || typeof window === 'undefined') return;
+
+      const rect = root.getBoundingClientRect();
+      const viewportPadding = 16;
+      const preferredHeight = 220;
+      const minHeight = 112;
+      const available =
+        menuPlacement === 'top'
+          ? rect.top - viewportPadding
+          : window.innerHeight - rect.bottom - viewportPadding;
+
+      setMenuMaxHeight(Math.max(minHeight, Math.min(preferredHeight, available)));
+    };
+
+    updateMenuHeight();
+    window.addEventListener('resize', updateMenuHeight);
+    window.addEventListener('scroll', updateMenuHeight, true);
+
+    return () => {
+      window.removeEventListener('resize', updateMenuHeight);
+      window.removeEventListener('scroll', updateMenuHeight, true);
+    };
+  }, [isOpen, menuPlacement]);
+
+  return (
+    <div ref={rootRef} className="relative" data-filter-select-root>
+      <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">{label}</span>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => setOpenKey(isOpen ? '' : id)}
+        className="flex h-10 w-full items-center justify-between gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 text-left text-[13px] font-semibold text-slate-800 outline-none transition hover:bg-white focus:border-[#003D82]/40 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="min-w-0 truncate">{selectedOption?.label || value}</span>
+        <ChevronDown
+          size={16}
+          className={`shrink-0 text-slate-500 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {isOpen && (
+        <div className={`absolute left-0 right-0 z-50 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-xl ${menuPositionClass}`}>
+          <div
+            role="listbox"
+            aria-label={label}
+            className="overflow-y-auto py-1"
+            style={{ maxHeight: `${menuMaxHeight}px` }}
+          >
+            {options.map((option) => {
+              const selected = option.value === value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => {
+                    onChange(option.value);
+                    setOpenKey('');
+                  }}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition ${
+                    selected
+                      ? 'bg-blue-50 font-bold text-[#003D82]'
+                      : 'font-medium text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                  {selected && <Check size={16} className="shrink-0 text-[#00796B]" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const normalizeLocationKey = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const INDIAN_LOCATION_COORDS = {
+  agra: { lat: 27.1767, lng: 78.0081 },
+  ahmedabad: { lat: 23.0225, lng: 72.5714 },
+  amravati: { lat: 20.9374, lng: 77.7796 },
+  anand: { lat: 22.5645, lng: 72.9289 },
+  bengaluru: { lat: 12.9716, lng: 77.5946 },
+  bangalore: { lat: 12.9716, lng: 77.5946 },
+  bharuch: { lat: 21.7051, lng: 72.9959 },
+  chennai: { lat: 13.0827, lng: 80.2707 },
+  delhi: { lat: 28.6139, lng: 77.209 },
+  ghaziabad: { lat: 28.6692, lng: 77.4538 },
+  gondal: { lat: 21.9607, lng: 70.8022 },
+  gorakhpur: { lat: 26.7606, lng: 83.3732 },
+  'greater noida': { lat: 28.4744, lng: 77.504 },
+  gurugram: { lat: 28.4595, lng: 77.0266 },
+  hyderabad: { lat: 17.385, lng: 78.4867 },
+  indore: { lat: 22.7196, lng: 75.8577 },
+  jaipur: { lat: 26.9124, lng: 75.7873 },
+  jalandhar: { lat: 31.326, lng: 75.5762 },
+  jetpur: { lat: 21.7548, lng: 70.6235 },
+  jhansi: { lat: 25.4484, lng: 78.5685 },
+  junagadh: { lat: 21.5222, lng: 70.4579 },
+  kanpur: { lat: 26.4499, lng: 80.3319 },
+  kolkata: { lat: 22.5726, lng: 88.3639 },
+  lucknow: { lat: 26.8467, lng: 80.9462 },
+  mumbai: { lat: 19.076, lng: 72.8777 },
+  noida: { lat: 28.5355, lng: 77.391 },
+  pune: { lat: 18.5204, lng: 73.8567 },
+  rajkot: { lat: 22.3039, lng: 70.8022 },
+  'ranga reddy': { lat: 17.3891, lng: 78.4799 },
+  surat: { lat: 21.1702, lng: 72.8311 },
+  vadodara: { lat: 22.3072, lng: 73.1812 },
+  chandigarh: { lat: 30.7333, lng: 76.7794 },
+  gujarat: { lat: 22.2587, lng: 71.1924 },
+  maharashtra: { lat: 19.7515, lng: 75.7139 },
+  telangana: { lat: 18.1124, lng: 79.0193 },
+  'uttar pradesh': { lat: 26.8467, lng: 80.9462 },
+  'west bengal': { lat: 22.9868, lng: 87.855 },
+  rajasthan: { lat: 27.0238, lng: 74.2179 },
+  punjab: { lat: 31.1471, lng: 75.3412 },
+  'madhya pradesh': { lat: 22.9734, lng: 78.6569 },
+};
+
+const getApproxCoordsForLocation = (location = '') => {
+  const parts = String(location || '')
+    .split(',')
+    .map((part) => normalizeLocationKey(part))
+    .filter(Boolean);
+
+  for (const part of parts) {
+    if (INDIAN_LOCATION_COORDS[part]) return INDIAN_LOCATION_COORDS[part];
+  }
+
+  return INDIAN_LOCATION_COORDS[normalizeLocationKey(location)] || null;
+};
+
+const distanceKmBetween = (a, b) => {
+  if (!a || !b) return null;
+  const toRad = (value) => (Number(value) * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return earthRadiusKm * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const formatDistanceKm = (distance) => {
+  if (!Number.isFinite(distance)) return '';
+  if (distance < 10) return `${distance.toFixed(1)} km`;
+  return `${Math.round(distance)} km`;
+};
+
 // ==================== PRODUCTS YOU BUY PAGE ====================
 export const ProductsPage = () => {
+  const PRODUCTS_PER_PAGE = 24;
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All Categories');
+  const [selectedHeadCategory, setSelectedHeadCategory] = useState('All Categories');
+  const [selectedSubCategory, setSelectedSubCategory] = useState('All Subcategories');
   const [selectedLocation, setSelectedLocation] = useState('All Locations');
+  const [selectedAvailability, setSelectedAvailability] = useState('all');
+  const [locationMode, setLocationMode] = useState('all');
+  const [userCoords, setUserCoords] = useState(null);
+  const [geoStatus, setGeoStatus] = useState('idle');
+  const [openFilter, setOpenFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -1048,13 +1246,49 @@ export const ProductsPage = () => {
     return `${num}${unit ? ` ${unit}` : ''}`;
   };
 
-  const pickCategory = (product) => {
-    const direct = String(product?.category || product?.category_other || '').trim();
-    if (direct) return direct;
-    const path = String(product?.category_path || '').trim();
-    if (!path) return 'General';
-    const parts = path.split('>').map((p) => p.trim()).filter(Boolean);
-    return parts.length ? parts[parts.length - 1] : path;
+  const pickText = (...values) =>
+    values.map((value) => String(value || '').trim()).find(Boolean) || '';
+
+  const buildCategoryTrail = (product) => {
+    const pathParts = String(product?.category_path || '')
+      .split('>')
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const micro = product?.micro_categories || {};
+    const sub = micro?.sub_categories || product?.sub_categories || {};
+    const head = sub?.head_categories || product?.head_categories || {};
+    const direct = pickText(product?.category, product?.category_other);
+
+    const fallbackHead = pickText(pathParts.length >= 2 ? pathParts[0] : '', direct, pathParts[0], 'General');
+    const fallbackSub = pickText(
+      pathParts.length >= 2 ? pathParts[1] : '',
+      direct,
+      pathParts[0],
+      fallbackHead,
+      'General'
+    );
+    const fallbackMicro = pickText(
+      pathParts.length >= 3 ? pathParts[pathParts.length - 1] : '',
+      direct,
+      pathParts[pathParts.length - 1],
+      fallbackSub,
+      'General'
+    );
+
+    const headCategory = pickText(product?.head_category_name, head?.name, fallbackHead);
+    const subCategory = pickText(product?.sub_category_name, sub?.name, fallbackSub);
+    const microCategory = pickText(product?.micro_category_name, micro?.name, fallbackMicro);
+    const categoryTrail = [headCategory, subCategory, microCategory].filter((value, index, list) => {
+      const normalized = value.toLowerCase();
+      return normalized && list.findIndex((item) => item.toLowerCase() === normalized) === index;
+    });
+
+    return {
+      headCategory: headCategory || 'General',
+      subCategory: subCategory || headCategory || 'General',
+      microCategory: microCategory || subCategory || headCategory || 'General',
+      categoryTrail,
+    };
   };
 
   const normalizeDedupText = (value) =>
@@ -1084,6 +1318,8 @@ export const ProductsPage = () => {
     if (product?.verified) score += 8;
     if (product?.image) score += 4;
     if (product?.slug) score += 2;
+    if (product?.priceValue > 0) score += 1.5;
+    if (product?.supplier) score += 1;
     score += Math.min(Number(product?.reviews) || 0, 50);
     score += Math.min(String(product?.description || '').trim().length, 120) / 100;
     return score;
@@ -1095,6 +1331,35 @@ export const ProductsPage = () => {
   const getSupplierPath = (product) =>
     getVendorProfilePath({ slug: product?.vendorSlug, id: product?.vendorId }) || '/contact';
 
+  const requestUserLocation = () => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setGeoStatus('unavailable');
+      return;
+    }
+
+    setGeoStatus('loading');
+    navigator.geolocation.getCurrentPosition(
+      ({ coords }) => {
+        setUserCoords({ lat: coords.latitude, lng: coords.longitude });
+        setGeoStatus('ready');
+        setLocationMode('nearby');
+      },
+      () => {
+        setGeoStatus('blocked');
+        setLocationMode('all');
+      },
+      {
+        enableHighAccuracy: false,
+        maximumAge: 10 * 60 * 1000,
+        timeout: 8000,
+      }
+    );
+  };
+
+  useEffect(() => {
+    requestUserLocation();
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const load = async () => {
@@ -1105,21 +1370,29 @@ export const ProductsPage = () => {
         const list = (Array.isArray(data) ? data : []).map((p) => {
           const vendor = p?.vendors || {};
           const location = [vendor?.city || p?.city, vendor?.state || p?.state].filter(Boolean).join(', ');
+          const safeLocation = location || 'India';
           const rating = Number(vendor?.seller_rating);
           const views = Number(p?.views);
+          const trail = buildCategoryTrail(p);
 
           return {
             id: p?.id,
             slug: p?.slug || '',
             name: p?.name || 'Unnamed Product',
-            category: pickCategory(p),
+            category: trail.microCategory,
+            headCategory: trail.headCategory,
+            subCategory: trail.subCategory,
+            microCategory: trail.microCategory,
+            categoryTrail: trail.categoryTrail,
             description: p?.description || '',
             price: formatPrice(p?.price, p?.price_unit),
+            priceValue: Number(p?.price) || 0,
             minOrder: formatMinOrder(p?.min_order_qty ?? p?.moq, p?.qty_unit),
             supplier: vendor?.company_name || '',
             vendorId: vendor?.id || '',
             vendorSlug: vendor?.slug || '',
-            location: location || 'India',
+            location: safeLocation,
+            locationCoords: getApproxCoordsForLocation(safeLocation),
             rating: Number.isFinite(rating) ? rating : 0,
             reviews: Number.isFinite(views) ? views : 0,
             verified: !!(
@@ -1128,7 +1401,7 @@ export const ProductsPage = () => {
               String(vendor?.kyc_status || '').toUpperCase() === 'APPROVED'
             ),
             features: normalizeFeatures(p?.specifications),
-            inStock: typeof p?.stock === 'number' ? p.stock > 0 : true,
+            inStock: true,
             image: pickFirstImageUrl(p?.images),
             createdAt: p?.created_at || '',
           };
@@ -1163,29 +1436,156 @@ export const ProductsPage = () => {
     };
   }, []);
 
-  const categories = useMemo(() => {
-    const set = new Set();
-    (products || []).forEach((p) => {
-      const value = String(p?.category || '').trim();
-      if (value) set.add(value);
+  useEffect(() => {
+    if (!openFilter) return undefined;
+
+    const closeOnOutsideInteraction = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('[data-filter-select-root]')) return;
+      setOpenFilter('');
+    };
+
+    const closeOnEscape = (event) => {
+      if (event.key === 'Escape') setOpenFilter('');
+    };
+
+    document.addEventListener('pointerdown', closeOnOutsideInteraction);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideInteraction);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [openFilter]);
+
+  const headCategoryCounts = useMemo(() => {
+    const counts = new Map();
+    (products || []).forEach((product) => {
+      const value = String(product?.headCategory || 'General').trim();
+      if (value) counts.set(value, (counts.get(value) || 0) + 1);
     });
-    return ['All Categories', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
+    return counts;
   }, [products]);
 
-  const locations = useMemo(() => {
-    const set = new Set();
-    (products || []).forEach((p) => {
-      const value = String(p?.location || '').trim();
-      if (value) set.add(value);
+  const subCategoryCounts = useMemo(() => {
+    const counts = new Map();
+    (products || []).forEach((product) => {
+      if (selectedHeadCategory !== 'All Categories' && product.headCategory !== selectedHeadCategory) return;
+      const value = String(product?.subCategory || 'General').trim();
+      if (value) counts.set(value, (counts.get(value) || 0) + 1);
     });
-    return ['All Locations', ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [products]);
+    return counts;
+  }, [products, selectedHeadCategory]);
+
+  const locationCounts = useMemo(() => {
+    const counts = new Map();
+    (products || []).forEach((p) => {
+      if (selectedHeadCategory !== 'All Categories' && p.headCategory !== selectedHeadCategory) return;
+      if (selectedSubCategory !== 'All Subcategories' && p.subCategory !== selectedSubCategory) return;
+      const value = String(p?.location || '').trim();
+      if (value) counts.set(value, (counts.get(value) || 0) + 1);
+    });
+    return counts;
+  }, [products, selectedHeadCategory, selectedSubCategory]);
+
+  const headCategories = useMemo(
+    () => ['All Categories', ...Array.from(headCategoryCounts.keys()).sort((a, b) => a.localeCompare(b))],
+    [headCategoryCounts]
+  );
+
+  const subCategories = useMemo(() => {
+    return ['All Subcategories', ...Array.from(subCategoryCounts.keys()).sort((a, b) => a.localeCompare(b))];
+  }, [subCategoryCounts]);
+
+  const locations = useMemo(
+    () => ['All Locations', ...Array.from(locationCounts.keys()).sort((a, b) => a.localeCompare(b))],
+    [locationCounts]
+  );
+
+  const headCategoryOptions = useMemo(
+    () => headCategories.map((cat) => ({
+      value: cat,
+      label: cat === 'All Categories' ? cat : `${cat} (${headCategoryCounts.get(cat) || 0})`,
+    })),
+    [headCategories, headCategoryCounts]
+  );
+
+  const subCategoryOptions = useMemo(
+    () => subCategories.map((cat) => ({
+      value: cat,
+      label: cat === 'All Subcategories' ? cat : `${cat} (${subCategoryCounts.get(cat) || 0})`,
+    })),
+    [subCategories, subCategoryCounts]
+  );
+
+  const locationOptions = useMemo(
+    () => locations.map((loc) => ({
+      value: loc,
+      label: loc === 'All Locations' ? loc : `${loc} (${locationCounts.get(loc) || 0})`,
+    })),
+    [locations, locationCounts]
+  );
+
+  const availabilityCounts = useMemo(() => {
+    const counts = { all: 0, in_stock: 0 };
+
+    (products || []).forEach((product) => {
+      if (selectedHeadCategory !== 'All Categories' && product.headCategory !== selectedHeadCategory) return;
+      if (selectedSubCategory !== 'All Subcategories' && product.subCategory !== selectedSubCategory) return;
+      if (selectedLocation !== 'All Locations' && product.location !== selectedLocation) return;
+
+      counts.all += 1;
+      if (product.inStock) counts.in_stock += 1;
+    });
+
+    return counts;
+  }, [products, selectedHeadCategory, selectedSubCategory, selectedLocation]);
+
+  const availabilityOptions = useMemo(
+    () => [
+      { value: 'all', label: `All products (${availabilityCounts.all})` },
+      { value: 'in_stock', label: `Available now (${availabilityCounts.in_stock})` },
+    ],
+    [availabilityCounts]
+  );
+
+  const getProductDistanceKm = (product) => {
+    if (!userCoords) return null;
+    return distanceKmBetween(userCoords, product?.locationCoords || getApproxCoordsForLocation(product?.location));
+  };
+
+  const recommendedLocations = useMemo(() => {
+    const rows = Array.from(locationCounts.entries()).map(([name, count]) => {
+      const coords = getApproxCoordsForLocation(name);
+      return {
+        name,
+        count,
+        distanceKm: userCoords && coords ? distanceKmBetween(userCoords, coords) : null,
+      };
+    });
+
+    return rows
+      .sort((a, b) => {
+        const aHasDistance = Number.isFinite(a.distanceKm);
+        const bHasDistance = Number.isFinite(b.distanceKm);
+        if (aHasDistance && bHasDistance) return a.distanceKm - b.distanceKm || b.count - a.count;
+        if (aHasDistance) return -1;
+        if (bHasDistance) return 1;
+        return b.count - a.count || a.name.localeCompare(b.name);
+      })
+      .slice(0, 7);
+  }, [locationCounts, userCoords]);
 
   useEffect(() => {
-    if (selectedCategory !== 'All Categories' && !categories.includes(selectedCategory)) {
-      setSelectedCategory('All Categories');
+    if (selectedHeadCategory !== 'All Categories' && !headCategories.includes(selectedHeadCategory)) {
+      setSelectedHeadCategory('All Categories');
     }
-  }, [categories, selectedCategory]);
+  }, [headCategories, selectedHeadCategory]);
+
+  useEffect(() => {
+    if (selectedSubCategory !== 'All Subcategories' && !subCategories.includes(selectedSubCategory)) {
+      setSelectedSubCategory('All Subcategories');
+    }
+  }, [selectedSubCategory, subCategories]);
 
   useEffect(() => {
     if (selectedLocation !== 'All Locations' && !locations.includes(selectedLocation)) {
@@ -1201,6 +1601,10 @@ export const ProductsPage = () => {
           product.name,
           product.description,
           product.category,
+          product.headCategory,
+          product.subCategory,
+          product.microCategory,
+          ...(product.categoryTrail || []),
           product.location,
           product.supplier,
         ]
@@ -1208,217 +1612,543 @@ export const ProductsPage = () => {
           .toLowerCase();
         if (!hay.includes(query)) return false;
       }
-      if (selectedCategory !== 'All Categories' && product.category !== selectedCategory) return false;
+      if (selectedHeadCategory !== 'All Categories' && product.headCategory !== selectedHeadCategory) return false;
+      if (selectedSubCategory !== 'All Subcategories' && product.subCategory !== selectedSubCategory) return false;
       if (selectedLocation !== 'All Locations' && product.location !== selectedLocation) return false;
+      if (selectedAvailability === 'in_stock' && !product.inStock) return false;
       return true;
     });
-  }, [products, searchTerm, selectedCategory, selectedLocation]);
+  }, [products, searchTerm, selectedHeadCategory, selectedSubCategory, selectedLocation, selectedAvailability]);
+
+  const visibleProducts = useMemo(() => {
+    const list = [...filteredProducts];
+    return list.sort((a, b) => {
+      if (locationMode === 'nearby' && userCoords && selectedLocation === 'All Locations') {
+        const aDistance = distanceKmBetween(userCoords, a.locationCoords);
+        const bDistance = distanceKmBetween(userCoords, b.locationCoords);
+        const aHasDistance = Number.isFinite(aDistance);
+        const bHasDistance = Number.isFinite(bDistance);
+
+        if (aHasDistance && bHasDistance) {
+          const distanceDelta = aDistance - bDistance;
+          if (Math.abs(distanceDelta) > 25) return distanceDelta;
+        } else if (aHasDistance) {
+          return -1;
+        } else if (bHasDistance) {
+          return 1;
+        }
+      }
+
+      return scoreProductForListing(b) - scoreProductForListing(a);
+    });
+  }, [filteredProducts, locationMode, selectedLocation, userCoords]);
+
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(visibleProducts.length / PRODUCTS_PER_PAGE)),
+    [visibleProducts.length]
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedHeadCategory, selectedSubCategory, selectedLocation, selectedAvailability, locationMode]);
+
+  useEffect(() => {
+    setCurrentPage((page) => Math.min(Math.max(page, 1), totalPages));
+  }, [totalPages]);
+
+  const paginatedProducts = useMemo(() => {
+    const start = (currentPage - 1) * PRODUCTS_PER_PAGE;
+    return visibleProducts.slice(start, start + PRODUCTS_PER_PAGE);
+  }, [currentPage, visibleProducts]);
+
+  const paginationPages = useMemo(() => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1);
+    }
+
+    const pages = [1];
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+
+    if (start > 2) pages.push('start-ellipsis');
+    for (let page = start; page <= end; page += 1) {
+      pages.push(page);
+    }
+    if (end < totalPages - 1) pages.push('end-ellipsis');
+    pages.push(totalPages);
+
+    return pages;
+  }, [currentPage, totalPages]);
+
+  const defaultLocationMode = geoStatus === 'ready' ? 'nearby' : 'all';
+
+  const hasActiveFilters =
+    !!searchTerm.trim() ||
+    selectedHeadCategory !== 'All Categories' ||
+    selectedSubCategory !== 'All Subcategories' ||
+    selectedLocation !== 'All Locations' ||
+    selectedAvailability !== 'all' ||
+    locationMode !== defaultLocationMode;
+
+  const resetFilters = () => {
+    setSearchTerm('');
+    setSelectedHeadCategory('All Categories');
+    setSelectedSubCategory('All Subcategories');
+    setSelectedLocation('All Locations');
+    setSelectedAvailability('all');
+    setLocationMode(defaultLocationMode);
+    setCurrentPage(1);
+    setOpenFilter('');
+  };
+
+  const goToPage = (page) => {
+    const nextPage = Math.min(Math.max(page, 1), totalPages);
+    setCurrentPage(nextPage);
+
+    window.requestAnimationFrame(() => {
+      document.getElementById('products-results')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  };
+
+  const renderPaginationControls = () => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <nav
+        aria-label="Products pagination"
+        className="mt-8 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <p className="text-sm font-semibold text-slate-500">
+          Page {currentPage} of {totalPages}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+          >
+            <ChevronLeft size={16} />
+            Prev
+          </button>
+
+          {paginationPages.map((page) => {
+            if (typeof page !== 'number') {
+              return (
+                <span key={page} className="inline-flex h-9 min-w-9 items-center justify-center px-1 text-sm font-bold text-slate-400">
+                  ...
+                </span>
+              );
+            }
+
+            const isCurrent = page === currentPage;
+            return (
+              <button
+                key={page}
+                type="button"
+                onClick={() => goToPage(page)}
+                aria-current={isCurrent ? 'page' : undefined}
+                className={`inline-flex h-9 min-w-9 items-center justify-center rounded-lg border px-3 text-sm font-bold transition ${
+                  isCurrent
+                    ? 'border-[#003D82] bg-[#003D82] text-white'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-blue-50'
+                }`}
+              >
+                {page}
+              </button>
+            );
+          })}
+
+          <button
+            type="button"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-white"
+          >
+            Next
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </nav>
+    );
+  };
+
+  const renderProductCard = (product) => {
+    const productPath = getProductDetailPath(product);
+    const supplierPath = getSupplierPath(product);
+    const distanceText = formatDistanceKm(getProductDistanceKm(product));
+
+    return (
+      <article key={buildProductDedupKey(product)} className="group flex flex-col overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:border-[#00A699]/50 hover:shadow-[0_14px_32px_rgba(15,23,42,0.09)]">
+        <div className="relative border-b border-slate-100 p-1.5">
+          <Link
+            to={productPath}
+            className="flex aspect-[11/5] min-h-[92px] items-center justify-center overflow-hidden rounded-md bg-gradient-to-br from-[#003D82] via-sky-600 to-[#00A699]"
+            aria-label={`View ${product.name}`}
+          >
+            {product.image ? (
+              <img
+                src={product.image}
+                alt={product.name}
+                className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                loading="lazy"
+              />
+            ) : (
+              <div className="px-4 text-center text-white">
+                <ShoppingCart size={24} className="mx-auto mb-1.5" />
+                <div className="text-xs font-semibold">{product.microCategory || product.category}</div>
+              </div>
+            )}
+          </Link>
+          <div className="absolute right-3 top-3 flex gap-1">
+            <Link
+              to={supplierPath}
+              className="relative z-10 inline-flex rounded-full bg-white/95 p-1.5 shadow-md transition hover:bg-blue-50"
+              aria-label="Contact supplier"
+              title="Contact supplier"
+            >
+              <Mail size={13} className="text-[#003D82]" />
+            </Link>
+            <Link
+              to={productPath}
+              className="relative z-10 inline-flex rounded-full bg-white/95 p-1.5 shadow-md transition hover:bg-blue-50"
+              aria-label="View product"
+              title="View product"
+            >
+              <Eye size={13} className="text-[#003D82]" />
+            </Link>
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col p-3">
+          <div className="mb-1.5 flex items-start justify-between gap-2">
+            <span className="min-w-0 flex-1 truncate text-[11px] font-bold uppercase text-[#003D82]">
+              {product.microCategory || product.category}
+            </span>
+            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+              product.verified
+                ? 'border-emerald-100 bg-emerald-50 text-[#00796B]'
+                : 'border-blue-100 bg-blue-50 text-[#003D82]'
+            }`}>
+              {product.verified ? 'ITM Verified' : 'ITM Listed'}
+            </span>
+          </div>
+
+          <Link
+            to={productPath}
+            className="min-h-[38px] overflow-hidden text-sm font-extrabold leading-5 text-slate-950 transition hover:text-[#003D82]"
+            style={{
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 2,
+            }}
+          >
+            {product.name}
+          </Link>
+          <p
+            className="mt-1.5 h-[17px] overflow-hidden text-xs leading-[17px] text-slate-600"
+            style={{
+              display: '-webkit-box',
+              WebkitBoxOrient: 'vertical',
+              WebkitLineClamp: 1,
+            }}
+          >
+            {product.description || 'Share your requirement to get supplier quotations and product details.'}
+          </p>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-slate-600">
+            {product.rating > 0 && (
+              <div className="flex items-center">
+                <Star className="mr-1 text-yellow-500" size={13} />
+                <span className="font-semibold text-slate-800">{product.rating.toFixed(1)}</span>
+                {product.reviews > 0 && (
+                  <span className="ml-1 text-slate-500">({product.reviews})</span>
+                )}
+              </div>
+            )}
+
+            <div className="flex min-w-0 items-center">
+              <MapPin className="mr-1 shrink-0 text-[#00796B]" size={13} />
+              <span className="truncate">{product.location}</span>
+            </div>
+            {distanceText && (
+              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-[#00796B]">
+                {distanceText}
+              </span>
+            )}
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+            <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
+              <span className="block text-[10px] font-bold uppercase text-slate-400">Price</span>
+              <span className="mt-0.5 block truncate font-extrabold text-[#00796B]">{product.price}</span>
+            </div>
+            <div className="rounded-md border border-slate-100 bg-slate-50 px-2 py-1.5">
+              <span className="block text-[10px] font-bold uppercase text-slate-400">MOQ</span>
+              <span className="mt-0.5 block truncate font-bold text-slate-800">{product.minOrder}</span>
+            </div>
+          </div>
+
+          <div className="mt-auto flex gap-2 pt-3">
+            <Link
+              to={productPath}
+              className="relative z-10 inline-flex flex-1 items-center justify-center gap-1.5 rounded-md bg-[#003D82] px-2.5 py-2 text-center text-xs font-bold text-white transition-colors hover:bg-[#002B5C]"
+            >
+              <Eye size={13} />
+              Details
+            </Link>
+            <Link
+              to={supplierPath}
+              className="relative z-10 inline-flex items-center justify-center gap-1.5 rounded-md border border-[#00A699]/25 px-2.5 py-2 text-xs font-bold text-[#00796B] transition hover:bg-emerald-50"
+            >
+              <Mail size={13} />
+              Quote
+            </Link>
+          </div>
+        </div>
+      </article>
+    );
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 text-white py-16">
-        <div className="container mx-auto px-4">
-          <h1 className="text-4xl font-bold mb-3">Products You Buy</h1>
-          <p className="text-xl text-blue-100">Discover quality products from verified suppliers across India for your business needs</p>
-        </div>
-      </div>
+    <div className="min-h-screen bg-slate-50">
+      <Helmet>
+        <title>Products Marketplace | Source B2B Products from Verified Suppliers in India</title>
+        <meta
+          name="description"
+          content="Browse IndianTradeMart products from verified manufacturers, suppliers, exporters and service providers. Filter by category and location, compare prices, and send enquiries to trusted sellers."
+        />
+        <meta
+          name="keywords"
+          content="B2B products India, verified suppliers India, manufacturers marketplace, wholesale products, industrial products, supplier directory, product sourcing India, IndianTradeMart products"
+        />
+        <link rel="canonical" href="https://indiantrademart.com/products" />
+      </Helmet>
 
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="mx-auto max-w-7xl px-4 py-6 md:py-8">
         {loadError && (
           <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {loadError}
           </div>
         )}
 
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
-          <div className="flex flex-col lg:flex-row gap-4">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-3 text-gray-400" size={20} />
-              <input
-                type="text"
-                placeholder="Search products, suppliers, categories..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+        <div className="grid gap-5 lg:grid-cols-[210px_minmax(0,1fr)] xl:grid-cols-[210px_minmax(0,1fr)_240px]">
+          <aside className="self-start rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm lg:sticky lg:top-24">
+            <div className="mb-3 flex items-center justify-between gap-2.5">
+              <div>
+                <h2 className="text-sm font-extrabold text-slate-950">Filters</h2>
+                <p className="mt-0.5 text-[11px] text-slate-500">Browse faster.</p>
+              </div>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="rounded-lg border border-slate-200 px-2.5 py-1 text-[11px] font-bold text-[#003D82] transition hover:bg-blue-50"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-bold uppercase text-slate-500">Search</span>
+                <span className="relative block">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    type="text"
+                    placeholder="Product, supplier, category"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    disabled={loading}
+                    className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-9 pr-3 text-[13px] font-medium text-slate-900 outline-none transition focus:border-[#003D82]/40 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                  />
+                </span>
+              </label>
+
+              <FilterSelect
+                id="category"
+                label="Category"
+                value={selectedHeadCategory}
+                options={headCategoryOptions}
                 disabled={loading}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                openKey={openFilter}
+                setOpenKey={setOpenFilter}
+                onChange={(nextValue) => {
+                  setSelectedHeadCategory(nextValue);
+                  setSelectedSubCategory('All Subcategories');
+                }}
+              />
+
+              <FilterSelect
+                id="subcategory"
+                label="Subcategory"
+                value={selectedSubCategory}
+                options={subCategoryOptions}
+                disabled={loading}
+                openKey={openFilter}
+                setOpenKey={setOpenFilter}
+                onChange={setSelectedSubCategory}
+              />
+
+              <FilterSelect
+                id="location"
+                label="Location"
+                value={selectedLocation}
+                options={locationOptions}
+                disabled={loading}
+                openKey={openFilter}
+                setOpenKey={setOpenFilter}
+                onChange={setSelectedLocation}
+              />
+
+              <FilterSelect
+                id="availability"
+                label="Availability"
+                value={selectedAvailability}
+                options={availabilityOptions}
+                disabled={loading}
+                openKey={openFilter}
+                setOpenKey={setOpenFilter}
+                onChange={setSelectedAvailability}
               />
             </div>
-            <select 
-              value={selectedCategory}
-              onChange={(e) => setSelectedCategory(e.target.value)}
-              disabled={loading}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {categories.map((cat) => (
-                <option key={cat} value={cat}>{cat}</option>
-              ))}
-            </select>
-            <select 
-              value={selectedLocation}
-              onChange={(e) => setSelectedLocation(e.target.value)}
-              disabled={loading}
-              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              {locations.map((loc) => (
-                <option key={loc} value={loc}>{loc}</option>
-              ))}
-            </select>
-          </div>
-        </div>
 
-        <div className="flex justify-between items-center mb-6">
-          <div className="text-sm text-gray-600">
-            {loading ? 'Loading products...' : `Showing ${filteredProducts.length} of ${products.length} products`}
-          </div>
-        </div>
+          </aside>
 
-        {loading ? (
-          <div className="flex items-center justify-center py-16 text-gray-600">
-            <Loader className="w-5 h-5 animate-spin mr-2" />
-            Loading products...
-          </div>
-        ) : (
-          <>
-            <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-6">
-              {filteredProducts.map((product) => {
-                const productPath = getProductDetailPath(product);
-                const supplierPath = getSupplierPath(product);
+          <section id="products-results" className="min-w-0 scroll-mt-24">
+            {loading ? (
+              <div className="flex items-center justify-center rounded-lg border border-slate-200 bg-white py-16 text-gray-600">
+                <Loader className="mr-2 h-5 w-5 animate-spin" />
+                Loading products...
+              </div>
+            ) : visibleProducts.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white py-12 text-center">
+                <p className="text-lg font-semibold text-slate-800">No products found matching your criteria.</p>
+                <p className="mt-2 text-sm text-slate-500">Try a broader product keyword, category, or location.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid items-start gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {paginatedProducts.map(renderProductCard)}
+                </div>
+                {renderPaginationControls()}
+              </>
+            )}
+          </section>
 
-                return (
-                <div key={buildProductDedupKey(product)} className="bg-white rounded-lg shadow-sm overflow-hidden hover:shadow-md transition-shadow">
-                  <div className="relative">
-                    <Link
-                      to={productPath}
-                      className="block h-48 bg-gradient-to-br from-blue-500 to-purple-600 overflow-hidden"
-                      aria-label={`View ${product.name}`}
-                    >
-                      {product.image ? (
-                        <img
-                          src={product.image}
-                          alt={product.name}
-                          className="w-full h-full object-cover"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="text-white text-center">
-                          <ShoppingCart size={32} className="mx-auto mb-2" />
-                          <div className="text-sm font-medium">{product.category}</div>
-                        </div>
-                      )}
-                    </Link>
-                    <div className="absolute top-2 right-2 flex gap-1">
-                      <Link
-                        to={supplierPath}
-                        className="relative z-10 inline-flex p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
-                        aria-label="Contact supplier"
-                        title="Contact supplier"
-                      >
-                        <Mail size={16} className="text-gray-600" />
-                      </Link>
-                      <Link
-                        to={productPath}
-                        className="relative z-10 inline-flex p-1 bg-white rounded-full shadow-md hover:bg-gray-50"
-                        aria-label="View product"
-                        title="View product"
-                      >
-                        <Eye size={16} className="text-gray-600" />
-                      </Link>
-                    </div>
-                    {!product.inStock && (
-                      <div className="absolute top-2 left-2 bg-red-500 text-white px-2 py-1 rounded text-xs">
-                        Out of Stock
-                      </div>
-                    )}
-                  </div>
+          {!loading && (
+            <aside className="self-start rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm lg:col-start-2 xl:col-start-auto xl:sticky xl:top-24">
+              <div className="mb-3">
+                <p className="text-[11px] font-bold uppercase text-[#00796B]">Location filter</p>
+                <h2 className="mt-0.5 text-sm font-extrabold text-slate-950">Recommended near you</h2>
+              </div>
 
-                  <div className="p-4">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-blue-600">{product.category}</span>
-                      {product.verified && (
-                        <span className="bg-green-100 text-green-800 text-xs px-2 py-1 rounded-full">
-                          Verified
-                        </span>
-                      )}
-                    </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocationMode('nearby');
+                    setSelectedLocation('All Locations');
+                    if (!userCoords) requestUserLocation();
+                  }}
+                  className={`min-h-10 rounded-lg border px-2.5 py-2 text-[11px] font-extrabold transition ${
+                    locationMode === 'nearby' && selectedLocation === 'All Locations'
+                      ? 'border-[#003D82] bg-[#003D82] text-white'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-blue-50'
+                  }`}
+                >
+                  Nearby first
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLocationMode('all');
+                    setSelectedLocation('All Locations');
+                  }}
+                  className={`min-h-10 rounded-lg border px-2.5 py-2 text-[11px] font-extrabold transition ${
+                    locationMode === 'all' && selectedLocation === 'All Locations'
+                      ? 'border-[#003D82] bg-[#003D82] text-white'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-blue-50'
+                  }`}
+                >
+                  All India
+                </button>
+              </div>
 
-                    <Link to={productPath} className="block text-lg font-semibold text-gray-900 mb-2 hover:text-blue-700">
-                      {product.name}
-                    </Link>
-                    <p className="text-gray-600 text-sm mb-3">{product.description}</p>
+              <button
+                type="button"
+                onClick={requestUserLocation}
+                disabled={geoStatus === 'loading'}
+                className="mt-2.5 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-[#00A699]/25 bg-emerald-50 px-3 py-2 text-[11px] font-extrabold text-[#00796B] transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {geoStatus === 'loading' ? <Loader className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}
+                {geoStatus === 'ready' ? 'Update my location' : 'Use my location'}
+              </button>
 
-                    {product.rating > 0 ? (
-                      <div className="flex items-center mb-3">
-                        <Star className="text-yellow-500 mr-1" size={14} />
-                        <span className="text-sm font-medium">{product.rating.toFixed(1)}</span>
-                        {product.reviews > 0 && (
-                          <span className="text-gray-500 text-sm ml-1">({product.reviews})</span>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-gray-500 mb-3">No ratings yet</div>
-                    )}
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                {geoStatus === 'ready'
+                  ? 'Nearest suppliers are prioritized first.'
+                  : geoStatus === 'blocked'
+                    ? 'Location access is off. All India results are shown.'
+                    : 'Choose nearby or browse all India locations.'}
+              </p>
 
-                    <div className="flex items-center text-sm text-gray-600 mb-3">
-                      <MapPin className="mr-1" size={14} />
-                      <span>{product.location}</span>
-                    </div>
+              <div className="mt-3 border-t border-slate-100 pt-2.5">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-bold uppercase text-slate-500">Recommended locations</p>
+                  <span className="text-[11px] font-bold text-slate-400">{recommendedLocations.length}</span>
+                </div>
 
-                    <div className="space-y-2 mb-4">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Price:</span>
-                        <span className="font-semibold text-green-600">{product.price}</span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Min Order:</span>
-                        <span className="font-medium">{product.minOrder}</span>
-                      </div>
-                    </div>
-
-                    {product.features.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mb-4">
-                        {product.features.slice(0, 2).map((feature, index) => (
-                          <span key={index} className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">
-                            {feature}
-                          </span>
-                        ))}
-                        {product.features.length > 2 && (
-                          <span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">
-                            +{product.features.length - 2} more
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex gap-2">
-                      <Link
-                        to={productPath}
-                        className={`relative z-10 inline-flex flex-1 items-center justify-center py-2 px-3 rounded-lg text-sm font-medium text-center transition-colors ${
-                          product.inStock
-                            ? 'bg-blue-600 text-white hover:bg-blue-700'
-                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                <div className="max-h-[280px] space-y-1 overflow-y-auto pr-1">
+                  {recommendedLocations.map((item) => {
+                    const selected = selectedLocation === item.name;
+                    const distanceLabel = formatDistanceKm(item.distanceKm);
+                    return (
+                      <button
+                        key={item.name}
+                        type="button"
+                        onClick={() => {
+                          setSelectedLocation(selected ? 'All Locations' : item.name);
+                          setLocationMode(selected ? (userCoords ? 'nearby' : 'all') : 'all');
+                        }}
+                        className={`flex w-full items-center justify-between gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] font-bold transition ${
+                          selected
+                            ? 'bg-[#003D82] text-white'
+                            : 'text-slate-700 hover:bg-slate-50'
                         }`}
                       >
-                        {product.inStock ? 'View Details' : 'View Product'}
-                      </Link>
-                      <Link
-                        to={supplierPath}
-                        className="relative z-10 inline-flex items-center justify-center px-3 py-2 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-50"
-                      >
-                        Get Quote
-                      </Link>
-                    </div>
-                  </div>
+                        <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] ${
+                          selected ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}>
+                          {distanceLabel || item.count}
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
-              )})}
-            </div>
-
-            {filteredProducts.length === 0 && (
-              <div className="text-center py-12">
-                <p className="text-gray-600 text-lg">No products found matching your criteria.</p>
               </div>
-            )}
-          </>
-        )}
+
+              {selectedLocation !== 'All Locations' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedLocation('All Locations');
+                    setLocationMode('all');
+                  }}
+                  className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-[11px] font-extrabold text-[#003D82] transition hover:bg-blue-50"
+                >
+                  Show distant locations
+                </button>
+              )}
+            </aside>
+          )}
+        </div>
+
       </main>
     </div>
   );

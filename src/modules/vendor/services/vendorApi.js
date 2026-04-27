@@ -1257,6 +1257,7 @@ export const vendorApi = {
       const normalizedUploadPurpose = String(options?.uploadPurpose || '').trim().toUpperCase();
       const isProductImage = normalizedBucket === 'product-images';
       const isKycDocument = normalizedUploadPurpose === 'KYC_DOCUMENT';
+      const isImageFile = String(file?.type || '').trim().toLowerCase().startsWith('image/');
 
       if (isKycDocument) {
         validateImageFile(file, {
@@ -1270,12 +1271,14 @@ export const vendorApi = {
           maxBytes: PRODUCT_MAX_BYTES,
           label: 'Product image',
         });
-      } else {
+      } else if (isImageFile) {
         validateImageFile(file, {
           minBytes: MIN_IMAGE_UPLOAD_BYTES,
           maxBytes: DEFAULT_MAX_BYTES,
           label: 'Image',
         });
+      } else if (Number(file.size || 0) > DEFAULT_MAX_BYTES) {
+        throw new Error('File too large (max 10MB)');
       }
 
       const hasCsrfCookie = () =>
@@ -1838,8 +1841,7 @@ export const vendorApi = {
         }
       }
 
-      const { error } = await supabase.from('vendor_contact_persons').delete().eq('id', id);
-      if (error) throw error;
+      await fetchVendorJson(`/api/vendors/me/contact-persons/${id}`, { method: 'DELETE' });
     }
   },
 
@@ -1874,8 +1876,7 @@ export const vendorApi = {
     },
 
     delete: async (id) => {
-      const { error } = await supabase.from('vendor_messages').delete().eq('id', id);
-      if (error) throw error;
+      await fetchVendorJson(`/api/vendors/me/messages/${id}`, { method: 'DELETE' });
     }
   },
 
@@ -1977,35 +1978,20 @@ export const vendorApi = {
     },
 
     updateStatus: async (id, status) => {
-      const validStatuses = ['ACTIVE', 'DRAFT', 'ARCHIVED'];
-      if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-
-      const { data, error } = await supabase
-        .from('products')
-        .update({ status, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const data = await fetchVendorJson(`/api/vendors/me/products/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      return data?.product;
     },
 
     delete: async (id) => {
-      const { error } = await supabase.from('products').delete().eq('id', id);
-      if (error) throw error;
+      await fetchVendorJson(`/api/vendors/me/products/${id}`, { method: 'DELETE' });
     },
 
     addImage: async (productId, file) => {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `products/${productId}/${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, file, { upsert: false });
-
-      if (uploadError) throw new Error(`Failed to upload image: ${uploadError.message}`);
-
-      const { data: publicUrl } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      const uploadedUrl = await vendorApi.auth.uploadImage(file, 'product-images');
 
       const { data: product, error: getError } = await supabase
         .from('products')
@@ -2016,7 +2002,7 @@ export const vendorApi = {
       if (getError) throw getError;
 
       const currentImages = product?.images || [];
-      const newImages = [...currentImages, { url: publicUrl.publicUrl, uploaded_at: new Date().toISOString() }];
+      const newImages = [...currentImages, { url: uploadedUrl, uploaded_at: new Date().toISOString() }];
 
       const { data, error } = await supabase
         .from('products')
@@ -2496,81 +2482,41 @@ export const vendorApi = {
     }
   },
 
-  // --- DASHBOARD STATS ---
+  // --- DASHBOARD STATS --- (backend-first, Phase 2)
   dashboard: {
     getStats: async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not authenticated');
-
-      const { data: vendor, error: vendorError } = await supabase
-        .from('vendors')
-        .select('id, profile_completion, kyc_status, vendor_id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (vendorError || !vendor) {
-        console.error('Vendor not found:', vendorError);
+      try {
+        const data = await fetchVendorJson('/api/vendors/me/dashboard-stats');
+        return data?.stats || {
+          totalProducts: 0, totalLeads: 0, totalMessages: 0,
+          profileCompletion: 0, kycStatus: 'PENDING', trustScore: 0, rating: 0,
+        };
+      } catch {
         return {
-          totalProducts: 0,
-          totalLeads: 0,
-          totalMessages: 0,
-          profileCompletion: 0,
-          kycStatus: 'PENDING',
-          trustScore: 0,
-          rating: 0
+          totalProducts: 0, totalLeads: 0, totalMessages: 0,
+          profileCompletion: 0, kycStatus: 'PENDING', trustScore: 0, rating: 0,
         };
       }
-
-      const [products, leads, proposals, messages] = await Promise.all([
-        supabase.from('products').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).limit(1),
-        supabase.from('leads').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).eq('status', 'AVAILABLE').limit(1),
-        supabase.from('proposals').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).eq('status', 'SENT').limit(1),
-        supabase.from('vendor_messages').select('*', { count: 'exact' }).eq('vendor_id', vendor.id).limit(1)
-      ]);
-
-      return {
-        totalProducts: products.count || 0,
-        totalLeads: (leads.count || 0) + (proposals.count || 0),
-        totalMessages: messages.count || 0,
-        profileCompletion: vendor.profile_completion || 0,
-        kycStatus: vendor.kyc_status || 'PENDING',
-        trustScore: 0,
-        rating: 0,
-        vendorId: vendor.vendor_id
-      };
     }
   },
 
-  getRecentProducts: async (userId) => {
-    const { data: vendor, error: vErr } = await supabase.from('vendors').select('id').eq('user_id', userId).single();
-    if (vErr) throw vErr;
-    if (!vendor) return [];
-    const { data, error } = await supabase.from('products').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(5);
-    if (error) throw error;
-    return data || [];
+  getRecentProducts: async () => {
+    const data = await fetchVendorJson('/api/vendors/me/recent-products');
+    return data?.products || [];
   },
 
-  getRecentLeads: async (userId) => {
-    const { data: vendor, error: vErr } = await supabase.from('vendors').select('id').eq('user_id', userId).single();
-    if (vErr) throw vErr;
-    if (!vendor) return [];
-    const { data, error } = await supabase.from('leads').select('*').eq('vendor_id', vendor.id).order('created_at', { ascending: false }).limit(5);
-    if (error) throw error;
-    return data || [];
+  getRecentLeads: async () => {
+    const data = await fetchVendorJson('/api/vendors/me/recent-leads');
+    return data?.leads || [];
   },
 
-  getSupportStats: async (userId) => {
-    const { data: vendor, error: vErr } = await supabase.from('vendors').select('id').eq('user_id', userId).single();
-    if (vErr) throw vErr;
-    if (!vendor) return { total: 0, unresolved: 0 };
-
-    const { count, error: e1 } = await supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id);
-    if (e1) throw e1;
-
-    const { count: open, error: e2 } = await supabase.from('support_tickets').select('*', { count: 'exact', head: true }).eq('vendor_id', vendor.id).neq('status', 'CLOSED');
-    if (e2) throw e2;
-
-    return { total: count || 0, unresolved: open || 0 };
+  getSupportStats: async () => {
+    try {
+      const data = await fetchVendorJson('/api/vendors/me/support-stats');
+      return { total: data?.stats?.total || 0, unresolved: data?.stats?.open || 0 };
+    } catch {
+      return { total: 0, unresolved: 0 };
+    }
   },
 
   // --- BANKING API ---
@@ -3531,13 +3477,10 @@ export const vendorApi = {
 
     uploadDoc: async (type, file) => {
       const vendorId = await getVendorId();
-      const fileExt = file.name.split('.').pop();
-      const fileName = `vendor-kyc/${vendorId}/${type}_${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file, { upsert: true });
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
+      const publicUrl = await vendorApi.auth.uploadImage(file, 'avatars', {
+        uploadPurpose: 'KYC_DOCUMENT',
+        documentType: type,
+      });
 
       const { data, error: e1 } = await supabase.from('vendors').select('kyc_docs').eq('id', vendorId).single();
       if (e1) throw e1;

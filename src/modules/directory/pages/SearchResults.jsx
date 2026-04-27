@@ -833,13 +833,6 @@ const SearchResults = () => {
       out = out.filter((item) => !!item?.vendorVerified);
     }
 
-    if (filters.inStock) {
-      out = out.filter((item) => {
-        const stock = toFiniteNumber(item?.stock) ?? toFiniteNumber(item?.available_quantity);
-        return stock === null ? true : stock > 0;
-      });
-    }
-
     return out;
   }, [results, filters, priceBounds.min, priceBounds.max]);
 

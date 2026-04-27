@@ -250,6 +250,143 @@ const resolveBuyerIdForUser = async (reqUser = {}, candidateUserIds = []) => {
   return null;
 };
 
+// GET /api/notifications — alias for /list (default consumer path)
+router.get('/', requireAuth(), async (req, res) => {
+  try {
+    const requestedLimit = Number(req.query?.limit || 100);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(200, Math.floor(requestedLimit))
+      : 100;
+
+    const userIds = await resolveCurrentUserIds(req.user);
+    if (!userIds.length) return res.json({ success: true, notifications: [] });
+
+    let query = supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (userIds.length === 1) {
+      query = query.eq('user_id', userIds[0]);
+    } else {
+      query = query.in('user_id', userIds);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, notifications: data || [] });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to load notifications' });
+  }
+});
+
+// GET /api/notifications/unread-count
+router.get('/unread-count', requireAuth(), async (req, res) => {
+  try {
+    const userIds = await resolveCurrentUserIds(req.user);
+    if (!userIds.length) return res.json({ success: true, count: 0 });
+
+    let query = supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_read', false);
+
+    if (userIds.length === 1) {
+      query = query.eq('user_id', userIds[0]);
+    } else {
+      query = query.in('user_id', userIds);
+    }
+
+    const { count, error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true, count: count || 0 });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to get unread count' });
+  }
+});
+
+// POST /api/notifications/read-all — mark all as read
+router.post('/read-all', requireAuth(), async (req, res) => {
+  try {
+    const userIds = await resolveCurrentUserIds(req.user);
+    if (!userIds.length) return res.json({ success: true });
+
+    let query = supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('is_read', false);
+
+    if (userIds.length === 1) {
+      query = query.eq('user_id', userIds[0]);
+    } else {
+      query = query.in('user_id', userIds);
+    }
+
+    const { error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to mark all as read' });
+  }
+});
+
+// PATCH /api/notifications/:id/read — mark single notification as read
+router.patch('/:id/read', requireAuth(), async (req, res) => {
+  try {
+    const notifId = String(req.params?.id || '').trim();
+    if (!notifId) return res.status(400).json({ success: false, error: 'Notification ID required' });
+
+    const userIds = await resolveCurrentUserIds(req.user);
+    if (!userIds.length) return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    let query = supabase
+      .from('notifications')
+      .update({ is_read: true })
+      .eq('id', notifId);
+
+    if (userIds.length === 1) {
+      query = query.eq('user_id', userIds[0]);
+    } else {
+      query = query.in('user_id', userIds);
+    }
+
+    const { error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to mark as read' });
+  }
+});
+
+// DELETE /api/notifications/:id — delete single notification
+router.delete('/:id', requireAuth(), async (req, res) => {
+  try {
+    const notifId = String(req.params?.id || '').trim();
+    if (!notifId) return res.status(400).json({ success: false, error: 'Notification ID required' });
+
+    const userIds = await resolveCurrentUserIds(req.user);
+    if (!userIds.length) return res.status(403).json({ success: false, error: 'Forbidden' });
+
+    let query = supabase
+      .from('notifications')
+      .delete()
+      .eq('id', notifId);
+
+    if (userIds.length === 1) {
+      query = query.eq('user_id', userIds[0]);
+    } else {
+      query = query.in('user_id', userIds);
+    }
+
+    const { error } = await query;
+    if (error) return res.status(500).json({ success: false, error: error.message });
+    return res.json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message || 'Failed to delete notification' });
+  }
+});
+
 router.get('/list', requireAuth(), async (req, res) => {
   try {
     const requestedLimit = Number(req.query?.limit || 100);

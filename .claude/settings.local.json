@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -o \"/api/[^'\\\\\"\\)\\\\`]*\")",
+      "Bash(wc -l \"c:/Users/Dipanshu pandey/OneDrive/Desktop/Office Work/indiantrademartmain-frontback-main/server/routes/\"*.js)",
+      "Bash(timeout 15 node --input-type=module)",
+      "Bash(node --check server/routes/dir.js)",
+      "Bash(node --check server/routes/notifications.js)",
+      "Bash(node --check server/routes/employee.js)",
+      "Bash(timeout 15 npm run dev:server)",
+      "Bash(curl -s http://localhost:3001/health)",
+      "Bash(node -e ' *)",
+      "Bash(node server/server.js)",
+      "Bash(node -e \"fetch\\('http://localhost:3001/health'\\).then\\(r=>r.json\\(\\)\\).then\\(console.log\\).catch\\(e=>console.error\\('Error:',e.message\\)\\)\")",
+      "Bash(node --check server/routes/vendorProfile.js)",
+      "Bash(node --check server/routes/admin.js)",
+      "Bash(node --check server/routes/quotation.js)",
+      "Bash(node -e \"fetch\\('http://localhost:3001/health'\\).then\\(r=>r.json\\(\\)\\).then\\(d=>console.log\\('HEALTH:',JSON.stringify\\(d\\)\\)\\).catch\\(e=>console.error\\('FAIL:',e.message\\)\\)\")"
+    ]
+  }
+}

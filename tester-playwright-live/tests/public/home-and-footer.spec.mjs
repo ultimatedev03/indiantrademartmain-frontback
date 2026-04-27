@@ -19,6 +19,8 @@ test('BUG-127 blog route redirects to the public blog', async ({ page }) => {
 
 test('BUG-128 about us page contains substantive content', async ({ page }) => {
   await page.goto('/about-us', { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle'); 
+  await expect(page.getByRole('heading', { name: /Building a clearer B2B marketplace/i }).first()).toBeVisible();
   const text = await page.locator('main, body').first().innerText();
   expect(text.trim().length).toBeGreaterThan(300);
 });

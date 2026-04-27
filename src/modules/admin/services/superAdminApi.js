@@ -1,224 +1,169 @@
+/**
+ * superAdminApi.js — Super Admin service (backend-first)
+ *
+ * MIGRATION: All direct Supabase calls removed.
+ * Routes through /api/superadmin/* on the Express backend, which enforces
+ * superadmin-level auth, audit logging, and role checks.
+ */
 
-import { supabase } from '@/lib/customSupabaseClient';
+import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
+import { apiUrl } from '@/lib/apiBase';
+
+const safeJson = async (res) => { try { return await res.json(); } catch { return {}; } };
+
+const sa = (path) => apiUrl(`/api/superadmin${path}`);
 
 export const superAdminApi = {
-  // System Configuration & Maintenance
+
+  // ── SYSTEM CONFIGURATION ──────────────────────────────────────────────────
+
   system: {
     getMaintenanceStatus: async () => {
-      const { data, error } = await supabase
-        .from('system_config')
-        .select('maintenance_mode, maintenance_message')
-        .eq('config_key', 'maintenance_mode')
-        .single();
-      
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(sa('/system-config'));
+      if (!res.ok) throw new Error('Failed to fetch system config');
+      const json = await res.json();
+      return json?.config || json?.data || json;
     },
 
-    updateMaintenanceStatus: async (maintenanceMode, maintenanceMessage, userId) => {
-      const { data, error } = await supabase
-        .from('system_config')
-        .update({
-          maintenance_mode: maintenanceMode,
-          maintenance_message: maintenanceMessage,
-          updated_at: new Date(),
-          updated_by: userId
-        })
-        .eq('config_key', 'maintenance_mode')
-        .select();
-
-      if (error) throw error;
-      return data;
+    updateMaintenanceStatus: async (maintenanceMode, maintenanceMessage, _userId) => {
+      const res = await fetchWithCsrf(sa('/system-config'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maintenance_mode: maintenanceMode, maintenance_message: maintenanceMessage }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to update maintenance status');
+      return json?.config || json?.data;
     },
 
     getSystemLogs: async () => {
-      const { data, error } = await supabase
-        .from('audit_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      return data;
-    }
+      const res = await fetchWithCsrf(sa('/audit-logs?limit=50'));
+      if (!res.ok) return [];
+      const json = await res.json();
+      return json?.logs || json?.data || [];
+    },
   },
 
-  // Page Control
+  // ── PAGE CONTROL ──────────────────────────────────────────────────────────
+
   pages: {
     getAll: async () => {
-      const { data, error } = await supabase
-        .from('page_status')
-        .select('*')
-        .order('page_name');
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(sa('/page-status'));
+      if (!res.ok) throw new Error('Failed to fetch page status');
+      const json = await res.json();
+      return json?.pages || json?.data || [];
     },
 
     updateStatus: async (pageId, isBlanked, errorMessage) => {
-      const { data, error } = await supabase
-        .from('page_status')
-        .update({ 
-          is_blanked: isBlanked, 
-          error_message: errorMessage,
-          updated_at: new Date()
-        })
-        .eq('id', pageId)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(sa(`/page-status/${pageId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_blanked: isBlanked, error_message: errorMessage }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to update page status');
+      return json?.page || json?.data;
     },
 
     create: async (pageName, pageRoute, errorMessage) => {
-      const { data, error } = await supabase
-        .from('page_status')
-        .insert([{
-          page_name: pageName,
-          page_route: pageRoute,
-          error_message: errorMessage,
-          is_blanked: false
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(sa('/page-status'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ page_name: pageName, page_route: pageRoute, error_message: errorMessage }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to create page status');
+      return json?.page || json?.data;
     },
 
     delete: async (pageId) => {
-      const { error } = await supabase
-        .from('page_status')
-        .delete()
-        .eq('id', pageId);
-      if (error) throw error;
+      const res = await fetchWithCsrf(sa(`/page-status/${pageId}`), { method: 'DELETE' });
+      if (!res.ok) { const j = await safeJson(res); throw new Error(j?.error || 'Failed to delete page status'); }
       return true;
-    }
+    },
   },
 
-  // User Management
+  // ── USER MANAGEMENT ───────────────────────────────────────────────────────
+
   users: {
     getAll: async (page = 1, limit = 10, search = '', roleFilter = 'ALL', statusFilter = 'ALL') => {
-      let query = supabase
-        .from('users')
-        .select('*', { count: 'exact' });
-      
-      if (search) {
-        query = query.or(`email.ilike.%${search}%,full_name.ilike.%${search}%`);
-      }
-
-      if (roleFilter !== 'ALL') {
-        query = query.eq('role', roleFilter);
-      }
-
-      if (statusFilter !== 'ALL') {
-        query = query.eq('status', statusFilter);
-      }
-      
-      const from = (page - 1) * limit;
-      const to = from + limit - 1;
-      
-      const { data, count, error } = await query
-        .range(from, to)
-        .order('created_at', { ascending: false });
-        
-      if (error) throw error;
-      return { data, count };
+      const params = new URLSearchParams({ page, limit });
+      if (search) params.set('search', search);
+      if (roleFilter !== 'ALL') params.set('role', roleFilter);
+      if (statusFilter !== 'ALL') params.set('status', statusFilter);
+      const res = await fetchWithCsrf(apiUrl(`/api/admin/users?${params}`));
+      if (!res.ok) throw new Error('Failed to fetch users');
+      const json = await res.json();
+      return { data: json?.users || [], count: json?.total || 0 };
     },
 
     create: async (userData) => {
-      // NOTE: Creating user in public.users. 
-      // For auth.users, client-side creation logs in the user immediately which kills admin session.
-      // In a real prod environment, this should be an Edge Function.
-      const { data, error } = await supabase
-        .from('users')
-        .insert([{
-          full_name: userData.name,
-          email: userData.email,
-          role: userData.role,
-          status: userData.status || 'ACTIVE',
-          password_hash: userData.password, // Storing hash/password as requested (insecure practice disclaimer needed)
-          created_at: new Date(),
-          updated_at: new Date()
-        }])
-        .select()
-        .single();
-        
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(sa('/employees'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to create user');
+      return json?.employee || json?.data;
     },
 
     update: async (userId, userData) => {
-      const { data, error } = await supabase
-        .from('users')
-        .update({
-          full_name: userData.name,
-          email: userData.email,
-          role: userData.role,
-          status: userData.status,
-          updated_at: new Date()
-        })
-        .eq('id', userId)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      const res = await fetchWithCsrf(apiUrl(`/api/employee/staff/${userId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to update user');
+      return json?.employee || json?.data;
     },
 
     delete: async (userId) => {
-      const { error } = await supabase
-        .from('users')
-        .delete()
-        .eq('id', userId);
-      if (error) throw error;
+      const res = await fetchWithCsrf(sa(`/employees/${userId}`), { method: 'DELETE' });
+      if (!res.ok) { const j = await safeJson(res); throw new Error(j?.error || 'Failed to delete user'); }
       return true;
     },
 
     resetPassword: async (userId, newPassword) => {
-      const { error } = await supabase
-        .from('users')
-        .update({
-          password_hash: newPassword, // In real app, hash this
-          updated_at: new Date()
-        })
-        .eq('id', userId);
-      if (error) throw error;
+      const res = await fetchWithCsrf(sa(`/employees/${userId}/password`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_password: newPassword }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to reset password');
       return true;
     },
 
     toggleStatus: async (userId, currentStatus) => {
       const newStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-      const { error } = await supabase
-        .from('users')
-        .update({
-          status: newStatus,
-          updated_at: new Date()
-        })
-        .eq('id', userId);
-      if (error) throw error;
+      const res = await fetchWithCsrf(apiUrl(`/api/employee/staff/${userId}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const json = await safeJson(res);
+      if (!res.ok) throw new Error(json?.error || 'Failed to toggle status');
       return newStatus;
-    }
+    },
   },
 
-  // Dashboard Overview Stats
+  // ── DASHBOARD STATS ───────────────────────────────────────────────────────
+
   getDashboardStats: async () => {
     try {
-      const [users, vendors, products] = await Promise.all([
-        supabase.from('users').select('id', { count: 'exact', head: true }),
-        supabase.from('vendors').select('id', { count: 'exact', head: true }),
-        supabase.from('products').select('id', { count: 'exact', head: true }),
-      ]);
-
+      const res = await fetchWithCsrf(sa('/monitoring/overview'));
+      if (!res.ok) return { totalUsers: 0, totalVendors: 0, totalProducts: 0 };
+      const json = await res.json();
+      const data = json?.overview || json?.data || json || {};
       return {
-        totalUsers: users.count || 0,
-        totalVendors: vendors.count || 0,
-        totalProducts: products.count || 0,
+        totalUsers: Number(data.totalUsers ?? data.total_users ?? 0) || 0,
+        totalVendors: Number(data.totalVendors ?? data.total_vendors ?? 0) || 0,
+        totalProducts: Number(data.totalProducts ?? data.total_products ?? 0) || 0,
       };
-    } catch (e) {
-      console.error("Error fetching dashboard stats:", e);
-      return {
-        totalUsers: 0,
-        totalVendors: 0,
-        totalProducts: 0,
-      };
+    } catch {
+      return { totalUsers: 0, totalVendors: 0, totalProducts: 0 };
     }
-  }
+  },
 };

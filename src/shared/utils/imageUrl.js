@@ -35,12 +35,12 @@ export const optimizeImageUrl = (value, options = {}) => {
     return url.toString();
   }
 
+  if (host.includes('res.cloudinary.com')) {
+    return raw;
+  }
+
   if (host.includes('.supabase.co') && url.pathname.includes('/storage/v1/object/public/')) {
-    url.pathname = url.pathname.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/');
-    if (width) url.searchParams.set('width', String(width));
-    if (height) url.searchParams.set('height', String(height));
-    url.searchParams.set('quality', String(quality));
-    return url.toString();
+    return raw;
   }
 
   return raw;

@@ -123,7 +123,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Delhi"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1703083664356-a15a04d42e4c?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -133,7 +133,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Noida"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1582407947304-fd86f028f716?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -143,7 +143,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Mumbai"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1518918249916-0a72d4f98658?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -153,7 +153,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Bengaluru"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1698127091046-3e260f65d6d8?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -163,7 +163,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Chennai"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1635472276754-a5369ebf1bba?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -173,7 +173,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Kolkata"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1571481808344-77708908c5a9?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -183,7 +183,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Jaipur"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1617516203158-1b87bb39caa7?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -193,7 +193,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Ahmedabad"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1674783358278-bed2d6a4d57d?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -203,7 +203,7 @@ const TopCitiesSection = () => {
       return (
         <CityImg
           alt="Hyderabad"
-          className="w-full h-full object-contain p-2"
+          className="w-full h-full rounded-full object-cover"
           src="https://images.unsplash.com/photo-1610341940372-5aab4d3786cb?auto=format&fit=crop&w=200&q=60"
         />
       );
@@ -220,21 +220,21 @@ const TopCitiesSection = () => {
           <p className="text-gray-500 text-lg">Connect with verified suppliers across India's major business hubs</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-10">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-x-6 gap-y-8 mb-10">
           {cities.map((city) => (
             <div
               key={city.id}
               onClick={() => navigate(`/directory/city/${city.slug}`)}
-              className="bg-white border border-gray-100 rounded-xl p-6 flex min-h-[220px] flex-col items-center justify-center hover:shadow-lg hover:border-blue-100 transition-all cursor-pointer group h-full"
+              className="group mx-auto flex aspect-square w-full max-w-[165px] cursor-pointer flex-col items-center justify-center rounded-full border border-gray-100 bg-white px-4 py-5 transition-all duration-300 hover:-translate-y-1 hover:border-blue-100 hover:shadow-lg"
               title={city.name}
             >
-              <div className="w-20 h-20 rounded-full bg-gray-50 flex items-center justify-center mb-4 group-hover:bg-blue-50 transition-colors overflow-hidden border border-gray-100">
+              <div className="mb-3 flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border border-gray-100 bg-gray-50 shadow-sm ring-4 ring-gray-50 transition-all group-hover:bg-blue-50 group-hover:ring-blue-50">
                 <CityIcon city={city} />
               </div>
-              <h3 className="font-bold text-gray-800 text-lg group-hover:text-blue-700 transition-colors">
+              <h3 className="text-center text-base font-bold leading-tight text-gray-900 transition-colors group-hover:text-blue-700">
                 {city.name}
               </h3>
-              <p className="text-sm text-gray-500 font-medium">{formatCount(city.supplier_count)} suppliers</p>
+              <p className="mt-1 text-center text-xs font-medium text-gray-500">{formatCount(city.supplier_count)} suppliers</p>
             </div>
           ))}
         </div>

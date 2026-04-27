@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { Helmet } from 'react-helmet';
 import { supabase } from '@/lib/customSupabaseClient';
@@ -26,6 +26,7 @@ import {
 import {
   Loader2,
   MapPin,
+  Building2,
   CheckCircle,
   Phone,
   Mail,
@@ -77,7 +78,6 @@ const ProductDetail = () => {
   const [ratingSummary, setRatingSummary] = useState({ average: 0, count: 0 });
   const [recentFeedback, setRecentFeedback] = useState([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
-  const [descriptionNeedsClamp, setDescriptionNeedsClamp] = useState(false);
   const isBuyer = String(userRole || user?.role || '').toUpperCase() === 'BUYER';
 
   // Enquiry modal
@@ -189,28 +189,47 @@ const ProductDetail = () => {
       .replace(/[ \t]{2,}/g, ' ')
       .trim();
 
+  const formatPrice = (value) => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return 'Price on request';
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return `₹${raw}`;
+    return new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: numeric % 1 === 0 ? 0 : 2,
+    }).format(numeric);
+  };
+
+  const getProductUnit = (product) => product?.qty_unit || product?.price_unit || product?.unit || 'Piece';
+
+  const normalizeSpecifications = (value) => {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => {
+          if (!item) return null;
+          if (typeof item === 'string') return { key: 'Detail', value: item };
+          const key = item.key || item.name || item.label || item.title || '';
+          const specValue = item.value || item.description || item.text || '';
+          if (!key && !specValue) return null;
+          return { key: key || 'Detail', value: specValue || '-' };
+        })
+        .filter(Boolean);
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value)
+        .map(([key, specValue]) => ({ key, value: specValue }))
+        .filter((item) => item.key && item.value !== undefined && item.value !== null && item.value !== '');
+    }
+    return [];
+  };
+
   const plainDescription = useMemo(() => getPlainDescription(data?.description), [data?.description]);
-  const descriptionRef = useRef(null);
 
   useEffect(() => {
     setDescriptionExpanded(false);
   }, [data?.id]);
-
-  useEffect(() => {
-    const measureDescription = () => {
-      const element = descriptionRef.current;
-      if (!element) {
-        setDescriptionNeedsClamp(false);
-        return;
-      }
-
-      setDescriptionNeedsClamp(element.scrollHeight > 18 * 16 + 8);
-    };
-
-    measureDescription();
-    window.addEventListener('resize', measureDescription);
-    return () => window.removeEventListener('resize', measureDescription);
-  }, [plainDescription, descriptionExpanded]);
 
   const handleCopyLink = async () => {
     const url = canonicalProductUrl || shareUtils.getCurrentUrl();
@@ -713,6 +732,51 @@ const ProductDetail = () => {
   })();
   const categoryLabel =
     categoryPathParts.length > 0 ? categoryPathParts.join(' › ') : 'Uncategorized';
+  const productName = data.name || 'Product';
+  const productUnit = getProductUnit(data);
+  const priceUnitLabel = data.price_unit || productUnit;
+  const priceLabel = data.price ? formatPrice(data.price) : 'Price on request';
+  const moqLabel = data.min_order_qty ? `${data.min_order_qty} ${productUnit}` : 'Ask supplier';
+  const vendorLocation = [vendor?.city, vendor?.state].filter(Boolean).join(', ') || 'India';
+  const productSpecifications = normalizeSpecifications(data.specifications);
+  const extraCategoryLabels = (() => {
+    try {
+      const raw =
+        typeof data.extra_micro_categories === 'string'
+          ? JSON.parse(data.extra_micro_categories)
+          : data.extra_micro_categories;
+      if (!Array.isArray(raw)) return [];
+      return raw
+        .map((item) => (typeof item === 'string' ? item : item?.name || item?.label || ''))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  })();
+  const overviewCopy =
+    plainDescription ||
+    `${productName} is listed by ${vendor?.company_name || 'this supplier'} for B2B buyers comparing product details, pricing, minimum order needs, and supplier credentials before sending an enquiry.`;
+  const isOverviewLong = overviewCopy.length > 620;
+  const visibleOverview =
+    descriptionExpanded || !isOverviewLong ? overviewCopy : `${overviewCopy.slice(0, 620).trim()}...`;
+  const productFacts = [
+    { label: 'Price', value: data.price ? `${priceLabel} / ${priceUnitLabel}` : priceLabel },
+    { label: 'Minimum Order', value: moqLabel },
+    { label: 'Unit', value: priceUnitLabel },
+    {
+      label: 'Rating',
+      value:
+        ratingSummary.count > 0
+          ? `${Number(ratingSummary.average || 0).toFixed(1)} (${ratingSummary.count})`
+          : 'No ratings yet',
+    },
+  ];
+  const detailRows = [
+    { label: 'Category', value: categoryLabel },
+    { label: 'Supplier', value: vendor?.company_name || 'Listed supplier' },
+    { label: 'Location', value: vendorLocation },
+    { label: 'Business Type', value: vendor?.primary_business_type || vendor?.business_type || '' },
+  ].filter((item) => item.value);
 
   // Build SEO meta tags
   let seoMetaTags = null;
@@ -790,7 +854,7 @@ const ProductDetail = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-20">
+    <div className="min-h-screen bg-white pb-20">
       {seoMetaTags}
 
       {/* Enquiry Modal */}
@@ -988,8 +1052,8 @@ const ProductDetail = () => {
         </div>
       )}
 
-      <div className="bg-white border-b py-3 px-4 mb-4 shadow-sm">
-        <div className="container mx-auto text-sm text-gray-500 flex flex-wrap gap-1">
+      <div className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="container mx-auto flex flex-wrap gap-1 text-sm text-slate-500">
           <Link to="/directory">Directory</Link> {' › '}
           {cat ? (
             <>
@@ -1016,284 +1080,303 @@ const ProductDetail = () => {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 auto-rows-max">
-        {/* Left: Gallery */}
-        <div className="md:col-span-1 space-y-4">
-          <div className="aspect-square bg-white rounded-lg border overflow-hidden flex items-center justify-center p-2 shadow-sm">
-            {images[activeImage] ? (
-              <img src={images[activeImage]} alt={data.name} className="max-w-full max-h-full object-contain" />
-            ) : (
-              <div className="text-gray-300">No Image</div>
-            )}
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-2">
-            {images.map((img, i) => (
-              <div
-                key={i}
-                onClick={() => setActiveImage(i)}
-                className={`w-16 h-16 border rounded cursor-pointer shrink-0 overflow-hidden ${
-                  activeImage === i ? 'ring-2 ring-blue-500' : 'opacity-70 hover:opacity-100'
-                }`}
-              >
-                <img src={img} className="w-full h-full object-cover" alt="" />
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[300px_minmax(0,1fr)_300px] xl:grid-cols-[330px_minmax(0,1fr)_310px]">
+          <aside className="lg:sticky lg:top-24">
+            <div className="aspect-square overflow-hidden bg-slate-50">
+              {images[activeImage] ? (
+                <img src={images[activeImage]} alt={productName} className="h-full w-full object-contain p-3" />
+              ) : (
+                <div className="flex h-full items-center justify-center text-sm font-medium text-slate-300">
+                  No Image
+                </div>
+              )}
+            </div>
+            {images.length > 0 && (
+              <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+                {images.map((img, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setActiveImage(i)}
+                    className={`h-12 w-12 shrink-0 overflow-hidden rounded border bg-white ${
+                      activeImage === i
+                        ? 'border-[#003D82] ring-1 ring-[#003D82]'
+                        : 'border-slate-200 opacity-75 hover:opacity-100'
+                    }`}
+                    aria-label={`View product image ${i + 1}`}
+                  >
+                    <img src={img} className="h-full w-full object-cover" alt="" />
+                  </button>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
+            )}
+          </aside>
 
-        {/* Center: Info */}
-        <div className="md:col-span-1 space-y-4">
-          <div>
-            <div className="flex justify-between items-start gap-4 mb-2">
-              <h1 className="text-3xl font-bold text-slate-900">{data.name}</h1>
-              {/* Share Buttons */}
-              <div className="flex gap-1 flex-wrap justify-end">
-                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-50" asChild>
+          <main className="min-w-0">
+            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+              <div className="min-w-0">
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  {cat?.name ? (
+                    <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-600">
+                      {cat.name}
+                    </Badge>
+                  ) : null}
+                  {vendor?.verification_badge ? (
+                    <Badge className="border-none bg-green-100 text-green-700 hover:bg-green-100">
+                      <CheckCircle className="mr-1 h-3 w-3" /> Verified Supplier
+                    </Badge>
+                  ) : null}
+                </div>
+                <h1 className="max-w-4xl break-words text-[1.65rem] font-semibold leading-[1.22] text-slate-950 sm:text-[2rem] lg:text-[2.25rem]">
+                  {productName}
+                </h1>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-500">
+                  <span className="inline-flex items-center gap-1.5">
+                    <Building2 className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="break-words">{vendor?.company_name || 'Listed supplier'}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                    <span className="break-words">{vendorLocation}</span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 flex-wrap gap-1.5 md:pt-1">
+                <Button size="icon" variant="outline" className="h-8 w-8 border-slate-200" asChild>
                   <a
-                    href={shareUtils.getWhatsAppUrl(data.name, canonicalProductUrl || shareUtils.getCurrentUrl())}
+                    href={shareUtils.getWhatsAppUrl(productName, canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on WhatsApp"
                   >
-                    <MessageCircle className="w-4 h-4 text-green-600" />
+                    <MessageCircle className="h-4 w-4 text-green-600" />
                   </a>
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-blue-50" asChild>
+                <Button size="icon" variant="outline" className="h-8 w-8 border-slate-200" asChild>
                   <a
                     href={shareUtils.getFacebookUrl(canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on Facebook"
                   >
-                    <Facebook className="w-4 h-4 text-blue-600" />
+                    <Facebook className="h-4 w-4 text-blue-600" />
                   </a>
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-blue-100" asChild>
+                <Button size="icon" variant="outline" className="h-8 w-8 border-slate-200" asChild>
                   <a
-                    href={shareUtils.getLinkedInUrl(canonicalProductUrl || shareUtils.getCurrentUrl(), data.name)}
+                    href={shareUtils.getLinkedInUrl(canonicalProductUrl || shareUtils.getCurrentUrl(), productName)}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on LinkedIn"
                   >
-                    <Linkedin className="w-4 h-4 text-blue-700" />
+                    <Linkedin className="h-4 w-4 text-blue-700" />
                   </a>
                 </Button>
-                <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-sky-50" asChild>
+                <Button size="icon" variant="outline" className="h-8 w-8 border-slate-200" asChild>
                   <a
-                    href={shareUtils.getTwitterUrl(data.name, canonicalProductUrl || shareUtils.getCurrentUrl())}
+                    href={shareUtils.getTwitterUrl(productName, canonicalProductUrl || shareUtils.getCurrentUrl())}
                     target="_blank"
                     rel="noopener noreferrer"
                     title="Share on Twitter"
                   >
-                    <Twitter className="w-4 h-4 text-sky-500" />
+                    <Twitter className="h-4 w-4 text-sky-500" />
                   </a>
                 </Button>
                 <Button
                   size="icon"
-                  variant="ghost"
-                  className="h-8 w-8 hover:bg-gray-100"
+                  variant="outline"
+                  className="h-8 w-8 border-slate-200"
                   onClick={handleCopyLink}
                   title="Copy link"
                 >
-                  {copied ? <Check className="w-4 h-4 text-green-600" /> : <LinkIcon className="w-4 h-4 text-gray-600" />}
+                  {copied ? <Check className="h-4 w-4 text-green-600" /> : <LinkIcon className="h-4 w-4 text-slate-600" />}
                 </Button>
               </div>
             </div>
 
-            <div className="text-2xl font-bold text-[#003D82]">
-              ₹{data.price}{' '}
-              <span className="text-base font-normal text-slate-500">/ {data.price_unit}</span>
+            <div className="mt-7 grid gap-x-6 gap-y-4 border-y border-slate-200 py-5 sm:grid-cols-2 xl:grid-cols-4">
+              {productFacts.map((item) => (
+                <div key={item.label}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{item.label}</div>
+                  <div className="mt-1 break-words text-base font-bold text-slate-950">{item.value}</div>
+                </div>
+              ))}
             </div>
-            {data.min_order_qty && (
-              <div className="text-sm text-gray-500 mt-1">
-                Min Order: {data.min_order_qty} {data.qty_unit}
-              </div>
-            )}
 
-            <div className="mt-2 flex items-center gap-2 text-sm">
-              <Star className="w-4 h-4 fill-yellow-400 text-yellow-400" />
-              {ratingSummary.count > 0 ? (
-                <>
-                  <span className="font-semibold text-slate-900">{Number(ratingSummary.average || 0).toFixed(1)}</span>
-                  <span className="text-slate-500">({ratingSummary.count} buyer ratings)</span>
-                </>
-              ) : (
-                <span className="text-slate-500">No ratings yet</span>
-              )}
-              {myRating > 0 ? (
-                <span className="text-slate-400">
-                  Your rating: {myRating.toFixed(1)}
-                  {myRatingUpdatedAt ? ` on ${formatDateTime(myRatingUpdatedAt)}` : ''}
-                </span>
-              ) : null}
-            </div>
-          </div>
+            <div className="mt-8 space-y-8">
+              <section className="border-b border-slate-200 pb-8">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Overview</h2>
+                <p className="mt-3 max-w-[72ch] whitespace-pre-line break-words text-[15px] leading-8 text-slate-700">
+                  {visibleOverview}
+                </p>
+                {isOverviewLong && (
+                  <button
+                    type="button"
+                    onClick={() => setDescriptionExpanded((value) => !value)}
+                    className="mt-2 text-sm font-semibold text-[#003D82] hover:text-blue-800"
+                  >
+                    {descriptionExpanded ? 'Show less' : 'Read full description'}
+                  </button>
+                )}
+              </section>
 
-          <div className="overflow-hidden rounded border bg-white shadow-sm">
-            <div
-              ref={descriptionRef}
-              className={`prose prose-sm max-w-none break-words p-4 text-slate-600 whitespace-pre-wrap ${
-                descriptionExpanded ? 'max-h-[30rem] overflow-y-auto pr-3' : 'max-h-[18rem] overflow-y-auto pr-3'
-              }`}
-            >
-              {plainDescription || 'No description available.'}
-            </div>
-            {descriptionNeedsClamp && (
-              <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => setDescriptionExpanded((value) => !value)}
-                  className="text-sm font-semibold text-blue-700 hover:text-blue-900"
-                >
-                  {descriptionExpanded ? 'Show less' : 'Read full description'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          {recentFeedback.length > 0 && (
-            <div className="bg-white rounded border p-4 shadow-sm">
-              <h3 className="font-bold mb-3 text-sm uppercase text-gray-500 border-b pb-2">Buyer Feedback</h3>
-              <div className="space-y-3">
-                {recentFeedback.map((row, idx) => (
-                  <div key={`${row.userId}-${row.updated_at || idx}`} className="rounded-md border border-slate-100 p-3">
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <div>
-                        <span className="text-sm font-semibold text-slate-800">{row.buyerName || 'Buyer'}</span>
-                        {row.updated_at || row.created_at ? (
-                          <p className="text-[11px] text-slate-400">
-                            Rated on {formatDateTime(row.updated_at || row.created_at)}
-                          </p>
-                        ) : null}
-                      </div>
-                      <span className="inline-flex items-center gap-1 text-sm text-slate-600">
-                        <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                        {Number(row.rating || 0).toFixed(1)}
-                      </span>
+              <section className="border-b border-slate-200 pb-8">
+                <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Product Details</h2>
+                <div className="mt-3 grid gap-x-5 gap-y-2 text-sm sm:grid-cols-2">
+                  {detailRows.map((item) => (
+                    <div key={item.label} className="flex gap-3 border-b border-slate-100 py-2">
+                      <span className="w-28 shrink-0 text-slate-500">{item.label}</span>
+                      <span className="min-w-0 break-words font-medium text-slate-900">{item.value}</span>
                     </div>
-                    <p className="text-sm text-slate-600 whitespace-pre-wrap break-words">{row.feedback}</p>
+                  ))}
+                </div>
+                {extraCategoryLabels.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {extraCategoryLabels.map((label) => (
+                      <Badge key={label} variant="secondary" className="bg-blue-50 text-blue-700">
+                        {label}
+                      </Badge>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                )}
+              </section>
 
-          {/* Specs */}
-          {data.specifications && data.specifications.length > 0 && (
-            <div className="bg-white rounded border p-4 shadow-sm">
-              <h3 className="font-bold mb-3 text-sm uppercase text-gray-500 border-b pb-2">Product Specifications</h3>
-              <div className="space-y-2 text-sm">
-                {data.specifications.map((s, i) => (
-                  <div key={i} className="flex justify-between pb-1 gap-2">
-                    <span className="text-slate-500 break-words">{s.key}</span>
-                    <span className="font-medium text-slate-900 break-words text-right">{s.value}</span>
+              {productSpecifications.length > 0 && (
+                <section className="border-b border-slate-200 pb-8">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Specifications</h2>
+                  <div className="mt-3 grid gap-x-6 text-sm sm:grid-cols-2">
+                    {productSpecifications.map((s, i) => (
+                      <div key={`${s.key}-${i}`} className="flex justify-between gap-4 border-b border-slate-100 py-2.5">
+                        <span className="break-words text-slate-500">{s.key}</span>
+                        <span className="break-words text-right font-medium text-slate-900">{s.value}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </section>
+              )}
+
+              {recentFeedback.length > 0 && (
+                <section className="border-b border-slate-200 pb-8">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Buyer Feedback</h2>
+                  <div className="mt-3 space-y-3">
+                    {recentFeedback.map((row, idx) => (
+                      <div key={`${row.userId}-${row.updated_at || idx}`} className="border-b border-slate-100 pb-3 last:border-b-0">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <div>
+                            <span className="text-sm font-semibold text-slate-800">{row.buyerName || 'Buyer'}</span>
+                            {row.updated_at || row.created_at ? (
+                              <p className="text-[11px] text-slate-400">
+                                Rated on {formatDateTime(row.updated_at || row.created_at)}
+                              </p>
+                            ) : null}
+                          </div>
+                          <span className="inline-flex items-center gap-1 text-sm text-slate-600">
+                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                            {Number(row.rating || 0).toFixed(1)}
+                          </span>
+                        </div>
+                        <p className="whitespace-pre-wrap break-words text-sm text-slate-600">{row.feedback}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {(data.pdf_url || data.video_url) && (
+                <section className="border-b border-slate-200 pb-8">
+                  <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Media & Documents</h2>
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    {data.pdf_url && (
+                      <a
+                        href={data.pdf_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded border border-blue-200 bg-white px-3 py-2 text-sm text-blue-700 hover:bg-blue-50"
+                      >
+                        <FileText className="h-4 w-4" /> Product Brochure
+                      </a>
+                    )}
+                    {data.video_url && (
+                      <a
+                        href={data.video_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        <PlayCircle className="h-4 w-4" /> Watch Video
+                      </a>
+                    )}
+                  </div>
+                </section>
+              )}
             </div>
-          )}
+          </main>
 
-          <div className="flex gap-3">
-            {data.pdf_url && (
-              <a
-                href={data.pdf_url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 text-sm text-blue-600 border border-blue-200 px-3 py-2 rounded hover:bg-blue-50 bg-white shadow-sm"
-              >
-                <FileText className="w-4 h-4" /> Product Brochure
-              </a>
-            )}
-            {data.video_url && (
-              <a
-                href={data.video_url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 text-sm text-red-600 border border-red-200 px-3 py-2 rounded hover:bg-red-50 bg-white shadow-sm"
-              >
-                <PlayCircle className="w-4 h-4" /> Watch Video
-              </a>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Vendor Card */}
-        <div className="md:col-span-1">
-          <div className="bg-white rounded-xl shadow-lg border border-blue-100 p-6 sticky top-20 h-fit">
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-16 h-16 rounded border bg-slate-50 flex items-center justify-center overflow-hidden">
+          <aside className="border-t border-slate-200 pt-6 lg:sticky lg:top-24 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+            <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Supplier</div>
+            <div className="mt-4 flex items-start gap-3">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50">
                 {vendor.profile_image ? (
-                  <img src={vendor.profile_image} className="w-full h-full object-cover" alt={vendor.company_name} />
+                  <img src={vendor.profile_image} className="h-full w-full object-cover" alt={vendor.company_name} />
                 ) : (
-                  <span className="text-xl font-bold text-slate-300">{vendor.company_name?.[0]}</span>
+                  <span className="text-lg font-bold text-slate-300">{vendor.company_name?.[0]}</span>
                 )}
               </div>
-              <div>
+              <div className="min-w-0">
                 <h3
                   onClick={handleCompanyClick}
-                  className="font-bold text-lg text-slate-900 leading-tight cursor-pointer hover:text-blue-600 transition-colors"
+                  className="cursor-pointer break-words text-base font-bold leading-snug text-slate-950 hover:text-[#003D82]"
                 >
                   {vendor.company_name}
                 </h3>
-                <div className="flex items-center gap-1 text-sm text-slate-500 mt-1">
-                  <MapPin className="w-3 h-3" /> {vendor.city}, {vendor.state}
+                <div className="mt-1 flex items-center gap-1 text-sm text-slate-500">
+                  <MapPin className="h-3.5 w-3.5 shrink-0" /> <span className="break-words">{vendorLocation}</span>
                 </div>
-                {vendor.verification_badge && (
-                  <Badge className="bg-green-100 text-green-700 hover:bg-green-100 border-none mt-2 h-5 px-2">
-                    <CheckCircle className="w-3 h-3 mr-1" /> Verified Supplier
-                  </Badge>
-                )}
               </div>
             </div>
 
-            <div className="space-y-3 mb-6">
-              <div className="flex items-center gap-3 text-sm">
-                <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                  <Phone className="w-4 h-4" />
-                </div>
-                <span className="font-medium text-slate-900">{phoneUtils.maskPhone(vendor.phone)}</span>
+            <div className="mt-5 space-y-3 border-y border-slate-100 py-4">
+              <div className="flex items-center gap-2 text-sm">
+                <Phone className="h-4 w-4 text-[#003D82]" />
+                <span className="break-words font-medium text-slate-900">{phoneUtils.maskPhone(vendor.phone)}</span>
               </div>
-
               {vendor.email && (
-                <div className="flex items-center gap-3 text-sm">
-                  <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
-                    <Mail className="w-4 h-4" />
-                  </div>
-                  <span className="font-medium text-slate-900">{maskEmail(vendor.email)}</span>
+                <div className="flex items-center gap-2 text-sm">
+                  <Mail className="h-4 w-4 text-[#003D82]" />
+                  <span className="break-words font-medium text-slate-900">{maskEmail(vendor.email)}</span>
                 </div>
               )}
             </div>
 
-            <Button onClick={openEnquiryModal} className="w-full bg-[#003D82] h-12 text-lg mb-3 hover:bg-blue-800">
+            <Button onClick={openEnquiryModal} className="mt-5 h-10 w-full bg-[#003D82] hover:bg-blue-800">
               Send Enquiry
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleToggleFavorite}
-              disabled={favLoading}
-              className={`w-full h-11 ${
-                isFavorite ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : ''
-              }`}
-            >
-              <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current text-yellow-500' : ''}`} />
-              {favLoading ? 'Please wait...' : isFavorite ? 'Favorited' : 'Add to Favorites'}
-            </Button>
-            <Button
-              variant="outline"
-              onClick={openRatingDialog}
-              disabled={Boolean(user) && !isBuyer}
-              className="w-full h-11 mt-3"
-              title={Boolean(user) && !isBuyer ? 'Only buyers can add/edit ratings' : undefined}
-            >
-              <Star className={`w-4 h-4 mr-2 ${myRating > 0 ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-              {Boolean(user) && !isBuyer
-                ? 'Buyer Account Required'
-                : myRating > 0
-                  ? 'Update Rating & Feedback'
-                  : 'Rate & Feedback'}
-            </Button>
-            {/* ✅ Removed "View Phone Number" button (privacy + prevents scraping) */}
-          </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={handleToggleFavorite}
+                disabled={favLoading}
+                className={`h-9 px-2 text-sm ${
+                  isFavorite ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100' : ''
+                }`}
+              >
+                <Heart className={`mr-1.5 h-4 w-4 ${isFavorite ? 'fill-current text-yellow-500' : ''}`} />
+                {favLoading ? 'Wait' : isFavorite ? 'Saved' : 'Favorite'}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={openRatingDialog}
+                disabled={Boolean(user) && !isBuyer}
+                className="h-9 px-2 text-sm"
+                title={Boolean(user) && !isBuyer ? 'Only buyers can add/edit ratings' : undefined}
+              >
+                <Star className={`mr-1.5 h-4 w-4 ${myRating > 0 ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+                Rate
+              </Button>
+            </div>
+          </aside>
         </div>
       </div>
     </div>
