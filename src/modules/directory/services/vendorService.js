@@ -2,7 +2,14 @@ import { supabase } from '@/lib/customSupabaseClient';
 
 const isMissingColumnError = (err) => {
   if (!err) return false;
-  return err.code === '42703' || /column .* does not exist/i.test(err.message || '');
+  const message = String(err.message || err.details || err.hint || '').trim();
+  const code = String(err.code || '').trim().toUpperCase();
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    /column .* does not exist/i.test(message) ||
+    /could not find .* column/i.test(message)
+  );
 };
 
 const FEATURED_VENDOR_COLUMNS = [
@@ -21,6 +28,24 @@ const FEATURED_VENDOR_COLUMNS = [
   'kyc_status',
   'is_verified',
   'verification_badge',
+  'is_active',
+  'created_at',
+].join(', ');
+
+const FEATURED_VENDOR_FALLBACK_COLUMNS = [
+  'id',
+  'slug',
+  'company_name',
+  'owner_name',
+  'profile_image',
+  'city',
+  'state',
+  'city_id',
+  'state_id',
+  'primary_business_type',
+  'description',
+  'kyc_status',
+  'is_verified',
   'is_active',
   'created_at',
 ].join(', ');
@@ -61,36 +86,40 @@ const mapVendorRow = (v) => {
   };
 };
 
-const fetchVendorRows = async ({ onlyActive, from = 0, to = null, limit = null }) => {
-  let query = supabase
-    .from('vendors')
-    .select(FEATURED_VENDOR_COLUMNS)
-    .order('created_at', { ascending: false });
+const applyVendorListModifiers = (query, { onlyActive, from = 0, to = null, limit = null }) => {
+  let nextQuery = query.order('created_at', { ascending: false });
 
   if (onlyActive) {
-    query = query.eq('is_active', true);
+    nextQuery = nextQuery.eq('is_active', true);
   }
 
   if (to !== null) {
-    query = query.range(from, to);
+    nextQuery = nextQuery.range(from, to);
   } else if (limit !== null) {
-    query = query.limit(limit);
+    nextQuery = nextQuery.limit(limit);
   }
 
-  let res = await query;
+  return nextQuery;
+};
+
+const fetchVendorRows = async ({ onlyActive, from = 0, to = null, limit = null }) => {
+  let res = await applyVendorListModifiers(
+    supabase.from('vendors').select(FEATURED_VENDOR_COLUMNS),
+    { onlyActive, from, to, limit }
+  );
 
   if (res.error && isMissingColumnError(res.error)) {
-    let fallbackQuery = supabase.from('vendors').select('*');
-    if (onlyActive) {
-      fallbackQuery = fallbackQuery.eq('is_active', true);
-    }
-    fallbackQuery = fallbackQuery.order('created_at', { ascending: false });
-    if (to !== null) {
-      fallbackQuery = fallbackQuery.range(from, to);
-    } else if (limit !== null) {
-      fallbackQuery = fallbackQuery.limit(limit);
-    }
-    res = await fallbackQuery;
+    res = await applyVendorListModifiers(
+      supabase.from('vendors').select(FEATURED_VENDOR_FALLBACK_COLUMNS),
+      { onlyActive, from, to, limit }
+    );
+  }
+
+  if (res.error && isMissingColumnError(res.error)) {
+    res = await applyVendorListModifiers(
+      supabase.from('vendors').select('*'),
+      { onlyActive, from, to, limit }
+    );
   }
 
   if (res.error) {

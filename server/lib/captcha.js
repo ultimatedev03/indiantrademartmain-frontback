@@ -27,6 +27,9 @@ const readCaptchaSecret = () =>
     process.env.TURNSTILE_SECRET_KEY,
     process.env.TURNSTILE_SECRET,
     process.env.CAPTCHA_SECRET_KEY,
+    process.env.VITE_TURNSTILE_SECRET_KEY,
+    process.env.VITE_CAPTCHA_SECRET_KEY,
+    process.env.CLOUDFLARE_TURNSTILE_SECRET_KEY,
   ]
     .map(normalizeText)
     .find(Boolean) || '';
@@ -101,7 +104,10 @@ export async function verifyCaptchaToken({ token, remoteIp = '', action = '' } =
       return { success: true, skipped: true, reason: 'dev_bypass_no_secret' };
     }
 
-    throw createCaptchaError('Captcha verification is not configured on the server.', 503);
+    throw createCaptchaError(
+      'Captcha verification is not configured on the server. Set TURNSTILE_SECRET_KEY in the deployment environment.',
+      503
+    );
   }
 
   if (!normalizedToken) {
