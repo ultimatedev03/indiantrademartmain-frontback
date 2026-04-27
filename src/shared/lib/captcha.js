@@ -1,4 +1,9 @@
-export const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+const PROD_TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY || '').trim();
+const DEV_TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_DEV_SITE_KEY || '').trim();
+
+export const TURNSTILE_SITE_KEY = import.meta.env.DEV
+  ? DEV_TURNSTILE_SITE_KEY
+  : PROD_TURNSTILE_SITE_KEY;
 export const CAPTCHA_BYPASS_TOKEN = 'captcha_bypass';
 
 const normalizeBooleanEnv = (value) => String(value ?? '').trim().toLowerCase();
@@ -38,7 +43,7 @@ export const getCaptchaBypassMessage = () => {
   }
 
   if (isCaptchaDevBypass()) {
-    return 'Captcha bypass is active in local development because `VITE_TURNSTILE_SITE_KEY` is not set.';
+    return 'Captcha bypass is active in local development because `VITE_TURNSTILE_DEV_SITE_KEY` is not set.';
   }
 
   return '';

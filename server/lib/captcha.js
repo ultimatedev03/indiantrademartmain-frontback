@@ -34,10 +34,20 @@ const readCaptchaSecret = () =>
 const isProductionRuntime = () =>
   normalizeText(process.env.NODE_ENV).toLowerCase() === 'production';
 
+const isLocalDevRuntime = () => {
+  const lifecycleEvent = normalizeText(process.env.npm_lifecycle_event).toLowerCase();
+  if (['dev', 'dev:all', 'dev:server', 'dev:client'].includes(lifecycleEvent)) {
+    return true;
+  }
+
+  return process.execArgv.some((arg) => normalizeText(arg) === '--watch');
+};
+
 const allowDevBypass = () => {
   const explicit = normalizeText(process.env.CAPTCHA_ALLOW_DEV_BYPASS).toLowerCase();
   if (explicit === 'true') return true;
   if (explicit === 'false') return false;
+  if (isLocalDevRuntime()) return true;
   return !isProductionRuntime();
 };
 
