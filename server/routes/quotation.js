@@ -1,8 +1,8 @@
 import { logger } from '../utils/logger.js';
 import express from 'express';
-import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { sendEmail } from '../lib/emailService.js';
 import { notifyUser } from '../lib/notify.js';
 
 const router = express.Router();
@@ -31,41 +31,6 @@ const validateQuotationRequest = (req, res, next) => {
   
   next();
 };
-
-/**
- * Create transporter:
- * - Prefer SMTP_* (production)
- * - Fallback to Gmail (local dev) if SMTP not configured
- */
-const createTransporter = () => {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
-  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_EMAIL,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-  }
-
-  throw new Error(
-    'Email transporter config missing. Set SMTP_HOST/SMTP_USER/SMTP_PASS (recommended) or GMAIL_EMAIL/GMAIL_APP_PASSWORD for local.'
-  );
-};
-
-const transporter = createTransporter();
 
 const insertNotification = async (payload) => {
   const safeUserId = String(payload?.user_id || '').trim();
@@ -1518,18 +1483,12 @@ ${isRegistered ? 'You can also view this quotation in your dashboard.' : 'Regist
   </div>
   `;
 
-  const from =
-    process.env.MAIL_FROM ||
-    process.env.SMTP_USER ||
-    process.env.GMAIL_EMAIL ||
-    'no-reply@indiantrademart.com';
-
-  await transporter.sendMail({
-    from,
+  await sendEmail({
     to,
     subject,
     text,
     html,
+    purpose: 'quotation',
     ...(attachments.length ? { attachments } : {}),
   });
 }

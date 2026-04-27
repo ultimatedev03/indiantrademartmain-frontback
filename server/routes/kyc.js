@@ -1,8 +1,8 @@
 import { logger } from '../utils/logger.js';
 import express from 'express';
-import nodemailer from 'nodemailer';
 import { supabase } from '../lib/supabaseClient.js';
 import { notifyUser, notifyRole } from '../lib/notify.js';
+import { isEmailTransportConfigured, sendEmail } from '../lib/emailService.js';
 import { requireEmployeeRoles } from '../middleware/requireEmployeeRoles.js';
 
 const router = express.Router();
@@ -11,58 +11,17 @@ const isHttpUrl = (v) => typeof v === 'string' && /^https?:\/\//i.test(v);
 const looksLikePdf = (v = '') => String(v || '').toLowerCase().includes('.pdf');
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
-let cachedReminderTransporter = null;
-let reminderTransportChecked = false;
-
-const createReminderTransporter = () => {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE || '').toLowerCase() === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
-  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_EMAIL,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-  }
-
-  return null;
-};
-
-const getReminderTransporter = () => {
-  if (reminderTransportChecked) return cachedReminderTransporter;
-  reminderTransportChecked = true;
-  cachedReminderTransporter = createReminderTransporter();
-  return cachedReminderTransporter;
-};
-
 const sendReminderEmail = async ({ to, subject, text, html }) => {
   const safeTo = normalizeEmail(to);
-  const transporter = getReminderTransporter();
-  if (!safeTo || !transporter) return false;
+  if (!safeTo) return false;
 
   try {
-    await transporter.sendMail({
-      from:
-        process.env.MAIL_FROM ||
-        process.env.SMTP_USER ||
-        process.env.GMAIL_EMAIL ||
-        'no-reply@indiantrademart.com',
+    await sendEmail({
       to: safeTo,
       subject,
       text,
       html,
+      purpose: 'notification',
     });
     return true;
   } catch (error) {
@@ -668,7 +627,7 @@ router.post(
           buyersMatched,
           buyersBellSent,
           buyersEmailSent,
-          emailConfigured: Boolean(getReminderTransporter()),
+          emailConfigured: isEmailTransportConfigured(),
         },
       });
     } catch (error) {

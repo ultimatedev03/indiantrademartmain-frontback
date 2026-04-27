@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import nodemailer from "nodemailer";
+import { isEmailTransportConfigured, sendEmail } from "../../server/lib/emailService.js";
 import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -61,58 +61,17 @@ const normalizeDoc = (d) => {
 const nowIso = () => new Date().toISOString();
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-let cachedReminderTransporter = null;
-let reminderTransportChecked = false;
-
-const createReminderTransporter = () => {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
-  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.GMAIL_EMAIL,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-  }
-
-  return null;
-};
-
-const getReminderTransporter = () => {
-  if (reminderTransportChecked) return cachedReminderTransporter;
-  reminderTransportChecked = true;
-  cachedReminderTransporter = createReminderTransporter();
-  return cachedReminderTransporter;
-};
-
 const sendReminderEmail = async ({ to, subject, text, html }) => {
   const safeTo = normalizeEmail(to);
-  const transporter = getReminderTransporter();
-  if (!safeTo || !transporter) return false;
+  if (!safeTo) return false;
 
   try {
-    await transporter.sendMail({
-      from:
-        process.env.MAIL_FROM ||
-        process.env.SMTP_USER ||
-        process.env.GMAIL_EMAIL ||
-        "no-reply@indiantrademart.com",
+    await sendEmail({
       to: safeTo,
       subject,
       text,
       html,
+      purpose: "notification",
     });
     return true;
   } catch (error) {
@@ -517,7 +476,7 @@ export async function handler(event) {
           buyersMatched,
           buyersBellSent,
           buyersEmailSent,
-          emailConfigured: Boolean(getReminderTransporter()),
+          emailConfigured: isEmailTransportConfigured(),
         },
       });
     }

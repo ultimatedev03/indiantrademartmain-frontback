@@ -1,10 +1,9 @@
-import nodemailer from "nodemailer";
 import jwt from "jsonwebtoken";
 import { createClient } from "@supabase/supabase-js";
 import { assertCaptchaForNetlifyEvent } from "../../server/lib/captcha.js";
 import { SECURITY_HEADERS } from "../../server/lib/httpSecurity.js";
 import { cacheDelete, cacheGetJson, cacheSetJson, isRedisConfigured } from "../../server/lib/redisCache.js";
-import { isResendConfigured, sendResendEmail } from "../../server/lib/resendMailer.js";
+import { sendOtpEmail as sendOtpMail } from "../../server/lib/emailService.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -32,113 +31,8 @@ const json = (statusCode, body) => ({
   body: JSON.stringify(body),
 });
 
-const sanitizeEnvValue = (value) => {
-  if (typeof value !== "string") return "";
-  let cleaned = value.trim();
-  if (
-    (cleaned.startsWith("\"") && cleaned.endsWith("\"")) ||
-    (cleaned.startsWith("'") && cleaned.endsWith("'"))
-  ) {
-    cleaned = cleaned.slice(1, -1).trim();
-  }
-  return cleaned;
-};
-
-const readEnv = (...keys) => {
-  for (const key of keys) {
-    const value = sanitizeEnvValue(process.env[key]);
-    if (value) return value;
-  }
-  return "";
-};
-
-const parseBoolean = (value, fallback = false) => {
-  const normalized = String(value || "").trim().toLowerCase();
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  return fallback;
-};
-
-const SMTP_CONFIG = Object.freeze({
-  host: readEnv("SMTP_HOST", "MAIL_HOST"),
-  port: Number.parseInt(readEnv("SMTP_PORT", "MAIL_PORT") || "587", 10),
-  secure: parseBoolean(readEnv("SMTP_SECURE", "MAIL_SECURE"), false),
-  user: readEnv("SMTP_USER", "SMTP_USERNAME", "MAIL_USER", "MAIL_USERNAME"),
-  pass: readEnv("SMTP_PASS", "SMTP_PASSWORD", "MAIL_PASS", "MAIL_PASSWORD")
-});
-
-const GMAIL_CONFIG = Object.freeze({
-  email: readEnv("GMAIL_EMAIL", "GMAIL_USER", "VITE_GMAIL_EMAIL"),
-  appPassword: readEnv("GMAIL_APP_PASSWORD", "GMAIL_PASSWORD", "VITE_GMAIL_APP_PASSWORD").replace(
-    /[\s\u200B-\u200D\uFEFF]+/g,
-    ""
-  )
-});
-
-const OTP_FROM_NAME = readEnv("OTP_FROM_NAME") || "IndianTradeMart";
-const OTP_FROM_EMAIL = readEnv("OTP_FROM_EMAIL");
 const OTP_TTL_SECONDS = 120;
 const OTP_REDIS_KEY_PREFIX = "auth_otp:";
-
-let cachedMailers = null;
-const getMailers = () => {
-  if (cachedMailers) return cachedMailers;
-
-  const mailers = [];
-
-  if (isResendConfigured()) {
-    mailers.push({
-      provider: "RESEND",
-      send: ({ to, subject, html }) =>
-        sendResendEmail({
-          to,
-          subject,
-          html,
-          fromName: OTP_FROM_NAME,
-          fromEmail: OTP_FROM_EMAIL
-        })
-    });
-  }
-
-  if (SMTP_CONFIG.host && SMTP_CONFIG.user && SMTP_CONFIG.pass) {
-    mailers.push({
-      provider: "SMTP",
-      fromEmail: OTP_FROM_EMAIL || SMTP_CONFIG.user,
-      transporter: nodemailer.createTransport({
-        host: SMTP_CONFIG.host,
-        port: Number.isNaN(SMTP_CONFIG.port) ? 587 : SMTP_CONFIG.port,
-        secure: SMTP_CONFIG.secure,
-        auth: {
-          user: SMTP_CONFIG.user,
-          pass: SMTP_CONFIG.pass
-        }
-      })
-    });
-  }
-
-  if (GMAIL_CONFIG.email && GMAIL_CONFIG.appPassword) {
-    mailers.push({
-      provider: "GMAIL",
-      fromEmail: OTP_FROM_EMAIL || GMAIL_CONFIG.email,
-      transporter: nodemailer.createTransport({
-        service: "gmail",
-        auth: {
-          user: GMAIL_CONFIG.email,
-          pass: GMAIL_CONFIG.appPassword
-        }
-      })
-    });
-  }
-
-  if (!mailers.length) {
-    throw new Error(
-      "Email transporter is not configured. Set RESEND_API_KEY/RESEND_FROM_EMAIL, SMTP_* or GMAIL_EMAIL/GMAIL_APP_PASSWORD in Netlify environment variables."
-    );
-  }
-
-  cachedMailers = mailers;
-  return cachedMailers;
-};
 
 const parseRequestBody = (event) => {
   if (!event?.body) return {};
@@ -238,61 +132,24 @@ function isValidEmail(email) {
 }
 
 async function sendOtpEmail(email, otp) {
-  const mailers = getMailers();
-  const failures = [];
-  const subject = `Your OTP Code: ${otp}`;
-  const html = `
-    <html>
-      <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="text-align: center;">
-          <h2 style="color: #003D82;">Email Verification</h2>
-          <p style="font-size: 16px; color: #333;">Your OTP verification code is:</p>
-          <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
-            <h1 style="color: #003D82; letter-spacing: 8px; font-size: 36px; margin: 0;">${otp}</h1>
-          </div>
-          <p style="color: #666; font-size: 14px;">This code will expire in 2 minutes.</p>
-          <p style="color: #999; font-size: 12px; margin-top: 20px;">If you didn't request this code, please ignore this email.</p>
-        </div>
-        <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
-        <p style="text-align: center; color: #999; font-size: 11px;">
-          &copy; ${new Date().getFullYear()} IndianTradeMart. All rights reserved.
-        </p>
-      </body>
-    </html>
-  `;
-
-  for (const mailer of mailers) {
-    const mailOptions = {
-      from: mailer.fromEmail ? `${OTP_FROM_NAME} <${mailer.fromEmail}>` : OTP_FROM_NAME,
-      to: email,
-      subject,
-      html
-    };
-
-    try {
-      if (mailer.send) {
-        await mailer.send({ to: email, subject, html });
-      } else {
-        await mailer.transporter.sendMail(mailOptions);
-      }
-      return;
-    } catch (error) {
-      const responseCode = Number(error?.responseCode);
-      const isAuthError = error?.code === "EAUTH" || responseCode === 535;
-      failures.push({ provider: mailer.provider, isAuthError, code: error?.code, responseCode });
-      console.error(`[otp function] ${mailer.provider} send failed`, {
-        code: error?.code,
-        responseCode: error?.responseCode
-      });
+  try {
+    await sendOtpMail(email, otp);
+  } catch (error) {
+    console.error("[otp function] send failed", {
+      code: error?.code,
+      responseCode: error?.responseCode || error?.statusCode,
+      message: error?.message
+    });
+    if (
+      error?.code === "EAUTH" ||
+      Number(error?.responseCode || error?.statusCode) === 401 ||
+      Number(error?.responseCode || error?.statusCode) === 403 ||
+      Number(error?.responseCode || error?.statusCode) === 535
+    ) {
+      throw new Error("Email service authentication failed. Please update Netlify Resend or SMTP credentials.");
     }
+    throw error;
   }
-
-  if (failures.some((item) => item.isAuthError)) {
-    throw new Error("Email service authentication failed. Please update Netlify SMTP credentials.");
-  }
-
-  console.error("[otp function] Failed to send OTP email with all configured providers.", { failures });
-  throw new Error("Failed to send OTP email");
 }
 
 const getOtpCacheKey = (email) => `${OTP_REDIS_KEY_PREFIX}${normalizeEmail(email)}`;

@@ -1,11 +1,11 @@
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { buildAuthLookupMap, loadAuthLookupCache } from '../lib/authLookupCache.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 
 const router = express.Router();
 
 const BUYER_NOTIF_PREFIX = 'buyer_notif:';
-const AUTH_LOOKUP_CACHE_TTL_MS = 60 * 1000;
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeId = (value) => String(value || '').trim();
@@ -41,75 +41,53 @@ const toBuyerNotifId = (id) => `${BUYER_NOTIF_PREFIX}${id}`;
 const isBuyerNotifId = (id) => String(id || '').startsWith(BUYER_NOTIF_PREFIX);
 const fromBuyerNotifId = (id) => String(id || '').replace(BUYER_NOTIF_PREFIX, '');
 
-let authLookupCacheAt = 0;
-let authLookupByEmail = new Map();
-
 const loadAuthLookupByEmail = async ({ force = false } = {}) => {
-  const now = Date.now();
-  if (
-    !force &&
-    authLookupByEmail.size > 0 &&
-    now - authLookupCacheAt <= AUTH_LOOKUP_CACHE_TTL_MS
-  ) {
-    return authLookupByEmail;
-  }
+  return loadAuthLookupCache({
+    force,
+    loader: async () => {
+      const emailMap = new Map();
 
-  const emailMap = new Map();
+      try {
+        let page = 1;
+        const perPage = 50;
+        let errorPages = 0;
 
-  try {
-    let page = 1;
-    const perPage = 50;
-    let errorPages = 0;
+        while (true) {
+          const paged = await supabase.auth.admin.listUsers({ page, perPage });
+          const pagedError = paged?.error || null;
+          const pagedUsers = Array.isArray(paged?.data?.users) ? paged.data.users : [];
 
-    while (true) {
-      const paged = await supabase.auth.admin.listUsers({ page, perPage });
-      const pagedError = paged?.error || null;
-      const pagedUsers = Array.isArray(paged?.data?.users) ? paged.data.users : [];
-
-      if (pagedError) {
-        // Some projects intermittently fail on a page; skip forward instead of bailing.
-        errorPages += 1;
-        if (page === 1) {
-          const fallback = await supabase.auth.admin.listUsers();
-          if (!fallback?.error && Array.isArray(fallback?.data?.users)) {
-            fallback.data.users.forEach((user) => {
-              const email = normalizeEmail(user?.email);
-              const id = normalizeId(user?.id);
-              if (email && id) emailMap.set(email, id);
-            });
+          if (pagedError) {
+            errorPages += 1;
+            if (page === 1) {
+              const fallback = await supabase.auth.admin.listUsers();
+              if (!fallback?.error && Array.isArray(fallback?.data?.users)) {
+                return buildAuthLookupMap(fallback.data.users);
+              }
+              break;
+            }
+            if (errorPages >= 5) break;
+            page += 1;
+            if (page > 50) break;
+            continue;
           }
-          break;
+
+          errorPages = 0;
+          buildAuthLookupMap(pagedUsers).forEach((id, email) => {
+            emailMap.set(email, id);
+          });
+
+          if (pagedUsers.length < perPage) break;
+          page += 1;
+          if (page > 50) break;
         }
-        if (errorPages >= 5) break;
-        page += 1;
-        if (page > 50) break;
-        continue;
+      } catch {
+        return null;
       }
 
-      errorPages = 0;
-      const users = pagedUsers;
-      users.forEach((user) => {
-        const email = normalizeEmail(user?.email);
-        const id = normalizeId(user?.id);
-        if (email && id) emailMap.set(email, id);
-      });
-
-      if (users.length < perPage) break;
-      page += 1;
-      if (page > 50) break;
-    }
-  } catch {
-    // keep previous cache if refresh fails
-  }
-
-  if (emailMap.size > 0) {
-    authLookupByEmail = emailMap;
-    authLookupCacheAt = now;
-  } else if (force) {
-    authLookupCacheAt = now;
-  }
-
-  return authLookupByEmail;
+      return emailMap;
+    },
+  });
 };
 
 const resolveAuthUserIdByEmail = async (email) => {

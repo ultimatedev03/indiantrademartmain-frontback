@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { buildAuthLookupMap, loadAuthLookupCache } from '../../server/lib/authLookupCache.js';
 import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
@@ -20,7 +21,6 @@ const supabase = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '
 });
 
 const BUYER_NOTIF_PREFIX = 'buyer_notif:';
-const AUTH_LOOKUP_CACHE_TTL_MS = 60 * 1000;
 
 const toBuyerNotifId = (id) => `${BUYER_NOTIF_PREFIX}${id}`;
 const isBuyerNotifId = (id) => String(id || '').startsWith(BUYER_NOTIF_PREFIX);
@@ -28,8 +28,6 @@ const fromBuyerNotifId = (id) => String(id || '').replace(BUYER_NOTIF_PREFIX, ''
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeId = (value) => String(value || '').trim();
 
-let authLookupCacheAt = 0;
-let authLookupByEmail = new Map();
 let warnedMissingJwtSecret = false;
 
 const getOrigin = (event) => event?.headers?.origin || event?.headers?.Origin || '*';
@@ -226,71 +224,54 @@ const mapBuyerNotificationRow = (row = {}) => ({
 });
 
 const loadAuthLookupByEmail = async ({ force = false } = {}) => {
-  const now = Date.now();
-  if (
-    !force &&
-    authLookupByEmail.size > 0 &&
-    now - authLookupCacheAt <= AUTH_LOOKUP_CACHE_TTL_MS
-  ) {
-    return authLookupByEmail;
-  }
+  return loadAuthLookupCache({
+    force,
+    loader: async () => {
+      const emailMap = new Map();
 
-  const emailMap = new Map();
+      try {
+        let page = 1;
+        const perPage = 50;
+        let errorPages = 0;
 
-  try {
-    let page = 1;
-    const perPage = 50;
-    let errorPages = 0;
+        while (true) {
+          const paged = await supabase.auth.admin.listUsers({ page, perPage });
+          const pagedError = paged?.error || null;
+          const pagedUsers = Array.isArray(paged?.data?.users) ? paged.data.users : [];
 
-    while (true) {
-      const paged = await supabase.auth.admin.listUsers({ page, perPage });
-      const pagedError = paged?.error || null;
-      const pagedUsers = Array.isArray(paged?.data?.users) ? paged.data.users : [];
+          if (pagedError) {
+            errorPages += 1;
 
-      if (pagedError) {
-        errorPages += 1;
+            if (page === 1) {
+              const fallback = await supabase.auth.admin.listUsers();
+              if (!fallback?.error && Array.isArray(fallback?.data?.users)) {
+                return buildAuthLookupMap(fallback.data.users);
+              }
+              break;
+            }
 
-        if (page === 1) {
-          const fallback = await supabase.auth.admin.listUsers();
-          if (!fallback?.error && Array.isArray(fallback?.data?.users)) {
-            fallback.data.users.forEach((user) => {
-              const email = normalizeEmail(user?.email);
-              const id = normalizeId(user?.id);
-              if (email && id) emailMap.set(email, id);
-            });
+            if (errorPages >= 5) break;
+            page += 1;
+            if (page > 50) break;
+            continue;
           }
-          break;
-        }
 
-        if (errorPages >= 5) break;
-        page += 1;
-        if (page > 50) break;
-        continue;
+          errorPages = 0;
+          buildAuthLookupMap(pagedUsers).forEach((id, email) => {
+            emailMap.set(email, id);
+          });
+
+          if (pagedUsers.length < perPage) break;
+          page += 1;
+          if (page > 50) break;
+        }
+      } catch {
+        return null;
       }
 
-      errorPages = 0;
-      pagedUsers.forEach((user) => {
-        const email = normalizeEmail(user?.email);
-        const id = normalizeId(user?.id);
-        if (email && id) emailMap.set(email, id);
-      });
-
-      if (pagedUsers.length < perPage) break;
-      page += 1;
-      if (page > 50) break;
-    }
-  } catch {
-    // keep previous cache on refresh failure
-  }
-
-  if (emailMap.size > 0) {
-    authLookupByEmail = emailMap;
-    authLookupCacheAt = now;
-  } else if (force) {
-    authLookupCacheAt = now;
-  }
-
-  return authLookupByEmail;
+      return emailMap;
+    },
+  });
 };
 
 const resolveAuthUserIdByEmail = async (email) => {

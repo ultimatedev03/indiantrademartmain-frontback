@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabaseClient.js';
 import { razorpayInstance } from '../lib/razorpayClient.js';
 import { generateInvoiceNumber, generateInvoicePDF, generateInvoiceSummary } from '../lib/invoiceGenerator.js';
 import { sendSubscriptionActivatedNotification } from '../lib/notificationService.js';
-import nodemailer from 'nodemailer';
+import { sendEmail } from '../lib/emailService.js';
 import { writeAuditLog } from '../lib/audit.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { consumeLeadForVendorWithCompat } from '../lib/leadConsumptionCompat.js';
@@ -344,35 +344,6 @@ async function resolveOfferForPayment({
 
   return fallback;
 }
-
-/**
- * Create email transporter
- */
-const createTransporter = () => {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-  }
-
-  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_EMAIL,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-  }
-
-  return null;
-};
 
 /**
  * POST /api/payment/initiate
@@ -715,11 +686,9 @@ router.post('/verify', async (req, res) => {
 
     // Send email with invoice
     try {
-      const transporter = createTransporter();
-      if (transporter && vendor.email) {
+      if (vendor.email) {
         const invoiceSummary = generateInvoiceSummary(invoicePdfData);
-        await transporter.sendMail({
-          from: process.env.GMAIL_EMAIL || process.env.SMTP_USER,
+        await sendEmail({
           to: vendor.email,
           subject: `Invoice ${invoiceNumber} - Subscription Purchase`,
           html: `
@@ -730,12 +699,13 @@ router.post('/verify', async (req, res) => {
             <p><strong>Subscription Period:</strong> ${new Date().toLocaleDateString('en-IN')} to ${endDate.toLocaleDateString('en-IN')}</p>
             <p>Thank you for choosing Indian Trade Mart!</p>
           `,
+          text: `Subscription Confirmation\n\nDear ${vendor.company_name},\n\nYour subscription has been successfully activated.\n\nSubscription Period: ${new Date().toLocaleDateString('en-IN')} to ${endDate.toLocaleDateString('en-IN')}\n\nThank you for choosing Indian Trade Mart!`,
+          purpose: 'billing',
           attachments: [
             {
               filename: `${invoiceNumber}.pdf`,
               content: invoicePdf.split(',')[1],
               encoding: 'base64',
-              contentType: 'application/pdf',
             },
           ],
         });

@@ -1,23 +1,39 @@
 import fs from 'fs';
 import path from 'path';
-import globPkg from 'glob';
 
-// ✅ CJS/ESM compatible globSync resolver
-const globSync =
-  (globPkg && typeof globPkg.globSync === 'function' && globPkg.globSync) ||
-  (globPkg && typeof globPkg.sync === 'function' && globPkg.sync) ||
-  null;
+function walkFiles(rootDir, allowedExtensions = new Set()) {
+  const results = [];
+
+  if (!fs.existsSync(rootDir)) return results;
+
+  const visit = (currentDir) => {
+    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+
+      if (entry.isDirectory()) {
+        visit(fullPath);
+        continue;
+      }
+
+      if (!entry.isFile()) continue;
+
+      const ext = path.extname(entry.name).toLowerCase();
+      if (allowedExtensions.size > 0 && !allowedExtensions.has(ext)) continue;
+      results.push(fullPath);
+    }
+  };
+
+  visit(rootDir);
+  return results;
+}
 
 function scanPagesForHelmet(pagesDir) {
   const pages = [];
 
-  if (!globSync) {
-    console.warn('⚠️  globSync not available. Skipping Helmet page scan.');
-    return pages;
-  }
-
   // Find all JSX/TSX files in src/pages directory
-  const pageFiles = globSync(`${pagesDir}/**/*.{jsx,tsx}`, { nodir: true }) || [];
+  const pageFiles = walkFiles(pagesDir, new Set(['.jsx', '.tsx']));
 
   for (const file of pageFiles) {
     const content = fs.readFileSync(file, 'utf8');

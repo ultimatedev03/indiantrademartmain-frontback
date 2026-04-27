@@ -26,6 +26,7 @@ import {
   getPublicUserById,
 } from '../lib/auth.js';
 import { assertCaptchaForExpressRequest } from '../lib/captcha.js';
+import { sendWelcomeEmail } from '../lib/emailService.js';
 import { validateStrongPassword } from '../lib/passwordPolicy.js';
 
 const router = express.Router();
@@ -837,6 +838,14 @@ router.post('/register', async (req, res) => {
         ...buyerProfileInput,
       });
     }
+
+    sendWelcomeEmail({
+      to: email,
+      fullName: full_name || user.full_name,
+      role,
+    }).catch((error) => {
+      logger.warn('[Auth] Welcome email failed:', error?.message || error);
+    });
 
     const payload = buildAuthUserPayload(user);
     if (buyerProfile) {

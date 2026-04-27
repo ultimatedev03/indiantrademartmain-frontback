@@ -1,6 +1,6 @@
-import nodemailer from 'nodemailer';
 import { createClient } from '@supabase/supabase-js';
 import jwt from 'jsonwebtoken';
+import { sendEmail } from '../../server/lib/emailService.js';
 import { SECURITY_HEADERS } from '../../server/lib/httpSecurity.js';
 
 const AUTH_COOKIE_NAME = process.env.AUTH_COOKIE_NAME || 'itm_access';
@@ -16,39 +16,6 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 const supabase = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '', {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
 });
-
-let cachedTransporter = null;
-const getTransporter = () => {
-  if (cachedTransporter) return cachedTransporter;
-
-  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-    cachedTransporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: parseInt(process.env.SMTP_PORT || '587', 10),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    });
-    return cachedTransporter;
-  }
-
-  if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-    cachedTransporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: process.env.GMAIL_EMAIL,
-        pass: process.env.GMAIL_APP_PASSWORD,
-      },
-    });
-    return cachedTransporter;
-  }
-
-  throw new Error(
-    'Email transporter config missing. Set SMTP_HOST/SMTP_USER/SMTP_PASS (recommended) or GMAIL_EMAIL/GMAIL_APP_PASSWORD for local.'
-  );
-};
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 const normalizeRole = (value) => String(value || '').trim().toUpperCase();
@@ -865,7 +832,6 @@ const canActorAccessProposalMessages = async (user = {}, proposal = {}) => {
 };
 
 const sendQuotationEmail = async (buyerEmail, quotationData, isRegistered) => {
-  const transporter = getTransporter();
   const { vendor, quotation } = quotationData;
 
   let attachments = [];
@@ -900,11 +866,10 @@ const sendQuotationEmail = async (buyerEmail, quotationData, isRegistered) => {
         buyerEmail
       )}`;
 
-  const mailOptions = {
-    from: `${process.env.APP_NAME || 'IndianTradeMart'} <${process.env.GMAIL_EMAIL || process.env.SMTP_USER}>`,
+  await sendEmail({
     to: buyerEmail,
     subject: `Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}`,
-    ...(attachments.length ? { attachments } : {}),
+    purpose: 'quotation',
     text: [
       `Hello ${buyerEmail.split('@')[0] || 'Buyer'},`,
       '',
@@ -921,11 +886,27 @@ const sendQuotationEmail = async (buyerEmail, quotationData, isRegistered) => {
       '',
       registrationText,
     ].join('\n'),
-  };
-
-  const info = await transporter.sendMail(mailOptions);
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.6;">
+        <h2>Quotation from ${vendor.company_name || vendor.owner_name || 'Vendor'}</h2>
+        <p>Hello ${buyerEmail.split('@')[0] || 'Buyer'},</p>
+        <p><strong>Vendor:</strong> ${vendor.owner_name || 'N/A'} (${vendor.company_name || 'N/A'})</p>
+        <p><strong>Phone:</strong> ${vendor.phone || 'N/A'}</p>
+        <p><strong>Email:</strong> ${vendor.email || 'N/A'}</p>
+        <hr />
+        <p><strong>Title:</strong> ${quotation.title || ''}</p>
+        <p><strong>Amount:</strong> ${quotation.quotation_amount || ''}</p>
+        <p><strong>Quantity:</strong> ${quotation.quantity || ''}</p>
+        <p><strong>Validity Days:</strong> ${quotation.validity_days || ''}</p>
+        <p><strong>Delivery Days:</strong> ${quotation.delivery_days || ''}</p>
+        <p><strong>Terms:</strong> ${quotation.terms_conditions || ''}</p>
+        <p style="margin-top:16px;">${registrationText}</p>
+      </div>
+    `,
+    ...(attachments.length ? { attachments } : {}),
+  });
   // eslint-disable-next-line no-console
-  console.log('Quotation email sent:', info.messageId, 'to:', buyerEmail);
+  console.log('Quotation email sent to:', buyerEmail);
   return true;
 };
 

@@ -1,5 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 import { upsertPublicUser } from "./auth.js";
+import { buildAuthLookupMap, loadAuthLookupCache } from "./authLookupCache.js";
 
 const nowIso = () => new Date().toISOString();
 
@@ -23,10 +24,6 @@ const resolveRoleCandidates = (role) => {
   const aliases = ROLE_ALIASES[normalized] || [normalized];
   return Array.from(new Set(aliases.map(normalizeRole).filter(Boolean)));
 };
-
-const AUTH_LOOKUP_CACHE_TTL_MS = 60 * 1000;
-let authLookupCacheAt = 0;
-let authLookupByEmail = new Map();
 
 async function getPublicUserById(userId) {
   const safeUserId = String(userId || "").trim();
@@ -63,30 +60,14 @@ async function getAuthUserIdById(userId) {
 }
 
 async function loadAuthLookupByEmail(force = false) {
-  const now = Date.now();
-  if (
-    !force &&
-    authLookupByEmail.size > 0 &&
-    now - authLookupCacheAt <= AUTH_LOOKUP_CACHE_TTL_MS
-  ) {
-    return authLookupByEmail;
-  }
-
-  const { data, error } = await supabase.auth.admin.listUsers();
-  if (error) {
-    return authLookupByEmail;
-  }
-
-  const users = data?.users || [];
-  const map = new Map();
-  users.forEach((user) => {
-    const email = normalizeEmail(user?.email);
-    if (email && user?.id) map.set(email, String(user.id));
+  return loadAuthLookupCache({
+    force,
+    loader: async () => {
+      const { data, error } = await supabase.auth.admin.listUsers();
+      if (error) return null;
+      return buildAuthLookupMap(data?.users || []);
+    },
   });
-
-  authLookupByEmail = map;
-  authLookupCacheAt = now;
-  return authLookupByEmail;
 }
 
 async function getAuthUserIdByEmail(email) {
