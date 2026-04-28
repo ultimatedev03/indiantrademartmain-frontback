@@ -14,6 +14,7 @@ import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { writeAuditLog } from '../lib/audit.js';
+import { invalidateDirCache } from '../lib/cacheMiddleware.js';
 
 const router = express.Router();
 
@@ -391,6 +392,7 @@ router.post('/products', requireAuth(), async (req, res) => {
       lastError = e;
     }
     if (!data) return res.status(500).json({ success: false, error: lastError?.message || 'Failed to create product' });
+    invalidateDirCache();
     return res.status(201).json({ success: true, product: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -404,6 +406,7 @@ router.put('/products/:productId', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('products').update(req.body).eq('id', req.params.productId);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true, product: { id: req.params.productId, ...req.body } });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -462,6 +465,7 @@ router.post('/categories/head', requireAuth(), async (req, res) => {
     const payload = { ...req.body, slug: req.body.slug || makeSlug(req.body.name) };
     const { data, error } = await supabase.from('head_categories').insert([payload]).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.status(201).json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -475,6 +479,7 @@ router.put('/categories/head/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { data, error } = await supabase.from('head_categories').update(req.body).eq('id', req.params.id).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -488,6 +493,7 @@ router.delete('/categories/head/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('head_categories').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -516,6 +522,7 @@ router.post('/categories/sub', requireAuth(), async (req, res) => {
     const payload = { ...req.body, slug: req.body.slug || makeSlug(req.body.name) };
     const { data, error } = await supabase.from('sub_categories').insert([payload]).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.status(201).json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -529,6 +536,7 @@ router.put('/categories/sub/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { data, error } = await supabase.from('sub_categories').update(req.body).eq('id', req.params.id).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -542,6 +550,7 @@ router.delete('/categories/sub/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('sub_categories').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -570,6 +579,7 @@ router.post('/categories/micro', requireAuth(), async (req, res) => {
     const payload = { ...req.body, slug: req.body.slug || makeSlug(req.body.name) };
     const { data, error } = await supabase.from('micro_categories').insert([payload]).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.status(201).json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -583,6 +593,7 @@ router.put('/categories/micro/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { data, error } = await supabase.from('micro_categories').update(req.body).eq('id', req.params.id).select().single();
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true, category: data });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -596,6 +607,7 @@ router.delete('/categories/micro/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('micro_categories').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -645,6 +657,7 @@ router.post('/categories/import-csv', requireAuth(), async (req, res) => {
         success++;
       } catch (e) { failed++; errors.push(e.message); }
     }
+    invalidateDirCache();
     return res.json({ success: true, imported: success, failed, errors });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -673,6 +686,7 @@ router.post('/locations/states', requireAuth(), async (req, res) => {
     const slug = makeSlug(name);
     const { error } = await supabase.from('states').insert([{ name, slug, is_active: true }]);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.status(201).json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -687,6 +701,7 @@ router.put('/locations/states/:id', requireAuth(), async (req, res) => {
     const { name } = req.body || {};
     const { error } = await supabase.from('states').update({ name }).eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -700,6 +715,7 @@ router.delete('/locations/states/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('states').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -729,6 +745,7 @@ router.post('/locations/cities', requireAuth(), async (req, res) => {
     const slug = makeSlug(name);
     const { error } = await supabase.from('cities').insert([{ state_id, name, slug, is_active: true }]);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.status(201).json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -743,6 +760,7 @@ router.put('/locations/cities/:id', requireAuth(), async (req, res) => {
     const { name } = req.body || {};
     const { error } = await supabase.from('cities').update({ name }).eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -756,6 +774,7 @@ router.delete('/locations/cities/:id', requireAuth(), async (req, res) => {
     if (!emp) return;
     const { error } = await supabase.from('cities').delete().eq('id', req.params.id);
     if (error) return res.status(500).json({ success: false, error: error.message });
+    invalidateDirCache();
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
@@ -787,6 +806,7 @@ router.post('/locations/import-csv', requireAuth(), async (req, res) => {
         } else { failed++; }
       } catch { failed++; }
     }
+    invalidateDirCache();
     return res.json({ success: true, imported: success, failed });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });

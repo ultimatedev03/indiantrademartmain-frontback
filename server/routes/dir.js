@@ -2,6 +2,7 @@
 import { logger } from '../utils/logger.js';
 import express from 'express';
 import { supabase } from '../lib/supabaseClient.js';
+import { cacheResponse } from '../lib/cacheMiddleware.js';
 
 const router = express.Router();
 
@@ -377,13 +378,13 @@ async function handleRankedProducts(req, res) {
 }
 
 // ✅ IMPORTANT: your UI search page calls /api/dir/search
-router.get('/search', handleRankedProducts);
+router.get('/search', cacheResponse('dir:search', 120), handleRankedProducts);
 
 // existing endpoint
-router.get('/products', handleRankedProducts);
+router.get('/products', cacheResponse('dir:products', 120), handleRankedProducts);
 
 // --- PUBLIC LOCATION ROUTES ---
-router.get('/states', async (req, res) => {
+router.get('/states', cacheResponse('dir:states', 3600), async (req, res) => {
   try {
     const { data, error } = await supabase.from('states').select('id, name, slug').order('name');
     if (error) throw error;
@@ -393,7 +394,7 @@ router.get('/states', async (req, res) => {
   }
 });
 
-router.get('/cities', async (req, res) => {
+router.get('/cities', cacheResponse('dir:cities', 3600), async (req, res) => {
   try {
     const { stateId } = req.query;
     if (!isValidId(stateId)) return res.status(400).json({ success: false, error: 'stateId required' });
@@ -411,7 +412,7 @@ router.get('/cities', async (req, res) => {
 });
 
 // --- PUBLIC CATEGORY ROUTES ---
-router.get('/head-categories', async (req, res) => {
+router.get('/head-categories', cacheResponse('dir:head-categories', 1800), async (req, res) => {
   try {
     const { data, error } = await supabase.from('head_categories').select('id, name, slug, image_url, description').eq('is_active', true).order('name');
     if (error) throw error;
@@ -421,7 +422,7 @@ router.get('/head-categories', async (req, res) => {
   }
 });
 
-router.get('/sub-categories', async (req, res) => {
+router.get('/sub-categories', cacheResponse('dir:sub-categories', 1800), async (req, res) => {
   try {
     const { headId } = req.query;
     if (!isValidId(headId)) return res.status(400).json({ success: false, error: 'headId required' });
@@ -433,7 +434,7 @@ router.get('/sub-categories', async (req, res) => {
   }
 });
 
-router.get('/micro-categories', async (req, res) => {
+router.get('/micro-categories', cacheResponse('dir:micro-categories', 1800), async (req, res) => {
   try {
     const { subId } = req.query;
     if (!isValidId(subId)) return res.status(400).json({ success: false, error: 'subId required' });
@@ -447,7 +448,7 @@ router.get('/micro-categories', async (req, res) => {
 
 // --- ADVANCED DIRECTORY ENDPOINTS ---
 
-router.get('/search-micro', async (req, res) => {
+router.get('/search-micro', cacheResponse('dir:search-micro', 300), async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (!q || q.length < 2) return res.json({ success: true, results: [] });
@@ -548,7 +549,7 @@ router.get('/search-micro', async (req, res) => {
   }
 });
 
-router.get('/products-preview', async (req, res) => {
+router.get('/products-preview', cacheResponse('dir:products-preview', 300), async (req, res) => {
   try {
     const microIdsParam = String(req.query.microIds || '');
     const ids = microIdsParam.split(',').filter(Boolean);
@@ -583,7 +584,7 @@ router.get('/products-preview', async (req, res) => {
   }
 });
 
-router.get('/micro-covers', async (req, res) => {
+router.get('/micro-covers', cacheResponse('dir:micro-covers', 600), async (req, res) => {
   try {
     const microIdsParam = String(req.query.microIds || '');
     const ids = microIdsParam.split(',').filter(Boolean);
@@ -638,7 +639,7 @@ router.get('/micro-covers', async (req, res) => {
   }
 });
 
-router.get('/category/:type/:slug', async (req, res) => {
+router.get('/category/:type/:slug', cacheResponse('dir:category-detail', 1800, { includeParams: true }), async (req, res) => {
   try {
     const { type, slug } = req.params;
     
@@ -682,7 +683,7 @@ router.get('/category/:type/:slug', async (req, res) => {
   }
 });
 
-router.get('/product/:slug', async (req, res) => {
+router.get('/product/:slug', cacheResponse('dir:product', 300, { includeParams: true }), async (req, res) => {
   try {
     const slug = req.params.slug;
     if (!slug) return res.status(400).json({ success: false, error: 'Slug required' });
@@ -749,7 +750,7 @@ const fetchMicroCategoriesBySubIds = async (subIds) => {
   return results;
 };
 
-router.get('/categories/home-showcase', async (req, res) => {
+router.get('/categories/home-showcase', cacheResponse('dir:home-showcase', 900), async (req, res) => {
   try {
     const headLimit = Number(req.query.headLimit) || 0;
     const subLimit = Number(req.query.subLimit) || 0;
@@ -810,7 +811,7 @@ router.get('/categories/home-showcase', async (req, res) => {
   }
 });
 
-router.get('/categories/children', async (req, res) => {
+router.get('/categories/children', cacheResponse('dir:categories-children', 1800), async (req, res) => {
   try {
     const { parentId, parentType } = req.query;
     let table = parentType === 'SUB' ? 'micro_categories' : 'sub_categories';
@@ -827,7 +828,7 @@ router.get('/categories/children', async (req, res) => {
   }
 });
 
-router.get('/categories/top-level', async (req, res) => {
+router.get('/categories/top-level', cacheResponse('dir:categories-top', 1800), async (req, res) => {
   try {
     let r = await supabase.from('head_categories').select('*').eq('is_active', true).order('sort_order', { ascending: true }).order('name', { ascending: true });
     if (r.error && isMissingColumnErr(r.error, 'sort_order')) {
@@ -840,7 +841,7 @@ router.get('/categories/top-level', async (req, res) => {
   }
 });
 
-router.get('/categories/head-count', async (req, res) => {
+router.get('/categories/head-count', cacheResponse('dir:head-count', 1800), async (req, res) => {
   try {
     const { count, error } = await supabase.from('head_categories').select('*', { count: 'exact', head: true }).eq('is_active', true);
     if (error) throw error;
@@ -850,7 +851,7 @@ router.get('/categories/head-count', async (req, res) => {
   }
 });
 
-router.get('/category/universal/:slug', async (req, res) => {
+router.get('/category/universal/:slug', cacheResponse('dir:universal', 1800, { includeParams: true }), async (req, res) => {
   try {
     const { slug } = req.params;
     const { data: h } = await supabase.from('head_categories').select('*').eq('slug', slug).eq('is_active', true).maybeSingle();
@@ -869,7 +870,7 @@ router.get('/category/universal/:slug', async (req, res) => {
 });
 
 // GET /api/dir/vendor/:vendorSlug — public vendor profile by slug
-router.get('/vendor/:vendorSlug', async (req, res) => {
+router.get('/vendor/:vendorSlug', cacheResponse('dir:vendor', 300, { includeParams: true }), async (req, res) => {
   try {
     const { vendorSlug } = req.params;
     if (!vendorSlug) return res.status(400).json({ success: false, error: 'Vendor slug required' });
@@ -910,7 +911,7 @@ router.get('/vendor/:vendorSlug', async (req, res) => {
 });
 
 // GET /api/dir/categories — flat list of all categories (head level)
-router.get('/categories', async (req, res) => {
+router.get('/categories', cacheResponse('dir:categories', 1800), async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('head_categories')
@@ -925,7 +926,7 @@ router.get('/categories', async (req, res) => {
 });
 
 // GET /api/dir/hierarchy — full 3-level category hierarchy
-router.get('/hierarchy', async (req, res) => {
+router.get('/hierarchy', cacheResponse('dir:hierarchy', 1800), async (req, res) => {
   try {
     const [headsRes, subsRes, microsRes] = await Promise.all([
       supabase.from('head_categories').select('id, name, slug, image_url').eq('is_active', true).order('name'),
@@ -959,7 +960,7 @@ router.get('/hierarchy', async (req, res) => {
 });
 
 // GET /api/dir/products/list — product listing with filters
-router.get('/products/list', async (req, res) => {
+router.get('/products/list', cacheResponse('dir:products-list', 120), async (req, res) => {
   try {
     const microId = req.query.microId || req.query.micro_id || null;
     const q = safeQ(req.query.q || req.query.search || '');
@@ -993,7 +994,7 @@ router.get('/products/list', async (req, res) => {
 });
 
 // GET /api/dir/product/id/:productId — product by UUID/ID (not slug)
-router.get('/product/id/:productId', async (req, res) => {
+router.get('/product/id/:productId', cacheResponse('dir:product-id', 300, { includeParams: true }), async (req, res) => {
   try {
     const { productId } = req.params;
     if (!productId) return res.status(400).json({ success: false, error: 'Product ID required' });
@@ -1014,7 +1015,7 @@ router.get('/product/id/:productId', async (req, res) => {
 });
 
 // GET /api/dir/vendors/search — search vendors by keyword
-router.get('/vendors/search', async (req, res) => {
+router.get('/vendors/search', cacheResponse('dir:vendors-search', 120), async (req, res) => {
   try {
     const q = safeQ(req.query.q || req.query.search || '');
     const stateId = req.query.stateId || req.query.state_id || null;
@@ -1042,7 +1043,7 @@ router.get('/vendors/search', async (req, res) => {
 });
 
 // GET /api/dir/vendors/detail/:vendorId — vendor detail by UUID
-router.get('/vendors/detail/:vendorId', async (req, res) => {
+router.get('/vendors/detail/:vendorId', cacheResponse('dir:vendor-detail', 300, { includeParams: true }), async (req, res) => {
   try {
     const { vendorId } = req.params;
     if (!vendorId) return res.status(400).json({ success: false, error: 'Vendor ID required' });
@@ -1068,7 +1069,7 @@ router.get('/vendors/detail/:vendorId', async (req, res) => {
 });
 
 // GET /api/dir/vendors/:vendorId/ratings — vendor ratings summary
-router.get('/vendors/:vendorId/ratings', async (req, res) => {
+router.get('/vendors/:vendorId/ratings', cacheResponse('dir:vendor-ratings', 300, { includeParams: true }), async (req, res) => {
   try {
     const { vendorId } = req.params;
     const { data: vendor, error } = await supabase
@@ -1107,7 +1108,7 @@ router.get('/vendors/:vendorId/ratings', async (req, res) => {
 });
 
 // GET /api/dir/leads/public — public lead listings (read-only, no auth)
-router.get('/leads/public', async (req, res) => {
+router.get('/leads/public', cacheResponse('dir:leads-public', 120), async (req, res) => {
   try {
     const microId = req.query.microId || req.query.micro_id || null;
     const stateId = req.query.stateId || req.query.state_id || null;
@@ -1181,7 +1182,7 @@ router.post('/contact', async (req, res) => {
 
 // ✅ Aliases used by employeeApiComplete.js
 // GET /api/dir/categories/heads → same as /head-categories
-router.get('/categories/heads', async (req, res) => {
+router.get('/categories/heads', cacheResponse('dir:heads-alias', 1800), async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('head_categories')
@@ -1196,7 +1197,7 @@ router.get('/categories/heads', async (req, res) => {
 });
 
 // GET /api/dir/categories/subs?head_id=... → sub-categories by head
-router.get('/categories/subs', async (req, res) => {
+router.get('/categories/subs', cacheResponse('dir:subs-alias', 1800), async (req, res) => {
   try {
     const headId = req.query.head_id || req.query.headId || req.query.headCategoryId;
     if (!headId) return res.status(400).json({ success: false, error: 'head_id is required' });
@@ -1214,7 +1215,7 @@ router.get('/categories/subs', async (req, res) => {
 });
 
 // GET /api/dir/categories/micros?sub_id=... → micro-categories by sub
-router.get('/categories/micros', async (req, res) => {
+router.get('/categories/micros', cacheResponse('dir:micros-alias', 1800), async (req, res) => {
   try {
     const subId = req.query.sub_id || req.query.subId || req.query.subCategoryId;
     if (!subId) return res.status(400).json({ success: false, error: 'sub_id is required' });
