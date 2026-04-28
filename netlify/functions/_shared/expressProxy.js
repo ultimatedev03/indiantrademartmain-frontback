@@ -4,6 +4,7 @@ import app from '../../../server/app.js';
 const FUNCTION_ROUTE_MAP = Object.freeze({
   admin: '/api/admin',
   auth: '/api/auth',
+  dir: '/api/dir',
   employee: '/api/employee',
   finance: '/api/finance',
   payment: '/api/payment',
