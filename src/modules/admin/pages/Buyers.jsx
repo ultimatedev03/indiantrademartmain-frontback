@@ -25,6 +25,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Eye, Edit, Loader2, Search, Ban, CheckCircle2 } from "lucide-react";
 import { supabase } from "@/lib/customSupabaseClient";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
+import { filterRecordsBySearch } from "@/modules/admin/lib/search";
 
 /* ================= VALIDATION HELPERS ================= */
 const nameRegex = /^[A-Za-z\s]+$/;
@@ -33,7 +34,6 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 const pincodeRegex = /^\d{6}$/;
-const exactEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 /* ================= ADMIN API BASE ================= */
 const isLocalHost = () => {
@@ -91,7 +91,6 @@ const isBuyerActive = (b) => {
 const getStatusLabel = (b) => (isBuyerActive(b) ? "ACTIVE" : "TERMINATED");
 const getStatusBadgeVariant = () => "outline";
 const getBuyerIdentifier = (b) => b?.id || b?.user_id || b?.email || null;
-const normalizeSearchText = (value) => String(value || "").trim().toLowerCase();
 
 /* ================= RESPONSE NORMALIZER ================= */
 function normalizeBuyersPayload(json) {
@@ -204,55 +203,18 @@ export default function Buyers() {
 
   // client-side filter (no refetch on every keypress)
   useEffect(() => {
-    const t = searchTerm.trim().toLowerCase();
-    if (!t) {
+    if (!searchTerm.trim()) {
       setBuyers(allBuyers);
       return;
     }
 
-    const exactEmailSearch = exactEmailRegex.test(t);
-    const exactIdMatches = [];
-    const broadMatches = [];
-
-    (allBuyers || []).forEach((buyer) => {
-      const buyerId = normalizeSearchText(buyer?.id);
-      const userId = normalizeSearchText(buyer?.user_id);
-      const email = normalizeSearchText(buyer?.email);
-      const fullName = normalizeSearchText(buyer?.full_name);
-      const phone = normalizeSearchText(buyer?.phone);
-      const companyName = normalizeSearchText(buyer?.company_name);
-
-      if ((buyerId && buyerId === t) || (userId && userId === t)) {
-        exactIdMatches.push(buyer);
-        return;
-      }
-
-      if (exactEmailSearch) {
-        if (email && email === t) broadMatches.push(buyer);
-        return;
-      }
-
-      if (
-        fullName.includes(t) ||
-        email.includes(t) ||
-        phone.includes(t) ||
-        companyName.includes(t)
-      ) {
-        broadMatches.push(buyer);
-      }
-    });
-
-    if (exactIdMatches.length) {
-      setBuyers(exactIdMatches);
-      return;
-    }
-
-    if (exactEmailSearch) {
-      setBuyers(broadMatches);
-      return;
-    }
-
-    setBuyers(broadMatches);
+    setBuyers(
+      filterRecordsBySearch(allBuyers, searchTerm, {
+        exactIdKeys: ["id", "user_id"],
+        exactEmailKeys: ["email"],
+        broadKeys: ["id", "user_id", "full_name", "email", "phone", "company_name"],
+      })
+    );
   }, [searchTerm, allBuyers]);
 
   const total = useMemo(() => allBuyers.length, [allBuyers]);

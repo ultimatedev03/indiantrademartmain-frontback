@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { Search, CheckCircle, XCircle, Eye, FileText, Loader2, ShieldAlert, Building2, Mail, Phone, Filter, Download } from 'lucide-react';
+import { filterRecordsBySearch } from '@/modules/admin/lib/search';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const KYC_VENDOR_BATCH_SIZE = 5000;
@@ -127,24 +128,6 @@ async function safeReadJson(res) {
   throw new Error(`API returned non-JSON (${res.status}). Got: ${text.slice(0, 80)}...`);
 }
 
-const normalizeSearchValue = (value = '') =>
-  String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-
-const matchesSearchValue = (candidate, query) => {
-  const rawCandidate = String(candidate || '').toLowerCase();
-  const rawQuery = String(query || '').trim().toLowerCase();
-
-  if (!rawQuery) return true;
-  if (rawCandidate.includes(rawQuery)) return true;
-
-  const normalizedQuery = normalizeSearchValue(rawQuery);
-  if (!normalizedQuery) return false;
-
-  return normalizeSearchValue(candidate).includes(normalizedQuery);
-};
-
 const normalizeKycStatus = (status = '') => {
   const normalized = String(status || '').trim().toUpperCase();
   return normalized === 'VERIFIED' ? 'APPROVED' : normalized || 'PENDING';
@@ -230,17 +213,12 @@ const KYCApproval = () => {
   }, [ADMIN_API_BASE, filterStatus, toast]);
 
   const filteredVendors = useMemo(() => {
-    const trimmedSearch = String(searchTerm || '').trim().toLowerCase();
-    if (!trimmedSearch) return vendors;
-
-    return vendors.filter(
-      (vendor) =>
-        matchesSearchValue(vendor.vendor_id, trimmedSearch) ||
-        matchesSearchValue(vendor.company_name, trimmedSearch) ||
-        matchesSearchValue(vendor.owner_name, trimmedSearch) ||
-        matchesSearchValue(vendor.email, trimmedSearch) ||
-        matchesSearchValue(vendor.phone, trimmedSearch)
-    );
+    if (!String(searchTerm || '').trim()) return vendors;
+    return filterRecordsBySearch(vendors, searchTerm, {
+      exactIdKeys: ['id', 'vendor_id'],
+      exactEmailKeys: ['email'],
+      broadKeys: ['id', 'vendor_id', 'company_name', 'owner_name', 'email', 'phone'],
+    });
   }, [searchTerm, vendors]);
 
   const hasSearchTerm = Boolean(String(searchTerm || '').trim());
@@ -391,7 +369,7 @@ const KYCApproval = () => {
       <div className="flex flex-col md:flex-row gap-4 p-4 bg-white rounded-lg border">
         <form onSubmit={handleSearch} className="flex-1 relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-          <Input className="pl-9" placeholder="Search by vendor ID, company, owner, phone, or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+          <Input className="pl-9" placeholder="Search by vendor ID, internal ID, company, phone, or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
         </form>
 
         <Select value={filterStatus} onValueChange={setFilterStatus}>

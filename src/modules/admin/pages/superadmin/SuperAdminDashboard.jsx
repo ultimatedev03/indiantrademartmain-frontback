@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useSuperAdmin } from '@/modules/admin/context/SuperAdminContext';
 import { superAdminServerApi } from '@/modules/admin/services/superAdminServerApi';
 import { toast } from '@/components/ui/use-toast';
+import { filterRecordsBySearch } from '@/modules/admin/lib/search';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -684,23 +685,21 @@ export default function SuperAdminDashboard() {
   }, []);
 
   const filteredEmployees = useMemo(() => {
-    const term = employeeSearch.trim().toLowerCase();
-    if (!term) return employees;
-    return (employees || []).filter((emp) =>
-      [emp.full_name, emp.email, emp.role, emp.department]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(term))
-    );
+    if (!employeeSearch.trim()) return employees;
+    return filterRecordsBySearch(employees, employeeSearch, {
+      exactIdKeys: ['id', 'user_id'],
+      exactEmailKeys: ['email'],
+      broadKeys: ['id', 'user_id', 'full_name', 'email', 'role', 'department'],
+    });
   }, [employees, employeeSearch]);
 
   const filteredVendors = useMemo(() => {
-    const term = vendorSearch.trim().toLowerCase();
-    if (!term) return vendors;
-    return (vendors || []).filter((v) =>
-      [v.company_name, v.owner_name, v.email, v.vendor_id, v.city, v.state]
-        .filter(Boolean)
-        .some((x) => String(x).toLowerCase().includes(term))
-    );
+    if (!vendorSearch.trim()) return vendors;
+    return filterRecordsBySearch(vendors, vendorSearch, {
+      exactIdKeys: ['id', 'vendor_id'],
+      exactEmailKeys: ['email'],
+      broadKeys: ['id', 'vendor_id', 'company_name', 'owner_name', 'email', 'city', 'state'],
+    });
   }, [vendors, vendorSearch]);
 
   const filteredPlans = useMemo(() => {
@@ -1712,7 +1711,7 @@ export default function SuperAdminDashboard() {
                 <Input
                   value={employeeSearch}
                   onChange={(e) => setEmployeeSearch(e.target.value)}
-                  placeholder="Search employees by name, email, role..."
+                  placeholder="Search employees by ID, name, email, role..."
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
 
@@ -1827,7 +1826,7 @@ export default function SuperAdminDashboard() {
                 <Input
                   value={vendorSearch}
                   onChange={(e) => setVendorSearch(e.target.value)}
-                  placeholder="Search vendors by company, owner, email, vendor ID..."
+                  placeholder="Search vendors by company, email, vendor ID, or internal ID..."
                   className="bg-neutral-800 border-neutral-700 text-white"
                 />
 

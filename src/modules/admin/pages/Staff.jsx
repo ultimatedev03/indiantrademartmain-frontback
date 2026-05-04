@@ -28,6 +28,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/use-toast";
 import { Plus, Search, Trash2, Loader2, KeyRound, Eye, EyeOff } from "lucide-react";
+import { filterRecordsBySearch } from "@/modules/admin/lib/search";
 import { Label } from "@/components/ui/label";
 import { fetchWithCsrf } from "@/lib/fetchWithCsrf";
 import { PASSWORD_POLICY_MESSAGE, validateStrongPassword } from "@/lib/passwordPolicy";
@@ -142,13 +143,12 @@ const Staff = () => {
   }, []);
 
   const filteredEmployees = useMemo(() => {
-    const t = searchTerm.trim().toLowerCase();
-    if (!t) return employees;
-    return (employees || []).filter((e) =>
-      [e.full_name, e.name, e.email, e.role, e.department, getDepartmentLabel(e)]
-        .filter(Boolean)
-        .some((x) => String(x).toLowerCase().includes(t))
-    );
+    if (!searchTerm.trim()) return employees;
+    return filterRecordsBySearch(employees, searchTerm, {
+      exactIdKeys: ["id", "user_id"],
+      exactEmailKeys: ["email"],
+      broadKeys: ["id", "user_id", "full_name", "name", "email", "role", "department"],
+    });
   }, [employees, searchTerm]);
 
   const handleCreate = async () => {
@@ -477,7 +477,7 @@ const Staff = () => {
           data-form-type="other"
           data-1p-ignore="true"
           data-lpignore="true"
-          placeholder="Search by name, email or role..."
+          placeholder="Search by ID, name, email or role..."
           className="border-0 focus-visible:ring-0"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
