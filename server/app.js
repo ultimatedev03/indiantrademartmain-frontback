@@ -29,6 +29,19 @@ import { SECURITY_HEADERS } from './lib/httpSecurity.js';
 
 const app = express();
 
+// Netlify/Render terminate TLS and forward requests to Express.
+app.set('trust proxy', 1);
+
+const resolveExpressMiddleware = (candidate) => {
+  if (!candidate) return null;
+  if (typeof candidate === 'function') return candidate;
+
+  // Some serverless bundlers wrap ESM default exports in a namespace object.
+  if (typeof candidate?.default === 'function') return candidate.default;
+
+  return null;
+};
+
 // 1. Subdomain detection (BEFORE cors)
 app.use(subdomainMiddleware);
 
@@ -105,7 +118,14 @@ app.use('/api/otp', otpLimiter);
 // 8. Routes
 backendModules.forEach((moduleConfig) => {
   moduleConfig.routes.forEach(({ path, router }) => {
-    app.use(path, router);
+    const middleware = resolveExpressMiddleware(router);
+
+    if (!middleware) {
+      const routeLabel = `${moduleConfig?.name || 'unknown'}:${path || '(missing-path)'}`;
+      throw new TypeError(`Invalid router registered for ${routeLabel}`);
+    }
+
+    app.use(path, middleware);
   });
 });
 
