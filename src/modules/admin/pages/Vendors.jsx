@@ -541,7 +541,7 @@ export default function Vendors() {
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
             <Input
               className="pl-9 h-9"
-              placeholder="Search by company, owner, vendor id or email..."
+              placeholder="Search by company, owner, vendor ID, internal ID or email..."
               value={searchTerm}
               onChange={(e) => {
                 setSearchTerm(e.target.value);

@@ -1,9 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { leadApi } from '@/modules/lead/services/leadApi';
-import { leadsMarketplaceApi } from '@/modules/vendor/services/leadsMarketplaceApi';
 import { leadPaymentApi } from '@/modules/vendor/services/leadPaymentApi';
-import { supabase } from '@/lib/customSupabaseClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -84,33 +82,6 @@ const buildDialablePhone = (value) => {
   return hasPlusPrefix ? `+${digitsOnly}` : digitsOnly;
 };
 
-
-// Combine images from product_images table + products.images jsonb
-const getProductImageUrls = (p) => {
-  const urls = [];
-
-  // product_images (array of rows)
-  if (Array.isArray(p?.product_images)) {
-    p.product_images.forEach((img) => {
-      if (img?.image_url) urls.push(img.image_url);
-    });
-  }
-
-  // products.images (jsonb) -> can be array of strings or objects
-  const imgs = p?.images;
-  if (Array.isArray(imgs)) {
-    imgs.forEach((it) => {
-      if (typeof it === 'string' && it.trim()) urls.push(it.trim());
-      else if (it && typeof it === 'object') {
-        if (typeof it.url === 'string' && it.url.trim()) urls.push(it.url.trim());
-        else if (typeof it.image_url === 'string' && it.image_url.trim()) urls.push(it.image_url.trim());
-        else if (typeof it.path === 'string' && it.path.trim()) urls.push(it.path.trim());
-      }
-    });
-  }
-
-  return Array.from(new Set(urls));
-};
 
 // quantity is text in DB ("100 units" / "100" / "100 kg")
 const parseQtyUnit = (lead) => {
@@ -278,42 +249,6 @@ const LeadDetail = () => {
   const loadLead = async () => {
     setLoading(true);
     try {
-      // Get current vendor ID
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({ title: 'Not authenticated', variant: 'destructive' });
-        navigate(leadsPath);
-        return;
-      }
-
-      const { data: vendor, error: vendorErr } = await supabase
-        .from('vendors')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      let vendorId = vendor?.id || null;
-
-      if (!vendorId) {
-        const { data: vendorRows, error: vendorRowsErr } = await supabase
-          .from('vendors')
-          .select('id')
-          .eq('user_id', user.id)
-          .limit(1);
-        if (vendorRowsErr) throw vendorRowsErr;
-        vendorId = vendorRows?.[0]?.id || null;
-      }
-
-      if (!vendorId) {
-        if (vendorErr) {
-          console.warn('Vendor lookup warning:', vendorErr?.message || vendorErr);
-        }
-        toast({ title: 'Vendor profile not found', variant: 'destructive' });
-        navigate(leadsPath);
-        return;
-      }
-
-      // Load the lead from database
       const leadData = await leadApi.get(id);
       if (!leadData) {
         toast({ title: 'Lead not found', variant: 'destructive' });
@@ -321,8 +256,7 @@ const LeadDetail = () => {
         return;
       }
 
-      // Determine source based on server-enriched lead response first.
-      let source = String(leadData?.source || '').trim() || 'Marketplace';
+      let source = String(leadData?.source || '').trim();
       let purchaseDate =
         leadData?.purchase_datetime ||
         leadData?.purchase_date ||
@@ -334,45 +268,21 @@ const LeadDetail = () => {
         String(source).toLowerCase() === 'purchased'
       );
 
-      // Fallback for older payloads that may not carry purchase metadata yet.
-      if (!isPurchasedFlag && String(leadData?.vendor_id || '') === String(vendorId || '')) {
-        source = 'Direct';
-        purchaseDate = purchaseDate || leadData.created_at;
-      } else if (!isPurchasedFlag) {
-        const purchased = await leadApi.purchases.list(vendorId);
-        const purchasedLead = purchased.find(p => String(p?.lead_id || '') === String(id));
-        if (purchasedLead) {
-          source = 'Purchased';
-          isPurchasedFlag = true;
-          purchaseDate =
-            purchasedLead.purchase_datetime ||
-            purchasedLead.purchase_date ||
-            purchaseDate;
+      if (!source) {
+        if (isPurchasedFlag) source = 'Purchased';
+        else if (leadData?.vendor_id) {
+          source = 'Direct';
+          purchaseDate = purchaseDate || leadData.created_at;
+        } else {
+          source = 'Marketplace';
         }
-      }
-
-      // Optional: fetch product cover image (for direct/purchased lead view)
-      let __productCover = null;
-      try {
-        const pid = leadData?.product_id || leadData?.productId || leadData?.product?.id || null;
-        if (pid) {
-          const { data: p } = await supabase
-            .from('products')
-            .select('id, images, product_images(image_url)')
-            .eq('id', pid)
-            .single();
-          const urls = p ? getProductImageUrls(p) : [];
-          __productCover = urls && urls.length ? urls[0] : null;
-        }
-      } catch {
-        // ignore cover fetch errors
       }
 
       setLead({
         ...leadData,
         __source: source,
         __purchaseDate: purchaseDate,
-        __productCover,
+        __productCover: null,
       });
       setIsPurchased(isPurchasedFlag);
       const initialStatus = toLeadStatus(
@@ -390,7 +300,7 @@ const LeadDetail = () => {
 
       // contact stats
       try {
-        const contacts = await leadsMarketplaceApi.getContactHistory(id);
+        const contacts = await leadApi.contacts.list(id);
         const calls = contacts.filter((c) => c.contact_type === 'CALL').length;
         const emails = contacts.filter((c) => c.contact_type === 'EMAIL').length;
         const whatsapp = contacts.filter((c) => c.contact_type === 'WHATSAPP').length;
@@ -487,6 +397,8 @@ const LeadDetail = () => {
   );
   const purchasedAt = isPurchased ? safeDate(lead?.__purchaseDate) : null;
   const purchasedAtLabel = purchasedAt ? formatDateTime(purchasedAt) : null;
+  const expiryAt = safeDate(lead?.expires_at);
+  const expiryLabel = expiryAt ? formatDateTime(expiryAt) : null;
   const hasExistingChatThread = Boolean(String(lead?.proposal_id || '').trim());
   const isRegisteredBuyer = Boolean(
     isTruthyRegistrationFlag(lead?.buyer_registered) ||
@@ -499,9 +411,9 @@ const LeadDetail = () => {
 
   const logContactSafe = async (type) => {
     try {
-      await leadsMarketplaceApi.logContact(lead.id, type);
+      await leadApi.contacts.create(lead.id, { contact_type: type });
       try {
-        const contacts = await leadsMarketplaceApi.getContactHistory(lead.id);
+        const contacts = await leadApi.contacts.list(lead.id);
         const calls = contacts.filter((c) => c.contact_type === 'CALL').length;
         const emails = contacts.filter((c) => c.contact_type === 'EMAIL').length;
         const whatsapp = contacts.filter((c) => c.contact_type === 'WHATSAPP').length;
@@ -697,6 +609,11 @@ const LeadDetail = () => {
                 <span className="flex items-center gap-2">
                   <Calendar className="h-4 w-4" /> Posted: {meta.postedOn}
                 </span>
+                {expiryLabel ? (
+                  <span className="flex items-center gap-2">
+                    <Calendar className="h-4 w-4" /> Expires: {expiryLabel}
+                  </span>
+                ) : null}
               </div>
             </div>
 

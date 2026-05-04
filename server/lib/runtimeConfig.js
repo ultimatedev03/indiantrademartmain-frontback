@@ -8,10 +8,14 @@ import { resolve } from 'path';
  * or shared defaults belong here instead of being scattered across files.
  */
 
-// Load env files in priority order (first hit wins for each key)
+// Load env files in priority order (first hit wins for each key).
+// Check both cwd (monorepo root) and parent dir (when Render runs from server/).
+const cwd = process.cwd();
 const envCandidates = [
-  resolve(process.cwd(), '.env.local'),
-  resolve(process.cwd(), '.env'),
+  resolve(cwd, '.env.local'),
+  resolve(cwd, '.env'),
+  resolve(cwd, '..', '.env.local'),
+  resolve(cwd, '..', '.env'),
 ];
 
 for (const envPath of envCandidates) {

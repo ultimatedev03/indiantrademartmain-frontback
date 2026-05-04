@@ -10,6 +10,7 @@ const LEAD_CONSUMPTION_STATUS_BY_CODE = {
 
 const INCLUDED_CONSUMPTION_TYPES = new Set(["DAILY_INCLUDED", "WEEKLY_INCLUDED"]);
 const PAID_CONSUMPTION_MODES = new Set(["BUY_EXTRA", "PAID"]);
+const MAX_VENDORS_PER_LEAD = 5;
 
 const normalizeLeadConsumptionMode = (value) => {
   const mode = String(value || "").trim().toUpperCase();
@@ -151,23 +152,46 @@ const readActiveSubscription = async (supabase, vendorId) => {
 };
 
 const readIncludedUsage = async (supabase, vendorId, now = new Date()) => {
-  const dayStart = new Date(toIsoUtcDayStart(now));
-  const weekStart = new Date(toIsoUtcWeekStart(now));
+  const dayStartIso = toIsoUtcDayStart(now);
+  const weekStartIso = toIsoUtcWeekStart(now);
 
+  // Only fetch included-quota purchases from this week (covers both daily & weekly).
   const { data: rows, error } = await supabase
     .from("lead_purchases")
-    .select("*")
-    .eq("vendor_id", vendorId);
+    .select("consumption_type, purchase_datetime, purchase_date")
+    .eq("vendor_id", vendorId)
+    .in("consumption_type", ["DAILY_INCLUDED", "WEEKLY_INCLUDED"])
+    .gte("purchase_datetime", weekStartIso);
 
   if (error) {
-    throw new Error(error.message || "Failed to read lead purchase usage");
+    // Fallback: purchase_datetime column may not exist on older schemas.
+    const isColumnError = String(error.message || "").toLowerCase().includes("does not exist");
+    if (!isColumnError) {
+      throw new Error(error.message || "Failed to read lead purchase usage");
+    }
+
+    // Retry with purchase_date for legacy schemas.
+    const { data: legacyRows, error: legacyError } = await supabase
+      .from("lead_purchases")
+      .select("consumption_type, purchase_date")
+      .eq("vendor_id", vendorId)
+      .in("consumption_type", ["DAILY_INCLUDED", "WEEKLY_INCLUDED"])
+      .gte("purchase_date", weekStartIso);
+
+    if (legacyError) {
+      throw new Error(legacyError.message || "Failed to read lead purchase usage");
+    }
+
+    return countIncludedUsage(legacyRows, dayStartIso, weekStartIso);
   }
 
-  const usage = {
-    daily: 0,
-    weekly: 0,
-    yearly: 0,
-  };
+  return countIncludedUsage(rows, dayStartIso, weekStartIso);
+};
+
+const countIncludedUsage = (rows, dayStartIso, weekStartIso) => {
+  const dayStart = new Date(dayStartIso);
+  const weekStart = new Date(weekStartIso);
+  const usage = { daily: 0, weekly: 0, yearly: 0 };
 
   (rows || []).forEach((row) => {
     const type = String(row?.consumption_type || "").trim().toUpperCase();
@@ -417,11 +441,11 @@ const consumeLeadForVendorLegacy = async ({
     throw new Error(countError.message || "Failed to validate lead capacity");
   }
 
-  if ((leadPurchaseCount || 0) >= 5) {
+  if ((leadPurchaseCount || 0) >= MAX_VENDORS_PER_LEAD) {
     return {
       success: false,
       code: "LEAD_CAP_REACHED",
-      error: "This lead has reached maximum 5 vendors limit",
+      error: `This lead has reached maximum ${MAX_VENDORS_PER_LEAD} vendors limit`,
     };
   }
 

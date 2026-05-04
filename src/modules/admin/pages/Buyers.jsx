@@ -33,6 +33,7 @@ const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const panRegex = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const gstRegex = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 const pincodeRegex = /^\d{6}$/;
+const exactEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
 
 /* ================= ADMIN API BASE ================= */
 const isLocalHost = () => {
@@ -90,6 +91,7 @@ const isBuyerActive = (b) => {
 const getStatusLabel = (b) => (isBuyerActive(b) ? "ACTIVE" : "TERMINATED");
 const getStatusBadgeVariant = () => "outline";
 const getBuyerIdentifier = (b) => b?.id || b?.user_id || b?.email || null;
+const normalizeSearchText = (value) => String(value || "").trim().toLowerCase();
 
 /* ================= RESPONSE NORMALIZER ================= */
 function normalizeBuyersPayload(json) {
@@ -207,14 +209,50 @@ export default function Buyers() {
       setBuyers(allBuyers);
       return;
     }
-    const filtered = (allBuyers || []).filter(
-      (b) =>
-        b.full_name?.toLowerCase().includes(t) ||
-        b.email?.toLowerCase().includes(t) ||
-        b.phone?.toLowerCase().includes(t) ||
-        b.company_name?.toLowerCase().includes(t)
-    );
-    setBuyers(filtered);
+
+    const exactEmailSearch = exactEmailRegex.test(t);
+    const exactIdMatches = [];
+    const broadMatches = [];
+
+    (allBuyers || []).forEach((buyer) => {
+      const buyerId = normalizeSearchText(buyer?.id);
+      const userId = normalizeSearchText(buyer?.user_id);
+      const email = normalizeSearchText(buyer?.email);
+      const fullName = normalizeSearchText(buyer?.full_name);
+      const phone = normalizeSearchText(buyer?.phone);
+      const companyName = normalizeSearchText(buyer?.company_name);
+
+      if ((buyerId && buyerId === t) || (userId && userId === t)) {
+        exactIdMatches.push(buyer);
+        return;
+      }
+
+      if (exactEmailSearch) {
+        if (email && email === t) broadMatches.push(buyer);
+        return;
+      }
+
+      if (
+        fullName.includes(t) ||
+        email.includes(t) ||
+        phone.includes(t) ||
+        companyName.includes(t)
+      ) {
+        broadMatches.push(buyer);
+      }
+    });
+
+    if (exactIdMatches.length) {
+      setBuyers(exactIdMatches);
+      return;
+    }
+
+    if (exactEmailSearch) {
+      setBuyers(broadMatches);
+      return;
+    }
+
+    setBuyers(broadMatches);
   }, [searchTerm, allBuyers]);
 
   const total = useMemo(() => allBuyers.length, [allBuyers]);
@@ -464,7 +502,7 @@ export default function Buyers() {
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
           <Input
             className="pl-9"
-            placeholder="Search by name, email, phone or company..."
+            placeholder="Search by ID, email, phone, name or company..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />

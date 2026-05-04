@@ -40,6 +40,12 @@ const MIME_EXT = {
   'video/quicktime': 'mov',
 };
 
+// ── Lead system constants ──
+const MAX_VENDORS_PER_LEAD = 5;
+const MARKETPLACE_LEAD_LIMIT = 500;
+const MARKETPLACE_LEAD_MAX_AGE_DAYS = 30;
+const LEAD_EXPIRY_DAYS = 30;
+
 const isValidId = (v) => typeof v === 'string' && v.trim().length > 0;
 const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isUuidLike = (value = '') => UUID_LIKE_RE.test(String(value || '').trim());
@@ -1541,6 +1547,71 @@ const parseLeadPriceNumber = (value, fallback = 0) => {
   return Math.max(0, Number(fallback) || 0);
 };
 
+const safeDate = (value) => {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const addDays = (dateValue, days) => {
+  const base = safeDate(dateValue);
+  if (!base) return null;
+  const next = new Date(base);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+};
+
+const buildLeadExpiryDate = (lead = {}) => {
+  const explicitExpiry = safeDate(lead?.expires_at);
+  if (explicitExpiry) return explicitExpiry;
+  return addDays(lead?.created_at, LEAD_EXPIRY_DAYS);
+};
+
+const buildLeadExpiryMeta = (lead = {}, now = new Date()) => {
+  const expiryDate = buildLeadExpiryDate(lead);
+  const status = String(lead?.status || '').trim().toUpperCase();
+  const isTerminal = ['CLOSED', 'CONVERTED'].includes(status);
+  const isExpired = Boolean(expiryDate && expiryDate.getTime() <= now.getTime() && !isTerminal);
+  const expiresInDays = expiryDate
+    ? Math.max(0, Math.ceil((expiryDate.getTime() - now.getTime()) / 86400000))
+    : null;
+
+  return {
+    expires_at: expiryDate?.toISOString() || lead?.expires_at || null,
+    is_expired: isExpired,
+    expires_in_days: expiresInDays,
+  };
+};
+
+const attachLeadExpiryMeta = (lead = {}, now = new Date()) => ({
+  ...lead,
+  ...buildLeadExpiryMeta(lead, now),
+});
+
+const isLeadExpired = (lead = {}, now = new Date()) => buildLeadExpiryMeta(lead, now).is_expired;
+
+const normalizeJsonObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value : {};
+};
+
+const getPlanExtraLeadPrice = (plan = {}) => {
+  const features = normalizeJsonObject(plan?.features);
+  const pricing = normalizeJsonObject(features?.pricing);
+  const value = Number(pricing?.extra_lead_price ?? 0);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value;
+};
+
 const VENDOR_LEAD_STATUS_VALUES = ['ACTIVE', 'VIEWED', 'CLOSED'];
 const VENDOR_LEAD_STATUS_SET = new Set(VENDOR_LEAD_STATUS_VALUES);
 
@@ -1604,7 +1675,10 @@ async function resolveVendorLeadAccess({ vendorId, leadId }) {
   let isVisibleMarketplaceLead = false;
   if (!isDirect && !purchase) {
     const leadStatus = String(lead?.status || '').toUpperCase();
-    const isMarketplace = !lead?.vendor_id && ['AVAILABLE', 'PURCHASED'].includes(leadStatus);
+    const isMarketplace =
+      !lead?.vendor_id &&
+      ['AVAILABLE', 'PURCHASED'].includes(leadStatus) &&
+      !isLeadExpired(lead);
     if (isMarketplace) {
       const { count: purchaseCount, error: countError } = await supabase
         .from('lead_purchases')
@@ -1614,7 +1688,7 @@ async function resolveVendorLeadAccess({ vendorId, leadId }) {
       if (countError) {
         throw new Error(countError.message || 'Failed to validate lead capacity');
       }
-      isVisibleMarketplaceLead = (purchaseCount || 0) < 5;
+      isVisibleMarketplaceLead = (purchaseCount || 0) < MAX_VENDORS_PER_LEAD;
     }
   }
 
@@ -2312,6 +2386,7 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
   try {
     const vendorIds = await resolveVendorIdsForUser(req.user);
     if (!vendorIds.length) return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    const now = new Date();
 
     const activeSubscriptions = await Promise.all(
       vendorIds.map(async (vendorId) => ({
@@ -2329,15 +2404,16 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
       });
     }
 
-    const maxVendorsPerLead = 5;
+    const maxAgeIso = new Date(Date.now() - MARKETPLACE_LEAD_MAX_AGE_DAYS * 86400000).toISOString();
 
     const { data: marketplaceRows, error: rowsError } = await supabase
       .from('leads')
       .select('*')
       .in('status', ['AVAILABLE', 'PURCHASED'])
       .or('vendor_id.is.null,source.eq.MARKETPLACE,source.is.null')
+      .gte('created_at', maxAgeIso)
       .order('created_at', { ascending: false })
-      .limit(500);
+      .limit(MARKETPLACE_LEAD_LIMIT);
 
     if (rowsError) {
       return res.status(500).json({ success: false, error: rowsError.message || 'Failed to fetch marketplace leads' });
@@ -2381,16 +2457,37 @@ router.get('/me/marketplace-leads', requireAuth({ roles: ['VENDOR'] }), async (r
       const id = String(row?.id || '').trim();
       if (!id) return false;
       if (myPurchasedLeadIds.has(id)) return false;
-      if ((purchaseCountByLead.get(id) || 0) >= maxVendorsPerLead) return false;
+      if ((purchaseCountByLead.get(id) || 0) >= MAX_VENDORS_PER_LEAD) return false;
       return true;
     });
 
     if (!eligibleRows.length) return res.json({ success: true, leads: [] });
 
     const filteredRows = applyMarketplaceFilters(eligibleRows, filterContext);
+    const usedPreferenceMatches = filteredRows.length > 0 && filteredRows.length < eligibleRows.length;
+    const fellBackToEligibleRows = filteredRows.length === 0 && eligibleRows.length > 0;
     const finalRows = filteredRows.length ? filteredRows : eligibleRows;
+    const filterScope = usedPreferenceMatches
+      ? 'matched'
+      : fellBackToEligibleRows
+        ? 'fallback'
+        : 'all';
+    const filterMessage =
+      filterScope === 'matched'
+        ? `Showing ${filteredRows.length} preference-matched leads out of ${eligibleRows.length} eligible leads.`
+        : filterScope === 'fallback'
+          ? `No saved preference matches found, so all ${eligibleRows.length} eligible leads are shown.`
+          : `Showing all ${eligibleRows.length} eligible leads.`;
 
-    return res.json({ success: true, leads: finalRows });
+    return res.json({
+      success: true,
+      leads: finalRows.map((row) => attachLeadExpiryMeta(row, now)),
+      filter_applied: filterScope !== 'all',
+      filter_scope: filterScope,
+      filter_message: filterMessage,
+      filter_match_count: filteredRows.length,
+      total_eligible: eligibleRows.length,
+    });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message || 'Failed to load marketplace leads' });
   }
@@ -2581,7 +2678,7 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
           return res.status(500).json({ success: false, error: countError.message || 'Failed to validate lead capacity' });
         }
 
-        isVisibleMarketplaceLead = (purchaseCount || 0) < 5;
+        isVisibleMarketplaceLead = (purchaseCount || 0) < MAX_VENDORS_PER_LEAD;
       }
     }
 
@@ -2643,7 +2740,7 @@ router.get('/me/leads/:leadId', requireAuth({ roles: ['VENDOR'] }), async (req, 
     }
 
     const responseLead = {
-      ...lead,
+      ...attachLeadExpiryMeta(lead),
       buyer_id: buyerMeta?.id || lead?.buyer_id || null,
       buyer_user_id: buyerMeta?.user_id || lead?.buyer_user_id || null,
       buyer_name: pickLeadBuyerText(buyerMeta?.full_name, lead?.buyer_name),
@@ -3042,7 +3139,8 @@ router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => 
             plan_name: purchase?.subscription_plan_name || null,
           };
         })
-        .filter(Boolean);
+        .filter(Boolean)
+        .map((lead) => attachLeadExpiryMeta(lead, now));
     }
 
     const { data: directRows, error: directError } = await supabase
@@ -3059,7 +3157,7 @@ router.get('/me/leads', requireAuth({ roles: ['VENDOR'] }), async (req, res) => 
     const directLeads = (directRows || [])
       .filter((lead) => !purchasedLeadIdSet.has(String(lead?.id || '')))
       .map((lead) => ({
-        ...lead,
+        ...attachLeadExpiryMeta(lead, now),
         source: 'Direct',
         purchase_date: lead?.created_at || null,
       }));
@@ -3663,6 +3761,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
       source: vendor?.id ? 'DIRECT' : 'MARKETPLACE',
       status: 'AVAILABLE',
       created_at: createdAt,
+      expires_at: addDays(createdAt, LEAD_EXPIRY_DAYS)?.toISOString() || null,
     };
 
     let createdLead = null;
@@ -3692,6 +3791,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
             'source',
             'city',
             'state',
+            'expires_at',
           ],
           [
             'vendor_id',
@@ -3710,6 +3810,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
             'source',
             'city',
             'state',
+            'expires_at',
           ],
           [
             'vendor_id',
@@ -3731,6 +3832,7 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
             'company_name',
             'city',
             'state',
+            'expires_at',
           ],
         ],
       });
@@ -3783,7 +3885,11 @@ router.post('/:vendorId/leads', optionalAuth(), async (req, res) => {
       }
     }
 
-    return res.status(201).json({ success: true, lead: createdLead, proposal: createdProposal });
+    return res.status(201).json({
+      success: true,
+      lead: attachLeadExpiryMeta(createdLead || baseLeadPayload),
+      proposal: createdProposal,
+    });
   } catch (e) {
     return res.status(e?.statusCode || 500).json({ success: false, error: e.message });
   }
@@ -3816,6 +3922,155 @@ router.get('/:vendorId/leads', requireAuth(), async (req, res) => {
 });
 
 // ── Phase 2 additions: backend-first routes for operations that were direct Supabase ──
+
+router.get('/me/lead-stats', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
+  try {
+    const vendorIds = await resolveVendorIdsForUser(req.user);
+    if (!vendorIds.length) {
+      return res.status(404).json({ success: false, error: 'Vendor profile not found' });
+    }
+
+    const activeSubscriptions = await Promise.all(
+      vendorIds.map(async (vendorId) => ({
+        vendorId,
+        subscription: await resolveActiveSubscriptionForVendor(vendorId),
+      }))
+    );
+    const activeVendorEntry = activeSubscriptions.find((entry) => entry?.subscription) || null;
+    const statsVendorId = activeVendorEntry?.vendorId || vendorIds[0] || null;
+
+    const [
+      purchaseRes,
+      directRes,
+      contactRes,
+      quotaRes,
+    ] = await Promise.all([
+      supabase
+        .from('lead_purchases')
+        .select(
+          'id, vendor_id, lead_id, purchase_date, purchase_datetime, consumption_type, amount, purchase_price, payment_status'
+        )
+        .in('vendor_id', vendorIds)
+        .order('purchase_datetime', { ascending: false, nullsFirst: false })
+        .order('purchase_date', { ascending: false, nullsFirst: false }),
+      supabase
+        .from('leads')
+        .select('id, vendor_id, status, created_at, expires_at')
+        .in('vendor_id', vendorIds)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('lead_contacts')
+        .select('lead_id, vendor_id')
+        .in('vendor_id', vendorIds),
+      statsVendorId
+        ? supabase
+            .from('vendor_lead_quota')
+            .select('*')
+            .eq('vendor_id', statsVendorId)
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+
+    if (purchaseRes?.error) {
+      return res.status(500).json({ success: false, error: purchaseRes.error.message || 'Failed to fetch lead purchases' });
+    }
+    if (directRes?.error) {
+      return res.status(500).json({ success: false, error: directRes.error.message || 'Failed to fetch direct leads' });
+    }
+    if (contactRes?.error) {
+      return res.status(500).json({ success: false, error: contactRes.error.message || 'Failed to fetch lead contacts' });
+    }
+    if (quotaRes?.error) {
+      return res.status(500).json({ success: false, error: quotaRes.error.message || 'Failed to fetch lead quota' });
+    }
+
+    let activePlan = null;
+    if (activeVendorEntry?.subscription?.plan_id) {
+      const { data: planRow, error: planError } = await supabase
+        .from('vendor_plans')
+        .select('id, name, daily_limit, weekly_limit, yearly_limit, features')
+        .eq('id', activeVendorEntry.subscription.plan_id)
+        .maybeSingle();
+
+      if (planError) {
+        return res.status(500).json({ success: false, error: planError.message || 'Failed to fetch active plan' });
+      }
+      activePlan = planRow || null;
+    }
+
+    const purchases = Array.isArray(purchaseRes?.data) ? purchaseRes.data : [];
+    const directLeads = Array.isArray(directRes?.data) ? directRes.data : [];
+    const contacts = Array.isArray(contactRes?.data) ? contactRes.data : [];
+    const quotaRow = quotaRes?.data || null;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const weekStart = new Date();
+    weekStart.setHours(0, 0, 0, 0);
+    const weekDay = weekStart.getDay();
+    const weekDiff = weekDay === 0 ? -6 : 1 - weekDay;
+    weekStart.setDate(weekStart.getDate() + weekDiff);
+
+    const directLeadIds = new Set(
+      directLeads
+        .filter((lead) => !isLeadExpired(lead))
+        .map((lead) => String(lead?.id || '').trim())
+        .filter(Boolean)
+    );
+
+    const contactedLeadIds = new Set(
+      contacts
+        .map((row) => String(row?.lead_id || '').trim())
+        .filter(Boolean)
+    );
+    const totalContacted = new Set([...directLeadIds, ...contactedLeadIds]).size;
+
+    let computedDailyUsed = 0;
+    let computedWeeklyUsed = 0;
+    purchases.forEach((row) => {
+      if (String(row?.vendor_id || '') !== String(statsVendorId || '')) return;
+      const type = String(row?.consumption_type || '').trim().toUpperCase();
+      const timestamp = safeDate(
+        row?.purchase_datetime ||
+        row?.purchase_date
+      );
+      if (!timestamp) return;
+      if (type === 'DAILY_INCLUDED' && timestamp >= todayStart) {
+        computedDailyUsed += 1;
+      }
+      if ((type === 'DAILY_INCLUDED' || type === 'WEEKLY_INCLUDED') && timestamp >= weekStart) {
+        computedWeeklyUsed += 1;
+      }
+    });
+
+    const quotaDailyUsed = Number(quotaRow?.daily_used);
+    const quotaWeeklyUsed = Number(quotaRow?.weekly_used);
+    const dailyLimit = Math.max(
+      Number.isFinite(Number(quotaRow?.daily_limit)) ? Number(quotaRow?.daily_limit) : 0,
+      Number(activePlan?.daily_limit) || 0
+    );
+    const weeklyLimit = Math.max(
+      Number.isFinite(Number(quotaRow?.weekly_limit)) ? Number(quotaRow?.weekly_limit) : 0,
+      Number(activePlan?.weekly_limit) || 0
+    );
+
+    return res.json({
+      success: true,
+      stats: {
+        direct: directLeadIds.size,
+        totalPurchased: purchases.length,
+        totalContacted,
+        dailyUsed: Math.max(Number.isFinite(quotaDailyUsed) ? quotaDailyUsed : 0, computedDailyUsed),
+        dailyLimit,
+        weeklyUsed: Math.max(Number.isFinite(quotaWeeklyUsed) ? quotaWeeklyUsed : 0, computedWeeklyUsed),
+        weeklyLimit,
+        extraLeadPrice: getPlanExtraLeadPrice(activePlan),
+        vendor_id: statsVendorId,
+      },
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: e.message || 'Failed to load lead stats' });
+  }
+});
 
 // ✅ Dashboard stats (products, leads, proposals, messages count)
 router.get('/me/dashboard-stats', requireAuth({ roles: ['VENDOR'] }), async (req, res) => {
@@ -4043,12 +4298,22 @@ router.post('/me/leads-create', requireAuth({ roles: ['VENDOR'] }), async (req, 
       source: 'VENDOR_CREATED',
       status: 'AVAILABLE',
       created_at: createdAt,
+      expires_at: addDays(createdAt, LEAD_EXPIRY_DAYS)?.toISOString() || null,
     };
 
-    const { data: lead, error } = await supabase.from('leads').insert([leadPayload]).select('*').maybeSingle();
-    if (error) return res.status(500).json({ success: false, error: error.message });
+    let lead = null;
+    try {
+      lead = await insertWithOptionalColumns({
+        table: 'leads',
+        payload: leadPayload,
+        select: '*',
+        fallbackDropSets: [['expires_at']],
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
 
-    return res.status(201).json({ success: true, lead });
+    return res.status(201).json({ success: true, lead: attachLeadExpiryMeta(lead || leadPayload) });
   } catch (e) {
     return res.status(500).json({ success: false, error: e.message });
   }

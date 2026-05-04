@@ -3,9 +3,12 @@ import { setDefaultResultOrder } from 'dns';
 import dotenv from 'dotenv';
 import { resolve } from 'path';
 
+const cwd = process.cwd();
 const envCandidates = [
-  resolve(process.cwd(), '.env.local'),
-  resolve(process.cwd(), '.env'),
+  resolve(cwd, '.env.local'),
+  resolve(cwd, '.env'),
+  resolve(cwd, '..', '.env.local'),
+  resolve(cwd, '..', '.env'),
 ];
 
 for (const envPath of envCandidates) {

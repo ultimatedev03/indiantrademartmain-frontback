@@ -5,54 +5,11 @@ import { apiUrl } from '@/lib/apiBase';
 
 // ============ HELPER FUNCTIONS ============
 
-// Get current vendor ID
+// Get current vendor ID — relies on backend session (no Supabase Auth on client).
 const getVendorId = async () => {
-
-  // Prefer backend (auth cookie/session based).
-  try {
-    const response = await fetchVendorJson('/api/vendors/me');
-    if (response?.vendor?.id) return response.vendor.id;
-  } catch {
-    // ignore and continue to direct lookup fallbacks
-  }
-
-  const normalizedEmail = String(user.email || '').toLowerCase().trim();
-
-  // Try by user_id first.
-  const { data: vendorByUser, error: vendorByUserErr } = await supabase
-    .from('vendors')
-    .select('id')
-    .eq('user_id', user.id)
-    .maybeSingle();
-  if (!vendorByUserErr && vendorByUser?.id) return vendorByUser.id;
-
-  // Legacy fallback by email.
-  if (normalizedEmail) {
-    const { data: vendorByEmailRows, error: vendorByEmailErr } = await supabase
-      .from('vendors')
-      .select('id, user_id')
-      .eq('email', normalizedEmail)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (!vendorByEmailErr && Array.isArray(vendorByEmailRows) && vendorByEmailRows[0]?.id) {
-      const matched = vendorByEmailRows[0];
-
-      // Best effort relink for future lookups.
-      if (matched?.id && matched?.user_id !== user.id) {
-        supabase
-          .from('vendors')
-          .update({ user_id: user.id })
-          .eq('id', matched.id)
-          .then(() => {})
-          .catch(() => {});
-      }
-
-      return matched.id;
-    }
-  }
-
-  if (vendorByUserErr) throw vendorByUserErr;
+  // Backend resolves the vendor from the session cookie / JWT.
+  const response = await fetchVendorJson('/api/vendors/me');
+  if (response?.vendor?.id) return response.vendor.id;
   throw new Error('Vendor profile not found');
 };
 
@@ -438,48 +395,8 @@ export const leadApi = {
     const leadId = String(id || '').trim();
     if (!leadId) throw new Error('Lead id is required');
 
-    // Prefer backend lookup so vendor lead detail stays aligned with server-side
-    // visibility rules and buyer-registration enrichment.
-    try {
-      const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(leadId)}`);
-      if (payload?.lead) return payload.lead;
-    } catch (byIdErr) {
-      console.warn('[leadApi] backend lead by-id fetch failed:', byIdErr?.message || byIdErr);
-    }
-
-    const { data, error } = await supabase
-      .from('leads')
-      .select('*')
-      .eq('id', leadId)
-      .maybeSingle();
-
-    if (!error && data) return await enrichLeadBuyerMeta(data);
-
-    // Fallback to backend endpoints which bypass client-side RLS.
-    try {
-      const { leads } = await fetchVendorJson('/api/vendors/me/leads');
-      const match = (leads || []).find((row) => {
-        const rowId = row?.id || row?.lead_id || row?.leads?.id;
-        return rowId && String(rowId) === leadId;
-      });
-      if (match) return await enrichLeadBuyerMeta(match?.leads || match);
-    } catch (fallbackErr) {
-      console.warn('[leadApi] fallback lead fetch failed:', fallbackErr?.message || fallbackErr);
-    }
-
-    // Marketplace lead fallback (for non-purchased leads opened via "View Details").
-    try {
-      const { leads: marketplaceLeads } = await fetchVendorJson('/api/vendors/me/marketplace-leads');
-      const match = (marketplaceLeads || []).find((row) => {
-        const rowId = row?.id || row?.lead_id || row?.leads?.id;
-        return rowId && String(rowId) === leadId;
-      });
-      if (match) return await enrichLeadBuyerMeta(match?.leads || match);
-    } catch (marketplaceErr) {
-      console.warn('[leadApi] marketplace fallback lead fetch failed:', marketplaceErr?.message || marketplaceErr);
-    }
-
-    if (error) throw error;
+    const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(leadId)}`);
+    if (payload?.lead) return payload.lead;
     throw new Error('Lead not found');
   },
 
@@ -525,6 +442,11 @@ export const leadApi = {
     return payload;
   },
 
+  getLeadStats: async () => {
+    const payload = await fetchVendorJson('/api/vendors/me/lead-stats');
+    return payload?.stats || null;
+  },
+
   create: async (leadData) => {
     const res = await fetchWithCsrf(apiUrl('/api/vendors/me/leads-create'), {
       method: 'POST',
@@ -548,16 +470,7 @@ export const leadApi = {
   },
 
   updateStatus: async (id, status) => {
-    const validStatuses = ['AVAILABLE', 'PENDING', 'CONVERTED', 'CLOSED'];
-    if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-    const res = await fetchWithCsrf(apiUrl(`/api/vendors/me/leads/${encodeURIComponent(id)}/status`), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.error || 'Failed to update lead status');
-    return json?.lead || json?.data;
+    return leadApi.updateLifecycleStatus(id, { status });
   },
 
   delete: async (id) => {
@@ -568,42 +481,42 @@ export const leadApi = {
   // --- LEAD CONTACTS API ---
   contacts: {
     list: async (leadId) => {
-      const { data, error } = await supabase
-        .from('lead_contacts')
-        .select('*')
-        .eq('lead_id', leadId)
-        .order('contact_date', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const normalizedLeadId = String(leadId || '').trim();
+      if (!normalizedLeadId) return [];
+      const payload = await fetchVendorJson(
+        `/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/contacts`
+      );
+      return Array.isArray(payload?.contacts) ? payload.contacts : [];
     },
 
     getByVendor: async (vendorId, leadId) => {
-      const { data, error } = await supabase
-        .from('lead_contacts')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('lead_id', leadId)
-        .order('contact_date', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      return leadApi.contacts.list(leadId);
     },
 
-    create: async (leadId, vendorId, contactData) => {
-      const { data, error } = await supabase
-        .from('lead_contacts')
-        .insert([{
-          lead_id: leadId,
-          vendor_id: vendorId,
-          contact_type: contactData.contact_type,
-          contact_date: contactData.contact_date || new Date().toISOString(),
-          notes: contactData.notes || '',
-          status: contactData.status || 'PENDING',
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+    create: async (leadId, vendorOrContactData, maybeContactData) => {
+      const normalizedLeadId = String(leadId || '').trim();
+      if (!normalizedLeadId) throw new Error('Lead id is required');
+
+      const contactData =
+        maybeContactData && typeof maybeContactData === 'object'
+          ? maybeContactData
+          : vendorOrContactData && typeof vendorOrContactData === 'object'
+            ? vendorOrContactData
+            : {};
+
+      const payload = await fetchVendorJson(
+        `/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/contacts`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact_type: contactData?.contact_type || contactData?.contactType,
+            notes: contactData?.notes || '',
+          }),
+        }
+      );
+
+      return payload?.contact || null;
     },
 
     update: async (id, updates) => {
@@ -637,27 +550,15 @@ export const leadApi = {
     },
 
     getStats: async (leadId) => {
-      const { count: total } = await supabase
-        .from('lead_contacts')
-        .select('*', { count: 'exact', head: true })
-        .eq('lead_id', leadId);
-
-      const { count: converted } = await supabase
-        .from('lead_contacts')
-        .select('*', { count: 'exact', head: true })
-        .eq('lead_id', leadId)
-        .eq('status', 'CONVERTED');
-
-      const { count: noResponse } = await supabase
-        .from('lead_contacts')
-        .select('*', { count: 'exact', head: true })
-        .eq('lead_id', leadId)
-        .eq('status', 'NO_RESPONSE');
+      const contacts = await leadApi.contacts.list(leadId);
+      const total = contacts.length;
+      const converted = contacts.filter((row) => String(row?.status || '').toUpperCase() === 'CONVERTED').length;
+      const noResponse = contacts.filter((row) => String(row?.status || '').toUpperCase() === 'NO_RESPONSE').length;
 
       return {
-        total: total || 0,
-        converted: converted || 0,
-        noResponse: noResponse || 0
+        total,
+        converted,
+        noResponse
       };
     }
   },
@@ -716,18 +617,26 @@ export const leadApi = {
       return data;
     },
 
-    create: async (vendorId, leadId, amount) => {
+    create: async (vendorId, leadId, amountOrOptions) => {
       const normalizedLeadId = String(leadId || '').trim();
       if (!normalizedLeadId) throw new Error('Lead id is required');
 
-      const parsedAmount = Number(amount);
+      const options =
+        amountOrOptions && typeof amountOrOptions === 'object' && !Array.isArray(amountOrOptions)
+          ? amountOrOptions
+          : { amount: amountOrOptions };
+      const parsedAmount = Number(options?.amount);
       const amountPayload = Number.isFinite(parsedAmount) ? parsedAmount : undefined;
+      const modeRaw = String(options?.mode || 'AUTO').trim().toUpperCase();
+      const mode = ['AUTO', 'USE_WEEKLY', 'BUY_EXTRA', 'PAID'].includes(modeRaw)
+        ? modeRaw
+        : 'AUTO';
 
       const payload = await fetchVendorJson(`/api/vendors/me/leads/${encodeURIComponent(normalizedLeadId)}/purchase`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
-          amountPayload === undefined ? { mode: 'AUTO' } : { mode: 'AUTO', amount: amountPayload }
+          amountPayload === undefined ? { mode } : { mode, amount: amountPayload }
         ),
       });
       return payload?.purchase || payload;
@@ -763,176 +672,26 @@ export const leadApi = {
     // Get leads for marketplace (excludes direct leads with vendor_id and purchased leads)
     listAvailable: async (options = {}) => {
       const withMeta = options && typeof options === 'object' && options.withMeta === true;
-      // Preferred path: backend endpoint (stable + bypasses client-side RLS drift)
-      try {
-        const response = await fetchVendorJson('/api/vendors/me/marketplace-leads');
-        const leads = Array.isArray(response?.leads) ? response.leads : [];
-        const subscriptionRequired = Boolean(response?.subscription_required);
-        const message = String(
-          response?.message ||
-            (subscriptionRequired ? 'Active subscription required to access marketplace leads.' : '')
-        ).trim();
-        if (withMeta) {
-          return { leads, subscription_required: subscriptionRequired, message };
-        }
-        return leads;
-      } catch (e) {
-        console.warn('[leadApi] /api/vendors/me/marketplace-leads failed, falling back:', e?.message || e);
-      }
-
-      const vendorId = await getVendorId();
-      const activeSubscription = await getActiveVendorSubscription(vendorId);
-      if (!isSubscriptionActive(activeSubscription)) {
-        const message = 'Active subscription required to access marketplace leads.';
-        if (withMeta) {
-          return { leads: [], subscription_required: true, message };
-        }
-        return [];
-      }
-
-      const ctx = await loadVendorLeadContext(vendorId);
-      const autoFilter = ctx.autoLeadFilter !== false;
-      const shouldFilterCategory = autoFilter && (
-        ctx.categorySet.size > 0 ||
-        ctx.productSet.size > 0 ||
-        ctx.microIdSet.size > 0 ||
-        ctx.headIdSet.size > 0 ||
-        ctx.subIdSet.size > 0
-      );
-      const shouldFilterLocation = autoFilter && (
-        ctx.stateSet.size > 0 ||
-        ctx.citySet.size > 0 ||
-        ctx.stateIdSet.size > 0 ||
-        ctx.cityIdSet.size > 0
-      );
-      const shouldFilterBudget = autoFilter && (
-        Number.isFinite(ctx.minBudget) ||
-        Number.isFinite(ctx.maxBudget)
-      );
-      
-      // Marketplace rows are identified primarily by source; older rows may only have vendor_id null.
-      const { data: available, error: availError } = await supabase
-        .from('leads')
-        .select('*')
-        .in('status', ['AVAILABLE', 'PURCHASED'])
-        .or('vendor_id.is.null,source.eq.MARKETPLACE,source.is.null')
-        .order('created_at', { ascending: false })
-        .limit(300);
-
-      if (availError) throw availError;
-
-      // Get leads already purchased by this vendor
-      const { data: purchases, error: purchError } = await supabase
-        .from('lead_purchases')
-        .select('lead_id')
-        .eq('vendor_id', vendorId);
-
-      if (purchError) throw purchError;
-
-      const purchasedIds = new Set((purchases || []).map(p => p.lead_id));
-      const maxVendorsPerLead = 5;
-
-      const candidateLeadIds = Array.from(
-        new Set((available || []).map((lead) => lead?.id).filter(Boolean))
-      );
-
-      const purchaseCountByLead = new Map();
-      if (candidateLeadIds.length > 0) {
-        const { data: allPurchases, error: allPurchasesError } = await supabase
-          .from('lead_purchases')
-          .select('lead_id')
-          .in('lead_id', candidateLeadIds);
-
-        if (allPurchasesError) throw allPurchasesError;
-
-        (allPurchases || []).forEach((row) => {
-          const leadId = String(row?.lead_id || '');
-          if (!leadId) return;
-          purchaseCountByLead.set(leadId, (purchaseCountByLead.get(leadId) || 0) + 1);
-        });
-      }
-
-      const filtered = (available || []).filter((lead) => {
-        if (purchasedIds.has(lead.id)) return false;
-        if ((purchaseCountByLead.get(String(lead?.id || '')) || 0) >= maxVendorsPerLead) return false;
-
-        const tokens = buildLeadTokens(lead);
-        const categoryHit = matchesAny(tokens, ctx.categorySet);
-        const productHit = matchesAny(tokens, ctx.productSet);
-        const microHit = lead?.micro_category_id && ctx.microIdSet.has(lead.micro_category_id);
-        const headHit = lead?.head_category_id && ctx.headIdSet.has(lead.head_category_id);
-        const subHit = lead?.sub_category_id && ctx.subIdSet.has(lead.sub_category_id);
-        const categoryMatch = microHit || headHit || subHit || categoryHit || productHit;
-
-        if (shouldFilterCategory && !categoryMatch) return false;
-
-        if (shouldFilterLocation) {
-          const locText = normalizeText(lead?.location);
-          const leadCityId = lead?.city_id || lead?.cityId || null;
-          const leadStateId = lead?.state_id || lead?.stateId || null;
-
-          const { city, state } = extractLocation(lead);
-          const nCity = normalizeText(city);
-          const nState = normalizeText(state);
-
-          const cityIdMatch = ctx.cityIdSet.size
-            ? (leadCityId && ctx.cityIdSet.has(leadCityId)) ||
-              (locText && [...ctx.cityIdSet].some((id) => locText.includes(normalizeText(id))))
-            : true;
-          const stateIdMatch = ctx.stateIdSet.size
-            ? (leadStateId && ctx.stateIdSet.has(leadStateId)) ||
-              (locText && [...ctx.stateIdSet].some((id) => locText.includes(normalizeText(id))))
-            : true;
-
-          const cityNameMatch = ctx.citySet.size
-            ? (nCity && matchesAny([nCity], ctx.citySet))
-            : true;
-          const stateNameMatch = ctx.stateSet.size
-            ? (nState && matchesAny([nState], ctx.stateSet))
-            : true;
-
-          const cityMatch = (ctx.cityIdSet.size || ctx.citySet.size)
-            ? (cityIdMatch || cityNameMatch)
-            : true;
-          const stateMatch = (ctx.stateIdSet.size || ctx.stateSet.size)
-            ? (stateIdMatch || stateNameMatch)
-            : true;
-
-          if (!cityMatch || !stateMatch) return false;
-        }
-
-        if (shouldFilterBudget) {
-          const budgetVal = Number.parseFloat(lead?.budget);
-          if (Number.isFinite(ctx.minBudget) && Number.isFinite(budgetVal) && budgetVal < ctx.minBudget) {
-            return false;
-          }
-          if (Number.isFinite(ctx.maxBudget) && Number.isFinite(budgetVal) && budgetVal > ctx.maxBudget) {
-            return false;
-          }
-        }
-
-        return true;
-      });
-
-      const unpurchasedLeads = (available || []).filter(
-        (lead) =>
-          !purchasedIds.has(lead.id) &&
-          (purchaseCountByLead.get(String(lead?.id || '')) || 0) < maxVendorsPerLead
-      );
-
-      // If filters are configured and they return zero, keep marketplace visible
-      // by falling back to unfiltered eligible leads.
-      const finalLeads =
-        shouldFilterCategory || shouldFilterLocation || shouldFilterBudget
-          ? filtered.length
-            ? filtered
-            : unpurchasedLeads
-          : unpurchasedLeads;
-
+      const response = await fetchVendorJson('/api/vendors/me/marketplace-leads');
+      const leads = Array.isArray(response?.leads) ? response.leads : [];
+      const subscriptionRequired = Boolean(response?.subscription_required);
+      const message = String(
+        response?.message ||
+          (subscriptionRequired ? 'Active subscription required to access marketplace leads.' : '')
+      ).trim();
       if (withMeta) {
-        return { leads: finalLeads, subscription_required: false, message: '' };
+        return {
+          leads,
+          subscription_required: subscriptionRequired,
+          message,
+          filter_applied: Boolean(response?.filter_applied),
+          filter_scope: String(response?.filter_scope || '').trim(),
+          filter_message: String(response?.filter_message || '').trim(),
+          filter_match_count: Number(response?.filter_match_count || 0),
+          total_eligible: Number(response?.total_eligible || 0),
+        };
       }
-      return finalLeads;
+      return leads;
     },
 
     // Get buyer-created direct leads (seller receives directly from buyer, not marketplace)
@@ -953,72 +712,8 @@ export const leadApi = {
 
     // Get My Leads (purchased + direct + proposals)
     getMyLeads: async () => {
-      // Preferred path: backend endpoint (bypasses Supabase RLS issues on vendor client)
-      try {
-        const { leads } = await fetchVendorJson('/api/vendors/me/leads');
-        if (Array.isArray(leads)) return leads;
-      } catch (e) {
-        console.warn('[leadApi] /api/vendors/me/leads failed, falling back:', e?.message || e);
-      }
-
-      // Fallback path (legacy direct Supabase access)
-      const vendorId = await getVendorId();
-
-      const { data: purchases, error: purchaseErr } = await supabase
-        .from('lead_purchases')
-        .select('*')
-        .eq('vendor_id', vendorId);
-
-      if (purchaseErr) throw purchaseErr;
-
-      const purchasedLeads = purchases
-        ? await Promise.all(
-            purchases.map(async (p) => {
-              const lead = await leadApi.get(p.lead_id);
-              const normalizedPurchaseDatetime =
-                p?.purchase_datetime ||
-                p?.purchase_date ||
-                lead?.created_at ||
-                null;
-              return {
-                ...lead,
-                source: 'Purchased',
-                purchase_date: normalizedPurchaseDatetime,
-                purchase_datetime: normalizedPurchaseDatetime,
-                lead_purchase_id: p?.id || null,
-                purchase_amount: p?.purchase_price ?? p?.amount ?? null,
-                payment_status: p?.payment_status || null,
-                consumption_type: p?.consumption_type || null,
-                lead_status: p?.lead_status || null,
-                subscription_plan_name: p?.subscription_plan_name || null,
-                plan_name: p?.subscription_plan_name || null,
-              };
-            })
-          )
-        : [];
-
-      const { data: direct, error: directErr } = await supabase
-        .from('leads')
-        .select('*')
-        .eq('vendor_id', vendorId);
-
-      if (directErr) throw directErr;
-
-      const purchasedSet = new Set((purchasedLeads || []).map((l) => String(l?.id)).filter(Boolean));
-      const directLeads = (direct || [])
-        .filter((l) => !purchasedSet.has(String(l?.id)))
-        .map((l) => ({
-          ...l,
-          source: 'Direct',
-          purchase_date: l.created_at,
-          purchase_datetime: l.created_at,
-        }));
-
-      return [...purchasedLeads, ...directLeads].sort((a, b) => {
-        const aTs = new Date(a?.purchase_date || a?.created_at || 0).getTime();
-        const bTs = new Date(b?.purchase_date || b?.created_at || 0).getTime();
-        return bTs - aTs;
-      });
+      const { leads } = await fetchVendorJson('/api/vendors/me/leads');
+      return Array.isArray(leads) ? leads : [];
     }
   }
 };

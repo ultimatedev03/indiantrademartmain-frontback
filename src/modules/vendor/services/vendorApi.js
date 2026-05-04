@@ -21,8 +21,24 @@ const fetchVendorJson = async (path, options = {}) => {
   return data;
 };
 
+const getCurrentVendorProfile = async ({ suppressAuthErrors = false } = {}) => {
+  try {
+    const response = await fetchVendorJson('/api/vendors/me');
+    return response?.vendor || null;
+  } catch (error) {
+    const status = Number(error?.status || 0);
+    if (suppressAuthErrors && [401, 403, 404].includes(status)) {
+      return null;
+    }
+    throw error;
+  }
+};
+
 // Helper to get current vendor ID based on auth user
 const getVendorId = async () => {
+  const backendVendor = await getCurrentVendorProfile({ suppressAuthErrors: true });
+  if (backendVendor?.id) return backendVendor.id;
+
   const { data: { user }, error: uErr } = await supabase.auth.getUser();
   if (uErr) throw uErr;
   if (!user) throw new Error('Not authenticated');
@@ -75,6 +91,9 @@ const getVendorId = async () => {
 };
 
 const getVendorCandidateIds = async () => {
+  const backendVendor = await getCurrentVendorProfile({ suppressAuthErrors: true });
+  if (backendVendor?.id) return [String(backendVendor.id)];
+
   const { data: { user }, error: uErr } = await supabase.auth.getUser();
   if (uErr) throw uErr;
   if (!user) throw new Error('Not authenticated');
@@ -1082,22 +1101,14 @@ export const vendorApi = {
   auth: {
     // ✅ FIXED: we do NOT spread full auth user object (confirmed_at/is_anonymous etc won’t leak to UI draft)
     me: async () => {
+      let vendor = await getCurrentVendorProfile({ suppressAuthErrors: true });
+
       const { data: { user }, error: uErr } = await supabase.auth.getUser();
       if (uErr) throw uErr;
-      if (!user) return null;
-
-      let vendor = null;
-
-      // Prefer backend endpoint (RLS-safe and mapping-safe).
-      try {
-        const response = await fetchVendorJson('/api/vendors/me');
-        vendor = response?.vendor || null;
-      } catch (error) {
-        vendor = null;
-      }
+      if (!vendor && !user) return null;
 
       // Fallback by user_id
-      if (!vendor) {
+      if (!vendor && user?.id) {
         const { data: byUserId, error: byUserErr } = await supabase
           .from('vendors')
           .select('*')
@@ -1108,7 +1119,7 @@ export const vendorApi = {
       }
 
       // Fallback by email (legacy rows can miss user_id link)
-      const normalizedEmail = String(user.email || '').toLowerCase().trim();
+      const normalizedEmail = String(user?.email || vendor?.email || '').toLowerCase().trim();
       if (!vendor && normalizedEmail) {
         const { data: byEmail, error: byEmailErr } = await supabase
           .from('vendors')
@@ -1122,7 +1133,7 @@ export const vendorApi = {
       }
 
       // Best effort relink for future lookups.
-      if (vendor?.id && vendor?.user_id !== user.id) {
+      if (vendor?.id && user?.id && vendor?.user_id !== user.id) {
         supabase
           .from('vendors')
           .update({ user_id: user.id })
@@ -1178,9 +1189,9 @@ export const vendorApi = {
 
       // ✅ Return safe auth + vendor data
       return {
-        user_id: user.id,
-        email: vendor?.email || user.email || null,
-        phone: vendor?.phone || user.phone || null,
+        user_id: vendor?.user_id || user?.id || null,
+        email: vendor?.email || user?.email || null,
+        phone: vendor?.phone || user?.phone || null,
         role: 'VENDOR',
         ...transformedVendor
       };

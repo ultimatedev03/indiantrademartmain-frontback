@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { leadApi } from "@/modules/lead/services/leadApi";
-import { vendorApi } from "@/modules/vendor/services/vendorApi";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +29,6 @@ import {
 import { toast } from "@/components/ui/use-toast";
 import { phoneUtils } from "@/shared/utils/phoneUtils";
 import LeadStatsPanel from "@/modules/vendor/components/LeadStatsPanel";
-import { supabase } from "@/lib/customSupabaseClient";
 import { leadPaymentApi } from "@/modules/vendor/services/leadPaymentApi";
 import { useSubdomain } from '@/contexts/SubdomainContext';
 
@@ -159,44 +157,11 @@ const formatConsumptionType = (value) => {
   return "";
 };
 
-const asObject = (value) => {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof value === "object" && !Array.isArray(value) ? value : {};
-};
-
-const getPlanExtraLeadPrice = (plan) => {
-  const features = asObject(plan?.features);
-  const pricing = asObject(features?.pricing);
-  const value = Number(pricing?.extra_lead_price ?? 0);
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return value;
-};
-
-const resolveQuotaLimit = (quotaValue, planValue) => {
-  const quotaLimit = Number(quotaValue);
-  if (Number.isFinite(quotaLimit) && quotaLimit > 0) return quotaLimit;
-
-  const planLimit = Number(planValue);
-  if (Number.isFinite(planLimit) && planLimit > 0) return planLimit;
-
-  return Number.isFinite(quotaLimit) ? quotaLimit : 0;
-};
-
 const topNFromCountMap = (map, n = 8) =>
   [...map.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, n)
     .map(([label, count]) => ({ label, count }));
-
-const INCLUDED_CONSUMPTION_TYPES = new Set(["DAILY_INCLUDED", "WEEKLY_INCLUDED"]);
 
 const anySelected = (obj) => Object.values(obj || {}).some(Boolean);
 const selectedKeys = (obj) => Object.keys(obj || {}).filter((k) => obj[k]);
@@ -219,21 +184,6 @@ const writeContactedIds = (ids) => {
   }
 };
 
-const startOfToday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const startOfWeekMonday = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d;
-};
-
 const Leads = () => {
   const navigate = useNavigate();
   const { resolvePath } = useSubdomain();
@@ -243,6 +193,11 @@ const Leads = () => {
   const [marketplaceInfo, setMarketplaceInfo] = useState({
     subscription_required: false,
     message: "",
+    filter_applied: false,
+    filter_scope: "",
+    filter_message: "",
+    filter_match_count: 0,
+    total_eligible: 0,
   });
   const [myLeads, setMyLeads] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -360,117 +315,20 @@ const Leads = () => {
 
   const loadStats = async () => {
     try {
-      try {
-        await vendorApi.dashboard.getStats();
-      } catch {
-        // ignore
+      const serverStats = await leadApi.getLeadStats();
+      if (!serverStats) {
+        setStats(null);
+        return;
       }
-
-      let vendorId = null;
-      try {
-        const me = await vendorApi.auth.me();
-        vendorId = me?.id || null;
-      } catch (e) {
-        console.error("Failed to get vendor id for stats:", e);
-      }
-
-      const myLeads = await leadApi.marketplace.getMyLeads();
-      const rows = myLeads || [];
-
-      const todayStart = startOfToday();
-      const weekStart = startOfWeekMonday();
-      let purchasedCount = 0;
-      let directCount = 0;
-      const directLeadIds = new Set();
-
-      let daily = 0;
-      let weekly = 0;
-
-      rows.forEach((row) => {
-        const leadObj = row?.leads || row;
-        const source = (row?.source || "").toString().toLowerCase();
-        const isDirect = source === "direct";
-        const isPurchased = source === "purchased" || !row?.source;
-        const consumptionType = String(row?.consumption_type || leadObj?.consumption_type || "")
-          .trim()
-          .toUpperCase();
-        const countsAgainstIncludedQuota = INCLUDED_CONSUMPTION_TYPES.has(consumptionType);
-
-        if (isDirect) {
-          directCount += 1;
-          if (leadObj?.id) directLeadIds.add(String(leadObj.id));
-        }
-        if (isPurchased) purchasedCount += 1;
-
-        const purchaseDate =
-          row?.purchase_datetime ||
-          row?.purchase_date ||
-          row?.purchaseDate ||
-          row?.purchased_at ||
-          leadObj?.created_at ||
-          leadObj?.createdAt;
-
-        const d = safeDate(purchaseDate);
-        if (!d) return;
-
-        if (!countsAgainstIncludedQuota) return;
-
-        if (consumptionType === "DAILY_INCLUDED" && d >= todayStart) daily += 1;
-        if (d >= weekStart) weekly += 1;
-      });
-
-      let totalContacted = 0;
-      try {
-        if (vendorId) {
-          const { data: contacts, error: contactErr } = await supabase
-            .from("lead_contacts")
-            .select("lead_id")
-            .eq("vendor_id", vendorId);
-          if (contactErr) throw contactErr;
-          const contactedIds = new Set((contacts || []).map((c) => String(c.lead_id)).filter(Boolean));
-          totalContacted = new Set([...contactedIds, ...directLeadIds]).size;
-        } else {
-          const contactedIds = readContactedIds().map((id) => String(id));
-          totalContacted = new Set([...contactedIds, ...directLeadIds]).size;
-        }
-      } catch (err) {
-        console.error("Failed to load contacted count:", err);
-        const contactedIds = readContactedIds().map((id) => String(id));
-        totalContacted = new Set([...contactedIds, ...directLeadIds]).size;
-      }
-
-      // fetch quota (limits + used)
-      let quota = null;
-      let planLimits = { daily_limit: 0, weekly_limit: 0 };
-      let planExtraLeadPrice = 0;
-      try {
-        const sub = await vendorApi.subscriptions.getCurrent();
-        if (sub?.plan) {
-          planLimits = {
-            daily_limit: sub.plan.daily_limit || 0,
-            weekly_limit: sub.plan.weekly_limit || 0,
-          };
-          planExtraLeadPrice = getPlanExtraLeadPrice(sub.plan);
-        }
-        quota = await vendorApi.leadQuota.get();
-      } catch (err) {
-        console.error("Failed to load quota:", err);
-      }
-
-      const quotaDailyUsed = Number(quota?.daily_used);
-      const quotaWeeklyUsed = Number(quota?.weekly_used);
-      const dailyLimit = resolveQuotaLimit(quota?.daily_limit, planLimits.daily_limit);
-      const weeklyLimit = resolveQuotaLimit(quota?.weekly_limit, planLimits.weekly_limit);
-
       setStats({
-        direct: directCount,
-        totalPurchased: purchasedCount,
-        totalContacted,
-        dailyUsed: Math.max(Number.isFinite(quotaDailyUsed) ? quotaDailyUsed : 0, daily),
-        dailyLimit,
-        weeklyUsed: Math.max(Number.isFinite(quotaWeeklyUsed) ? quotaWeeklyUsed : 0, weekly),
-        weeklyLimit,
-        extraLeadPrice: planExtraLeadPrice,
+        direct: Number(serverStats?.direct || 0),
+        totalPurchased: Number(serverStats?.totalPurchased || 0),
+        totalContacted: Number(serverStats?.totalContacted || 0),
+        dailyUsed: Number(serverStats?.dailyUsed || 0),
+        dailyLimit: Number(serverStats?.dailyLimit || 0),
+        weeklyUsed: Number(serverStats?.weeklyUsed || 0),
+        weeklyLimit: Number(serverStats?.weeklyLimit || 0),
+        extraLeadPrice: Number(serverStats?.extraLeadPrice || 0),
       });
     } catch (error) {
       console.error("Failed to load stats:", error);
@@ -507,11 +365,24 @@ const Leads = () => {
         setMarketplaceInfo({
           subscription_required: Boolean(marketplacePayload?.subscription_required),
           message: String(marketplacePayload?.message || "").trim(),
+          filter_applied: Boolean(marketplacePayload?.filter_applied),
+          filter_scope: String(marketplacePayload?.filter_scope || "").trim(),
+          filter_message: String(marketplacePayload?.filter_message || "").trim(),
+          filter_match_count: Number(marketplacePayload?.filter_match_count || 0),
+          total_eligible: Number(marketplacePayload?.total_eligible || 0),
         });
       } catch (error) {
         console.error(error);
         if (requestId !== leadsRequestRef.current) return;
-        setMarketplaceInfo({ subscription_required: false, message: "" });
+        setMarketplaceInfo({
+          subscription_required: false,
+          message: "",
+          filter_applied: false,
+          filter_scope: "",
+          filter_message: "",
+          filter_match_count: 0,
+          total_eligible: 0,
+        });
         // Keep already visible leads on transient failure; only show toast.
         toast({ title: "Failed to load leads", variant: "destructive" });
       } finally {
@@ -1279,6 +1150,42 @@ const Leads = () => {
             </CardContent>
           </Card>
 
+          {!marketplaceInfo?.subscription_required && (
+            <Card className="border bg-white">
+              <CardContent className="p-3">
+                <div className="flex flex-col gap-1 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {marketplaceInfo?.filter_scope === "matched" ? (
+                      <Badge className="bg-emerald-50 text-emerald-700 border border-emerald-200">
+                        Saved preferences matched
+                      </Badge>
+                    ) : marketplaceInfo?.filter_scope === "fallback" ? (
+                      <Badge className="bg-amber-50 text-amber-700 border border-amber-200">
+                        Preference fallback
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline">All eligible leads</Badge>
+                    )}
+                    {marketAppliedCount > 0 ? (
+                      <Badge variant="outline">
+                        UI filters: {marketAppliedCount}
+                      </Badge>
+                    ) : null}
+                    <Badge variant="outline">
+                      Showing {filteredMarketplaceLeads.length} of {normalizedMarketplaceLeads.length}
+                    </Badge>
+                  </div>
+
+                  {marketplaceInfo?.filter_message ? (
+                    <div className="text-gray-600">
+                      {marketplaceInfo.filter_message}
+                    </div>
+                  ) : null}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {loading ? (
             <div className="p-8 text-center text-gray-500">Loading...</div>
           ) : filteredMarketplaceLeads.length === 0 ? (
@@ -1503,6 +1410,14 @@ const LeadCard = ({
         minute: "2-digit",
       })
     : "";
+  const expiryDateObj = safeDate(lead?.expires_at);
+  const expiresInDays = Number(lead?.expires_in_days);
+  const showExpiryHint = !Number.isNaN(expiresInDays) && Number.isFinite(expiresInDays) && !isPurchased && !isDirect;
+  const expiryHint = showExpiryHint
+    ? expiresInDays <= 1
+      ? "Expires today"
+      : `Expires in ${expiresInDays} days`
+    : "";
 
   return (
     <Card
@@ -1569,6 +1484,15 @@ const LeadCard = ({
                   className={`text-[11px] px-2 py-0.5 ${lifecycleBadgeClass(lifecycleStatus)}`}
                 >
                   {leadStatusLabel}
+                </Badge>
+              ) : null}
+              {showExpiryHint && expiryHint ? (
+                <Badge
+                  variant="outline"
+                  className={expiresInDays <= 3 ? "text-[11px] border-amber-200 text-amber-700 bg-amber-50" : "text-[11px]"}
+                  title={expiryDateObj ? `Expires on ${expiryDateObj.toLocaleString("en-IN")}` : undefined}
+                >
+                  {expiryHint}
                 </Badge>
               ) : null}
             </div>

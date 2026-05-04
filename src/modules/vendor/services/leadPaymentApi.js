@@ -1,6 +1,6 @@
 import { fetchWithCsrf } from '@/lib/fetchWithCsrf';
 import { apiUrl } from '@/lib/apiBase';
-import { leadsMarketplaceApi } from '@/modules/vendor/services/leadsMarketplaceApi';
+import { leadApi } from '@/modules/lead/services/leadApi';
 
 let razorpayScriptPromise = null;
 
@@ -141,7 +141,7 @@ export const leadPaymentApi = {
     // Included consumption path (AUTO / USE_WEEKLY)
     if (!forcePaid) {
       try {
-        const consumePayload = await leadsMarketplaceApi.purchaseLead(leadId, {
+        const consumePayload = await leadApi.purchases.create(null, leadId, {
           mode,
           amount: leadPrice,
         });

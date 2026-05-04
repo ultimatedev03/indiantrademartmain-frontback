@@ -64,6 +64,18 @@ function roleToDepartment(role) {
   }
 }
 
+const EMAIL_SEARCH_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function escapeIlikeTerm(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+    .replace(/,/g, " ");
+}
+
 async function findPublicUserByEmail(email) {
   const target = normalizeEmail(email);
   if (!target) return null;
@@ -556,9 +568,25 @@ router.get("/vendors", async (req, res) => {
     }
 
     if (search) {
-      vendorQuery = vendorQuery.or(
-        `company_name.ilike.%${search}%,owner_name.ilike.%${search}%,vendor_id.ilike.%${search}%,email.ilike.%${search}%`
-      );
+      const normalizedSearchEmail = normalizeEmail(search);
+      const escapedSearch = escapeIlikeTerm(search);
+      const looksLikeEmailSearch = EMAIL_SEARCH_RE.test(search);
+      const looksLikeUuidSearch = UUID_LIKE_RE.test(search);
+
+      if (looksLikeEmailSearch) {
+        vendorQuery = vendorQuery.ilike("email", normalizedSearchEmail);
+      } else if (looksLikeUuidSearch) {
+        vendorQuery = vendorQuery.eq("id", search);
+      } else {
+        vendorQuery = vendorQuery.or(
+          [
+            `company_name.ilike.%${escapedSearch}%`,
+            `owner_name.ilike.%${escapedSearch}%`,
+            `vendor_id.ilike.%${escapedSearch}%`,
+            `email.ilike.%${escapedSearch}%`,
+          ].join(",")
+        );
+      }
     }
 
     if (hasJoinedFrom) {
@@ -584,7 +612,6 @@ router.get("/vendors", async (req, res) => {
       if (internalId) vendorLookupMap.set(internalId, internalId);
       if (publicId) vendorLookupMap.set(publicId, internalId);
     });
-    const UUID_LIKE_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const chunk = (arr, size = 120) => {
       const out = [];
       for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
