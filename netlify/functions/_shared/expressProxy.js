@@ -30,6 +30,24 @@ if (!expressApp) {
   throw new TypeError(`Unsupported Express app export in expressProxy. Keys: ${keys}`);
 }
 
+const toQueryString = (event = {}) => {
+  const rawQuery = String(event?.rawQuery || '').trim();
+  if (rawQuery) return rawQuery;
+
+  const params = new URLSearchParams();
+  const queryObject = event?.queryStringParameters || {};
+  Object.entries(queryObject).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === '') return;
+    params.append(key, String(value));
+  });
+  return params.toString();
+};
+
+const buildRewrittenUrl = (event = {}, rewrittenPath = '/') => {
+  const queryString = toQueryString(event);
+  return queryString ? `${rewrittenPath}?${queryString}` : rewrittenPath;
+};
+
 const rewriteFunctionPath = (event = {}) => {
   const rawPath = String(event?.path || '').trim();
   if (!rawPath) return '/';
@@ -49,18 +67,20 @@ const rewriteFunctionPath = (event = {}) => {
 const expressHandler = serverless(expressApp, {
   request: (req, event) => {
     const rewrittenPath = rewriteFunctionPath(event);
-    req.url = rewrittenPath;
-    req.originalUrl = rewrittenPath;
+    const rewrittenUrl = buildRewrittenUrl(event, rewrittenPath);
+    req.url = rewrittenUrl;
+    req.originalUrl = rewrittenUrl;
   },
 });
 
 export const expressProxy = async (event, context) => {
   const rewrittenPath = rewriteFunctionPath(event);
+  const rewrittenUrl = buildRewrittenUrl(event, rewrittenPath);
   const nextEvent = {
     ...event,
     path: rewrittenPath,
     rawUrl: event?.rawUrl
-      ? String(event.rawUrl).replace(String(event.path || ''), rewrittenPath)
+      ? String(event.rawUrl).replace(String(event.path || ''), rewrittenUrl)
       : event?.rawUrl,
   };
 
