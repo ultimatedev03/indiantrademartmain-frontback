@@ -1,5 +1,5 @@
 import serverless from 'serverless-http';
-import app from '../../../server/app.js';
+import appModule from '../../../server/app.js';
 
 const FUNCTION_ROUTE_MAP = Object.freeze({
   admin: '/api/admin',
@@ -13,6 +13,22 @@ const FUNCTION_ROUTE_MAP = Object.freeze({
 });
 
 const stripTrailingSlash = (value = '') => String(value || '').replace(/\/+$/, '');
+
+const resolveExpressApp = (candidate) => {
+  if (!candidate) return null;
+  if (typeof candidate === 'function') return candidate;
+  if (typeof candidate?.default === 'function') return candidate.default;
+  if (typeof candidate?.app === 'function') return candidate.app;
+  if (typeof candidate?.default?.app === 'function') return candidate.default.app;
+  return null;
+};
+
+const expressApp = resolveExpressApp(appModule);
+
+if (!expressApp) {
+  const keys = Object.keys(appModule || {}).join(', ') || 'none';
+  throw new TypeError(`Unsupported Express app export in expressProxy. Keys: ${keys}`);
+}
 
 const rewriteFunctionPath = (event = {}) => {
   const rawPath = String(event?.path || '').trim();
@@ -30,7 +46,7 @@ const rewriteFunctionPath = (event = {}) => {
   return tail ? `${stripTrailingSlash(baseRoute)}/${tail}` : baseRoute;
 };
 
-const expressHandler = serverless(app, {
+const expressHandler = serverless(expressApp, {
   request: (req, event) => {
     const rewrittenPath = rewriteFunctionPath(event);
     req.url = rewrittenPath;
