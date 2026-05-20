@@ -59,7 +59,8 @@ begin
     'geo_postal_raw',
     'product_videos',
     'requirements',
-    'quotes'
+    'quotes',
+    'favorites'
   ]
   loop
     if to_regclass(format('public.%I', table_name)) is not null then
@@ -153,8 +154,8 @@ begin
       for select
       to authenticated
       using (
-        user_id = auth.uid()
-        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        user_id = (select auth.uid())
+        or lower(coalesce(email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
       );
   end if;
 end $$;
@@ -177,8 +178,8 @@ begin
           from public.buyers b
           where b.id = proposals.buyer_id
             and (
-              b.user_id = auth.uid()
-              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
         or exists (
@@ -186,8 +187,8 @@ begin
           from public.vendors v
           where v.id = proposals.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -281,7 +282,7 @@ begin
 end $$;
 
 -- Remove policies that triggered the "RLS references user metadata" advisor
--- warning for buyers. Use auth.uid() and top-level JWT email instead.
+-- warning for buyers. Use (select auth.uid()) and top-level JWT email instead.
 do $$
 declare
   policy_item record;
@@ -310,8 +311,8 @@ begin
       for select
       to authenticated
       using (
-        user_id = auth.uid()
-        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        user_id = (select auth.uid())
+        or lower(coalesce(email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
       );
 
     drop policy if exists buyers_update_own_safe on public.buyers;
@@ -320,12 +321,12 @@ begin
       for update
       to authenticated
       using (
-        user_id = auth.uid()
-        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        user_id = (select auth.uid())
+        or lower(coalesce(email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
       )
       with check (
-        user_id = auth.uid()
-        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+        user_id = (select auth.uid())
+        or lower(coalesce(email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
       );
   end if;
 end $$;
@@ -349,8 +350,8 @@ begin
           from public.vendors v
           where v.id = vendor_plan_slots.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -370,8 +371,8 @@ begin
           from public.vendors v
           where v.id = vendor_referral_profiles.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -391,8 +392,8 @@ begin
           from public.vendors v
           where v.id = vendor_referral_wallets.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -412,8 +413,8 @@ begin
           from public.vendors v
           where v.id = vendor_referral_wallet_ledger.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -433,8 +434,8 @@ begin
           from public.vendors v
           where v.id = vendor_referral_cashout_requests.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -450,8 +451,8 @@ begin
           from public.vendors v
           where v.id = vendor_referral_cashout_requests.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -471,8 +472,8 @@ begin
           from public.vendors v
           where v.id in (vendor_referrals.referrer_vendor_id, vendor_referrals.referred_vendor_id)
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -496,8 +497,8 @@ begin
           from public.vendors v
           where v.id = lead_contacts.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       )
@@ -507,8 +508,8 @@ begin
           from public.vendors v
           where v.id = lead_contacts.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -528,8 +529,8 @@ begin
           from public.vendors v
           where v.id = lead_status_history.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -549,8 +550,8 @@ begin
           from public.vendors v
           where v.id = kyc_documents.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -570,8 +571,8 @@ begin
           from public.buyers b
           where b.id = buyer_notifications.buyer_id
             and (
-              b.user_id = auth.uid()
-              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       )
@@ -581,8 +582,8 @@ begin
           from public.buyers b
           where b.id = buyer_notifications.buyer_id
             and (
-              b.user_id = auth.uid()
-              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -602,8 +603,8 @@ begin
           from public.vendors v
           where v.id = vendor_division_map.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -623,8 +624,8 @@ begin
           from public.buyers b
           where b.id = quotes.buyer_id
             and (
-              b.user_id = auth.uid()
-              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
         or exists (
@@ -632,8 +633,8 @@ begin
           from public.vendors v
           where v.id = quotes.vendor_id
             and (
-              v.user_id = auth.uid()
-              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+              v.user_id = (select auth.uid())
+              or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
         )
       );
@@ -647,8 +648,8 @@ begin
       on public.chatbot_history
       for all
       to authenticated
-      using (user_id = auth.uid())
-      with check (user_id = auth.uid());
+      using (user_id = (select auth.uid()))
+      with check (user_id = (select auth.uid()));
   end if;
 
   if to_regclass('public.platform_feedback') is not null then
@@ -659,7 +660,7 @@ begin
       on public.platform_feedback
       for insert
       to authenticated
-      with check (user_id = auth.uid() or user_id is null);
+      with check (user_id = (select auth.uid()) or user_id is null);
   end if;
 
   if to_regclass('public.requirements') is not null then
@@ -675,6 +676,38 @@ begin
 
   if to_regclass('public.chat_blocks') is not null then
     grant select, insert, delete on table public.chat_blocks to authenticated;
+  end if;
+
+  if to_regclass('public.favorites') is not null then
+    grant select, insert, delete on table public.favorites to authenticated;
+
+    drop policy if exists favorites_buyer_owner_rw on public.favorites;
+    create policy favorites_buyer_owner_rw
+      on public.favorites
+      for all
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.buyers b
+          where b.id = favorites.buyer_id
+            and (
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+            )
+        )
+      )
+      with check (
+        exists (
+          select 1
+          from public.buyers b
+          where b.id = favorites.buyer_id
+            and (
+              b.user_id = (select auth.uid())
+              or lower(coalesce(b.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
+            )
+        )
+      );
   end if;
 end $$;
 
@@ -694,5 +727,45 @@ begin
     if to_regclass(format('public.%I', view_name)) is not null then
       execute format('alter view public.%I set (security_invoker = true)', view_name);
     end if;
+  end loop;
+end $$;
+
+-- Supabase performance advisor recommends wrapping auth helper calls in a
+-- scalar subquery so Postgres can initialize them once per statement.
+do $$
+declare
+  policy_item record;
+  next_qual text;
+  next_check text;
+  alter_sql text;
+begin
+  for policy_item in
+    select schemaname, tablename, policyname, qual, with_check
+    from pg_policies
+    where schemaname = 'public'
+      and (
+        coalesce(qual, '') ~ 'auth\.(uid|jwt)\(\)'
+        or coalesce(with_check, '') ~ 'auth\.(uid|jwt)\(\)'
+      )
+  loop
+    next_qual := replace(replace(policy_item.qual, 'auth.uid()', '(select auth.uid())'), 'auth.jwt()', '(select auth.jwt())');
+    next_check := replace(replace(policy_item.with_check, 'auth.uid()', '(select auth.uid())'), 'auth.jwt()', '(select auth.jwt())');
+
+    alter_sql := format(
+      'alter policy %I on %I.%I',
+      policy_item.policyname,
+      policy_item.schemaname,
+      policy_item.tablename
+    );
+
+    if next_qual is not null then
+      alter_sql := alter_sql || format(' using (%s)', next_qual);
+    end if;
+
+    if next_check is not null then
+      alter_sql := alter_sql || format(' with check (%s)', next_check);
+    end if;
+
+    execute alter_sql;
   end loop;
 end $$;

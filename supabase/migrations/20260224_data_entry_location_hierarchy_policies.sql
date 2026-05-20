@@ -39,21 +39,21 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 )
 WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 );
 
 DO $$
@@ -80,21 +80,21 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 )
 WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 );
 
 DO $$
@@ -121,21 +121,21 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 )
 WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 );
 
 DO $$
@@ -162,19 +162,19 @@ USING (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 )
 WITH CHECK (
   EXISTS (
     SELECT 1
     FROM public.employees e
-    WHERE e.user_id = auth.uid()
+    WHERE e.user_id = (select auth.uid())
       AND upper(coalesce(e.status, 'ACTIVE')) = 'ACTIVE'
       AND upper(coalesce(e.role, '')) IN ('DATA_ENTRY', 'DATAENTRY', 'ADMIN', 'SUPERADMIN')
   )
-  OR upper(coalesce(auth.jwt() ->> 'role', '')) = 'SUPERADMIN'
+  OR upper(coalesce((select auth.jwt()) ->> 'role', '')) = 'SUPERADMIN'
 );
