@@ -60,7 +60,8 @@ begin
     'product_videos',
     'requirements',
     'quotes',
-    'favorites'
+    'favorites',
+    'page_status'
   ]
   loop
     if to_regclass(format('public.%I', table_name)) is not null then
@@ -83,7 +84,8 @@ begin
       ('geo_divisions', 'geo_divisions_public_read'),
       ('geo_division_pincodes', 'geo_division_pincodes_public_read'),
       ('vendor_services', 'vendor_services_public_read'),
-      ('product_videos', 'product_videos_public_read')
+      ('product_videos', 'product_videos_public_read'),
+      ('page_status', 'page_status_public_read')
     ) as v(table_name, policy_name)
   loop
     if to_regclass(format('public.%I', item.table_name)) is not null then
@@ -202,6 +204,14 @@ do $$
 begin
   if to_regclass('public.system_config') is not null then
     revoke all on table public.system_config from anon, authenticated;
+    grant select on table public.system_config to anon, authenticated;
+
+    drop policy if exists system_config_public_maintenance_read on public.system_config;
+    create policy system_config_public_maintenance_read
+      on public.system_config
+      for select
+      to anon, authenticated
+      using (config_key = 'maintenance_mode');
   end if;
 
   if to_regclass('public.vendor_additional_leads') is not null then
