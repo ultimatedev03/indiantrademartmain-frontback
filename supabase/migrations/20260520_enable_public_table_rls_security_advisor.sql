@@ -590,7 +590,7 @@ begin
   end if;
 
   if to_regclass('public.vendor_division_map') is not null then
-    grant select on table public.vendor_division_map to authenticated;
+    grant select, insert, update, delete on table public.vendor_division_map to authenticated;
 
     drop policy if exists vendor_division_map_vendor_owner_read on public.vendor_division_map;
     create policy vendor_division_map_vendor_owner_read
@@ -606,6 +606,28 @@ begin
               v.user_id = (select auth.uid())
               or lower(coalesce(v.email, '')) = lower(coalesce((select auth.jwt()) ->> 'email', ''))
             )
+        )
+      );
+
+    drop policy if exists vendor_division_map_employee_manage on public.vendor_division_map;
+    create policy vendor_division_map_employee_manage
+      on public.vendor_division_map
+      for all
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.employees e
+          where e.user_id = (select auth.uid())
+            and e.role in ('DATA_ENTRY', 'DATAENTRY', 'SUPPORT', 'ADMIN', 'SUPERADMIN')
+        )
+      )
+      with check (
+        exists (
+          select 1
+          from public.employees e
+          where e.user_id = (select auth.uid())
+            and e.role in ('DATA_ENTRY', 'DATAENTRY', 'SUPPORT', 'ADMIN', 'SUPERADMIN')
         )
       );
   end if;
@@ -708,6 +730,16 @@ begin
             )
         )
       );
+  end if;
+end $$;
+
+-- Vendor inserts/updates can fire a geography sync trigger that writes to
+-- vendor_division_map. Keep the trigger compatible with RLS-enabled tables.
+do $$
+begin
+  if to_regprocedure('public.sync_vendor_division_map_from_vendor()') is not null then
+    alter function public.sync_vendor_division_map_from_vendor() security definer;
+    alter function public.sync_vendor_division_map_from_vendor() set search_path = public, pg_temp;
   end if;
 end $$;
 
