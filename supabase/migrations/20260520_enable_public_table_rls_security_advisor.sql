@@ -33,7 +33,33 @@ begin
     'vendor_referral_wallet_ledger',
     'superadmin_users',
     'vendor_referral_cashout_requests',
-    'referral_program_settings'
+    'referral_program_settings',
+    'lead_contacts',
+    'sales_vendor_engagements',
+    'lead_status_history',
+    'subscription_extension_requests',
+    'buyers',
+    'kyc_documents',
+    'buyer_notifications',
+    'geo_divisions',
+    'vendor_coupon_usages',
+    'quotation_emails',
+    'geo_division_pincodes',
+    'quotation_unregistered',
+    'vendor_services',
+    'vendor_subscriptions',
+    'vp_manager_division_allocations',
+    'manager_sales_division_allocations',
+    'vendor_division_map',
+    'vendor_lead_quota_backup_20260222',
+    'chat_blocks',
+    'categories',
+    'chatbot_history',
+    'platform_feedback',
+    'geo_postal_raw',
+    'product_videos',
+    'requirements',
+    'quotes'
   ]
   loop
     if to_regclass(format('public.%I', table_name)) is not null then
@@ -51,7 +77,12 @@ begin
     select *
     from (values
       ('plan_tiers', 'plan_tiers_public_read'),
-      ('regions', 'regions_public_read')
+      ('regions', 'regions_public_read'),
+      ('categories', 'categories_public_read'),
+      ('geo_divisions', 'geo_divisions_public_read'),
+      ('geo_division_pincodes', 'geo_division_pincodes_public_read'),
+      ('vendor_services', 'vendor_services_public_read'),
+      ('product_videos', 'product_videos_public_read')
     ) as v(table_name, policy_name)
   loop
     if to_regclass(format('public.%I', item.table_name)) is not null then
@@ -207,6 +238,96 @@ begin
   if to_regclass('public.referral_program_settings') is not null then
     revoke all on table public.referral_program_settings from anon, authenticated;
   end if;
+
+  if to_regclass('public.sales_vendor_engagements') is not null then
+    revoke all on table public.sales_vendor_engagements from anon, authenticated;
+  end if;
+
+  if to_regclass('public.subscription_extension_requests') is not null then
+    revoke all on table public.subscription_extension_requests from anon, authenticated;
+  end if;
+
+  if to_regclass('public.vendor_coupon_usages') is not null then
+    revoke all on table public.vendor_coupon_usages from anon, authenticated;
+  end if;
+
+  if to_regclass('public.quotation_emails') is not null then
+    revoke all on table public.quotation_emails from anon, authenticated;
+  end if;
+
+  if to_regclass('public.quotation_unregistered') is not null then
+    revoke all on table public.quotation_unregistered from anon, authenticated;
+  end if;
+
+  if to_regclass('public.vendor_subscriptions') is not null then
+    revoke all on table public.vendor_subscriptions from anon, authenticated;
+  end if;
+
+  if to_regclass('public.vp_manager_division_allocations') is not null then
+    revoke all on table public.vp_manager_division_allocations from anon, authenticated;
+  end if;
+
+  if to_regclass('public.manager_sales_division_allocations') is not null then
+    revoke all on table public.manager_sales_division_allocations from anon, authenticated;
+  end if;
+
+  if to_regclass('public.geo_postal_raw') is not null then
+    revoke all on table public.geo_postal_raw from anon, authenticated;
+  end if;
+
+  if to_regclass('public.vendor_lead_quota_backup_20260222') is not null then
+    revoke all on table public.vendor_lead_quota_backup_20260222 from anon, authenticated;
+  end if;
+end $$;
+
+-- Remove policies that triggered the "RLS references user metadata" advisor
+-- warning for buyers. Use auth.uid() and top-level JWT email instead.
+do $$
+declare
+  policy_item record;
+begin
+  if to_regclass('public.buyers') is not null then
+    for policy_item in
+      select policyname
+      from pg_policies
+      where schemaname = 'public'
+        and tablename = 'buyers'
+        and (
+          coalesce(qual, '') ilike '%user_metadata%'
+          or coalesce(with_check, '') ilike '%user_metadata%'
+          or coalesce(qual, '') ilike '%raw_user_meta_data%'
+          or coalesce(with_check, '') ilike '%raw_user_meta_data%'
+        )
+    loop
+      execute format('drop policy if exists %I on public.buyers', policy_item.policyname);
+    end loop;
+
+    grant select, update on table public.buyers to authenticated;
+
+    drop policy if exists buyers_select_own_safe on public.buyers;
+    create policy buyers_select_own_safe
+      on public.buyers
+      for select
+      to authenticated
+      using (
+        user_id = auth.uid()
+        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      );
+
+    drop policy if exists buyers_update_own_safe on public.buyers;
+    create policy buyers_update_own_safe
+      on public.buyers
+      for update
+      to authenticated
+      using (
+        user_id = auth.uid()
+        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      )
+      with check (
+        user_id = auth.uid()
+        or lower(coalesce(email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+      );
+  end if;
 end $$;
 
 -- Vendor-owned plan/referral rows. Backend service role still handles all
@@ -356,4 +477,222 @@ begin
         )
       );
   end if;
+end $$;
+
+-- Additional owner-scoped direct browser policies for advisor-reported tables.
+do $$
+begin
+  if to_regclass('public.lead_contacts') is not null then
+    grant select, insert, update on table public.lead_contacts to authenticated;
+
+    drop policy if exists lead_contacts_vendor_owner_rw on public.lead_contacts;
+    create policy lead_contacts_vendor_owner_rw
+      on public.lead_contacts
+      for all
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.vendors v
+          where v.id = lead_contacts.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      )
+      with check (
+        exists (
+          select 1
+          from public.vendors v
+          where v.id = lead_contacts.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.lead_status_history') is not null then
+    grant select on table public.lead_status_history to authenticated;
+
+    drop policy if exists lead_status_history_vendor_owner_read on public.lead_status_history;
+    create policy lead_status_history_vendor_owner_read
+      on public.lead_status_history
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.vendors v
+          where v.id = lead_status_history.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.kyc_documents') is not null then
+    grant select on table public.kyc_documents to authenticated;
+
+    drop policy if exists kyc_documents_vendor_owner_read on public.kyc_documents;
+    create policy kyc_documents_vendor_owner_read
+      on public.kyc_documents
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.vendors v
+          where v.id = kyc_documents.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.buyer_notifications') is not null then
+    grant select, update on table public.buyer_notifications to authenticated;
+
+    drop policy if exists buyer_notifications_owner_read_update on public.buyer_notifications;
+    create policy buyer_notifications_owner_read_update
+      on public.buyer_notifications
+      for all
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.buyers b
+          where b.id = buyer_notifications.buyer_id
+            and (
+              b.user_id = auth.uid()
+              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      )
+      with check (
+        exists (
+          select 1
+          from public.buyers b
+          where b.id = buyer_notifications.buyer_id
+            and (
+              b.user_id = auth.uid()
+              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.vendor_division_map') is not null then
+    grant select on table public.vendor_division_map to authenticated;
+
+    drop policy if exists vendor_division_map_vendor_owner_read on public.vendor_division_map;
+    create policy vendor_division_map_vendor_owner_read
+      on public.vendor_division_map
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.vendors v
+          where v.id = vendor_division_map.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.quotes') is not null then
+    grant select on table public.quotes to authenticated;
+
+    drop policy if exists quotes_related_user_read on public.quotes;
+    create policy quotes_related_user_read
+      on public.quotes
+      for select
+      to authenticated
+      using (
+        exists (
+          select 1
+          from public.buyers b
+          where b.id = quotes.buyer_id
+            and (
+              b.user_id = auth.uid()
+              or lower(coalesce(b.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+        or exists (
+          select 1
+          from public.vendors v
+          where v.id = quotes.vendor_id
+            and (
+              v.user_id = auth.uid()
+              or lower(coalesce(v.email, '')) = lower(coalesce(auth.jwt() ->> 'email', ''))
+            )
+        )
+      );
+  end if;
+
+  if to_regclass('public.chatbot_history') is not null then
+    grant select, insert on table public.chatbot_history to authenticated;
+
+    drop policy if exists chatbot_history_owner_read_insert on public.chatbot_history;
+    create policy chatbot_history_owner_read_insert
+      on public.chatbot_history
+      for all
+      to authenticated
+      using (user_id = auth.uid())
+      with check (user_id = auth.uid());
+  end if;
+
+  if to_regclass('public.platform_feedback') is not null then
+    grant insert on table public.platform_feedback to authenticated;
+
+    drop policy if exists platform_feedback_owner_insert on public.platform_feedback;
+    create policy platform_feedback_owner_insert
+      on public.platform_feedback
+      for insert
+      to authenticated
+      with check (user_id = auth.uid() or user_id is null);
+  end if;
+
+  if to_regclass('public.requirements') is not null then
+    grant insert on table public.requirements to anon, authenticated;
+
+    drop policy if exists requirements_public_insert on public.requirements;
+    create policy requirements_public_insert
+      on public.requirements
+      for insert
+      to anon, authenticated
+      with check (true);
+  end if;
+
+  if to_regclass('public.chat_blocks') is not null then
+    grant select, insert, delete on table public.chat_blocks to authenticated;
+  end if;
+end $$;
+
+-- Convert security-definer views reported by the advisor to security invoker.
+do $$
+declare
+  view_name text;
+begin
+  foreach view_name in array array[
+    'marketplace_available_leads',
+    'buyer_support_tickets',
+    'view_category_hierarchy',
+    'public_vendor_plan_badges',
+    'admin_users'
+  ]
+  loop
+    if to_regclass(format('public.%I', view_name)) is not null then
+      execute format('alter view public.%I set (security_invoker = true)', view_name);
+    end if;
+  end loop;
 end $$;
